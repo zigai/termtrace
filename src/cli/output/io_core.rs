@@ -1,7 +1,12 @@
+#![expect(
+    dead_code,
+    reason = "Capture tracking utilities preserved for test harness"
+)]
+
 use super::*;
 
 pub(in crate::cli) fn write_progress(response: &ResponseWriter, message: impl Display) {
-    if response.mode() == ResolvedResponseMode::Quiet {
+    if response.mode() == ResponseMode::Quiet {
         return;
     }
 

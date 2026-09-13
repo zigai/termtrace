@@ -1,18 +1,44 @@
 use super::*;
 
-pub(in crate::cli) fn run_start(
+pub(super) fn run_detached_record(
     response: &mut ResponseWriter,
-    arguments: StartArgs,
+    arguments: RecordArgs,
 ) -> Result<ExitCode> {
-    let StartArgs {
-        name,
+    let RecordArgs {
+        out,
+        detach,
         startup_timeout_ms,
         until_idle,
         until_screen,
         until_screen_regex,
         timeout,
+        json,
         recording,
+        ..
     } = arguments;
+    let mut recording = recording;
+    let name = if let Some(alias) = arguments.session_alias {
+        alias
+    } else if let Some(d) = detach.filter(|s| return !s.is_empty()) {
+        d
+    } else {
+        if recording.command.is_empty() {
+            return Err(miette::miette!(
+                "detached recording requires a session alias and command"
+            ));
+        }
+
+        recording.command.remove(0).to_string_lossy().to_string()
+    };
+
+    if recording
+        .command
+        .first()
+        .is_some_and(|arg| return arg == "--")
+    {
+        recording.command.remove(0);
+    }
+
     let synchronization = StartSynchronization {
         until_idle,
         until_screen,
@@ -41,7 +67,11 @@ pub(in crate::cli) fn run_start(
         None
     };
 
-    let paths = registry.allocate_detached_paths().into_diagnostic()?;
+    let mut paths = registry.allocate_detached_paths().into_diagnostic()?;
+    if let Some(out) = out {
+        paths.session = out;
+    }
+
     let lease = Duration::from_millis(startup_timeout_ms).saturating_add(Duration::from_secs(5));
     let reservation = registry
         .reserve(&name, &paths.session, lease)
@@ -103,6 +133,7 @@ pub(in crate::cli) fn run_start(
                 &reservation,
                 &paths,
                 &synchronization,
+                json,
             );
         }
 
@@ -120,7 +151,14 @@ pub(in crate::cli) fn run_start(
                     );
                 })?;
 
-                return report_start_outcome(response, &entry, &paths, None, &synchronization);
+                return report_start_outcome(
+                    response,
+                    &entry,
+                    &paths,
+                    None,
+                    &synchronization,
+                    json,
+                );
             }
         }
 
@@ -132,6 +170,7 @@ pub(in crate::cli) fn run_start(
                     &reservation,
                     &paths,
                     &synchronization,
+                    json,
                 );
             }
 
@@ -189,6 +228,7 @@ fn promote_completed_start(
     reservation: &AliasReservation,
     paths: &DetachedSessionPaths,
     synchronization: &StartSynchronization,
+    json: bool,
 ) -> Result<ExitCode> {
     let completion = wait_for_completion(&paths.session, Duration::ZERO).into_diagnostic()?;
     let entry = registry.promote(reservation).map_err(|error| {
@@ -200,7 +240,14 @@ fn promote_completed_start(
         );
     })?;
 
-    return report_start_outcome(response, &entry, paths, Some(&completion), synchronization);
+    return report_start_outcome(
+        response,
+        &entry,
+        paths,
+        Some(&completion),
+        synchronization,
+        json,
+    );
 }
 
 fn report_start_outcome(
@@ -209,6 +256,7 @@ fn report_start_outcome(
     paths: &DetachedSessionPaths,
     completion: Option<&SessionCompletion>,
     synchronization: &StartSynchronization,
+    json: bool,
 ) -> Result<ExitCode> {
     let startup_state = match completion {
         None => "live",
@@ -271,7 +319,11 @@ fn report_start_outcome(
             .insert("postcondition".to_owned(), postcondition);
     }
 
-    write_json_line(response, &output)?;
+    if json {
+        write_json_pretty(response, &output)?;
+    } else {
+        write_stdout(response, format!("Started session {}\n", entry.alias))?;
+    }
 
     if !synchronization_ok {
         return Ok(ExitCode::FAILURE);

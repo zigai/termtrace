@@ -10,6 +10,10 @@ pub(in crate::cli) fn run_record(
         return super::original::run_original(response, arguments);
     }
 
+    if arguments.detach.is_some() {
+        return super::start::run_detached_record(response, arguments);
+    }
+
     let RecordArgs {
         original_native: _,
         original_fps: _,
@@ -17,6 +21,14 @@ pub(in crate::cli) fn run_record(
         resolved_ghostty_profile_provenance,
         on_recording_error,
         out,
+        detach: _,
+
+        startup_timeout_ms: _,
+        until_idle: _,
+        until_screen: _,
+        until_screen_regex: _,
+        timeout: _,
+        json: _,
         no_input,
         session_alias,
         restart_source,
@@ -27,6 +39,8 @@ pub(in crate::cli) fn run_record(
         import_source,
         recording: arguments,
     } = arguments;
+    let out = out.ok_or_else(|| miette::miette!("--out is required for foreground recording"))?;
+
     let import_provenance = match (
         import_source_kind,
         import_source_byte_count,
@@ -220,7 +234,7 @@ pub(in crate::cli) fn run_record(
             environment,
             colors,
             forward_stdin: !no_input,
-            continue_after_output_mirror_closes: false,
+            continue_after_output_mirror_closes: true,
             durability_policy,
             provenance_policy,
             resource_limits: ResourceLimits {
@@ -279,8 +293,19 @@ pub(super) fn report_record_outcome(outcome: RecordOutcome) -> Result<ExitCode> 
     if outcome.resource_limit.is_some() {
         return Ok(ExitCode::FAILURE);
     }
-    return match (outcome.exit_code, outcome.signal_name) {
-        (Some(code), None) => u8::try_from(code).map(ExitCode::from).into_diagnostic(),
-        _ => Ok(ExitCode::FAILURE),
-    };
+
+    if let Some(signal) = outcome.signal_name.as_deref() {
+        return match signal {
+            "Interrupt" | "SIGINT" | "INT" => Ok(ExitCode::from(130)),
+            "Terminate" | "SIGTERM" | "TERM" => Ok(ExitCode::from(143)),
+            "Pipe" | "BrokenPipe" | "SIGPIPE" | "PIPE" => Ok(ExitCode::from(141)),
+            "Hangup" | "SIGHUP" | "HUP" => Ok(ExitCode::from(129)),
+            "Quit" | "SIGQUIT" | "QUIT" => Ok(ExitCode::from(131)),
+            _ => Ok(ExitCode::FAILURE),
+        };
+    }
+    return outcome.exit_code.map_or_else(
+        || return Ok(ExitCode::FAILURE),
+        |code| return u8::try_from(code).map(ExitCode::from).into_diagnostic(),
+    );
 }

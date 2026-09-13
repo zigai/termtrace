@@ -3,15 +3,17 @@ use crate::cli::output::ResponseWriter;
 pub(super) mod args;
 
 use crate::cli::{
-    control::args::{
-        ActArgs, PointerArgs, PointerCommand, ResizeArgs, ScreenArgs, ScreenEncoding, SendArgs,
-        StatusArgs, StopArgs, WaitArgs,
+    control::args::{ScreenArgs, ScreenEncoding, StatusArgs, StopArgs, WaitArgs},
+    output::{
+        human_action_summary, human_screen_summary, write_json_line, write_json_pretty,
+        write_stdout,
     },
-    output::write_json_line,
     parsers::{parse_cursor_position, parse_region_predicate, parse_row_predicate},
-    session_helpers::{resolve_session, write_session_lifecycle, ResolvedSessionRef},
+    session_helpers::{
+        resolve_session, resolve_session_path, resolve_state_point, write_session_lifecycle,
+        ResolvedSessionRef,
+    },
 };
-use args::{ControlSubcommand, FocusDirection};
 use miette::{IntoDiagnostic as _, Result};
 use std::{
     io::{self, Read as _},
@@ -28,8 +30,8 @@ use termtrace_model::{
     protocol::control::{
         derive_input_operation_id, ActionPostcondition, ActionPostconditionResult, ControlCommand,
         ControlData, ControlErrorDetails, ControlRequest, ControlResult, InputSequenceAtom,
-        InputSequenceAtomOutcome, PointerOperation, ScreenPostconditionQuality, ScreenPredicate,
-        ScreenWaitQuality, StableCaptureQuality, StateHashComparison,
+        InputSequenceAtomOutcome, ScreenPostconditionQuality, ScreenPredicate, ScreenWaitQuality,
+        StableCaptureQuality, StateHashComparison,
     },
     registry::RegistryLifecycle,
     terminal::observation::{ActorBoundaries, CaptureQuality, StatePoint},
@@ -48,61 +50,10 @@ mod screen;
 mod transport;
 mod wait;
 
-pub(super) use action::run_act;
-use action::{input_failure_application, input_retry};
-pub(super) use input::{run_keys, run_pointer, run_resize, run_send};
-pub(super) use screen::run_screen;
-pub(super) use transport::{run_control_guarded, run_status, run_stop};
+pub(in crate::cli) use action::run_send;
+pub(in crate::cli) use screen::run_screen;
+pub(in crate::cli) use transport::{run_status, run_stop};
+#[expect(unused_imports, reason = "Control transport types preserved for tests")]
 use transport::{send_cli_control, CliControlOutcome};
 use wait::compact_boundaries;
-pub(super) use wait::run_wait;
-
-pub(super) fn dispatch(
-    response: &mut ResponseWriter,
-    command: ControlSubcommand,
-) -> Result<ExitCode> {
-    return match command {
-        ControlSubcommand::Keys => run_keys(response),
-        ControlSubcommand::Focus(arguments) => run_control_guarded(
-            response,
-            arguments.session,
-            ControlCommand::Focus {
-                focused: matches!(arguments.direction, FocusDirection::In),
-                strict: arguments.strict,
-            },
-            arguments.expected_presented_state_hash,
-            arguments.request_id,
-        ),
-        ControlSubcommand::Pointer(arguments) => run_pointer(response, arguments),
-        ControlSubcommand::Activate(arguments) => run_control_guarded(
-            response,
-            arguments.session,
-            ControlCommand::Activate {
-                text: arguments.text,
-                unique: arguments.unique,
-                strict: arguments.strict,
-            },
-            arguments.expected_presented_state_hash,
-            arguments.request_id,
-        ),
-        ControlSubcommand::Resize(arguments) => run_resize(response, arguments),
-        ControlSubcommand::Signal(arguments) => run_control_guarded(
-            response,
-            arguments.session,
-            ControlCommand::Signal {
-                signal: arguments.signal.into(),
-            },
-            arguments.expected_presented_state_hash,
-            arguments.request_id,
-        ),
-        ControlSubcommand::Mark(arguments) => run_control_guarded(
-            response,
-            arguments.session,
-            ControlCommand::Mark {
-                label: arguments.label,
-            },
-            arguments.expected_presented_state_hash,
-            arguments.request_id,
-        ),
-    };
-}
+pub(in crate::cli) use wait::run_wait;

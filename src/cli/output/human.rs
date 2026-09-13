@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn human_screen_summary(value: &serde_json::Value) -> String {
+pub(crate) fn human_screen_summary(value: &serde_json::Value) -> String {
     let state = value_string(value, "state").unwrap_or_else(|| return "unknown".to_owned());
     let size = value.get("size").and_then(serde_json::Value::as_array);
     let cols = size
@@ -141,7 +141,7 @@ pub(super) fn value_u64(value: &serde_json::Value, key: &str) -> u64 {
         .unwrap_or_default();
 }
 
-pub(super) fn human_action_summary(value: &serde_json::Value) -> String {
+pub(crate) fn human_action_summary(value: &serde_json::Value) -> String {
     let input = value.get("input").unwrap_or(&serde_json::Value::Null);
     let applied = value_string(input, "applied").unwrap_or_else(|| return "unknown".to_owned());
     let atoms = value_u64(input, "atoms");
@@ -286,7 +286,7 @@ pub(super) fn human_artifact_summary(
     };
 }
 
-pub(super) fn human_summary(value: &serde_json::Value, command_type: &str) -> String {
+pub(crate) fn human_summary(value: &serde_json::Value, command_type: &str) -> String {
     let kind = response_type(Some(value), command_type);
     if kind == "screen" {
         return human_screen_summary(value);
@@ -316,7 +316,7 @@ pub(super) fn human_summary(value: &serde_json::Value, command_type: &str) -> St
         return human_action_summary(value);
     }
 
-    if command_type == "inspect" {
+    if command_type == "inspect" || command_type == "last_action" || command_type == "last-action" {
         return human_inspect_summary(value);
     }
 

@@ -209,7 +209,7 @@ pub(in crate::cli) struct TmuxEventsArgs {
     /// Inclusive first lifecycle sequence.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u64).range(1..))]
     pub(in crate::cli) from_sequence: u64,
-    /// Maximum number of events returned, subject to a four-megabyte page limit.
+    /// Maximum number of events returned (1-4096), subject to a four-megabyte page limit.
     #[arg(long, default_value_t = 128, value_parser = clap::value_parser!(u16).range(1..=4096))]
     pub(in crate::cli) limit: u16,
 }
@@ -277,7 +277,7 @@ pub(in crate::cli) struct TmuxVideoArgs {
     #[arg(long, value_enum, default_value_t = VideoPresetArg::Docs)]
     pub(in crate::cli) preset: VideoPresetArg,
 
-    /// Optional exact video frame rate; presets choose their own default when omitted.
+    /// Optional exact video frame rate (24, 30, or 60); presets choose their own default when omitted.
     #[arg(long, value_parser = parse_video_fps)]
     pub(in crate::cli) fps: Option<u16>,
 

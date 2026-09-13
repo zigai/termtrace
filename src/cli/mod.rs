@@ -23,48 +23,47 @@ mod session_helpers;
 mod tmux;
 mod tooling;
 
-use command::{
-    command_contract, preserves_requested_output, requested_response_mode, root_command, Cli,
-};
-use output::{
-    finish_response, write_clap_error, ResolvedResponseMode, ResponseMode, ResponseWriter,
-};
+use command::{command_contract, requested_quiet_mode, root_command, Cli};
+use output::{finish_response, write_clap_error, ResponseMode, ResponseWriter};
 
 fn init_diagnostics(level: tracing::Level) {
     let filter = EnvFilter::builder()
         .with_default_directive(level.into())
         .from_env_lossy();
 
+    let layer = fmt::layer()
+        .with_target(false)
+        .with_writer(io::stderr)
+        .with_ansi(!command::should_disable_color());
+
     tracing_registry()
         .with(filter)
         .with(tracing_error::ErrorLayer::default())
-        .with(fmt::layer().with_target(false).with_writer(io::stderr))
+        .with(layer)
         .init();
 }
 
 pub(crate) fn run() -> ExitCode {
-    let requested_mode = requested_response_mode();
+    let quiet = requested_quiet_mode();
     let matches = match root_command().try_get_matches() {
         Ok(matches) => matches,
-        Err(error) => return write_clap_error(error, requested_mode),
+        Err(error) => return write_clap_error(error, quiet),
     };
 
     let (command_type, mutating) = command_contract(&matches);
     let cli = match Cli::from_arg_matches(&matches) {
         Ok(cli) => cli,
-        Err(error) => return write_clap_error(error, requested_mode),
+        Err(error) => return write_clap_error(error, quiet),
     };
 
-    let response_mode =
-        if cli.response == ResponseMode::Auto && preserves_requested_output(&cli.command) {
-            ResolvedResponseMode::Full
-        } else {
-            cli.response.resolve()
-        };
+    if let Err(error) = cli.validate() {
+        return write_clap_error(error, quiet);
+    }
 
-    let mut response = ResponseWriter::new(response_mode, cli.fields, command_type, mutating);
+    let response_mode = if cli.is_quiet() { ResponseMode::Quiet } else { ResponseMode::Human };
+    let mut response = ResponseWriter::new(response_mode, command_type, mutating);
 
-    if response_mode != ResolvedResponseMode::Quiet {
+    if !cli.is_quiet() {
         init_diagnostics(cli.log);
     }
 

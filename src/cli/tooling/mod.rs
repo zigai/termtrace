@@ -5,13 +5,12 @@ pub(super) mod args;
 use crate::cli::command::completion_command;
 use crate::cli::{
     agent::serve as serve_driver,
-    output::{write_json_line, write_stdout},
+    output::{write_json_line, write_json_pretty, write_stdout},
     tooling::args::{
         ClientArgs, ClientCommand, ClientRunArgs, CompletionsArgs, DoctorArgs, SchemaArgs,
         VersionArgs,
     },
 };
-use args::ToolingSubcommand;
 use clap_complete::generate;
 use miette::{IntoDiagnostic as _, Result};
 use std::{
@@ -110,20 +109,23 @@ pub(super) fn run_version(
     arguments: VersionArgs,
 ) -> Result<ExitCode> {
     if arguments.json {
-        return write_json_line(
-            response,
-            &serde_json::json!({
-                "termtrace_version": env!("CARGO_PKG_VERSION"),
-                "build_revision": env!("TERMTRACE_BUILD_REVISION"),
-                "ghostty_vt_revision": GHOSTTY_REVISION,
-                "event_log_version": EVENT_LOG_VERSION,
-                "state_format_version": STATE_FORMAT_VERSION,
-                "control_protocol_version": CONTROL_PROTOCOL_VERSION,
-                "target_os": env::consts::OS,
-                "target_arch": env::consts::ARCH,
-            }),
-        );
+        let value = serde_json::json!({
+            "termtrace_version": env!("CARGO_PKG_VERSION"),
+            "build_revision": env!("TERMTRACE_BUILD_REVISION"),
+            "ghostty_vt_revision": GHOSTTY_REVISION,
+            "event_log_version": EVENT_LOG_VERSION,
+            "state_format_version": STATE_FORMAT_VERSION,
+            "control_protocol_version": CONTROL_PROTOCOL_VERSION,
+            "target_os": env::consts::OS,
+            "target_arch": env::consts::ARCH,
+        });
+
+        let mut encoded = serde_json::to_vec_pretty(&value).into_diagnostic()?;
+        encoded.push(b'\n');
+
+        return write_stdout(response, encoded);
     }
+
     return write_stdout(
         response,
         format!(
@@ -138,7 +140,7 @@ pub(super) fn run_doctor(response: &mut ResponseWriter, arguments: DoctorArgs) -
     let report = probe_capabilities();
 
     if arguments.json {
-        write_json_line(response, &report)?;
+        write_json_pretty(response, &report)?;
     } else {
         write_stdout(response, capability_text(&report, arguments.explain)?)?;
     }
@@ -475,15 +477,4 @@ pub(super) fn run_schemas(
             "replaced_existing_files": replaced_existing_files,
         }),
     );
-}
-
-pub(super) fn dispatch(
-    response: &mut ResponseWriter,
-    command: ToolingSubcommand,
-) -> Result<ExitCode> {
-    return match command {
-        ToolingSubcommand::Client(arguments) => run_client(response, arguments),
-        ToolingSubcommand::Schemas(arguments) => run_schemas(response, arguments),
-        ToolingSubcommand::Completions(arguments) => run_completions(response, arguments),
-    };
 }

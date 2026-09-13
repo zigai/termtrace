@@ -40,7 +40,11 @@ pub(super) fn run_original(
     };
 
     let cwd = env::current_dir().into_diagnostic()?;
-    let session = if arguments.out.is_absolute() { arguments.out } else { cwd.join(arguments.out) };
+    let out = arguments
+        .out
+        .unwrap_or_else(|| return cwd.join("original-native.termtrace"));
+
+    let session = if out.is_absolute() { out } else { cwd.join(out) };
 
     if let Some(path) = arguments.recording.environment_spec.as_mut() {
         *path = path.canonicalize().into_diagnostic()?;

@@ -1,9 +1,10 @@
 //! Read-only semantic forensic reviewer with safe terminal rendering.
 
+use crate::cli::command::should_disable_color;
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event as TerminalEvent, KeyCode,
-        KeyEventKind, MouseEventKind,
+        KeyEventKind, KeyModifiers, MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -23,6 +24,7 @@ use signal_hook::{
 use std::{
     io::{self, Stdout},
     path::{Path, PathBuf},
+    process::ExitCode,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Condvar, Mutex,
@@ -411,10 +413,12 @@ pub(in crate::cli) fn run(
     session: impl AsRef<Path>,
     around_marker: Option<&str>,
     search_query: Option<&str>,
-) -> Result<()> {
-    let interrupted = Arc::new(AtomicBool::new(false));
-    register_signal(SIGINT, Arc::clone(&interrupted)).map_err(terminal_error)?;
-    register_signal(SIGTERM, Arc::clone(&interrupted)).map_err(terminal_error)?;
+) -> Result<ExitCode> {
+    let sigint = Arc::new(AtomicBool::new(false));
+    let sigterm = Arc::new(AtomicBool::new(false));
+    register_signal(SIGINT, Arc::clone(&sigint)).map_err(terminal_error)?;
+
+    register_signal(SIGTERM, Arc::clone(&sigterm)).map_err(terminal_error)?;
 
     let mut model = ReviewModel::open(session.as_ref(), around_marker, search_query)?;
     let _guard = TerminalModeGuard::enter()?;
@@ -422,7 +426,7 @@ pub(in crate::cli) fn run(
         Terminal::new(CrosstermBackend::new(io::stdout())).map_err(terminal_error)?;
     terminal.clear().map_err(terminal_error)?;
 
-    while !interrupted.load(Ordering::Relaxed) {
+    while !sigint.load(Ordering::Relaxed) && !sigterm.load(Ordering::Relaxed) {
         model.update()?;
         draw(&mut terminal, &model)?;
 
@@ -431,28 +435,38 @@ pub(in crate::cli) fn run(
         }
 
         match event::read().map_err(terminal_error)? {
-            TerminalEvent::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                KeyCode::Char('q') => break,
-                KeyCode::Esc => {
-                    model.worker.cancelled.store(true, Ordering::Relaxed);
-                    model.status = "query cancelled; displayed evidence retained";
+            TerminalEvent::Key(key) if key.kind == KeyEventKind::Press => {
+                if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    sigint.store(true, Ordering::Relaxed);
+
+                    break;
                 }
-                KeyCode::Char('j') | KeyCode::Down | KeyCode::Right => {
-                    model.move_selection(true)?
+
+                match key.code {
+                    KeyCode::Char('q') => break,
+                    KeyCode::Esc => {
+                        model.worker.cancelled.store(true, Ordering::Relaxed);
+                        model.status = "query cancelled; displayed evidence retained";
+                    }
+                    KeyCode::Char('j') | KeyCode::Down | KeyCode::Right => {
+                        model.move_selection(true)?
+                    }
+                    KeyCode::Char('k') | KeyCode::Up | KeyCode::Left => {
+                        model.move_selection(false)?
+                    }
+                    KeyCode::Home => model.query(ReviewQuery::State(0))?,
+                    KeyCode::End => model.query(ReviewQuery::Final)?,
+                    KeyCode::Char('p') => model.presented_only = !model.presented_only,
+                    KeyCode::Char('m') => model.jump_event(true, true)?,
+                    KeyCode::Char('M') => model.jump_event(false, true)?,
+                    KeyCode::Char('i') => model.jump_event(true, false)?,
+                    KeyCode::Char('I') => model.jump_event(false, false)?,
+                    KeyCode::Char('n') => model.jump_search(true)?,
+                    KeyCode::Char('N') => model.jump_search(false)?,
+                    KeyCode::Char('?' | ':') => model.show_help = !model.show_help,
+                    _ => {}
                 }
-                KeyCode::Char('k') | KeyCode::Up | KeyCode::Left => model.move_selection(false)?,
-                KeyCode::Home => model.query(ReviewQuery::State(0))?,
-                KeyCode::End => model.query(ReviewQuery::Final)?,
-                KeyCode::Char('p') => model.presented_only = !model.presented_only,
-                KeyCode::Char('m') => model.jump_event(true, true)?,
-                KeyCode::Char('M') => model.jump_event(false, true)?,
-                KeyCode::Char('i') => model.jump_event(true, false)?,
-                KeyCode::Char('I') => model.jump_event(false, false)?,
-                KeyCode::Char('n') => model.jump_search(true)?,
-                KeyCode::Char('N') => model.jump_search(false)?,
-                KeyCode::Char('?' | ':') => model.show_help = !model.show_help,
-                _ => {}
-            },
+            }
             TerminalEvent::Mouse(mouse) => match mouse.kind {
                 MouseEventKind::ScrollDown => model.move_selection(true)?,
                 MouseEventKind::ScrollUp => model.move_selection(false)?,
@@ -464,7 +478,10 @@ pub(in crate::cli) fn run(
 
     terminal.show_cursor().map_err(terminal_error)?;
 
-    return Ok(());
+    if sigint.load(Ordering::Relaxed) {
+        return Ok(ExitCode::from(130));
+    }
+    return Ok(ExitCode::SUCCESS);
 }
 
 fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) -> Result<()> {
@@ -506,7 +523,12 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<Stdout>>, model: &ReviewModel) 
             format!("{}\nsession: {}\ncursor: {:?},{:?} visible={}\nmode filter: {}\nsearch: {} (on-demand exact scan)\nnative: {}", identity, sanitize_text(&model.session.display().to_string()), viewport.and_then(|viewport| return viewport.cursor_row), viewport.and_then(|viewport| return viewport.cursor_column), viewport.is_some_and(|viewport| return viewport.cursor_visible), if model.presented_only { "presented" } else { "all" }, sanitize_text(model.search_query.as_deref().unwrap_or("-")), native)
         };
         frame.render_widget(Paragraph::new(details).block(Block::default().title(" evidence ").borders(Borders::ALL)).wrap(Wrap { trim: false }), details_area);
-        frame.render_widget(Paragraph::new(vec![Line::styled(" q quit · j/k state · m/M marker · i/I input · n/N match · ? help ", Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)), Line::from(model.status)]), status);
+        let footer_style = if should_disable_color() {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+        };
+        frame.render_widget(Paragraph::new(vec![Line::styled(" q quit · j/k state · m/M marker · i/I input · n/N match · ? help ", footer_style), Line::from(model.status)]), status);
     }).map_err(terminal_error)?;
 
     return Ok(());

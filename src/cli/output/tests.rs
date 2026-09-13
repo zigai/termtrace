@@ -1,7 +1,7 @@
 use super::{
     bounded_agent_response, bounded_capture_projection, capture_raw, compact_success,
     compact_task_value, enforce_success_budget, human_summary, pagination_projection,
-    retry_for_applied, ResolvedResponseMode, ResponseField, ResponseState, ResponseWriter,
+    retry_for_applied, ResponseField, ResponseMode, ResponseState, ResponseWriter,
     ACTION_RESPONSE_BYTES, MAX_AGENT_RESPONSE_BYTES, MAX_CAPTURE_BYTES, START_RESPONSE_BYTES,
     STOP_RESPONSE_BYTES, WAIT_STATUS_RESPONSE_BYTES,
 };
@@ -96,12 +96,7 @@ fn oversized_agent_pages_keep_the_next_offset() {
 
 #[test]
 fn oversized_raw_pages_keep_the_trailing_resume_cursor() {
-    let mut writer = ResponseWriter::new(
-        ResolvedResponseMode::Agent,
-        Vec::new(),
-        "timeline".to_owned(),
-        false,
-    );
+    let mut writer = ResponseWriter::new(ResponseMode::Human, "timeline".to_owned(), false);
 
     let output = format!(
         "{}\npage: {{\"offset\":0,\"limit\":600,\"returned\":600,\"truncated\":true,\"next_offset\":580}}\n",
@@ -118,12 +113,7 @@ fn oversized_raw_pages_keep_the_trailing_resume_cursor() {
 
 #[test]
 fn binary_raw_output_is_base64_encoded_for_agents() {
-    let mut writer = ResponseWriter::new(
-        ResolvedResponseMode::Agent,
-        Vec::new(),
-        "output".to_owned(),
-        false,
-    );
+    let mut writer = ResponseWriter::new(ResponseMode::Human, "output".to_owned(), false);
     capture_raw(&mut writer, b"\xff");
     let response = compact_success(&writer.state);
     assert_eq!(response["output"]["encoding"], "base64");
@@ -244,7 +234,7 @@ fn response_state(
     let captured_bytes = serde_json::to_vec(&value).expect("response fixture").len();
 
     return ResponseState {
-        mode: ResolvedResponseMode::Agent,
+        mode: ResponseMode::Human,
         fields,
         command_type: command_type.to_owned(),
         mutating,

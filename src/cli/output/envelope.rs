@@ -1,3 +1,8 @@
+#![expect(
+    dead_code,
+    reason = "Legacy envelope functions preserved for test fixtures"
+)]
+
 use super::*;
 use serde::{
     de::value::{self, StrDeserializer},

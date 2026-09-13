@@ -1,6 +1,6 @@
 use crate::cli::parsers::{
-    parse_capture_target, parse_font_size, parse_provenance_rule, parse_rgb_color,
-    parse_stability_duration, parse_wait_deadline_duration,
+    parse_bounded_screen_regex, parse_capture_target, parse_font_size, parse_provenance_rule,
+    parse_rgb_color, parse_stability_duration, parse_wait_deadline_duration,
 };
 use clap::{Args, ValueEnum};
 use std::{ffi::OsString, path::PathBuf, time::Duration};
@@ -23,7 +23,7 @@ pub(in crate::cli) struct GeometryProbeArgs {
 #[derive(Debug, Args)]
 pub(in crate::cli) struct RecordArgs {
     /// Acquire original command pixels in a private Ghostty display, with video and final PNG.
-    #[arg(long, conflicts_with_all = ["no_input", "restart_source", "environment_spec_stdin", "import_source_kind", "on_recording_error"])]
+    #[arg(long, conflicts_with_all = ["no_input", "restart_source", "environment_spec_stdin", "import_source_kind", "on_recording_error", "detach"])]
     pub(in crate::cli) original_native: bool,
     /// Original capture rate: 24, 30, or 60 frames per second.
     #[arg(long, requires = "original_native")]
@@ -38,8 +38,37 @@ pub(in crate::cli) struct RecordArgs {
     #[arg(long, value_enum)]
     pub(in crate::cli) on_recording_error: Option<RecordingFailurePolicyArg>,
     /// New owner-only session directory.
+    #[arg(long, required_unless_present = "detach")]
+    pub(in crate::cli) out: Option<PathBuf>,
+
+    /// Run session in background (optionally under this friendly alias name).
+    #[arg(short = 'd', long = "detach", num_args = 0..=1, default_missing_value = "")]
+    pub(in crate::cli) detach: Option<String>,
+    /// Maximum time to wait for manifest and control readiness in milliseconds (1+).
+    #[arg(long, default_value_t = 5_000, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(in crate::cli) startup_timeout_ms: u64,
+    /// Wait until the first presented screen remains unchanged for this duration.
+    #[arg(
+        long,
+        value_parser = parse_stability_duration,
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "100ms",
+        conflicts_with_all = ["until_screen", "until_screen_regex"]
+    )]
+    pub(in crate::cli) until_idle: Option<Duration>,
+    /// Wait until the first presented screen contains this text.
+    #[arg(long, conflicts_with_all = ["until_idle", "until_screen_regex"])]
+    pub(in crate::cli) until_screen: Option<String>,
+    /// Wait until the first presented screen matches this bounded regular expression.
+    #[arg(long, conflicts_with_all = ["until_idle", "until_screen"], value_parser = parse_bounded_screen_regex)]
+    pub(in crate::cli) until_screen_regex: Option<String>,
+    /// Maximum time to wait for matching presented state.
+    #[arg(long, value_parser = parse_wait_deadline_duration, default_value = "30s")]
+    pub(in crate::cli) timeout: Duration,
+    /// Emit stable structured output as JSON.
     #[arg(long)]
-    pub(in crate::cli) out: PathBuf,
+    pub(in crate::cli) json: bool,
 
     /// Do not forward standard input to the child PTY.
     #[arg(long)]
@@ -76,13 +105,17 @@ pub(in crate::cli) struct RecordArgs {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum OriginalBackendArg {
+    /// Acquire pixels from a private headless X11 display.
     PrivateX11,
+    /// Acquire pixels from a portal-selected Wayland window.
     WaylandPortal,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum RecordingFailurePolicyArg {
+    /// Preserve interactive input after a recorder error.
     Preserve,
+    /// Terminate recording immediately upon recorder error.
     Stop,
 }
 
@@ -96,19 +129,20 @@ impl From<RecordingFailurePolicyArg> for RecordingFailurePolicy {
 }
 
 #[derive(Debug, Args)]
+#[expect(dead_code, reason = "Transitional until root CLI cutover")]
 pub(in crate::cli) struct StartArgs {
     /// New friendly session name.
     pub(in crate::cli) name: String,
 
-    /// Maximum time to wait for manifest and control readiness.
-    #[arg(long, default_value_t = 10_000)]
+    /// Maximum time to wait for manifest and control readiness in milliseconds (1+).
+    #[arg(long, default_value_t = 10_000, value_parser = clap::value_parser!(u64).range(1..))]
     pub(in crate::cli) startup_timeout_ms: u64,
-
     /// Wait until the first presented screen remains unchanged for this duration.
     #[arg(
         long,
         value_parser = parse_stability_duration,
         num_args = 0..=1,
+        require_equals = true,
         default_missing_value = "100ms",
         conflicts_with_all = ["until_screen", "until_screen_regex"]
     )]
@@ -117,11 +151,13 @@ pub(in crate::cli) struct StartArgs {
     #[arg(long, conflicts_with_all = ["until_idle", "until_screen_regex"])]
     pub(in crate::cli) until_screen: Option<String>,
     /// Wait until the first presented screen matches this bounded regular expression.
-    #[arg(long, conflicts_with_all = ["until_idle", "until_screen"])]
+    #[arg(long, conflicts_with_all = ["until_idle", "until_screen"], value_parser = parse_bounded_screen_regex)]
     pub(in crate::cli) until_screen_regex: Option<String>,
-    /// Maximum start-time synchronization duration.
     #[arg(long, value_parser = parse_wait_deadline_duration, default_value = "30s")]
     pub(in crate::cli) timeout: Duration,
+    /// Emit stable structured output as JSON.
+    #[arg(long)]
+    pub(in crate::cli) json: bool,
 
     #[command(flatten)]
     pub(in crate::cli) recording: RecordingArgs,
@@ -136,38 +172,35 @@ pub(in crate::cli) struct RestartArgs {
     /// Existing friendly session name.
     pub(in crate::cli) name: String,
 
-    /// Maximum time for predecessor completion and successor readiness.
-    #[arg(long, default_value_t = 10_000)]
+    /// Maximum time for predecessor completion and successor readiness in milliseconds (1+).
+    #[arg(long, default_value_t = 10_000, value_parser = clap::value_parser!(u64).range(1..))]
     pub(in crate::cli) timeout_ms: u64,
-
     /// Override the successor working directory.
     #[arg(long)]
     pub(in crate::cli) cwd: Option<PathBuf>,
-    /// Override terminal columns while retaining the predecessor when omitted.
-    #[arg(long)]
+    /// Override terminal columns while retaining the predecessor when omitted (1-65535).
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) cols: Option<u16>,
-    /// Override terminal rows while retaining the predecessor when omitted.
-    #[arg(long)]
+    /// Override terminal rows while retaining the predecessor when omitted (1-65535).
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) rows: Option<u16>,
-    /// Override cell width in pixels.
-    #[arg(long)]
+    /// Override cell width in pixels (1-65535).
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) cell_width: Option<u16>,
-    /// Override cell height in pixels.
-    #[arg(long)]
+    /// Override cell height in pixels (1-65535).
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) cell_height: Option<u16>,
-    /// Override the terminal identity exposed to the child.
     #[arg(long)]
     pub(in crate::cli) term: Option<String>,
     /// Override the canonical output persistence policy.
     #[arg(long, value_enum)]
     pub(in crate::cli) durability: Option<DurabilityModeArg>,
-    /// Override the bounded maximum unsynchronized interval.
-    #[arg(long)]
+    /// Override the bounded maximum unsynchronized interval in milliseconds (1+).
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     pub(in crate::cli) durability_max_interval_ms: Option<u64>,
-    /// Override the bounded maximum unsynchronized byte count.
-    #[arg(long)]
+    /// Override the bounded maximum unsynchronized byte count (1+).
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     pub(in crate::cli) durability_max_uncommitted_bytes: Option<u64>,
-    /// Override the execution provenance policy.
     #[arg(long, value_enum)]
     pub(in crate::cli) provenance: Option<ProvenancePolicyArg>,
     /// Override custom environment rules.
@@ -200,6 +233,9 @@ pub(in crate::cli) struct RestartArgs {
     /// Remove the predecessor's idle timeout.
     #[arg(long)]
     pub(in crate::cli) clear_idle_timeout: bool,
+    /// Emit stable structured output as JSON.
+    #[arg(long)]
+    pub(in crate::cli) json: bool,
     #[arg(num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
     pub(in crate::cli) command: Vec<OsString>,
 }
@@ -274,23 +310,21 @@ pub(in crate::cli) struct RecordingArgs {
     #[arg(long, value_parser = parse_rgb_color)]
     pub(in crate::cli) background: Option<String>,
 
-    /// Terminal columns used by manual geometry.
-    #[arg(long, default_value_t = 160)]
+    /// Terminal columns used by manual geometry (1-65535).
+    #[arg(long, default_value_t = 160, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) cols: u16,
 
-    /// Terminal rows used by manual geometry.
-    #[arg(long, default_value_t = 45)]
+    /// Terminal rows used by manual geometry (1-65535).
+    #[arg(long, default_value_t = 45, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) rows: u16,
 
-    /// Manual cell width, or inherited-geometry fallback, in pixels.
-    #[arg(long, default_value_t = 12)]
+    /// Manual cell width, or inherited-geometry fallback, in pixels (1-65535).
+    #[arg(long, default_value_t = 12, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) cell_width: u16,
 
-    /// Manual cell height, or inherited-geometry fallback, in pixels.
-    #[arg(long, default_value_t = 24)]
+    /// Manual cell height, or inherited-geometry fallback, in pixels (1-65535).
+    #[arg(long, default_value_t = 24, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) cell_height: u16,
-
-    /// Terminal identity exposed to the child.
     #[arg(long, default_value = "xterm-ghostty")]
     pub(in crate::cli) term: String,
 
@@ -346,14 +380,13 @@ pub(in crate::cli) struct RecordingArgs {
     #[arg(long, value_enum, default_value_t = DurabilityModeArg::Bounded)]
     pub(in crate::cli) durability: DurabilityModeArg,
 
-    /// Maximum unsynchronized interval in bounded mode (default: 50).
-    #[arg(long)]
+    /// Maximum unsynchronized interval in bounded mode in milliseconds (default: 50, 1+).
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     pub(in crate::cli) durability_max_interval_ms: Option<u64>,
 
-    /// Maximum unsynchronized PTY bytes in bounded mode (default: 65536).
-    #[arg(long)]
+    /// Maximum unsynchronized PTY bytes in bounded mode (default: 65536, 1+).
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     pub(in crate::cli) durability_max_uncommitted_bytes: Option<u64>,
-
     /// Execution provenance collection policy.
     #[arg(long, value_enum, default_value_t = ProvenancePolicyArg::Minimal)]
     pub(in crate::cli) provenance: ProvenancePolicyArg,
@@ -374,29 +407,41 @@ pub(in crate::cli) struct RecordingArgs {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum GeometryMode {
+    /// Use manually specified columns, rows, and cell dimensions.
     Manual,
+    /// Inherit terminal geometry from the calling terminal emulator.
     Inherit,
+    /// Fit terminal geometry to the intended capture viewport.
     Fit,
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, ValueEnum)]
 pub(in crate::cli) enum DurabilityModeArg {
+    /// Synchronize every canonical event to disk before processing next.
     Strict,
+    /// Synchronize events periodically within bounded time and byte limits.
     Bounded,
+    /// Maximize throughput by allowing asynchronous uncommitted event buffering.
     Throughput,
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, ValueEnum)]
 pub(in crate::cli) enum ProvenancePolicyArg {
+    /// Record minimal execution provenance metadata.
     Minimal,
+    /// Record complete reproducible build and environment provenance.
     Reproducible,
+    /// Apply user-specified custom environment capture rules.
     Custom,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum ColorPolicyArg {
+    /// Automatically infer color environment settings from the host.
     Auto,
+    /// Force color environment variables to enabled state.
     Always,
+    /// Force color environment variables to disabled state.
     Never,
 }
 

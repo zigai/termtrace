@@ -1,10 +1,11 @@
 use miette::Result;
-use std::{result::Result as StdResult, time::Duration};
-use termtrace_engine::timeline::parse_time_offset_ns;
+use std::{ffi::OsStr, path::PathBuf, result::Result as StdResult, time::Duration};
+use termtrace_engine::recording::control::compile_screen_predicate;
+pub(super) use termtrace_engine::timeline::parse_time_offset_ns;
 use termtrace_model::{
     execution::provenance::ProvenanceCapture, execution::session::CaptureTarget,
-    protocol::capability::CAPABILITY_IDS, terminal::analysis::DiagnosticCheck,
-    terminal::screen::ScreenRegion,
+    protocol::capability::CAPABILITY_IDS, protocol::control::ScreenPredicate,
+    terminal::analysis::DiagnosticCheck, terminal::screen::ScreenRegion,
 };
 
 pub(super) fn parse_row_predicate(value: &str) -> Result<(u16, String)> {
@@ -188,6 +189,7 @@ pub(super) fn parse_page_limit(value: &str) -> StdResult<usize, String> {
     return Ok(limit);
 }
 
+#[expect(dead_code, reason = "Cell coordinate parser")]
 pub(super) fn parse_cell(value: &str) -> StdResult<(u16, u16), String> {
     let (column, row) = value
         .split_once(',')
@@ -264,6 +266,24 @@ pub(super) fn parse_rgb_color(value: &str) -> StdResult<String, String> {
         return Err("color must use #RRGGBB syntax".to_owned());
     }
     return Ok(format!("#{}", hex.to_ascii_lowercase()));
+}
+
+pub(super) fn parse_bounded_screen_regex(value: &str) -> StdResult<String, String> {
+    let predicate = ScreenPredicate::MatchesRegex {
+        pattern: value.to_owned(),
+    };
+
+    compile_screen_predicate(&predicate)?;
+
+    return Ok(value.to_owned());
+}
+
+pub(super) fn parse_video_output_path(value: &str) -> StdResult<PathBuf, String> {
+    let path = PathBuf::from(value);
+    if path.extension() != Some(OsStr::new("mp4")) {
+        return Err("video output must use the `.mp4` extension".to_owned());
+    }
+    return Ok(path);
 }
 
 #[cfg(test)]

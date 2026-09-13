@@ -1,3 +1,8 @@
+#![cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Pagination functions used in test suite")
+)]
+
 use super::{OutputPage, PageArgs};
 
 pub(super) fn pagination_projection(value: &serde_json::Value) -> Option<serde_json::Value> {

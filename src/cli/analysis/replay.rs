@@ -5,11 +5,15 @@ use crate::cli::{
         PlaybackWorkerArgs, ReviewArgs,
     },
     analysis::reviewer::run as run_reviewer,
-    output::{row_text, write_json_line, write_stdout},
+    output::{row_text, write_json_line, write_json_pretty, write_stdout},
     session_helpers::{resolve_cli_range, resolve_session_path},
 };
 use miette::{IntoDiagnostic as _, Result};
-use std::{process::ExitCode, time::Duration};
+use std::{
+    io::{self, IsTerminal as _},
+    process::ExitCode,
+    time::Duration,
+};
 use termtrace_engine::{
     analysis::reviewer::{
         export_state as export_review_state, search as search_review, summarize as summarize_review,
@@ -61,25 +65,37 @@ pub(in crate::cli) fn run_review(
 
     if arguments.json {
         if let Some(query) = &arguments.search {
-            return write_json_line(response, &search_review(session, query).into_diagnostic()?);
+            return write_json_pretty(response, &search_review(session, query).into_diagnostic()?);
         }
 
         let visual_evidence = validated_visual_manifests(&session).into_diagnostic()?;
 
-        return write_json_line(
+        return write_json_pretty(
             response,
             &summarize_review(session, &visual_evidence).into_diagnostic()?,
         );
     }
 
-    run_reviewer(
+    if !io::stdout().is_terminal() || !io::stdin().is_terminal() {
+        let visual_evidence = validated_visual_manifests(&session).into_diagnostic()?;
+        let summary = summarize_review(&session, &visual_evidence).into_diagnostic()?;
+        let text = format!(
+            "Session: {}\nStates: {} (presented: {})\nFinal state hash: {}\n",
+            session.display(),
+            summary.state_count,
+            summary.presented_state_count,
+            summary.final_state_hash,
+        );
+
+        return write_stdout(response, text);
+    }
+
+    return run_reviewer(
         session,
         arguments.around_marker.as_deref(),
         arguments.search.as_deref(),
     )
-    .into_diagnostic()?;
-
-    return Ok(ExitCode::SUCCESS);
+    .into_diagnostic();
 }
 
 pub(in crate::cli) fn run_index(

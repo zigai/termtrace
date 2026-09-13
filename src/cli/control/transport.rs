@@ -1,4 +1,6 @@
 use super::*;
+use std::{ffi::OsString, fmt::Write as _, os::unix::ffi::OsStringExt as _};
+use termtrace_engine::registry::SessionRegistry;
 use termtrace_model::protocol::control::{ActorBoundaries, ClockSample};
 
 pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Value> {
@@ -177,12 +179,14 @@ pub(super) fn send_cli_control(
     }
 }
 
+#[expect(dead_code, reason = "Control execution helper preserved for tests")]
 pub(in crate::cli) fn run_control_guarded(
     response: &mut ResponseWriter,
     session: PathBuf,
     command: ControlCommand,
     expected_presented_state_hash: Option<String>,
     request_id: Option<uuid::Uuid>,
+    json: bool,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(session)?;
     if resolved.lifecycle != RegistryLifecycle::Live {
@@ -201,14 +205,122 @@ pub(in crate::cli) fn run_control_guarded(
         CliControlOutcome::Rejected(exit_code) => return Ok(exit_code),
     };
 
-    return write_json_line(response, &compact_control_data(&data)?);
+    let compacted = compact_control_data(&data)?;
+    if json {
+        return write_json_pretty(response, &compacted);
+    }
+    return write_stdout(response, "Control command applied\n");
 }
 
 pub(in crate::cli) fn run_status(
     response: &mut ResponseWriter,
     arguments: StatusArgs,
 ) -> Result<ExitCode> {
-    let requested_session = arguments.session;
+    if arguments.gc {
+        let registry = SessionRegistry::open_default().into_diagnostic()?;
+        let report = registry
+            .garbage_collect_with_quota(
+                arguments.older_than_days.unwrap_or(30),
+                arguments.keep_latest.unwrap_or(20),
+                None,
+                true,
+            )
+            .into_diagnostic()?;
+
+        if arguments.json {
+            return write_json_pretty(response, &report);
+        }
+        return write_stdout(
+            response,
+            format!(
+                "Garbage collection completed: {} session(s) removed\n",
+                report.removed_sessions,
+            ),
+        );
+    }
+
+    if let Some(alias) = &arguments.rm {
+        let registry = SessionRegistry::open_default().into_diagnostic()?;
+        let entry = registry.remove(alias).into_diagnostic()?;
+        let canonical_session_display = entry.session_path().display().to_string();
+
+        if arguments.json {
+            return write_json_pretty(
+                response,
+                &serde_json::json!({
+                    "alias": entry.alias,
+                    "canonical_session": entry.canonical_session,
+                    "canonical_session_display": canonical_session_display,
+                    "session_id": entry.session_id,
+                    "evidence_preserved": true,
+                }),
+            );
+        }
+        return write_stdout(
+            response,
+            format!("Removed alias '{alias}' for session {canonical_session_display}\n"),
+        );
+    }
+
+    let Some(requested_session) = arguments.session else {
+        let registry = SessionRegistry::open_default().into_diagnostic()?;
+        let entries = registry.list(false).into_diagnostic()?;
+
+        if arguments.json {
+            return write_json_pretty(response, &entries);
+        }
+
+        if entries.is_empty() {
+            return write_stdout(response, "No sessions found.\n");
+        }
+
+        let rows = entries
+            .into_iter()
+            .map(|entry| {
+                let path = PathBuf::from(OsString::from_vec(
+                    entry.canonical_session.as_bytes().to_vec(),
+                ));
+
+                return (
+                    entry.alias,
+                    entry.lifecycle.as_str().to_owned(),
+                    entry.session_id.to_string(),
+                    path.display().to_string(),
+                );
+            })
+            .collect::<Vec<_>>();
+
+        let alias_width = rows
+            .iter()
+            .fold("ALIAS".len(), |width, row| return width.max(row.0.len()));
+        let lifecycle_width = rows.iter().fold("LIFECYCLE".len(), |width, row| {
+            return width.max(row.1.len());
+        });
+        let session_id_width = rows.iter().fold("SESSION ID".len(), |width, row| {
+            return width.max(row.2.len());
+        });
+
+        let mut output = String::new();
+
+        let header = format!(
+            "{:<alias_width$}  {:<lifecycle_width$}  {:<session_id_width$}  CANONICAL SESSION",
+            "ALIAS", "LIFECYCLE", "SESSION ID",
+        );
+
+        let rule = "─".repeat(header.chars().count());
+
+        writeln!(output, "{header}").into_diagnostic()?;
+        writeln!(output, "{rule}").into_diagnostic()?;
+        for (alias, lifecycle, session_id, path) in rows {
+            writeln!(
+                output,
+                "{alias:<alias_width$}  {lifecycle:<lifecycle_width$}  {session_id:<session_id_width$}  {path}",
+            )
+            .into_diagnostic()?;
+        }
+
+        return write_stdout(response, output);
+    };
     let session_label = requested_session.display().to_string();
     let resolved = resolve_session(requested_session)?;
     if arguments.wait_complete || resolved.lifecycle == RegistryLifecycle::Completed {
@@ -216,19 +328,35 @@ pub(in crate::cli) fn run_status(
             wait_for_completion(&resolved.path, Duration::from_millis(arguments.timeout_ms))
                 .into_diagnostic()?;
 
-        return write_json_line(
+        let payload = serde_json::json!({
+            "kind": "completed",
+            "session": session_label,
+            "lifecycle": "completed",
+            "completion": completion,
+        });
+
+        if arguments.json {
+            return write_json_pretty(response, &payload);
+        }
+
+        let exit_str = completion
+            .exit_code
+            .map_or_else(|| return "unknown".to_owned(), |c| return c.to_string());
+
+        return write_stdout(
             response,
-            &serde_json::json!({
-                "kind": "completed",
-                "session": session_label,
-                "lifecycle": "completed",
-                "completion": completion,
-            }),
+            format!("Session {session_label} completed (exit code {exit_str})\n"),
         );
     }
 
     if resolved.lifecycle != RegistryLifecycle::Live {
-        return write_session_lifecycle(response, &resolved, "status", ExitCode::SUCCESS);
+        if arguments.json {
+            return write_session_lifecycle(response, &resolved, "status", ExitCode::SUCCESS);
+        }
+        return write_stdout(
+            response,
+            format!("Session {session_label} {}\n", resolved.lifecycle.as_str()),
+        );
     }
 
     let data = request(resolved.path, ControlCommand::Status).into_diagnostic()?;
@@ -248,8 +376,21 @@ pub(in crate::cli) fn run_status(
             clock_sample,
         };
 
-        return write_json_line(response, &status);
+        if arguments.json {
+            return write_json_pretty(response, &status);
+        }
+
+        let pid_str = pid.map_or_else(|| return "none".to_owned(), |p| return p.to_string());
+
+        return write_stdout(
+            response,
+            format!(
+                "Session {session_label} live (PID {pid_str}, next event seq {})\n",
+                boundaries.observed.next_event_seq
+            ),
+        );
     }
+
     return Err(miette::miette!(
         "unexpected status response from recording actor"
     ));
@@ -274,12 +415,17 @@ pub(in crate::cli) fn run_stop(
     if resolved.lifecycle == RegistryLifecycle::Completed {
         let completion = wait_for_completion(&resolved.path, Duration::ZERO).into_diagnostic()?;
 
-        return write_json_line(
+        let payload = serde_json::json!({
+            "kind": "completed",
+            "completion": completion,
+        });
+
+        if arguments.json {
+            return write_json_pretty(response, &payload);
+        }
+        return write_stdout(
             response,
-            &serde_json::json!({
-                "kind": "completed",
-                "completion": completion,
-            }),
+            format!("Session {} already completed\n", resolved.path.display()),
         );
     }
 
@@ -300,18 +446,29 @@ pub(in crate::cli) fn run_stop(
     };
 
     if !arguments.wait {
-        return write_json_line(response, &compact_control_data(&acknowledged)?);
+        if arguments.json {
+            return write_json_pretty(response, &compact_control_data(&acknowledged)?);
+        }
+        return write_stdout(
+            response,
+            format!("Session {} stop requested\n", resolved.path.display()),
+        );
     }
 
     let completion =
         wait_for_completion(&resolved.path, Duration::from_millis(arguments.timeout_ms))
             .into_diagnostic()?;
 
-    return write_json_line(
+    let payload = serde_json::json!({
+        "kind": "completed",
+        "completion": completion,
+    });
+
+    if arguments.json {
+        return write_json_pretty(response, &payload);
+    }
+    return write_stdout(
         response,
-        &serde_json::json!({
-            "kind": "completed",
-            "completion": completion,
-        }),
+        format!("Session {} stopped\n", resolved.path.display()),
     );
 }

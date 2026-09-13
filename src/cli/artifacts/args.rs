@@ -1,6 +1,9 @@
 use crate::cli::{
     analysis::args::{ShowRenderer, TimeRangeArgs},
-    parsers::{parse_capture_target, parse_media_hold_duration, parse_state_hash, parse_video_fps},
+    parsers::{
+        parse_capture_target, parse_media_hold_duration, parse_state_hash, parse_video_fps,
+        parse_video_output_path,
+    },
 };
 use clap::{ArgGroup, Args, Subcommand, ValueEnum};
 use std::{path::PathBuf, time::Duration};
@@ -43,10 +46,13 @@ pub(in crate::cli) struct BugReportFacadeArgs {
     pub(in crate::cli) screenshot: bool,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(in crate::cli) enum BundleProfileArg {
+    /// Bundle only viewport screen presentation evidence.
     Screen,
+    /// Bundle state history and diagnostic summaries for debugging.
     Debug,
+    /// Bundle complete byte-exact PTY event streams and all artifacts.
     Forensic,
 }
 
@@ -61,6 +67,7 @@ impl From<BundleProfileArg> for BundleProfile {
 }
 
 #[derive(Debug, Args)]
+#[expect(clippy::struct_excessive_bools, reason = "Independent CLI flags")]
 pub(in crate::cli) struct BundleArgs {
     /// Completed canonical session.
     pub(in crate::cli) session: PathBuf,
@@ -76,6 +83,12 @@ pub(in crate::cli) struct BundleArgs {
     /// Publish a deterministic compressed archive instead of a directory.
     #[arg(long)]
     pub(in crate::cli) archive: bool,
+    /// Include a semantic PNG screenshot of the last presented screen.
+    #[arg(long)]
+    pub(in crate::cli) screenshot: bool,
+    /// Emit stable structured output as JSON.
+    #[arg(long)]
+    pub(in crate::cli) json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -98,11 +111,11 @@ pub(in crate::cli) struct ImportArgs {
     /// New canonical session directory.
     #[arg(long)]
     pub(in crate::cli) out: PathBuf,
-    /// Imported terminal columns.
-    #[arg(long, default_value_t = 160)]
+    /// Imported terminal columns (1-65535).
+    #[arg(long, default_value_t = 160, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) cols: u16,
-    /// Imported terminal rows.
-    #[arg(long, default_value_t = 45)]
+    /// Imported terminal rows (1-65535).
+    #[arg(long, default_value_t = 45, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) rows: u16,
 }
 
@@ -118,12 +131,19 @@ pub(in crate::cli) struct ExportArgs {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum SaveFormatArg {
+    /// Plain text screen representation.
     Txt,
+    /// JSON representation of the semantic grid.
     Json,
+    /// Deep forensic JSON representation including escape sequences and styles.
     DeepJson,
+    /// Raw VT escape sequences reconstructing the screen state.
     Vt,
+    /// Self-contained HTML document rendering the screen state.
     Html,
+    /// Scalable Vector Graphics image representation.
     Svg,
+    /// Portable Network Graphics raster image.
     Png,
 }
 
@@ -218,11 +238,16 @@ pub(in crate::cli) struct ScreenshotArgs {
     /// Emphasize that a supplied viewport is an exact evidentiary assertion.
     #[arg(long, requires = "viewport")]
     pub(in crate::cli) strict: bool,
+    /// Emit stable structured output as JSON.
+    #[arg(long)]
+    pub(in crate::cli) json: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(in crate::cli) enum ScreenshotFormat {
+    /// Scalable Vector Graphics vector screenshot.
     Svg,
+    /// Portable Network Graphics raster screenshot.
     Png,
 }
 
@@ -298,11 +323,12 @@ pub(in crate::cli) enum VideoCursorStyleArg {
         .multiple(false)
         .args(["out", "dry_run", "preview_out"])
 ))]
+#[expect(clippy::struct_excessive_bools, reason = "Independent CLI flags")]
 pub(in crate::cli) struct VideoFacadeArgs {
     /// Completed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
     /// New MP4 output file; a manifested `.termtrace` sidecar is retained.
-    #[arg(short, long)]
+    #[arg(short, long, value_parser = parse_video_output_path)]
     pub(in crate::cli) out: Option<PathBuf>,
     /// Resolve and print the presentation plan without rendering.
     #[arg(long)]
@@ -377,4 +403,7 @@ pub(in crate::cli) struct VideoFacadeArgs {
     /// Low-resolution preview width.
     #[arg(long, default_value_t = 640, requires = "preview_out")]
     pub(in crate::cli) preview_width: u16,
+    /// Emit stable structured output as JSON.
+    #[arg(long)]
+    pub(in crate::cli) json: bool,
 }

@@ -3,10 +3,10 @@ use crate::cli::output::ResponseWriter;
 pub(super) mod args;
 
 use crate::cli::{
-    output::{response_output, write_json_line},
+    output::{response_output, write_json_line, write_json_pretty, write_stdout},
     recording::args::{
         ColorPolicyArg, DurabilityModeArg, GeometryMode, GeometryProbeArgs, ProvenancePolicyArg,
-        RecordArgs, RecordingArgs, RestartArgs, RestartOverrides, StartArgs,
+        RecordArgs, RecordingArgs, RestartArgs, RestartOverrides,
     },
 };
 use miette::{IntoDiagnostic as _, Result};
@@ -85,4 +85,4 @@ use record::durability_policy_for;
 pub(super) use record::run_record;
 use restart::restarted_record_options;
 pub(super) use restart::run_restart;
-pub(super) use start::{open_detached_log, run_start};
+pub(super) use start::open_detached_log;

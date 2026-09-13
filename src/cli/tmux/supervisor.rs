@@ -14,7 +14,7 @@ use super::{
     SUPERVISOR_INTERVAL, TMUX_INTEGRATION_VERSION, UNRECORDED_GRACE,
 };
 use crate::cli::output::ResponseWriter;
-use crate::cli::output::{optional_display, write_json_line, write_stdout};
+use crate::cli::output::{optional_display, write_json_pretty, write_stdout};
 use miette::{IntoDiagnostic as _, Result};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -80,7 +80,7 @@ pub(in crate::cli) fn run_tmux_status(
     let report = tmux_status_report(&client)?;
 
     if arguments.json {
-        return write_json_line(response, &report);
+        return write_json_pretty(response, &report);
     }
 
     let scope = report

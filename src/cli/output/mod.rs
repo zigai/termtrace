@@ -1,10 +1,10 @@
 use crate::cli::analysis::args::PageArgs;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use clap::{error::ErrorKind as ClapErrorKind, ValueEnum};
+use clap::error::ErrorKind as ClapErrorKind;
 use miette::{IntoDiagnostic as _, Result};
 use std::{
     fmt::{Display, Write as _},
-    io::{self, IsTerminal as _, Write as _},
+    io::{self, Write as _},
     process::ExitCode,
 };
 use termtrace_model::{
@@ -16,50 +16,53 @@ use termtrace_model::{
     value::pagination::OutputPage,
 };
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Legacy envelope constants used in test suite")
+)]
 const MAX_AGENT_RESPONSE_BYTES: usize = 64 * 1024;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Legacy envelope constants used in test suite")
+)]
 const MAX_CAPTURE_BYTES: usize = 256 * 1024;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Legacy envelope constants used in test suite")
+)]
 const START_RESPONSE_BYTES: usize = 300;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Legacy envelope constants used in test suite")
+)]
 const ACTION_RESPONSE_BYTES: usize = 250;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Legacy envelope constants used in test suite")
+)]
 const WAIT_STATUS_RESPONSE_BYTES: usize = 300;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Legacy envelope constants used in test suite")
+)]
 const MAX_COMPACT_SCREEN_BYTES: usize = 16 * 1024;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Legacy envelope constants used in test suite")
+)]
 const STOP_RESPONSE_BYTES: usize = 350;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub(super) enum ResponseMode {
-    Auto,
-    Human,
-    Agent,
-    Full,
-    Quiet,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ResolvedResponseMode {
+pub(in crate::cli) enum ResponseMode {
     Human,
-    Agent,
-    Full,
     Quiet,
 }
 
-impl ResponseMode {
-    pub(super) fn resolve(self) -> ResolvedResponseMode {
-        match self {
-            Self::Full => return ResolvedResponseMode::Full,
-            Self::Quiet => return ResolvedResponseMode::Quiet,
-            Self::Human => return ResolvedResponseMode::Human,
-            Self::Agent => return ResolvedResponseMode::Agent,
-            Self::Auto => {
-                if io::stdout().is_terminal() {
-                    return ResolvedResponseMode::Human;
-                } else {
-                    return ResolvedResponseMode::Agent;
-                }
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Response fields used in test suite")
+)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ResponseField {
     Cursor,
     Modes,
@@ -69,13 +72,25 @@ pub(super) enum ResponseField {
 
 #[derive(Debug)]
 struct ResponseState {
-    mode: ResolvedResponseMode,
+    mode: ResponseMode,
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "Response fields used in test suite")
+    )]
     fields: Vec<ResponseField>,
     command_type: String,
     mutating: bool,
     values: Vec<serde_json::Value>,
     raw: Vec<u8>,
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "Capture tracking used in test suite")
+    )]
     captured_bytes: usize,
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "Omitted tracking used in test suite")
+    )]
     omitted_items: usize,
 }
 
@@ -86,16 +101,11 @@ pub(super) struct ResponseWriter {
 }
 
 impl ResponseWriter {
-    pub(super) fn new(
-        mode: ResolvedResponseMode,
-        fields: Vec<ResponseField>,
-        command_type: String,
-        mutating: bool,
-    ) -> Self {
+    pub(super) fn new(mode: ResponseMode, command_type: String, mutating: bool) -> Self {
         return Self {
             state: ResponseState {
                 mode,
-                fields,
+                fields: Vec::new(),
                 command_type,
                 mutating,
                 values: Vec::new(),
@@ -106,17 +116,12 @@ impl ResponseWriter {
         };
     }
 
-    pub(in crate::cli) fn mode(&self) -> ResolvedResponseMode {
+    pub(in crate::cli) fn mode(&self) -> ResponseMode {
         return self.state.mode;
     }
 
     pub(in crate::cli) fn quiet() -> Self {
-        return Self::new(
-            ResolvedResponseMode::Quiet,
-            Vec::new(),
-            String::new(),
-            false,
-        );
+        return Self::new(ResponseMode::Quiet, String::new(), false);
     }
 }
 
@@ -128,28 +133,33 @@ mod pagination;
 mod projection;
 mod sink;
 
+#[cfg(test)]
+use envelope::compact_success;
 use envelope::{
-    applied_from_str, compact_failure, compact_success, response_encoding_failure,
-    response_string_value, retry_for_applied, retry_from_str, session_state_from_str,
-    typed_envelope,
+    applied_from_str, response_encoding_failure, response_string_value, retry_for_applied,
+    retry_from_str, session_state_from_str, typed_envelope,
 };
 pub(super) use helpers::{
     id_list, optional_display, projection_warning, quoted_text, row_text, stable_enum_label,
     write_projection_warning,
 };
-use human::{human_failure_summary, human_summary};
-pub(super) use io_core::write_progress;
-use io_core::{capture_json, capture_raw, direct_stderr, direct_stdout, report_message};
+use human::human_failure_summary;
+pub(in crate::cli) use human::{human_action_summary, human_screen_summary, human_summary};
+#[cfg(test)]
+use io_core::capture_raw;
+pub(in crate::cli) use io_core::write_progress;
+use io_core::{direct_stderr, direct_stdout, report_message};
 pub(super) use pagination::paginate;
 use pagination::{pagination_projection, raw_pagination_projection};
+#[cfg(test)]
+use projection::{bounded_agent_response, enforce_success_budget};
 use projection::{
-    bounded_agent_response, bounded_capture_projection, compact_task_value, copy_value,
-    enforce_success_budget, failure_string, nested_string, response_type, session_state,
-    value_string,
+    bounded_capture_projection, compact_task_value, copy_value, failure_string, nested_string,
+    response_type, session_state, value_string,
 };
 pub(super) use sink::{
     finish_response, response_output, write_clap_error, write_follow_json_line,
-    write_follow_stdout, write_json_line, write_stdout,
+    write_follow_stdout, write_json_line, write_json_pretty, write_stdout,
 };
 
 #[cfg(test)]

@@ -1,3 +1,8 @@
+#![expect(
+    dead_code,
+    reason = "Integrity functions preserved for analysis verification and tests"
+)]
+
 use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
@@ -5,7 +10,7 @@ pub(super) mod args;
 use crate::cli::{
     artifacts::run_bundle_verify,
     integrity::args::{RecoverArgs, SignArgs, VerifyArgs, VerifyLevelArg},
-    output::{paginate, stable_enum_label, write_json_line, write_stdout},
+    output::{paginate, stable_enum_label, write_json_line, write_json_pretty, write_stdout},
 };
 use args::IntegritySubcommand;
 use miette::{IntoDiagnostic as _, Result};
@@ -36,7 +41,7 @@ pub(super) fn run_verify(response: &mut ResponseWriter, arguments: VerifyArgs) -
     report.output_page = partial.then_some(page.clone());
 
     if arguments.json {
-        write_json_line(response, &report)?;
+        write_json_pretty(response, &report)?;
     } else {
         let status = if valid { "valid" } else { "invalid" };
         let level = stable_enum_label(&report.level)?;

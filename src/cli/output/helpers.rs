@@ -52,7 +52,7 @@ pub(in crate::cli) fn write_projection_warning(
     response: &ResponseWriter,
     message: &str,
 ) -> Result<()> {
-    if response.mode() == ResolvedResponseMode::Quiet {
+    if response.mode() == ResponseMode::Quiet {
         return Ok(());
     }
 

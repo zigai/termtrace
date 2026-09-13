@@ -93,7 +93,7 @@ pub(super) fn run() -> Result<ExitCode> {
         // Waiting owns and reaps the child; only one observer is spawned at a
         // time, and both roles hold independent crash-released locks.
         match Command::new(&executable)
-            .args(["tmux", "supervise", "--response", "quiet"])
+            .args(["tmux", "supervise", "-q"])
             .status()
         {
             Ok(status) => tracing::debug!(%status, "tmux observer exited"),

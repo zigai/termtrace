@@ -4,9 +4,13 @@ use crate::cli::{
         DiagnoseArgs, DiagnoseFacadeArgs, DiffArgs, DiffFormat, ExplainArgs, ExplainFormat,
         InspectFacadeArgs, TimelineArgs,
     },
+    integrity::{
+        args::{RecoverArgs, VerifyArgs},
+        run_recover as execute_recover, run_verify as execute_verify,
+    },
     output::{
-        id_list, optional_display, paginate, quoted_text, stable_enum_label, write_json_line,
-        write_stdout,
+        human_summary, id_list, optional_display, paginate, quoted_text, stable_enum_label,
+        write_json_line, write_json_pretty, write_progress, write_stdout,
     },
     session_helpers::{
         resolve_session, resolve_session_path, resolve_state_point, write_session_lifecycle,
@@ -36,7 +40,7 @@ use termtrace_media::native_capture::validated_visual_manifests;
 use termtrace_model::{
     execution::event::Event,
     registry::RegistryLifecycle,
-    terminal::analysis::{DiagnoseReport, ExplainOutputPage, ExplainReport, LastActionAnalysis},
+    terminal::analysis::{DiagnoseReport, ExplainOutputPage, ExplainReport},
     terminal::diff::SemanticDiff,
     terminal::observation::StatePoint,
     terminal::timeline::{TimelineEntry, TimelineItem},
@@ -349,7 +353,7 @@ pub(in crate::cli) fn run_diagnose(
     report.output_page = partial.then_some(page.clone());
 
     if arguments.json {
-        write_json_line(response, &report)?;
+        write_json_pretty(response, &report)?;
     } else {
         let mut output = diagnose_text(&report)?;
 
@@ -371,48 +375,84 @@ pub(in crate::cli) fn run_diagnose(
     return Ok(ExitCode::SUCCESS);
 }
 
-fn run_last_action_facade<T: serde::Serialize>(
-    response: &mut ResponseWriter,
-    session: PathBuf,
-    broad_change_percent: u8,
-    operation: &'static str,
-    select: impl FnOnce(&LastActionAnalysis) -> &T,
-) -> Result<ExitCode> {
-    let resolved = resolve_session(session)?;
-    if resolved.lifecycle != RegistryLifecycle::Completed {
-        return write_session_lifecycle(response, &resolved, operation, ExitCode::FAILURE);
-    }
-
-    let analysis =
-        analyze_last_action_session(&resolved.path, broad_change_percent).into_diagnostic()?;
-
-    return write_json_line(response, select(&analysis));
-}
-
-pub(in crate::cli) fn run_inspect_facade(
+pub(in crate::cli) fn run_last_action_facade(
     response: &mut ResponseWriter,
     arguments: InspectFacadeArgs,
 ) -> Result<ExitCode> {
-    return run_last_action_facade(
+    let resolved = resolve_session(arguments.session)?;
+    if resolved.lifecycle != RegistryLifecycle::Completed {
+        return write_session_lifecycle(response, &resolved, "last_action", ExitCode::FAILURE);
+    }
+
+    write_progress(
         response,
-        arguments.session,
-        arguments.broad_change_percent,
-        "inspect_last_action",
-        |analysis| return &analysis.inspection,
+        format!("analyzing last action in {}...", resolved.path.display()),
+    );
+
+    let analysis = analyze_last_action_session(&resolved.path, arguments.broad_change_percent)
+        .into_diagnostic()?;
+
+    if arguments.json {
+        return write_json_pretty(response, &analysis.inspection);
+    }
+    return write_stdout(
+        response,
+        human_summary(
+            &serde_json::to_value(&analysis.inspection).into_diagnostic()?,
+            "last_action",
+        ),
     );
 }
 
-pub(in crate::cli) fn run_diagnose_facade(
+pub(in crate::cli) fn run_diagnose_last_action_facade(
     response: &mut ResponseWriter,
     arguments: DiagnoseFacadeArgs,
 ) -> Result<ExitCode> {
-    return run_last_action_facade(
+    let resolved = resolve_session(arguments.session)?;
+    if resolved.lifecycle != RegistryLifecycle::Completed {
+        return write_session_lifecycle(
+            response,
+            &resolved,
+            "diagnose_since_last_action",
+            ExitCode::FAILURE,
+        );
+    }
+
+    write_progress(
         response,
-        arguments.session,
-        arguments.broad_change_percent,
-        "diagnose_since_last_action",
-        |analysis| return &analysis.diagnostics,
+        format!(
+            "analyzing last action diagnostics in {}...",
+            resolved.path.display()
+        ),
     );
+
+    let analysis = analyze_last_action_session(&resolved.path, arguments.broad_change_percent)
+        .into_diagnostic()?;
+
+    if arguments.json {
+        return write_json_pretty(response, &analysis.diagnostics);
+    }
+    return write_stdout(
+        response,
+        human_summary(
+            &serde_json::to_value(&analysis.diagnostics).into_diagnostic()?,
+            "diagnose",
+        ),
+    );
+}
+
+pub(in crate::cli) fn run_verify(
+    response: &mut ResponseWriter,
+    arguments: VerifyArgs,
+) -> Result<ExitCode> {
+    return execute_verify(response, arguments);
+}
+
+pub(in crate::cli) fn run_recover(
+    response: &mut ResponseWriter,
+    arguments: RecoverArgs,
+) -> Result<ExitCode> {
+    return execute_recover(response, arguments);
 }
 
 fn explain_text(report: &ExplainReport) -> Result<String> {

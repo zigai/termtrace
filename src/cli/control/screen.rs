@@ -1,21 +1,162 @@
 use super::*;
+use crate::cli::{analysis::args::ShowFormat, output::stable_enum_label};
+use std::io::{self, Write as _};
+use termtrace_engine::observation::observe_completed_with_formats;
+use termtrace_model::terminal::observation::Observation;
+use termtrace_terminal::Format as GhosttyFormat;
 
 pub(in crate::cli) fn run_screen(
     response: &mut ResponseWriter,
     arguments: ScreenArgs,
 ) -> Result<ExitCode> {
-    let resolved = resolve_session(arguments.session)?;
-    if !matches!(
-        resolved.lifecycle,
-        RegistryLifecycle::Live | RegistryLifecycle::Completed
-    ) {
+    let is_historical = arguments.state.is_some()
+        || arguments.state_hash.is_some()
+        || arguments.event_seq.is_some()
+        || arguments.at.is_some()
+        || arguments.at_marker.is_some();
+
+    if is_historical {
+        let point = resolve_state_point(
+            arguments.state,
+            arguments.state_hash,
+            arguments.event_seq,
+            arguments.at,
+            arguments.at_marker,
+            Some(StatePoint::LatestPresented),
+            "screen",
+        )?;
+
+        let session = resolve_session_path(arguments.session)?;
+        let format = arguments.format.unwrap_or(if arguments.json {
+            ShowFormat::Json
+        } else {
+            ShowFormat::Text
+        });
+
+        let engine_format = match format {
+            ShowFormat::Vt => Some(GhosttyFormat::Vt),
+            ShowFormat::Html => Some(GhosttyFormat::Html),
+            _ => None,
+        };
+
+        let (observation, formatted) = match engine_format {
+            Some(f) => {
+                let (obs, rendered) =
+                    observe_completed_with_formats(&session, point, arguments.include_hidden, &[f])
+                        .into_diagnostic()?;
+
+                let formatted = rendered
+                    .into_iter()
+                    .next()
+                    .map(|(_, bytes)| return bytes)
+                    .ok_or_else(|| miette::miette!("selected formatter produced no output"))?;
+                (obs, Some(formatted))
+            }
+            None => {
+                let obs = if arguments.recover_prefix {
+                    observe_validated_prefix(&session, point, arguments.include_hidden)
+                        .into_diagnostic()?
+                } else {
+                    observe_session_with_options(&session, point, arguments.include_hidden)
+                        .into_diagnostic()?
+                };
+                (obs, None)
+            }
+        };
+
+        if arguments.metadata {
+            write_observation_metadata(&observation)?;
+        }
+
+        return match format {
+            ShowFormat::Text => {
+                write_stdout(response, format!("{}\n", observation.frame.viewport_text))
+            }
+            ShowFormat::Json => write_stdout(
+                response,
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&observation).into_diagnostic()?
+                ),
+            ),
+            ShowFormat::JsonCompact => write_json_line(response, &observation),
+            ShowFormat::FrameJson => write_json_line(response, &observation.frame_envelope()),
+            ShowFormat::Vt | ShowFormat::Html => {
+                let bytes = formatted
+                    .ok_or_else(|| miette::miette!("selected formatter produced no output"))?;
+
+                write_stdout(response, bytes)
+            }
+        };
+    }
+
+    let mut resolved = resolve_session(arguments.session)?;
+    if resolved.lifecycle == RegistryLifecycle::Stale
+        && wait_for_completion(&resolved.path, Duration::from_millis(500)).is_ok()
+    {
+        resolved.lifecycle = RegistryLifecycle::Completed;
+        resolved.diagnostic = None;
+    }
+
+    if !arguments.recover_prefix
+        && !matches!(
+            resolved.lifecycle,
+            RegistryLifecycle::Live | RegistryLifecycle::Completed
+        )
+    {
         return write_session_lifecycle(response, &resolved, "screen", ExitCode::FAILURE);
     }
 
     let lifecycle = resolved.lifecycle;
     let session = resolved.path;
-    let observation = observe_session_with_options(&session, StatePoint::LatestPresented, false)
+    let mut stable_hash: Option<String> = None;
+    if !arguments.stable_for.is_zero() && lifecycle == RegistryLifecycle::Live {
+        let stable_wait = wait_for_screen(
+            &session,
+            ScreenPredicate::StateHash {
+                hash: "0".repeat(64),
+                comparison: StateHashComparison::Changed,
+            },
+            arguments.stable_for,
+            arguments.timeout,
+        )
         .into_diagnostic()?;
+
+        if !stable_wait.matched || stable_wait.quality != ScreenWaitQuality::Matched {
+            return Err(miette::miette!(
+                "live stability was not established before {:?}",
+                stable_wait.quality
+            ));
+        }
+
+        stable_hash = Some(stable_wait.frame.state_hash);
+    }
+
+    let mut observation = if arguments.recover_prefix {
+        observe_validated_prefix(
+            &session,
+            StatePoint::LatestPresented,
+            arguments.include_hidden,
+        )
+        .into_diagnostic()?
+    } else {
+        observe_session_with_options(&session, StatePoint::LatestPresented, false)
+            .into_diagnostic()?
+    };
+
+    if let Some(state_hash) = &stable_hash {
+        if observation.state_hash != *state_hash {
+            return Err(miette::miette!(
+                "presented state changed between stability proof and observation; retry screen"
+            ));
+        }
+
+        observation.capture_quality = CaptureQuality::Stable;
+    }
+
+    if arguments.metadata {
+        write_observation_metadata(&observation)?;
+    }
 
     if arguments.since.as_deref() == Some(observation.state_hash.as_str()) {
         let output = ScreenResponse {
@@ -32,7 +173,71 @@ pub(in crate::cli) fn run_screen(
             screen: None,
         };
 
-        return write_json_line(response, &output);
+        if arguments.json {
+            return write_json_pretty(response, &output);
+        }
+        return write_stdout(
+            response,
+            human_screen_summary(&serde_json::to_value(&output).into_diagnostic()?),
+        );
+    }
+
+    if let Some(format) = arguments.format {
+        if matches!(format, ShowFormat::Vt | ShowFormat::Html)
+            && !session.join("completion.json").is_file()
+        {
+            return Err(miette::miette!(
+                "--format vt and --format html are supported only on completed sessions"
+            ));
+        }
+
+        let (mut observation, formatted) = match format {
+            ShowFormat::Vt | ShowFormat::Html => {
+                let f =
+                    if format == ShowFormat::Vt { GhosttyFormat::Vt } else { GhosttyFormat::Html };
+
+                let (obs, rendered) = observe_completed_with_formats(
+                    &session,
+                    StatePoint::LatestPresented,
+                    arguments.include_hidden,
+                    &[f],
+                )
+                .into_diagnostic()?;
+
+                let formatted = rendered
+                    .into_iter()
+                    .next()
+                    .map(|(_, bytes)| return bytes)
+                    .ok_or_else(|| miette::miette!("selected formatter produced no output"))?;
+                (obs, Some(formatted))
+            }
+            _ => (observation, None),
+        };
+
+        if stable_hash.is_some() {
+            observation.capture_quality = CaptureQuality::Stable;
+        }
+
+        return match format {
+            ShowFormat::Text => {
+                write_stdout(response, format!("{}\n", observation.frame.viewport_text))
+            }
+            ShowFormat::Json => write_stdout(
+                response,
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&observation).into_diagnostic()?
+                ),
+            ),
+            ShowFormat::JsonCompact => write_json_line(response, &observation),
+            ShowFormat::FrameJson => write_json_line(response, &observation.frame_envelope()),
+            ShowFormat::Vt | ShowFormat::Html => {
+                let bytes = formatted
+                    .ok_or_else(|| miette::miette!("selected formatter produced no output"))?;
+
+                write_stdout(response, bytes)
+            }
+        };
     }
 
     let screen = match arguments.screen {
@@ -86,7 +291,29 @@ pub(in crate::cli) fn run_screen(
         screen,
     };
 
-    return write_json_line(response, &output);
+    if arguments.json {
+        return write_json_pretty(response, &output);
+    }
+    return write_stdout(
+        response,
+        human_screen_summary(&serde_json::to_value(&output).into_diagnostic()?),
+    );
+}
+
+fn write_observation_metadata(observation: &Observation) -> Result<()> {
+    writeln!(
+        io::stderr(),
+        "source={} resolution={} state_hash={} presented={} quality={} truth={}",
+        stable_enum_label(&observation.source_kind)?,
+        stable_enum_label(&observation.resolution)?,
+        observation.state_hash,
+        observation.presented,
+        stable_enum_label(&observation.capture_quality)?,
+        stable_enum_label(&observation.truth_layer)?,
+    )
+    .into_diagnostic()?;
+
+    return Ok(());
 }
 
 #[derive(serde::Serialize)]

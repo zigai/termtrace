@@ -1,137 +1,92 @@
 use crate::cli::{
-    analysis::args::{
-        AnalyzeArgs, AnalyzeSubcommand, DiagnoseFacadeArgs, InspectFacadeArgs, PlaybackArgs,
-        PlaybackWorkerArgs, ShowArgs,
-    },
-    artifacts::args::{
-        ArtifactArgs, ArtifactSubcommand, BugReportFacadeArgs, BundleArgs, ScreenshotArgs,
-        VideoFacadeArgs,
-    },
-    control::args::{ActArgs, ControlArgs, ScreenArgs, SendArgs, StatusArgs, StopArgs, WaitArgs},
-    integrity::args::{IntegrityArgs, IntegritySubcommand},
-    output::{ResponseField, ResponseMode},
+    analysis::args::{AnalyzeArgs, InspectFacadeArgs, PlaybackArgs, PlaybackWorkerArgs},
+    artifacts::args::{ArtifactArgs, BundleArgs, ScreenshotArgs, VideoFacadeArgs},
+    control::args::{ScreenArgs, ScreenEncoding, SendArgs, StatusArgs, StopArgs, WaitArgs},
+    integrity::args::IntegrityArgs,
     owned::OwnedProcessArgs,
-    recording::args::{GeometryProbeArgs, RecordArgs, RestartArgs, StartArgs},
-    registry::args::{RegistryArgs, RegistrySubcommand},
+    recording::args::{
+        DurabilityModeArg, GeometryProbeArgs, ProvenancePolicyArg, RecordArgs, RecordingArgs,
+        RestartArgs,
+    },
+    registry::args::RegistryArgs,
     scenario::args::TestArgs,
-    tmux::{TmuxArgs, TmuxSubcommand},
-    tooling::args::{ClientCommand, DoctorArgs, ToolingArgs, ToolingSubcommand, VersionArgs},
+    tmux::TmuxArgs,
+    tooling::args::{ClientArgs, CompletionsArgs, DoctorArgs, SchemaArgs, VersionArgs},
 };
-use clap::{CommandFactory as _, Parser, Subcommand, ValueEnum as _};
-use std::{env, fmt::Write as _};
-
-const ROOT_HELP_TEMPLATE: &str = "\
-{about-with-newline}
-{usage-heading} {usage}{after-help}
-
-Options:
-{options}
-";
-const ROOT_COMMAND_GROUPS: &[(&str, &[&str])] = &[
-    (
-        "Sessions",
-        &[
-            "record", "start", "restart", "status", "stop", "session", "tmux",
-        ],
-    ),
-    (
-        "Interaction",
-        &["screen", "show", "wait", "act", "send", "control"],
-    ),
-    ("Investigation", &["inspect", "diagnose", "analyze"]),
-    (
-        "Artifacts",
-        &[
-            "screenshot",
-            "video",
-            "bundle",
-            "bug-report",
-            "artifact",
-            "integrity",
-        ],
-    ),
-    ("Automation", &["test", "agent", "tooling"]),
-    ("System", &["doctor", "version"]),
-];
-
+use clap::{error::ErrorKind as ClapErrorKind, CommandFactory as _, Parser, Subcommand};
+use std::env;
 #[derive(Debug, Parser)]
 #[command(
     name = "termtrace",
-    version,
-    about = "Record native terminal pixels and every semantic terminal state"
-)]
+    version = concat!(env!("CARGO_PKG_VERSION"), " (build ", env!("TERMTRACE_BUILD_REVISION"), ")"),
+    about = "Record native terminal pixels and every semantic terminal state",
+
+    disable_help_flag = true
+) ]
 pub(super) struct Cli {
+    /// Print help.
+    #[arg(long, global = true, action = clap::ArgAction::Help)]
+    help: Option<bool>,
+
+    /// Suppress standard output and communicate only via exit codes.
+    #[arg(short = 'q', long, global = true)]
+    pub(super) quiet: bool,
+
+    /// Diagnostic log level threshold (error, warn, info, debug, trace).
     #[arg(long, global = true, env = "TERMTRACE_LOG", default_value = "warn")]
     pub(super) log: tracing::Level,
-
-    /// Select concise human, strict agent, forensic full, or exit-only output.
-    #[arg(
-        long,
-        global = true,
-        env = "TERMTRACE_RESPONSE",
-        default_value = "auto",
-        value_name = "PROFILE"
-    )]
-    pub(super) response: ResponseMode,
-
-    /// Include advanced compact-response fields.
-    #[arg(long, global = true, value_delimiter = ',', value_name = "FIELD")]
-    pub(super) fields: Vec<ResponseField>,
 
     #[command(subcommand)]
     pub(super) command: Command,
 }
 
 #[derive(Debug, Subcommand)]
+#[expect(clippy::large_enum_variant, reason = "Top-level command dispatch enum")]
 pub(super) enum Command {
-    /// Run a command in a PTY and preserve its byte-exact event stream.
+    /// Record a terminal command (use -d/--detach for a background session).
     Record(RecordArgs),
-    /// Execute one strict evidence-native terminal scenario.
-    Test(TestArgs),
-    /// Start a detached recording and publish a name after readiness.
-    Start(StartArgs),
-    /// Stop a named session and atomically publish an immutable successor.
-    Restart(RestartArgs),
-    /// Print machine-readable live session status.
-    Status(StatusArgs),
-    /// Apply terminal input and wait for an optional presented-state postcondition.
-    Act(ActArgs),
-    /// Send text, file, or standard-input bytes to a live child PTY.
+    /// View the live or historical presented terminal viewport.
+    Screen(ScreenArgs),
+    /// Send terminal input (keys, text, clicks, resize) and await screen state.
     Send(SendArgs),
-    /// Request graceful termination of a live session child.
+    /// Wait for screen text, output bytes, or idle stability.
+    Wait(WaitArgs),
+    /// Show live session status or list registered sessions (--gc to prune).
+    Status(StatusArgs),
+    /// Request graceful termination of a running background session.
     Stop(StopArgs),
+    /// Atomically stop and restart a background session.
+    Restart(RestartArgs),
+    /// Inspect session forensics (default: triage last action).
+    Analyze(AnalyzeArgs),
+    /// Capture a rendered PNG/SVG screenshot of a session.
+    Screenshot(ScreenshotArgs),
+    /// Export a presentation MP4 video from a session.
+    Video(VideoFacadeArgs),
+    /// Create an evidence bundle (supports --profile debug and --screenshot).
+    Bundle(BundleArgs),
+    /// Execute strict evidence-native terminal scenario tests.
+    Test(TestArgs),
     /// Record managed tmux panes for their full lifetime.
     Tmux(TmuxArgs),
-    /// Live session control commands.
-    Control(ControlArgs),
-    /// Replay, inspect, compare, and diagnose terminal evidence.
-    Analyze(AnalyzeArgs),
-    /// Render, capture, and publish terminal artifacts.
-    Artifact(ArtifactArgs),
-    /// Summarize the most recent canonical input action.
-    Inspect(InspectFacadeArgs),
-    /// Run diagnostics bounded to the most recent canonical input action.
-    Diagnose(DiagnoseFacadeArgs),
-    /// Create a manifested screenshot artifact.
-    Screenshot(ScreenshotArgs),
-    /// Create a sensitivity-labeled evidence bundle.
-    Bundle(BundleArgs),
-    /// Publish a bounded manifested debugging evidence export without raw byte streams.
-    BugReport(BugReportFacadeArgs),
-    /// Plan, preview, or export a manifested presentation video.
-    Video(VideoFacadeArgs),
-    /// Manage friendly session names and retention.
-    Session(RegistryArgs),
-    /// Verify, sign, and recover canonical evidence.
-    Integrity(IntegrityArgs),
-    /// Runtime, SDK, and shell integration tools.
-    Tooling(ToolingArgs),
-    /// Probe built-in and optional host capabilities.
+    /// Probe system capabilities, Ghostty VT, and rendering dependencies.
     Doctor(DoctorArgs),
-    /// Report build and runtime component versions.
-    Version(VersionArgs),
+    /// Generate a shell autocompletion script from the current command graph.
+    #[command(name = "completion")]
+    Completion(CompletionsArgs),
+
     /// Serve the versioned language-neutral JSONL process protocol.
+    #[command(hide = true)]
     Agent,
+    /// Generate JSON Schemas for public events, controls, and artifacts.
+    #[command(name = "schema", hide = true)]
+    Schema(SchemaArgs),
+    /// Run Python or TypeScript client code from managed SDK assets without project files.
+    #[command(name = "client", hide = true)]
+    Client(ClientArgs),
+    /// Report build and runtime component versions.
+    #[command(hide = true)]
+    Version(VersionArgs),
 
     /// Internal timed event playback used as Ghostty's child process.
     #[command(hide = true)]
@@ -145,12 +100,18 @@ pub(super) enum Command {
     /// Internal live terminal geometry probe.
     #[command(hide = true)]
     GeometryProbe(GeometryProbeArgs),
-    /// Return a compact representation of the latest presented screen.
-    Screen(ScreenArgs),
-    /// Show a truth-labeled live or completed terminal viewport.
-    Show(ShowArgs),
-    /// Wait for an explicit presented-screen, output-history, or idle predicate.
-    Wait(WaitArgs),
+    /// Internal artifact operations.
+    #[command(hide = true)]
+    Artifact(ArtifactArgs),
+    /// Internal session registry operations.
+    #[command(hide = true)]
+    Session(RegistryArgs),
+    /// Internal integrity operations.
+    #[command(hide = true)]
+    Integrity(IntegrityArgs),
+    /// Internal last-action shortcut.
+    #[command(name = "last-action", hide = true)]
+    LastAction(InspectFacadeArgs),
 }
 
 pub(super) fn completion_command() -> clap::Command {
@@ -163,114 +124,139 @@ fn bound_help_width(command: clap::Command) -> clap::Command {
         .mut_subcommands(bound_help_width);
 }
 
-pub(super) fn root_command() -> clap::Command {
-    let command = bound_help_width(Cli::command());
-    let visible_commands = command
-        .get_subcommands()
-        .filter(|subcommand| return !subcommand.is_hide_set())
-        .map(|subcommand| {
-            return (
-                subcommand.get_name().to_owned(),
-                subcommand
-                    .get_about()
-                    .map(ToString::to_string)
-                    .unwrap_or_default(),
-            );
-        })
-        .collect::<Vec<_>>();
-
-    let grouped_names = ROOT_COMMAND_GROUPS
-        .iter()
-        .flat_map(|(_, names)| return names.iter().copied())
-        .collect::<Vec<_>>();
-
-    for (name, _) in &visible_commands {
-        assert!(
-            grouped_names.contains(&name.as_str()),
-            "visible command `{name}` is missing from ROOT_COMMAND_GROUPS"
-        );
-    }
-
-    for name in &grouped_names {
-        assert!(
-            visible_commands
-                .iter()
-                .any(|(visible, _)| return visible == name),
-            "ROOT_COMMAND_GROUPS contains unknown or hidden command `{name}`"
-        );
-    }
-
-    let mut grouped_help = String::from("Commands:\n");
-    for (heading, names) in ROOT_COMMAND_GROUPS {
-        let command_width = names
-            .iter()
-            .map(|name| return name.len())
-            .max()
-            .unwrap_or_default()
-            .max(9);
-
-        let _ = writeln!(grouped_help, "  {heading}:");
-        for name in *names {
-            let Some(about) = visible_commands.iter().find_map(|(visible, about)| {
-                return (visible == name).then_some(about.as_str());
-            }) else {
-                continue;
-            };
-            let _ = writeln!(grouped_help, "    {name:<command_width$}  {about}");
-        }
-
-        grouped_help.push('\n');
-    }
-
-    grouped_help.push_str(
-        "A presented screen is a state snapshot; canonical output is the byte history.\n\
-         \n\
-         Run `termtrace <command> --help` for more details.",
-    );
-
-    return command
-        .help_template(ROOT_HELP_TEMPLATE)
-        .after_help(grouped_help);
+pub(super) fn should_disable_color() -> bool {
+    return env::var_os("NO_COLOR").is_some()
+        || env::var_os("NOCOLOR").is_some()
+        || env::var("TERM").is_ok_and(|term| return term == "dumb");
 }
 
-pub(super) fn requested_response_mode() -> ResponseMode {
-    let mut mode = env::var("TERMTRACE_RESPONSE")
-        .ok()
-        .and_then(|value| return response_mode_name(&value))
-        .unwrap_or(ResponseMode::Auto);
+pub(super) fn root_command() -> clap::Command {
+    let mut command = bound_help_width(Cli::command());
+    if should_disable_color() {
+        command = command.color(clap::ColorChoice::Never);
+    }
 
-    let mut arguments = env::args_os().skip(1);
-    while let Some(argument) = arguments.next() {
-        let Some(argument) = argument.to_str() else {
-            continue;
-        };
+    return command;
+}
 
-        if let Some(value) = argument.strip_prefix("--response=") {
-            if let Some(selected) = response_mode_name(value) {
-                mode = selected;
+impl Cli {
+    pub(super) fn is_quiet(&self) -> bool {
+        return self.quiet;
+    }
+
+    pub(super) fn validate(&self) -> Result<(), clap::Error> {
+        let mut cmd = root_command();
+        match &self.command {
+            Command::Record(record_args) => {
+                validate_recording_args(&mut cmd, &record_args.recording)?;
             }
 
+            Command::Restart(restart_args) => {
+                if !restart_args.provenance_environment.is_empty()
+                    && !matches!(restart_args.provenance, Some(ProvenancePolicyArg::Custom))
+                {
+                    return Err(cmd.error(
+                        ClapErrorKind::ArgumentConflict,
+                        "--provenance-env requires --provenance custom\n\nhelp: specify `--provenance custom` when supplying custom environment rules",
+                    ));
+                }
+
+                if (restart_args.durability_max_interval_ms.is_some()
+                    || restart_args.durability_max_uncommitted_bytes.is_some())
+                    && !matches!(restart_args.durability, Some(DurabilityModeArg::Bounded))
+                {
+                    return Err(cmd.error(
+                        ClapErrorKind::ArgumentConflict,
+                        "--durability-max-interval-ms and --durability-max-uncommitted-bytes require --durability bounded\n\nhelp: specify `--durability bounded` when supplying durability thresholds",
+                    ));
+                }
+            }
+            Command::Screen(screen_args)
+                if screen_args.screen == ScreenEncoding::Diff && screen_args.since.is_none() =>
+            {
+                return Err(cmd.error(
+                    ClapErrorKind::MissingRequiredArgument,
+                    "--screen diff requires --since STATE_HASH\n\nhelp: specify `--since <STATE_HASH>` to compare the latest presented screen against",
+                ));
+            }
+
+            _ => {}
+        }
+
+        return Ok(());
+    }
+}
+
+fn validate_recording_args(
+    cmd: &mut clap::Command,
+    recording: &RecordingArgs,
+) -> Result<(), clap::Error> {
+    if !recording.provenance_environment.is_empty()
+        && !matches!(recording.provenance, ProvenancePolicyArg::Custom)
+    {
+        return Err(cmd.error(
+            ClapErrorKind::ArgumentConflict,
+            "--provenance-env requires --provenance custom\n\nhelp: specify `--provenance custom` when supplying custom environment rules",
+        ));
+    }
+
+    if (recording.durability_max_interval_ms.is_some()
+        || recording.durability_max_uncommitted_bytes.is_some())
+        && !matches!(recording.durability, DurabilityModeArg::Bounded)
+    {
+        return Err(cmd.error(
+            ClapErrorKind::ArgumentConflict,
+            "--durability-max-interval-ms and --durability-max-uncommitted-bytes require --durability bounded\n\nhelp: specify `--durability bounded` when supplying durability thresholds",
+        ));
+    }
+    return Ok(());
+}
+
+pub(super) fn requested_quiet_mode() -> bool {
+    let mut arguments = env::args_os().skip(1);
+    while let Some(argument) = arguments.next() {
+        let Some(s) = argument.to_str() else {
+            continue;
+        };
+        if s == "--" {
+            break;
+        }
+
+        if s == "--quiet" {
+            return true;
+        }
+
+        if s == "--log" || s == "-o" || s == "--out" || s == "-L" || s == "-S" {
+            arguments.next();
             continue;
         }
 
-        if argument != "--response" {
+        if s.starts_with("--") {
             continue;
         }
 
-        if let Some(value) = arguments
-            .next()
-            .and_then(|value| return value.into_string().ok())
-            && let Some(selected) = response_mode_name(&value)
-        {
-            mode = selected;
+        if let Some(chars) = s.strip_prefix('-') {
+            if chars.is_empty() {
+                continue;
+            }
+
+            for (idx, ch) in chars.char_indices() {
+                match ch {
+                    'q' => return true,
+                    'o' | 'L' | 'S' => {
+                        if idx + ch.len_utf8() == chars.len() {
+                            arguments.next();
+                        }
+
+                        break;
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 
-    return mode;
-}
-
-fn response_mode_name(value: &str) -> Option<ResponseMode> {
-    return ResponseMode::from_str(value, false).ok();
+    return false;
 }
 
 pub(super) fn command_contract(matches: &clap::ArgMatches) -> (String, bool) {
@@ -302,54 +288,4 @@ pub(super) fn command_contract(matches: &clap::ArgMatches) -> (String, bool) {
     );
 
     return (command_type.to_owned(), mutating);
-}
-
-pub(super) fn preserves_requested_output(command: &Command) -> bool {
-    return match command {
-        Command::Record(_)
-        | Command::Video(_)
-        | Command::Inspect(_)
-        | Command::Diagnose(_)
-        | Command::Screenshot(_)
-        | Command::Bundle(_)
-        | Command::BugReport(_)
-        | Command::Agent
-        | Command::Playback(_)
-        | Command::PlaybackWorker(_)
-        | Command::OwnedProcess(_)
-        | Command::GeometryProbe(_) => true,
-        Command::Show(_) => true,
-        Command::Artifact(arguments) => {
-            matches!(arguments.command, ArtifactSubcommand::Capture(_))
-        }
-        Command::Analyze(arguments) => matches!(
-            arguments.command,
-            AnalyzeSubcommand::Inspect(_)
-                | AnalyzeSubcommand::Timeline(_)
-                | AnalyzeSubcommand::Diff(_)
-                | AnalyzeSubcommand::Explain(_)
-                | AnalyzeSubcommand::Diagnose(_)
-                | AnalyzeSubcommand::Output(_)
-                | AnalyzeSubcommand::Events(_)
-        ),
-        Command::Tooling(arguments) => match &arguments.command {
-            ToolingSubcommand::Completions(_) => true,
-            ToolingSubcommand::Client(arguments) => {
-                !matches!(arguments.command, ClientCommand::Status)
-            }
-            ToolingSubcommand::Schemas(_) => false,
-        },
-        Command::Doctor(arguments) => arguments.json || !arguments.require.is_empty(),
-        Command::Version(arguments) => arguments.json,
-        Command::Session(arguments) => matches!(
-            arguments.command,
-            RegistrySubcommand::Resolve(_) | RegistrySubcommand::List(_)
-        ),
-        Command::Integrity(arguments) => matches!(
-            arguments.command,
-            IntegritySubcommand::Verify(_) | IntegritySubcommand::VerifyBundle(_)
-        ),
-        Command::Tmux(arguments) => matches!(arguments.command, TmuxSubcommand::Config(_)),
-        _ => false,
-    };
 }

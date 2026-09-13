@@ -150,9 +150,7 @@ pub(in crate::cli) fn run_tmux_record(
     };
 
     let output = ProcessCommand::new(&setup.termtrace)
-        .arg("--response")
-        .arg("full")
-        .arg("start")
+        .args(["record", "-d"])
         .arg(&alias)
         .arg("--")
         .args(&composite_command)
@@ -393,6 +391,7 @@ pub(in crate::cli) fn run_tmux_stop(
         timeout_ms: arguments.timeout_ms,
         expected_presented_state_hash: None,
         request_id: None,
+        json: false,
     };
 
     let mut quiet_response = ResponseWriter::quiet();
@@ -541,6 +540,7 @@ pub(in crate::cli) fn run_tmux_video(
         max_frames: 12,
         change_only: false,
         preview_width: 640,
+        json: false,
     };
 
     return run_video_facade(response, video_args);

@@ -1,9 +1,14 @@
+#![expect(
+    dead_code,
+    reason = "Registry management functions preserved for status command and tests"
+)]
+
 use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
 
 use crate::cli::{
-    output::{write_json_line, write_stdout},
+    output::{write_json_line, write_json_pretty, write_stdout},
     registry::args::{GcArgs, ListArgs, RegisterArgs, RemoveArgs, ResolveArgs},
 };
 use args::RegistrySubcommand;
@@ -50,7 +55,7 @@ pub(super) fn run_resolve(
     let entry = registry.resolve(&arguments.name).into_diagnostic()?;
 
     if arguments.json {
-        return write_json_line(response, &entry);
+        return write_json_pretty(response, &entry);
     }
 
     let mut path = entry.session_path().into_os_string().into_vec();
@@ -64,7 +69,14 @@ pub(super) fn run_list(response: &mut ResponseWriter, arguments: ListArgs) -> Re
     let entries = registry.list(arguments.all).into_diagnostic()?;
 
     if arguments.json {
-        return write_json_line(response, &entries);
+        let mut encoded = serde_json::to_vec_pretty(&entries).into_diagnostic()?;
+        encoded.push(b'\n');
+
+        return write_stdout(response, encoded);
+    }
+
+    if entries.is_empty() {
+        return write_stdout(response, "No sessions found.\n");
     }
 
     let rows = entries
@@ -94,13 +106,16 @@ pub(super) fn run_list(response: &mut ResponseWriter, arguments: ListArgs) -> Re
     });
 
     let mut output = String::new();
-    writeln!(
-        output,
+
+    let header = format!(
         "{:<alias_width$}  {:<lifecycle_width$}  {:<session_id_width$}  CANONICAL SESSION",
         "ALIAS", "LIFECYCLE", "SESSION ID",
-    )
-    .into_diagnostic()?;
+    );
 
+    let rule = "─".repeat(header.chars().count());
+
+    writeln!(output, "{header}").into_diagnostic()?;
+    writeln!(output, "{rule}").into_diagnostic()?;
     for (alias, lifecycle, session_id, path) in rows {
         writeln!(
             output,

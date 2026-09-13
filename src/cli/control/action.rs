@@ -1,129 +1,559 @@
+use super::args::SendArgs;
 use super::input::input_sequence_atom_for_cli;
 use super::*;
+use std::mem::take;
+use termtrace_model::{
+    protocol::control::{PointerOperation, ProcessSignal, ScreenPredicate},
+    terminal::state::MouseButton,
+};
+use termtrace_sdk::wait_for_screen;
 
-pub(in crate::cli) fn run_act(
+fn parse_click_str(s: &str) -> Result<(u16, u16)> {
+    let (x_str, y_str) = s
+        .split_once(',')
+        .ok_or_else(|| miette::miette!("invalid click coordinates '{s}'; expected X,Y"))?;
+    let col = x_str.trim().parse::<u16>().into_diagnostic()?;
+    let row = y_str.trim().parse::<u16>().into_diagnostic()?;
+
+    return Ok((col, row));
+}
+
+fn parse_resize_str(s: &str) -> Result<(u16, u16, u16, u16)> {
+    let (w_str, h_str) = s
+        .split_once('x')
+        .or_else(|| return s.split_once('X'))
+        .or_else(|| return s.split_once(','))
+        .ok_or_else(|| {
+            return miette::miette!(
+                "invalid resize format '{s}'; expected WxH e.g. 80x24 or 80,24"
+            );
+        })?;
+    let cols = w_str.trim().parse::<u16>().into_diagnostic()?;
+    let rows = h_str.trim().parse::<u16>().into_diagnostic()?;
+    let pixel_width = cols.saturating_mul(12);
+    let pixel_height = rows.saturating_mul(24);
+
+    return Ok((cols, rows, pixel_width, pixel_height));
+}
+
+fn parse_signal_str(s: &str) -> Result<ProcessSignal> {
+    let normalized = s.trim().to_ascii_uppercase();
+    let name = normalized.strip_prefix("SIG").unwrap_or(&normalized);
+
+    return match name {
+        "INT" | "INTERRUPT" => Ok(ProcessSignal::Interrupt),
+        "TERM" | "TERMINATE" => Ok(ProcessSignal::Terminate),
+        "HUP" | "HANGUP" => Ok(ProcessSignal::Hangup),
+        "USR1" | "USER1" => Ok(ProcessSignal::User1),
+        "USR2" | "USER2" => Ok(ProcessSignal::User2),
+        _ => Err(miette::miette!(
+            "unknown signal '{s}'; expected INT, TERM, HUP, USR1, or USR2"
+        )),
+    };
+}
+
+pub(in crate::cli) fn run_send(
     response: &mut ResponseWriter,
-    arguments: ActArgs,
+    arguments: SendArgs,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session.clone())?;
     if resolved.lifecycle != RegistryLifecycle::Live {
-        return write_session_lifecycle(response, &resolved, "act", ExitCode::FAILURE);
+        return write_session_lifecycle(response, &resolved, "send", ExitCode::FAILURE);
     }
 
     let request_id = arguments.request_id.unwrap_or_else(uuid::Uuid::now_v7);
-    let mut atoms: Vec<InputSequenceAtom> = Vec::new();
+    let mut stdin_bytes: Option<Vec<u8>> = None;
+    if arguments.stdin || arguments.atoms.iter().any(|a| return a == "-") {
+        let mut data = Vec::new();
+        io::stdin().read_to_end(&mut data).into_diagnostic()?;
+        stdin_bytes = Some(data);
+    }
+
+    enum SendOp {
+        Control(ControlCommand, &'static str),
+        PacedAtoms(Vec<InputSequenceAtom>),
+    }
+
+    let mut ops: Vec<SendOp> = Vec::new();
+    let mut current_atoms: Vec<InputSequenceAtom> = Vec::new();
+
+    if let Some(resize) = &arguments.resize {
+        let (cols, rows, pixel_width, pixel_height) = parse_resize_str(resize)?;
+        ops.push(SendOp::Control(
+            ControlCommand::Resize {
+                cols,
+                rows,
+                pixel_width,
+                pixel_height,
+            },
+            "resize",
+        ));
+    }
+
+    if let Some(signal_str) = &arguments.signal {
+        let signal = parse_signal_str(signal_str)?;
+        ops.push(SendOp::Control(ControlCommand::Signal { signal }, "signal"));
+    }
+
+    if let Some(mark) = &arguments.mark {
+        ops.push(SendOp::Control(
+            ControlCommand::Mark {
+                label: mark.clone(),
+            },
+            "mark",
+        ));
+    }
 
     for atom in &arguments.atoms {
-        if arguments.pace.is_zero() || !atom.starts_with("text:") {
-            let operation_id = derive_input_operation_id(request_id, atoms.len());
-            atoms.push(input_sequence_atom_for_cli(
+        if atom == "-" {
+            let data = stdin_bytes.clone().unwrap_or_default();
+            current_atoms.push(InputSequenceAtom::Bytes {
+                operation_id: derive_input_operation_id(request_id, current_atoms.len()),
+                data: ByteString::new(data),
+                input_kind: InputKind::Raw,
+                caller_intent: arguments.intent.clone(),
+            });
+        } else if let Some(coords) = atom.strip_prefix("click:") {
+            if !current_atoms.is_empty() {
+                ops.push(SendOp::PacedAtoms(take(&mut current_atoms)));
+            }
+
+            let (col, row) = parse_click_str(coords)?;
+            ops.push(SendOp::Control(
+                ControlCommand::Pointer {
+                    column: col,
+                    row,
+                    operation: PointerOperation::Click {
+                        button: MouseButton::Left,
+                    },
+                    strict: false,
+                },
+                "pointer",
+            ));
+        } else if let Some(text) = atom.strip_prefix("activate:") {
+            if !current_atoms.is_empty() {
+                ops.push(SendOp::PacedAtoms(take(&mut current_atoms)));
+            }
+
+            ops.push(SendOp::Control(
+                ControlCommand::Activate {
+                    text: text.to_owned(),
+                    unique: false,
+                    strict: false,
+                },
+                "activate",
+            ));
+        } else if let Some(wh) = atom.strip_prefix("resize:") {
+            if !current_atoms.is_empty() {
+                ops.push(SendOp::PacedAtoms(take(&mut current_atoms)));
+            }
+
+            let (cols, rows, pixel_width, pixel_height) = parse_resize_str(wh)?;
+            ops.push(SendOp::Control(
+                ControlCommand::Resize {
+                    cols,
+                    rows,
+                    pixel_width,
+                    pixel_height,
+                },
+                "resize",
+            ));
+        } else if let Some(sig) = atom.strip_prefix("signal:") {
+            if !current_atoms.is_empty() {
+                ops.push(SendOp::PacedAtoms(take(&mut current_atoms)));
+            }
+
+            let signal = parse_signal_str(sig)?;
+            ops.push(SendOp::Control(ControlCommand::Signal { signal }, "signal"));
+        } else if let Some(label) = atom.strip_prefix("mark:") {
+            if !current_atoms.is_empty() {
+                ops.push(SendOp::PacedAtoms(take(&mut current_atoms)));
+            }
+
+            ops.push(SendOp::Control(
+                ControlCommand::Mark {
+                    label: label.to_owned(),
+                },
+                "mark",
+            ));
+        } else if arguments.pace.is_zero() || !atom.starts_with("text:") {
+            let operation_id = derive_input_operation_id(request_id, current_atoms.len());
+            current_atoms.push(input_sequence_atom_for_cli(
                 atom,
                 operation_id,
                 arguments.intent.clone(),
             )?);
-            continue;
-        }
+        } else {
+            let text = atom.strip_prefix("text:").unwrap_or_default();
 
-        let text = atom.strip_prefix("text:").unwrap_or_default();
-
-        for scalar in text.chars() {
-            atoms.push(InputSequenceAtom::Bytes {
-                operation_id: derive_input_operation_id(request_id, atoms.len()),
-                data: ByteString::new(scalar.to_string().into_bytes()),
-                input_kind: InputKind::Text,
-                caller_intent: arguments.intent.clone(),
-            });
+            for scalar in text.chars() {
+                current_atoms.push(InputSequenceAtom::Bytes {
+                    operation_id: derive_input_operation_id(request_id, current_atoms.len()),
+                    data: ByteString::new(scalar.to_string().into_bytes()),
+                    input_kind: InputKind::Text,
+                    caller_intent: arguments.intent.clone(),
+                });
+            }
         }
     }
 
-    if atoms.is_empty() || atoms.len() > 4096 {
+    if let Some(text) = &arguments.text {
+        if arguments.pace.is_zero() {
+            current_atoms.push(InputSequenceAtom::Bytes {
+                operation_id: derive_input_operation_id(request_id, current_atoms.len()),
+                data: ByteString::new(text.as_bytes().to_vec()),
+                input_kind: InputKind::Text,
+                caller_intent: arguments.intent.clone(),
+            });
+        } else {
+            for scalar in text.chars() {
+                current_atoms.push(InputSequenceAtom::Bytes {
+                    operation_id: derive_input_operation_id(request_id, current_atoms.len()),
+                    data: ByteString::new(scalar.to_string().into_bytes()),
+                    input_kind: InputKind::Text,
+                    caller_intent: arguments.intent.clone(),
+                });
+            }
+        }
+    }
+
+    if let Some(path) = &arguments.file {
+        let bytes = fs_err::read(path).into_diagnostic()?;
+        current_atoms.push(InputSequenceAtom::Bytes {
+            operation_id: derive_input_operation_id(request_id, current_atoms.len()),
+            data: ByteString::new(bytes),
+            input_kind: InputKind::Raw,
+            caller_intent: arguments.intent.clone(),
+        });
+    }
+
+    if arguments.stdin && !arguments.atoms.iter().any(|a| return a == "-") {
+        let bytes = stdin_bytes.unwrap_or_default();
+        current_atoms.push(InputSequenceAtom::Bytes {
+            operation_id: derive_input_operation_id(request_id, current_atoms.len()),
+            data: ByteString::new(bytes),
+            input_kind: InputKind::Raw,
+            caller_intent: arguments.intent.clone(),
+        });
+    }
+
+    if !current_atoms.is_empty() {
+        ops.push(SendOp::PacedAtoms(current_atoms));
+    }
+
+    if ops.is_empty() {
         return Err(miette::miette!(
-            "input sequence must contain 1 to 4096 atoms"
+            "send requires at least one input atom or flag"
         ));
     }
 
     let postcondition = action_postcondition(&arguments);
-    let mut request = ControlRequest::new(ControlCommand::Act {
-        atoms,
-        pace_ns: u64::try_from(arguments.pace.as_nanos()).unwrap_or(u64::MAX),
-        include_atom_outcomes: arguments.verbose,
-        postcondition,
-        projection: ScreenProjectionRequest::default(),
-    });
-    request.request_id = request_id;
-    request.expected_presented_state_hash = arguments.expected_presented_state_hash;
-    let control_response = match send_request_response(&resolved.path, &request) {
-        Ok(control_response) => control_response,
-        Err(error) => {
-            let (code, applied, retry) = match &error {
-                SdkError::InvalidControlProtocol { .. } => {
-                    ("invalid_payload", "none", "safe_new_request")
+    let total_ops = ops.len();
+
+    for (index, op) in ops.into_iter().enumerate() {
+        let is_last = index + 1 == total_ops;
+        match op {
+            SendOp::Control(cmd, label) => {
+                let mut request = ControlRequest::new(cmd);
+                request.request_id = request_id;
+                request
+                    .expected_presented_state_hash
+                    .clone_from(&arguments.if_state);
+                let control_response = match send_request_response(&resolved.path, &request) {
+                    Ok(resp) => resp,
+                    Err(error) => {
+                        if arguments.json {
+                            write_json_pretty(
+                                response,
+                                &serde_json::json!({
+                                    "v": 1,
+                                    "ok": false,
+                                    "type": label,
+                                    "message": error.to_string(),
+                                    "request_id": request_id,
+                                }),
+                            )?;
+                        } else {
+                            write_stdout(response, format!("Send {label} failed: {error}\n"))?;
+                        }
+
+                        return Ok(ExitCode::FAILURE);
+                    }
+                };
+
+                if let ControlResult::Error {
+                    code,
+                    message,
+                    details,
+                } = control_response.result
+                {
+                    let output = action_error_response(
+                        control_response.request_id,
+                        code,
+                        message,
+                        details.as_ref(),
+                        resolved.path.join("completion.json").is_file(),
+                    );
+
+                    if arguments.json {
+                        write_json_pretty(response, &output)?;
+                    } else {
+                        write_stdout(
+                            response,
+                            format!(
+                                "Send {label} error: {}\n",
+                                output
+                                    .get("message")
+                                    .and_then(|m| return m.as_str())
+                                    .unwrap_or("unknown error")
+                            ),
+                        )?;
+                    }
+
+                    return Ok(ExitCode::FAILURE);
                 }
-                _ => (
-                    "control_transport_failed",
-                    "unknown",
-                    "same_request_id_only",
-                ),
-            };
 
-            write_json_line(
-                response,
-                &serde_json::json!({
-                    "v": 1,
-                    "ok": false,
-                    "type": "action",
-                    "code": code,
-                    "message": error.to_string(),
-                    "request_id": request.request_id,
-                    "input": {
-                        "applied": applied,
-                        "atoms": serde_json::Value::Null,
-                        "bytes": serde_json::Value::Null,
-                        "retry": retry,
-                    },
-                    "postcondition": {
-                        "kind": "not_started",
-                        "matched": false,
-                        "outcome": "not_started",
-                    },
-                    "observation": serde_json::Value::Null,
-                    "ended": resolved.path.join("completion.json").is_file(),
-                    "boundaries": serde_json::Value::Null,
-                }),
-            )?;
+                if is_last {
+                    let (matched, post_kind, outcome) = match postcondition {
+                        ActionPostcondition::Idle {
+                            stable_for_ns,
+                            timeout_ns,
+                        } => {
+                            let capture_req = ControlRequest::new(ControlCommand::CaptureStable {
+                                stable_for_ns,
+                                timeout_ns,
+                                projection: ScreenProjectionRequest::default(),
+                            });
 
-            return Ok(ExitCode::FAILURE);
-        }
-    };
+                            match send_request_response(&resolved.path, &capture_req) {
+                                Ok(resp) => match resp.result {
+                                    ControlResult::Ok { data } => {
+                                        let matched = matches!(
+                                            data,
+                                            ControlData::StableSnapshot { quality, .. }
+                                                if quality == StableCaptureQuality::Stable
+                                        );
+                                        (
+                                            matched,
+                                            "idle",
+                                            if matched { "matched" } else { "unmatched" },
+                                        )
+                                    }
+                                    ControlResult::Error { .. } => (false, "idle", "error"),
+                                },
+                                Err(_) => (false, "idle", "error"),
+                            }
+                        }
+                        ActionPostcondition::Screen {
+                            predicate,
+                            timeout_ns,
+                        } => {
+                            let wait_timeout = Duration::from_nanos(timeout_ns);
+                            match wait_for_screen(
+                                &resolved.path,
+                                predicate,
+                                Duration::ZERO,
+                                wait_timeout,
+                            ) {
+                                Ok(outcome) => (
+                                    outcome.matched,
+                                    "screen",
+                                    if outcome.matched { "matched" } else { "deadline" },
+                                ),
+                                Err(_) => (false, "screen", "deadline"),
+                            }
+                        }
+                        ActionPostcondition::None => (true, "none", "matched"),
+                    };
 
-    match control_response.result {
-        ControlResult::Ok { data } => {
-            let (output, matched) = action_applied_response(control_response.request_id, &data)?;
-            write_json_line(response, &output)?;
+                    if arguments.json {
+                        write_json_pretty(
+                            response,
+                            &serde_json::json!({
+                                "v": 1,
+                                "ok": matched,
+                                "type": label,
+                                "request_id": request_id,
+                                "postcondition": {
+                                    "kind": post_kind,
+                                    "matched": matched,
+                                    "outcome": outcome,
+                                }
+                            }),
+                        )?;
+                    } else if matched {
+                        write_stdout(
+                            response,
+                            format!("Send command completed ({label}); postcondition {post_kind} matched={matched}, outcome={outcome}\n"),
+                        )?;
+                    } else {
+                        write_stdout(
+                            response,
+                            format!("Send command failed ({label}); postcondition {post_kind} matched={matched}, outcome={outcome}\n"),
+                        )?;
+                    }
 
-            return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
-        }
-        ControlResult::Error {
-            code,
-            message,
-            details,
-        } => {
-            let output = action_error_response(
-                control_response.request_id,
-                code,
-                message,
-                details.as_ref(),
-                resolved.path.join("completion.json").is_file(),
-            );
+                    return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
+                }
+            }
+            SendOp::PacedAtoms(atoms) => {
+                let op_postcondition =
+                    if is_last { postcondition.clone() } else { ActionPostcondition::None };
 
-            write_json_line(response, &output)?;
+                let mut request = ControlRequest::new(ControlCommand::Act {
+                    atoms,
+                    pace_ns: u64::try_from(arguments.pace.as_nanos()).unwrap_or(u64::MAX),
+                    include_atom_outcomes: arguments.verbose,
+                    postcondition: op_postcondition,
+                    projection: ScreenProjectionRequest::default(),
+                });
+                request.request_id = request_id;
 
-            return Ok(ExitCode::FAILURE);
+                request
+                    .expected_presented_state_hash
+                    .clone_from(&arguments.if_state);
+                let control_response = match send_request_response(&resolved.path, &request) {
+                    Ok(control_response) => control_response,
+                    Err(error) => {
+                        let (code, applied, retry) = match &error {
+                            SdkError::InvalidControlProtocol { .. } => {
+                                ("invalid_payload", "none", "safe_new_request")
+                            }
+                            _ => (
+                                "control_transport_failed",
+                                "unknown",
+                                "same_request_id_only",
+                            ),
+                        };
+
+                        let payload = serde_json::json!({
+                            "v": 1,
+                            "ok": false,
+                            "type": "action",
+                            "code": code,
+                            "message": error.to_string(),
+                            "request_id": request.request_id,
+                            "input": {
+                                "applied": applied,
+                                "atoms": serde_json::Value::Null,
+                                "bytes": serde_json::Value::Null,
+                                "retry": retry,
+                            },
+                            "postcondition": {
+                                "matched": false,
+                                "quality": "unmatched",
+                                "state": serde_json::Value::Null,
+                                "screen": serde_json::Value::Null,
+                                "state_hash": serde_json::Value::Null,
+                                "timeout": true,
+                            },
+                        });
+
+                        if arguments.json {
+                            write_json_pretty(response, &payload)?;
+                        } else {
+                            write_stdout(response, format!("Send action failed: {error}\n"))?;
+                        }
+
+                        return Ok(ExitCode::FAILURE);
+                    }
+                };
+
+                match control_response.result {
+                    ControlResult::Ok { data } => {
+                        let is_direct_stream = arguments.atoms.is_empty()
+                            && (arguments.file.is_some()
+                                || arguments.stdin
+                                || arguments.text.is_some())
+                            && matches!(postcondition, ActionPostcondition::None);
+
+                        if is_direct_stream {
+                            if let ControlData::ActionApplied { input, .. } = &data {
+                                write_json_line(
+                                    response,
+                                    &serde_json::json!({
+                                        "kind": "input_sent",
+                                        "request_id": input.sequence_id,
+                                        "bytes_written": input.bytes_written,
+                                    }),
+                                )?;
+
+                                return Ok(ExitCode::SUCCESS);
+                            }
+
+                            if let ControlData::InputSequenceApplied {
+                                sequence_id,
+                                bytes_written,
+                                boundaries,
+                                ..
+                            } = &data
+                            {
+                                write_json_line(
+                                    response,
+                                    &serde_json::json!({
+                                        "kind": "input_sent",
+                                        "request_id": sequence_id,
+                                        "bytes_written": bytes_written,
+                                        "boundary": compact_boundaries(boundaries),
+                                    }),
+                                )?;
+
+                                return Ok(ExitCode::SUCCESS);
+                            }
+                        }
+
+                        let (output, matched) =
+                            action_applied_response(control_response.request_id, &data)?;
+
+                        if is_last {
+                            if arguments.json {
+                                write_json_pretty(response, &output)?;
+                            } else {
+                                write_stdout(response, human_action_summary(&output))?;
+                            }
+
+                            return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
+                        }
+                    }
+                    ControlResult::Error {
+                        code,
+                        message,
+                        details,
+                    } => {
+                        let output = action_error_response(
+                            control_response.request_id,
+                            code,
+                            message,
+                            details.as_ref(),
+                            resolved.path.join("completion.json").is_file(),
+                        );
+
+                        if arguments.json {
+                            write_json_pretty(response, &output)?;
+                        } else {
+                            write_stdout(
+                                response,
+                                format!(
+                                    "Send action error: {}\n",
+                                    output
+                                        .get("message")
+                                        .and_then(|m| return m.as_str())
+                                        .unwrap_or("unknown error")
+                                ),
+                            )?;
+                        }
+
+                        return Ok(ExitCode::FAILURE);
+                    }
+                }
+            }
         }
     }
+
+    return Ok(ExitCode::SUCCESS);
 }
 
-pub(super) fn action_postcondition(arguments: &ActArgs) -> ActionPostcondition {
+pub(super) fn action_postcondition(arguments: &SendArgs) -> ActionPostcondition {
     if let Some(stable_for) = arguments.until_idle {
         return ActionPostcondition::Idle {
             stable_for_ns: u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX),
@@ -431,6 +861,7 @@ pub(super) fn input_retry(applied: &str) -> &'static str {
     };
 }
 
+#[expect(dead_code, reason = "Input failure categorization helper")]
 pub(super) fn input_failure_application(details: Option<&ControlErrorDetails>) -> &'static str {
     let Some(sequence) = details.and_then(|details| return details.input_sequence.as_ref()) else {
         return "none";

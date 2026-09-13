@@ -1,37 +1,13 @@
-use crate::cli::parsers::{
-    parse_cell, parse_pace_duration, parse_stability_duration, parse_state_hash,
-    parse_wait_deadline_duration,
+use crate::cli::{
+    analysis::args::ShowFormat,
+    parsers::{
+        parse_bounded_screen_regex, parse_pace_duration, parse_stability_duration,
+        parse_state_hash, parse_time_offset_ns, parse_wait_deadline_duration,
+    },
 };
-use clap::{ArgGroup, Args, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, ValueEnum};
 use std::{path::PathBuf, time::Duration};
-use termtrace_model::{
-    protocol::control::{ProcessSignal, ScreenMode},
-    terminal::state::{CursorStyle, MouseButton},
-};
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct ControlArgs {
-    #[command(subcommand)]
-    pub(in crate::cli) command: ControlSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub(in crate::cli) enum ControlSubcommand {
-    /// Print the accepted symbolic key and modifier grammar.
-    Keys,
-    /// Report terminal-window focus when the application opted in.
-    Focus(FocusArgs),
-    /// Send cell-addressed mouse input using live tracking modes.
-    Pointer(PointerArgs),
-    /// Resolve visible text and click its center from one actor state.
-    Activate(ActivateArgs),
-    /// Resize a live child PTY.
-    Resize(ResizeArgs),
-    /// Signal a live child process group.
-    Signal(SignalArgs),
-    /// Add a marker to a live session timeline.
-    Mark(MarkArgs),
-}
+use termtrace_model::{protocol::control::ScreenMode, terminal::state::CursorStyle};
 
 #[derive(Debug, Args)]
 #[command(group(
@@ -58,6 +34,10 @@ pub(in crate::cli) enum ControlSubcommand {
 // Require the group so another predicate's conflict cannot waive the idle requirement.
 #[command(group(ArgGroup::new("idle_selection").args(["idle"])))]
 #[command(override_usage = "termtrace wait [OPTIONS] <SESSION>")]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Screen, cursor, and incomplete predicates are independent wait flags"
+)]
 pub(in crate::cli) struct WaitArgs {
     /// Live session name or canonical path.
     #[arg(index = 1)]
@@ -73,6 +53,7 @@ pub(in crate::cli) struct WaitArgs {
         long,
         value_parser = parse_stability_duration,
         num_args = 0..=1,
+        require_equals = true,
         default_missing_value = "100ms"
     )]
     pub(in crate::cli) idle: Option<Duration>,
@@ -80,7 +61,7 @@ pub(in crate::cli) struct WaitArgs {
     #[arg(long)]
     pub(in crate::cli) screen_absent: Option<String>,
     /// Bounded linear-time regular expression required in the viewport.
-    #[arg(long)]
+    #[arg(long, value_parser = parse_bounded_screen_regex)]
     pub(in crate::cli) screen_regex: Option<String>,
     /// Required row substring as `ROW:TEXT`, with a zero-based row.
     #[arg(long)]
@@ -129,18 +110,32 @@ pub(in crate::cli) struct WaitArgs {
     /// Include the compressed complete semantic state in the response.
     #[arg(long, requires = "idle_selection")]
     pub(in crate::cli) full_state: bool,
+    /// Emit stable structured output as JSON.
+    #[arg(long)]
+    pub(in crate::cli) json: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(in crate::cli) enum ScreenEncoding {
+    /// Complete screen text including trailing blank cells and whitespace.
     Exact,
+    /// Plain trimmed text lines suitable for human inspection.
     Text,
+    /// Compact non-empty row text indexed by row numbers.
     Sparse,
+    /// Visual text diff against a prior presented state.
     Diff,
+    /// Omit screen text from the response payload.
     None,
 }
 
 #[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("screen_state_selector")
+        .multiple(false)
+        .args(["state", "state_hash", "event_seq", "at", "at_marker"])
+))]
+#[expect(clippy::struct_excessive_bools, reason = "Independent CLI flags")]
 pub(in crate::cli) struct ScreenArgs {
     /// Live session name or canonical completed session path.
     pub(in crate::cli) session: PathBuf,
@@ -150,60 +145,122 @@ pub(in crate::cli) struct ScreenArgs {
     /// Prior presented-state hash; returns `unchanged` when it is still current.
     #[arg(long, value_parser = parse_state_hash)]
     pub(in crate::cli) since: Option<String>,
+    /// Exact sequential state identifier.
+    #[arg(long)]
+    pub(in crate::cli) state: Option<u64>,
+    /// Exact presented state BLAKE3 hash.
+    #[arg(long, value_parser = parse_state_hash)]
+    pub(in crate::cli) state_hash: Option<String>,
+    /// Sequential canonical event sequence.
+    #[arg(long)]
+    pub(in crate::cli) event_seq: Option<u64>,
+    /// Latest state at or before this session offset.
+    #[arg(long, value_parser = parse_time_offset_ns)]
+    pub(in crate::cli) at: Option<u64>,
+    /// State at the given marker label.
+    #[arg(long)]
+    pub(in crate::cli) at_marker: Option<String>,
+    /// Output representation format.
+    #[arg(long, value_enum)]
+    pub(in crate::cli) format: Option<ShowFormat>,
+    /// Permit an explicitly selected synchronized-output hidden state.
+    #[arg(long)]
+    pub(in crate::cli) include_hidden: bool,
+    /// Explicitly observe an integrity-checked incomplete event prefix offline.
+    #[arg(long)]
+    pub(in crate::cli) recover_prefix: bool,
+    /// Require an unchanged live presented state for this duration.
+    #[arg(long, value_parser = parse_stability_duration, default_value = "0ms")]
+    pub(in crate::cli) stable_for: Duration,
+    /// Maximum live stability wait.
+    #[arg(long, value_parser = parse_wait_deadline_duration, default_value = "30s")]
+    pub(in crate::cli) timeout: Duration,
+    /// Write a concise provenance header to standard error.
+    #[arg(long)]
+    pub(in crate::cli) metadata: bool,
+    /// Emit stable structured output as JSON.
+    #[arg(long)]
+    pub(in crate::cli) json: bool,
 }
 
 #[derive(Debug, Args)]
 #[command(group(
-    ArgGroup::new("act_postcondition")
+    ArgGroup::new("send_postcondition")
         .multiple(false)
         .args(["until_idle", "until_screen", "until_screen_regex"])
 ))]
-pub(in crate::cli) struct ActArgs {
+pub(in crate::cli) struct SendArgs {
     /// Live session name or canonical path.
     #[arg(index = 1)]
     pub(in crate::cli) session: PathBuf,
-    /// Named keys, text:VALUE, paste:VALUE, raw:VALUE, or raw-file:PATH atoms.
-    #[arg(index = 2, value_name = "INPUT", num_args = 1..)]
+    /// Named keys, text:VALUE, paste:VALUE, raw:VALUE, or action atoms.
+    #[arg(index = 2, value_name = "INPUT", num_args = 0..)]
     pub(in crate::cli) atoms: Vec<String>,
+    /// Read raw bytes or atoms from standard input.
+    #[arg(long)]
+    pub(in crate::cli) stdin: bool,
+    /// UTF-8 text to write directly to the child PTY.
+    #[arg(long)]
+    pub(in crate::cli) text: Option<String>,
+    /// File whose exact bytes are written directly to the child PTY.
+    #[arg(long)]
+    pub(in crate::cli) file: Option<PathBuf>,
+    /// Terminal resize as WxH or COLSxROWS.
+    #[arg(long)]
+    pub(in crate::cli) resize: Option<String>,
+    /// Signal to deliver to child process (e.g. INT, TERM, HUP).
+    #[arg(long)]
+    pub(in crate::cli) signal: Option<String>,
+    /// Marker label to append to session timeline.
+    #[arg(long)]
+    pub(in crate::cli) mark: Option<String>,
+    /// Wait until the presented screen contains this exact text.
+    #[arg(long)]
+    pub(in crate::cli) until_screen: Option<String>,
+    /// Wait until the presented screen matches this bounded regular expression.
+    #[arg(long, value_parser = parse_bounded_screen_regex)]
+    pub(in crate::cli) until_screen_regex: Option<String>,
+    /// Wait until the resulting presented screen remains unchanged for this duration.
+    #[arg(
+        long,
+        value_parser = parse_stability_duration,
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "100ms"
+    )]
+    pub(in crate::cli) until_idle: Option<Duration>,
+    /// Maximum postcondition wait duration.
+    #[arg(long, value_parser = parse_wait_deadline_duration, default_value = "30s")]
+    pub(in crate::cli) timeout: Duration,
     /// Delay between atoms; paced text is split by Unicode scalar.
     #[arg(long, value_parser = parse_pace_duration, default_value = "0ms")]
     pub(in crate::cli) pace: Duration,
     /// Human-readable reason retained with the input event.
     #[arg(long)]
     pub(in crate::cli) intent: Option<String>,
-    /// Apply every input atom only if the latest presented state has this BLAKE3 hash.
+    /// Apply input only if the latest presented state has this BLAKE3 hash.
     #[arg(long = "if-state")]
-    pub(in crate::cli) expected_presented_state_hash: Option<String>,
+    pub(in crate::cli) if_state: Option<String>,
     /// Caller-owned identifier for idempotent retries.
     #[arg(long)]
     pub(in crate::cli) request_id: Option<uuid::Uuid>,
-    /// Wait until the resulting presented screen remains unchanged for this duration.
-    #[arg(
-        long,
-        value_parser = parse_stability_duration,
-        num_args = 0..=1,
-        default_missing_value = "100ms"
-    )]
-    pub(in crate::cli) until_idle: Option<Duration>,
-    /// Wait until the presented screen contains this exact text.
-    #[arg(long)]
-    pub(in crate::cli) until_screen: Option<String>,
-    /// Wait until the presented screen matches this bounded regular expression.
-    #[arg(long)]
-    pub(in crate::cli) until_screen_regex: Option<String>,
-    /// Maximum postcondition wait duration.
-    #[arg(long, value_parser = parse_wait_deadline_duration, default_value = "30s")]
-    pub(in crate::cli) timeout: Duration,
     /// Include per-atom operation and canonical event identifiers.
     #[arg(long)]
     pub(in crate::cli) verbose: bool,
+    /// Emit stable structured output as JSON.
+    #[arg(long)]
+    pub(in crate::cli) json: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum CursorShapeArg {
+    /// Vertical bar cursor.
     Bar,
+    /// Full cell block cursor.
     Block,
+    /// Horizontal underline cursor.
     Underline,
+    /// Outlined hollow box cursor.
     HollowBlock,
 }
 
@@ -220,9 +277,13 @@ impl From<CursorShapeArg> for CursorStyle {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum ScreenModeArg {
+    /// Terminal alternate screen buffer mode (DEC 1049).
     AlternateScreen,
+    /// Bracketed paste mode (DEC 2004).
     BracketedPaste,
+    /// Automatic terminal line wraparound mode (DEC 7).
     Wraparound,
+    /// Synchronized output atomic batch rendering mode (DEC 2026).
     SynchronizedOutput,
 }
 
@@ -246,13 +307,29 @@ pub(in crate::cli) struct SessionArgs {
 #[derive(Debug, Args)]
 pub(in crate::cli) struct StatusArgs {
     /// Session name or canonical path.
-    pub(in crate::cli) session: PathBuf,
+    #[arg(index = 1)]
+    pub(in crate::cli) session: Option<PathBuf>,
     /// Wait for durable completion instead of returning live counters.
     #[arg(long)]
     pub(in crate::cli) wait_complete: bool,
     /// Maximum completion wait in milliseconds.
     #[arg(long, default_value_t = 30_000)]
     pub(in crate::cli) timeout_ms: u64,
+    /// Run session garbage collection.
+    #[arg(long)]
+    pub(in crate::cli) gc: bool,
+    /// Delete completed sessions older than this many days during gc.
+    #[arg(long)]
+    pub(in crate::cli) older_than_days: Option<u64>,
+    /// Retain at least this many completed sessions during gc.
+    #[arg(long)]
+    pub(in crate::cli) keep_latest: Option<u64>,
+    /// Remove alias name from registry.
+    #[arg(long)]
+    pub(in crate::cli) rm: Option<String>,
+    /// Emit stable structured output as JSON.
+    #[arg(long)]
+    pub(in crate::cli) json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -271,291 +348,7 @@ pub(in crate::cli) struct StopArgs {
     /// Caller-owned identifier for idempotent retries.
     #[arg(long)]
     pub(in crate::cli) request_id: Option<uuid::Uuid>,
-}
-
-#[derive(Debug, Args)]
-#[command(group(
-    ArgGroup::new("input")
-        .required(true)
-        .multiple(false)
-        .args(["text", "file", "stdin"])
-))]
-pub(in crate::cli) struct SendArgs {
-    /// Live session name or canonical path.
-    pub(in crate::cli) session: PathBuf,
-    /// UTF-8 text to write directly to the child PTY.
+    /// Emit stable structured output as JSON.
     #[arg(long)]
-    pub(in crate::cli) text: Option<String>,
-    /// File whose exact bytes are written directly to the child PTY.
-    #[arg(long)]
-    pub(in crate::cli) file: Option<PathBuf>,
-    /// Read one exact byte burst from standard input.
-    #[arg(long)]
-    pub(in crate::cli) stdin: bool,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct ResizeArgs {
-    /// Live session name or canonical path.
-    pub(in crate::cli) session: PathBuf,
-    /// Terminal columns.
-    #[arg(long)]
-    pub(in crate::cli) cols: u16,
-    /// Terminal rows.
-    #[arg(long)]
-    pub(in crate::cli) rows: u16,
-    /// Total pixel width; defaults to columns multiplied by 12.
-    #[arg(long)]
-    pub(in crate::cli) pixel_width: Option<u16>,
-    /// Total pixel height; defaults to rows multiplied by 24.
-    #[arg(long)]
-    pub(in crate::cli) pixel_height: Option<u16>,
-    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
-    #[arg(long = "if-state")]
-    pub(in crate::cli) expected_presented_state_hash: Option<String>,
-    /// Caller-owned identifier for idempotent retries.
-    #[arg(long)]
-    pub(in crate::cli) request_id: Option<uuid::Uuid>,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub(in crate::cli) enum FocusDirection {
-    In,
-    Out,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct FocusArgs {
-    /// Live session name or canonical path.
-    pub(in crate::cli) session: PathBuf,
-    /// Focus transition to report.
-    #[arg(value_enum)]
-    pub(in crate::cli) direction: FocusDirection,
-    /// Reject when reporting is disabled instead of returning a semantic no-op.
-    #[arg(long)]
-    pub(in crate::cli) strict: bool,
-    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
-    #[arg(long = "if-state")]
-    pub(in crate::cli) expected_presented_state_hash: Option<String>,
-    /// Caller-owned identifier for idempotent retries.
-    #[arg(long)]
-    pub(in crate::cli) request_id: Option<uuid::Uuid>,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub(in crate::cli) enum CliPointerButton {
-    Left,
-    Middle,
-    Right,
-}
-
-impl From<CliPointerButton> for MouseButton {
-    fn from(button: CliPointerButton) -> Self {
-        return match button {
-            CliPointerButton::Left => Self::Left,
-            CliPointerButton::Middle => Self::Middle,
-            CliPointerButton::Right => Self::Right,
-        };
-    }
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct PointerArgs {
-    /// Live session name or canonical path.
-    pub(in crate::cli) session: PathBuf,
-    #[command(subcommand)]
-    pub(in crate::cli) operation: PointerCommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub(in crate::cli) enum PointerCommand {
-    /// Press and release one button at a zero-based cell.
-    Click(PointerClickArgs),
-    /// Repeat a complete click two through four times.
-    MultiClick(PointerMultiClickArgs),
-    /// Press, emit bounded motion samples, and release at a destination cell.
-    Drag(PointerDragArgs),
-    /// Emit signed vertical wheel ticks at a zero-based cell.
-    Scroll(PointerScrollArgs),
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct PointerClickArgs {
-    /// Zero-based COLUMN,ROW cell.
-    #[arg(long, value_parser = parse_cell)]
-    pub(in crate::cli) cell: (u16, u16),
-    /// Button to click.
-    #[arg(long, value_enum, default_value_t = CliPointerButton::Left)]
-    pub(in crate::cli) button: CliPointerButton,
-    /// Reject when tracking suppresses output instead of returning a no-op.
-    #[arg(long)]
-    pub(in crate::cli) strict: bool,
-    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
-    #[arg(long = "if-state")]
-    pub(in crate::cli) expected_presented_state_hash: Option<String>,
-    /// Caller-owned identifier for idempotent retries.
-    #[arg(long)]
-    pub(in crate::cli) request_id: Option<uuid::Uuid>,
-    #[command(flatten)]
-    pub(in crate::cli) postcondition: PointerPostconditionArgs,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct PointerMultiClickArgs {
-    /// Zero-based COLUMN,ROW cell.
-    #[arg(long, value_parser = parse_cell)]
-    pub(in crate::cli) cell: (u16, u16),
-    /// Button to click.
-    #[arg(long, value_enum, default_value_t = CliPointerButton::Left)]
-    pub(in crate::cli) button: CliPointerButton,
-    /// Number of complete clicks.
-    #[arg(long, value_parser = clap::value_parser!(u8).range(2..=4))]
-    pub(in crate::cli) count: u8,
-    /// Reject when tracking suppresses output instead of returning a no-op.
-    #[arg(long)]
-    pub(in crate::cli) strict: bool,
-    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
-    #[arg(long = "if-state")]
-    pub(in crate::cli) expected_presented_state_hash: Option<String>,
-    /// Caller-owned identifier for idempotent retries.
-    #[arg(long)]
-    pub(in crate::cli) request_id: Option<uuid::Uuid>,
-    #[command(flatten)]
-    pub(in crate::cli) postcondition: PointerPostconditionArgs,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct PointerDragArgs {
-    /// Zero-based COLUMN,ROW press cell.
-    #[arg(long, value_parser = parse_cell)]
-    pub(in crate::cli) from: (u16, u16),
-    /// Zero-based COLUMN,ROW release cell.
-    #[arg(long, value_parser = parse_cell)]
-    pub(in crate::cli) to: (u16, u16),
-    /// Button held throughout the drag.
-    #[arg(long, value_enum, default_value_t = CliPointerButton::Left)]
-    pub(in crate::cli) button: CliPointerButton,
-    /// Number of motion samples, including the destination.
-    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u8).range(1..=100))]
-    pub(in crate::cli) steps: u8,
-    /// Reject when tracking suppresses output instead of returning a no-op.
-    #[arg(long)]
-    pub(in crate::cli) strict: bool,
-    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
-    #[arg(long = "if-state")]
-    pub(in crate::cli) expected_presented_state_hash: Option<String>,
-    /// Caller-owned identifier for idempotent retries.
-    #[arg(long)]
-    pub(in crate::cli) request_id: Option<uuid::Uuid>,
-    #[command(flatten)]
-    pub(in crate::cli) postcondition: PointerPostconditionArgs,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct PointerScrollArgs {
-    /// Zero-based COLUMN,ROW cell.
-    #[arg(long, value_parser = parse_cell)]
-    pub(in crate::cli) cell: (u16, u16),
-    /// Signed lines: negative is up and positive is down.
-    #[arg(long, allow_negative_numbers = true)]
-    pub(in crate::cli) lines: i16,
-    /// Reject when tracking suppresses output instead of returning a no-op.
-    #[arg(long)]
-    pub(in crate::cli) strict: bool,
-    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
-    #[arg(long = "if-state")]
-    pub(in crate::cli) expected_presented_state_hash: Option<String>,
-    /// Caller-owned identifier for idempotent retries.
-    #[arg(long)]
-    pub(in crate::cli) request_id: Option<uuid::Uuid>,
-    #[command(flatten)]
-    pub(in crate::cli) postcondition: PointerPostconditionArgs,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct PointerPostconditionArgs {
-    /// After applying input, wait until the presented screen contains this text.
-    #[arg(long, conflicts_with = "wait_screen_absent")]
-    pub(in crate::cli) wait_screen: Option<String>,
-    /// After applying input, wait until the presented screen excludes this text.
-    #[arg(long, conflicts_with = "wait_screen")]
-    pub(in crate::cli) wait_screen_absent: Option<String>,
-    /// Require one unchanged matching presented state for this duration.
-    #[arg(long, default_value = "0ms", value_parser = parse_stability_duration)]
-    pub(in crate::cli) stable_for: Duration,
-    /// Bounded postcondition deadline.
-    #[arg(long, default_value_t = 10_000)]
-    pub(in crate::cli) timeout_ms: u64,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct ActivateArgs {
-    /// Live session name or canonical path.
-    pub(in crate::cli) session: PathBuf,
-    /// Exact visible row-contained text to resolve.
-    #[arg(long)]
-    pub(in crate::cli) text: String,
-    /// Require exactly one visible match.
-    #[arg(long)]
-    pub(in crate::cli) unique: bool,
-    /// Reject when mouse reporting suppresses output instead of returning a no-op.
-    #[arg(long)]
-    pub(in crate::cli) strict: bool,
-    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
-    #[arg(long = "if-state")]
-    pub(in crate::cli) expected_presented_state_hash: Option<String>,
-    /// Caller-owned identifier for idempotent retries.
-    #[arg(long)]
-    pub(in crate::cli) request_id: Option<uuid::Uuid>,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub(in crate::cli) enum CliSignal {
-    Interrupt,
-    Terminate,
-    Hangup,
-    User1,
-    User2,
-}
-
-impl From<CliSignal> for ProcessSignal {
-    fn from(signal: CliSignal) -> Self {
-        match signal {
-            CliSignal::Interrupt => return Self::Interrupt,
-            CliSignal::Terminate => return Self::Terminate,
-            CliSignal::Hangup => return Self::Hangup,
-            CliSignal::User1 => return Self::User1,
-            CliSignal::User2 => return Self::User2,
-        }
-    }
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct SignalArgs {
-    /// Live session name or canonical path.
-    pub(in crate::cli) session: PathBuf,
-    /// Allow-listed signal.
-    #[arg(long, value_enum)]
-    pub(in crate::cli) signal: CliSignal,
-    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
-    #[arg(long = "if-state")]
-    pub(in crate::cli) expected_presented_state_hash: Option<String>,
-    /// Caller-owned identifier for idempotent retries.
-    #[arg(long)]
-    pub(in crate::cli) request_id: Option<uuid::Uuid>,
-}
-
-#[derive(Debug, Args)]
-pub(in crate::cli) struct MarkArgs {
-    /// Live session name or canonical path.
-    pub(in crate::cli) session: PathBuf,
-    /// Marker label.
-    #[arg(long)]
-    pub(in crate::cli) label: String,
-    /// Apply only if the actor's latest presented state has this BLAKE3 hash.
-    #[arg(long = "if-state")]
-    pub(in crate::cli) expected_presented_state_hash: Option<String>,
-    /// Caller-owned identifier for idempotent retries.
-    #[arg(long)]
-    pub(in crate::cli) request_id: Option<uuid::Uuid>,
+    pub(in crate::cli) json: bool,
 }

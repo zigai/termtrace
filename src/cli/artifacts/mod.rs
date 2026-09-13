@@ -1,3 +1,8 @@
+#![expect(
+    dead_code,
+    reason = "Legacy artifact subcommands preserved for test fixtures"
+)]
+
 use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
@@ -6,11 +11,11 @@ mod native_screenshot;
 use crate::cli::{
     analysis::args::ShowRenderer,
     artifacts::args::{
-        BugReportFacadeArgs, BundleArgs, BundleVerifyArgs, CaptureArgs, ExportArgs, ImportArgs,
+        BundleArgs, BundleProfileArg, BundleVerifyArgs, CaptureArgs, ExportArgs, ImportArgs,
         SaveArgs, ScreenshotArgs, ScreenshotFormat, SemanticRasterProfileArg, VideoCursorStyleArg,
         VideoFacadeArgs, VideoPresetArg, VideoSourceArg,
     },
-    output::{write_json_line, write_progress},
+    output::{write_json_line, write_progress, write_stdout},
     session_helpers::{
         resolve_cli_range, resolve_session, resolve_session_path, resolve_state_point,
         write_session_lifecycle,
@@ -39,7 +44,7 @@ use termtrace_evidence::{
 };
 use termtrace_export::{
     archive::{create as create_bundle_archive, verify as verify_bundle_archive},
-    asciicast::export as export_asciicast,
+    asciicast::{export as export_asciicast, export_to_writer as export_asciicast_to_writer},
     bug_report::create as create_bug_report,
     bundle::{create as create_bundle, plan as plan_bundle, verify_profile},
 };
@@ -72,6 +77,13 @@ pub(super) fn run_export_asciicast(
     arguments: ExportArgs,
 ) -> Result<ExitCode> {
     let output = arguments.out;
+    if output == Path::new("-") {
+        let mut buffer = Vec::new();
+        export_asciicast_to_writer(arguments.session, &mut buffer, "<stdout>").into_diagnostic()?;
+
+        return write_stdout(response, buffer);
+    }
+
     export_asciicast(arguments.session, &output).into_diagnostic()?;
 
     return write_json_line(
@@ -842,28 +854,6 @@ pub(super) fn run_screenshot(
     );
 }
 
-pub(super) fn run_bug_report_facade(
-    response: &mut ResponseWriter,
-    arguments: BugReportFacadeArgs,
-) -> Result<ExitCode> {
-    let resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle != RegistryLifecycle::Completed {
-        return write_session_lifecycle(response, &resolved, "bug_report", ExitCode::FAILURE);
-    }
-
-    let manifest = create_bug_report(&resolved.path, &arguments.out, arguments.screenshot)
-        .into_diagnostic()?;
-
-    return write_json_line(
-        response,
-        &serde_json::json!({
-            "kind": "bug_report",
-            "directory": arguments.out,
-            "manifest": manifest,
-        }),
-    );
-}
-
 pub(super) fn run_bundle(response: &mut ResponseWriter, arguments: BundleArgs) -> Result<ExitCode> {
     let profile = arguments.profile.into();
 
@@ -902,6 +892,21 @@ pub(super) fn run_bundle(response: &mut ResponseWriter, arguments: BundleArgs) -
                 "archive": arguments.out,
                 "member_count": manifest.members.len(),
                 "includes_canonical_evidence": manifest.includes_canonical_evidence,
+            }),
+        );
+    }
+
+    if arguments.profile == BundleProfileArg::Debug {
+        let manifest =
+            create_bug_report(&session, &arguments.out, arguments.screenshot).into_diagnostic()?;
+
+        return write_json_line(
+            response,
+            &serde_json::json!({
+                "kind": "bundle",
+                "profile": "debug",
+                "directory": arguments.out,
+                "manifest": manifest,
             }),
         );
     }

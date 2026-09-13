@@ -91,27 +91,29 @@ pub(in crate::cli) fn run_restart(
             let predecessor_display = predecessor.display().to_string();
             let successor_display = successor.session_path().display().to_string();
 
-            return write_json_line(
-                response,
-                &serde_json::json!({
-                    "alias": arguments.name,
-                    "predecessor": {
-                        "canonical_session": predecessor_entry.canonical_session,
-                        "canonical_session_display": predecessor_display,
-                        "session_id": predecessor_entry.session_id,
-                    },
-                    "successor": {
-                        "canonical_session": successor.canonical_session,
-                        "canonical_session_display": successor_display,
-                        "session_id": successor.session_id,
-                        "recorder_pid": successor.recorder_pid,
-                        "recorder_process_start_ticks": successor.recorder_process_start_ticks,
-                    },
-                    "stdout_log": paths.stdout_log,
-                    "stderr_log": paths.stderr_log,
-                    "ready": true,
-                }),
-            );
+            let payload = serde_json::json!({
+                "alias": arguments.name,
+                "predecessor": {
+                    "canonical_session": predecessor_entry.canonical_session,
+                    "canonical_session_display": predecessor_display,
+                    "session_id": predecessor_entry.session_id,
+                },
+                "successor": {
+                    "canonical_session": successor.canonical_session,
+                    "canonical_session_display": successor_display,
+                    "session_id": successor.session_id,
+                    "recorder_pid": successor.recorder_pid,
+                    "recorder_process_start_ticks": successor.recorder_process_start_ticks,
+                },
+                "stdout_log": paths.stdout_log,
+                "stderr_log": paths.stderr_log,
+                "ready": true,
+            });
+
+            if arguments.json {
+                return write_json_pretty(response, &payload);
+            }
+            return write_stdout(response, format!("Restarted session {}\n", arguments.name));
         }
 
         if let Some(status) = recorder.try_wait().into_diagnostic()? {

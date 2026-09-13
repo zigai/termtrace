@@ -1,3 +1,8 @@
+#![cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Projection functions used in test suite")
+)]
+
 use super::*;
 use std::collections::BTreeMap;
 

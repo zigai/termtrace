@@ -507,7 +507,7 @@ pub(super) fn tmux_wrapper_command(setup: &PreparedTmuxSetup) -> OsString {
     command.extend_from_slice(&shell_quote(setup.tmux.as_os_str().as_bytes()));
     command.push(b' ');
     command.extend_from_slice(&shell_quote(setup.termtrace.as_os_str().as_bytes()));
-    command.extend_from_slice(b" tmux run --response quiet");
+    command.extend_from_slice(b" tmux run -q");
 
     if setup.launch_hook {
         command.extend_from_slice(b" --pane-launch -- \"$@\"");
@@ -531,7 +531,7 @@ fn restore_launch_hook(client: &TmuxClient) -> Result<()> {
 
 pub(super) fn tmux_hook_command() -> OsString {
     return OsString::from(
-        "run-shell -b \"exec env TERMTRACE_TMUX_BINARY=#{q:@termtrace-tmux-executable} #{q:@termtrace-executable} tmux guard --response quiet --pane '#{pane_id}'\"",
+        "run-shell -b \"exec env TERMTRACE_TMUX_BINARY=#{q:@termtrace-tmux-executable} #{q:@termtrace-executable} tmux guard -q --pane '#{pane_id}'\"",
     );
 }
 
@@ -542,7 +542,7 @@ pub(super) fn supervisor_shell_command(setup: &PreparedTmuxSetup) -> OsString {
     command.extend_from_slice(&shell_quote(setup.tmux.as_os_str().as_bytes()));
     command.push(b' ');
     command.extend_from_slice(&shell_quote(setup.termtrace.as_os_str().as_bytes()));
-    command.extend_from_slice(b" tmux watchdog --response quiet");
+    command.extend_from_slice(b" tmux watchdog -q");
 
     return OsString::from_vec(command);
 }

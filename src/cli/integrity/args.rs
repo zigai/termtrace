@@ -24,9 +24,13 @@ pub(in crate::cli) enum IntegritySubcommand {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum VerifyLevelArg {
+    /// Validate session directory structure and manifest integrity.
     Structure,
+    /// Validate cryptographic content hashes and event sequence continuity.
     Content,
+    /// Validate persistence durability records and fsync boundaries.
     DurabilityRecord,
+    /// Validate cryptographic OpenSSH digital signatures against trusted signers.
     Signature,
 }
 

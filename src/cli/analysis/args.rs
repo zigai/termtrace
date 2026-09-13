@@ -1,5 +1,6 @@
 use crate::cli::{
     control::args::SessionArgs,
+    integrity::args::{RecoverArgs, VerifyArgs},
     parsers::{
         parse_diagnostic_check, parse_event_type, parse_page_limit, parse_stability_duration,
         parse_state_hash,
@@ -12,12 +13,20 @@ use termtrace_model::terminal::analysis::DiagnosticCheck;
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct AnalyzeArgs {
+    /// Completed session name or canonical path.
+    pub(in crate::cli) session: Option<PathBuf>,
+    /// Emit one stable structured report as JSON.
+    #[arg(long)]
+    pub(in crate::cli) json: bool,
     #[command(subcommand)]
-    pub(in crate::cli) command: AnalyzeSubcommand,
+    pub(in crate::cli) command: Option<AnalyzeSubcommand>,
 }
 
 #[derive(Debug, Subcommand)]
 pub(in crate::cli) enum AnalyzeSubcommand {
+    /// Summarize the most recent canonical input action.
+    #[command(name = "last-action")]
+    LastAction(InspectFacadeArgs),
     /// Replay canonical events and build semantic state artifacts.
     Index(IndexArgs),
     /// Reconstruct one semantic state as JSON or text.
@@ -40,6 +49,10 @@ pub(in crate::cli) enum AnalyzeSubcommand {
     Markers(MarkersArgs),
     /// Inspect or clear bounded disposable replay checkpoints.
     Cache(CacheArgs),
+    /// Verify a completed session's structure and evidence bindings offline.
+    Verify(VerifyArgs),
+    /// Copy the longest integrity-checked event prefix without modifying source.
+    Recover(RecoverArgs),
 }
 
 #[derive(Debug, Args)]
@@ -49,6 +62,9 @@ pub(in crate::cli) struct InspectFacadeArgs {
     /// Minimum changed-cell percentage for a broad repaint warning.
     #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u8).range(1..=100))]
     pub(in crate::cli) broad_change_percent: u8,
+    /// Emit one stable structured report as JSON.
+    #[arg(long)]
+    pub(in crate::cli) json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -58,12 +74,18 @@ pub(in crate::cli) struct DiagnoseFacadeArgs {
     /// Minimum changed-cell percentage for a broad repaint finding.
     #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u8).range(1..=100))]
     pub(in crate::cli) broad_change_percent: u8,
+    /// Emit one stable structured report as JSON.
+    #[arg(long)]
+    pub(in crate::cli) json: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum InspectFormat {
+    /// Formatted JSON object with complete cell and style records.
     Json,
+    /// Single-line compact JSON representation.
     JsonCompact,
+    /// Plain text lines without ANSI formatting.
     Text,
 }
 
@@ -113,17 +135,25 @@ pub(in crate::cli) enum CacheCommand {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(in crate::cli) enum ShowFormat {
+    /// Plain text representation of the viewport.
     Text,
+    /// Complete JSON representation with cell metadata.
     Json,
+    /// Compact JSON representation without individual cell details.
     JsonCompact,
+    /// Low-level frame JSON matching internal presentation models.
     FrameJson,
+    /// Raw VT escape sequences reconstructing the screen state.
     Vt,
+    /// Self-contained HTML document rendering the viewport.
     Html,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(in crate::cli) enum ShowRenderer {
+    /// Pure semantic cell grid without native Ghostty rasterization.
     Semantic,
+    /// Pixel-exact rendering using the native Ghostty VT engine.
     Native,
 }
 
@@ -192,10 +222,15 @@ pub(in crate::cli) struct TimelineArgs {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum DiffFormat {
+    /// Unified plain text terminal diff.
     Text,
+    /// Formatted JSON object containing detailed cell mutations.
     Json,
+    /// Single-line compact JSON diff representation.
     JsonCompact,
+    /// Scalable Vector Graphics visual diff visualization.
     Svg,
+    /// Portable Network Graphics raster diff image.
     Png,
 }
 
@@ -258,8 +293,11 @@ pub(in crate::cli) struct DiffArgs {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum ExplainFormat {
+    /// Plain text breakdown of VT events and state transitions.
     Text,
+    /// Formatted JSON object detailing causal evidence.
     Json,
+    /// Single-line compact JSON explanation representation.
     JsonCompact,
 }
 
@@ -303,7 +341,9 @@ pub(in crate::cli) struct ExplainArgs {
 pub(in crate::cli) struct DiagnoseArgs {
     /// Completed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
-    /// Comma-separated detector groups; omit to run every detector.
+    /// Run diagnostics bounded to the most recent canonical input action.
+    #[arg(long)]
+    pub(in crate::cli) last_action: bool,
     #[arg(long, value_delimiter = ',', value_parser = parse_diagnostic_check)]
     pub(in crate::cli) check: Vec<DiagnosticCheck>,
     /// Minimum changed-cell percentage for a broad repaint.
@@ -401,7 +441,7 @@ pub(in crate::cli) struct EventsArgs {
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct PageArgs {
-    /// Maximum matching records returned by default.
+    /// Maximum matching records returned by default (1-10000).
     #[arg(long, default_value_t = 100, value_parser = parse_page_limit)]
     pub(in crate::cli) limit: usize,
     /// Zero-based matching-record offset for deterministic pagination.

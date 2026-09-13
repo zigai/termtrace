@@ -16,7 +16,7 @@ pub(in crate::cli) struct TestArgs {
     /// New JUnit XML result path.
     #[arg(long)]
     pub(in crate::cli) junit: Option<PathBuf>,
-    /// Maximum concurrent fresh-session workers.
+    /// Maximum concurrent fresh-session workers (1-64).
     #[arg(long, default_value_t = 1, value_parser = parse_scenario_jobs)]
     pub(in crate::cli) jobs: usize,
     /// Zero-based deterministic shard index.
@@ -25,7 +25,7 @@ pub(in crate::cli) struct TestArgs {
     /// Total deterministic shard count.
     #[arg(long, requires = "shard_index", value_parser = parse_positive_usize)]
     pub(in crate::cli) shard_count: Option<usize>,
-    /// Fresh-session reruns after a failed attempt.
+    /// Fresh-session reruns after a failed attempt (0-10).
     #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=10))]
     pub(in crate::cli) reruns: u8,
 }

@@ -23,10 +23,18 @@ pub(in crate::cli) fn run_wait(
                 "--stable-for applies only to screen predicates"
             ));
         }
-        return write_json_line(
-            response,
-            &wait_for_output(session, output.as_bytes(), timeout).into_diagnostic()?,
-        );
+
+        let outcome = wait_for_output(&session, output.as_bytes(), timeout).into_diagnostic()?;
+        if arguments.json {
+            write_json_pretty(response, &outcome)?;
+        } else {
+            write_stdout(
+                response,
+                format!("Output matched in session {}\n", session.display()),
+            )?;
+        }
+
+        return Ok(ExitCode::SUCCESS);
     }
 
     let predicate = parse_screen_predicate(&arguments)?;
@@ -40,7 +48,14 @@ pub(in crate::cli) fn run_wait(
             outcome.quality == ScreenWaitQuality::Matched
         };
 
-    write_json_line(response, &outcome)?;
+    if arguments.json {
+        write_json_pretty(response, &outcome)?;
+    } else if matched {
+        write_stdout(
+            response,
+            format!("Screen matched state {}\n", outcome.frame.state_hash),
+        )?;
+    }
 
     return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
 }
@@ -93,21 +108,30 @@ fn run_idle_wait(
     }
 
     if arguments.full_state {
+        if arguments.json {
+            return write_json_pretty(response, &data);
+        }
         return write_json_line(response, &data);
     }
-    return write_json_line(
+
+    let payload = serde_json::json!({
+        "kind": "stable_snapshot",
+        "quality": quality,
+        "state_hash": frame.state_hash,
+        "frame_hash": frame.frame_hash,
+        "geometry": frame.geometry,
+        "frame": frame,
+        "first_observed_monotonic_ns": first_observed_monotonic_ns,
+        "observed_monotonic_ns": observed_monotonic_ns,
+        "stable_for_ns": stable_for_ns,
+    });
+
+    if arguments.json {
+        return write_json_pretty(response, &payload);
+    }
+    return write_stdout(
         response,
-        &serde_json::json!({
-            "kind": "stable_snapshot",
-            "quality": quality,
-            "state_hash": frame.state_hash,
-            "frame_hash": frame.frame_hash,
-            "geometry": frame.geometry,
-            "frame": frame,
-            "first_observed_monotonic_ns": first_observed_monotonic_ns,
-            "observed_monotonic_ns": observed_monotonic_ns,
-            "stable_for_ns": stable_for_ns,
-        }),
+        format!("Session idle at state {}\n", frame.state_hash),
     );
 }
 
