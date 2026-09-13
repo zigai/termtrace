@@ -151,9 +151,9 @@ fn index_replays_every_distinct_state_deterministically() {
         .arg("--json")
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""artifact_roots_verified":2"#))
+        .stdout(predicate::str::contains(r#""artifact_roots_verified": 2"#))
         .stdout(predicate::str::contains(
-            r#""artifact_authenticity_established":false"#,
+            r#""artifact_authenticity_established": false"#,
         ));
 
     let tampered_member = session.join("derived/final.txt");
@@ -169,7 +169,7 @@ fn index_replays_every_distinct_state_deterministically() {
         .assert()
         .failure()
         .stdout(predicate::str::contains(
-            r#""code":"artifact_integrity_invalid""#,
+            r#""code": "artifact_integrity_invalid""#,
         ));
 
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");

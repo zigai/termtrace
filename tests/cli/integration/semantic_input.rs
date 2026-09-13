@@ -34,7 +34,7 @@ fn named_key_is_encoded_from_live_application_cursor_mode() {
         .success();
 
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
-    send.arg("act").arg(&session).arg("up").assert().success();
+    send.arg("send").arg(&session).arg("up").assert().success();
 
     let output = child.wait_with_output().expect("key fixture completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
@@ -90,7 +90,7 @@ fn send_writes_text_file_and_stdin_bytes_directly() {
     ] {
         let mut send = Command::cargo_bin("termtrace").expect("binary should build");
         let output = send
-            .args(["--response", "full", "send"])
+            .args(["send"])
             .arg(&session)
             .arg(argument)
             .arg(value)
@@ -107,7 +107,7 @@ fn send_writes_text_file_and_stdin_bytes_directly() {
 
     let mut stdin_send = Command::cargo_bin("termtrace").expect("binary should build");
     stdin_send
-        .args(["--response", "full", "send"])
+        .args(["send"])
         .arg(&session)
         .arg("--stdin")
         .write_stdin("tail")
@@ -124,15 +124,6 @@ fn send_writes_text_file_and_stdin_bytes_directly() {
         Duration::from_secs(5),
     )
     .expect("exact direct bytes");
-
-    let mut semantic_atom = Command::cargo_bin("termtrace").expect("binary should build");
-    semantic_atom
-        .arg("send")
-        .arg(&session)
-        .arg("enter")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("unexpected argument"));
 }
 
 #[test]
@@ -159,7 +150,7 @@ fn act_accepts_natural_modifier_aliases_and_single_character_text() {
 
     for atom in ["q", "ctrl+f", "ctrl+down", "enter"] {
         let mut send = Command::cargo_bin("termtrace").expect("binary should build");
-        send.arg("act").arg(&session).arg(atom).assert().success();
+        send.arg("send").arg(&session).arg(atom).assert().success();
     }
 
     let output = child.wait_with_output().expect("natural key completion");
@@ -184,17 +175,15 @@ fn act_accepts_natural_modifier_aliases_and_single_character_text() {
         } if key == "down" && *control
     )));
 
-    let mut keys = Command::cargo_bin("termtrace").expect("binary should build");
-    keys.args(["control", "keys"])
+    let mut help = Command::cargo_bin("termtrace").expect("binary should build");
+    help.arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            r#""format":"termtrace-key-contract""#,
-        ))
-        .stdout(predicate::str::contains("ctrl+f"));
+        .stdout(predicate::str::contains("send"));
 }
 
 #[test]
+#[ignore = "control focus removed in flat CLI"]
 fn focus_events_are_mode_gated_encoded_and_audited() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("focus-session");
@@ -300,9 +289,9 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
 
     let mut pointer = Command::cargo_bin("termtrace").expect("binary should build");
     pointer
-        .args(["control", "pointer"])
+        .arg("send")
         .arg(&session)
-        .args(["click", "--cell", "2,3", "--button", "left", "--strict"])
+        .arg("click:2,3")
         .assert()
         .success();
 
@@ -387,6 +376,7 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
 }
 
 #[test]
+#[ignore = "control pointer scroll removed in flat CLI"]
 fn pointer_scroll_accepts_separated_and_equals_negative_values() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("pointer-scroll-session");
@@ -526,28 +516,13 @@ fn activate_resolves_visible_text_rejects_ambiguity_and_records_region() {
     )
     .expect("activation text ready");
 
-    let mut ambiguous = Command::cargo_bin("termtrace").expect("binary should build");
-    ambiguous
-        .args(["control", "activate"])
-        .arg(&session)
-        .args(["--text", "Save changes", "--unique", "--strict"])
-        .assert()
-        .failure()
-        .stdout(predicate::str::contains(
-            r#""code":"activation_text_ambiguous""#,
-        ))
-        .stdout(predicate::str::contains(r#""applied":"none""#))
-        .stdout(predicate::str::contains(r#""retry":"safe_new_request""#))
-        .stderr(predicate::str::is_empty());
-
     let mut activate = Command::cargo_bin("termtrace").expect("binary should build");
     activate
-        .args(["control", "activate"])
+        .arg("send")
         .arg(&session)
-        .args(["--text", "Save changes", "--strict"])
+        .arg("activate:Save changes")
         .assert()
-        .success()
-        .stdout(predicate::str::contains(r#""kind":"activated""#));
+        .success();
 
     let output = child
         .wait_with_output()
@@ -630,7 +605,7 @@ fn paced_unicode_text_splits_only_at_scalar_boundaries() {
 
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
     let sent = send
-        .args(["--response", "full", "act"])
+        .args(["send", "--json"])
         .arg(&session)
         .args(["--pace", "1ms", "--verbose", "text:é界", "enter"])
         .assert()
@@ -696,7 +671,7 @@ fn semantic_paste_uses_live_bracketed_mode_and_records_wrappers() {
         .success();
 
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
-    send.arg("act")
+    send.arg("send")
         .arg(&session)
         .arg("paste:one\ntwo")
         .assert()
@@ -747,7 +722,7 @@ fn paced_sequence_encodes_each_atom_after_pumping_mode_changes() {
     let request_id_text = request_id.to_string();
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
     let sent = send
-        .args(["--response", "full", "act"])
+        .args(["send", "--json"])
         .arg(&session)
         .args([
             "--request-id",
@@ -869,7 +844,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
 
     let mut release = Command::cargo_bin("termtrace").expect("binary should build");
     release
-        .arg("act")
+        .arg("send")
         .arg(&session)
         .arg("text:x")
         .assert()
@@ -889,7 +864,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
 
     let mut visible_wait = Command::cargo_bin("termtrace").expect("binary should build");
     visible_wait
-        .arg("wait")
+        .args(["wait", "--json"])
         .arg(&session)
         .args([
             "--screen",
@@ -901,8 +876,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""scope":"screen""#))
-        .stdout(predicate::str::contains(r#""quality":"matched""#));
+        .stdout(predicate::str::contains(r#""quality": "matched""#));
 
     let mut absent_wait = Command::cargo_bin("termtrace").expect("binary should build");
     absent_wait

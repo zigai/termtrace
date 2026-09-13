@@ -161,14 +161,7 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
 
     let mut page = Command::cargo_bin("termtrace").expect("binary should build");
     let output = page
-        .args([
-            "--response",
-            "full",
-            "tmux",
-            "events",
-            "work",
-            "--output-root",
-        ])
+        .args(["tmux", "events", "work", "--output-root"])
         .arg(&state)
         .args(["--from-sequence", "2", "--limit", "3"])
         .assert()
@@ -428,15 +421,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
     let status: serde_json::Value = serde_json::from_slice(
         &Command::cargo_bin("termtrace")
             .expect("binary should build")
-            .args([
-                "--response",
-                "full",
-                "tmux",
-                "status",
-                "work",
-                "--output-root",
-                root,
-            ])
+            .args(["tmux", "status", "work", "--output-root", root])
             .assert()
             .success()
             .get_output()
@@ -474,15 +459,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         let refreshed: serde_json::Value = serde_json::from_slice(
             &Command::cargo_bin("termtrace")
                 .expect("binary should build")
-                .args([
-                    "--response",
-                    "full",
-                    "tmux",
-                    "status",
-                    "work",
-                    "--output-root",
-                    root,
-                ])
+                .args(["tmux", "status", "work", "--output-root", root])
                 .assert()
                 .success()
                 .get_output()
@@ -526,15 +503,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         let refreshed: serde_json::Value = serde_json::from_slice(
             &Command::cargo_bin("termtrace")
                 .expect("binary should build")
-                .args([
-                    "--response",
-                    "full",
-                    "tmux",
-                    "status",
-                    "work",
-                    "--output-root",
-                    root,
-                ])
+                .args(["tmux", "status", "work", "--output-root", root])
                 .assert()
                 .success()
                 .get_output()
@@ -629,8 +598,6 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         .arg(&video)
         .assert()
         .failure()
-        .stdout(predicate::str::contains(r#""type":"video""#))
-        .stdout(predicate::str::contains("Planning video from").not())
         .stderr(predicate::str::contains("Planning video from"))
         .stderr(predicate::str::contains(
             "required capability `semantic-video` is blocked",

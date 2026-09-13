@@ -27,7 +27,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut register = Command::cargo_bin("termtrace").expect("binary should build");
     let registered = register
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "session", "register"])
+        .args(["session", "register"])
         .arg("demo")
         .arg("--session")
         .arg(&session)
@@ -66,7 +66,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .assert()
         .success()
         .stdout(predicate::str::contains(manifest.session_id.to_string()))
-        .stdout(predicate::str::contains(r#""alias":"demo""#));
+        .stdout(predicate::str::contains(r#""alias": "demo""#));
 
     let entry_path = state.join("registry/demo.json");
     assert_eq!(
@@ -102,8 +102,8 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .args(["session", "list", "--all", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""lifecycle":"completed""#))
-        .stdout(predicate::str::contains(r#""alias":"demo""#))
+        .stdout(predicate::str::contains(r#""lifecycle": "completed""#))
+        .stdout(predicate::str::contains(r#""alias": "demo""#))
         .get_output()
         .stdout
         .clone();
@@ -134,6 +134,12 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let human = String::from_utf8(human).expect("registry table");
     let mut lines = human.lines();
     let header = lines.next().expect("registry table header");
+    let rule = lines.next().expect("registry table rule");
+    assert!(
+        rule.starts_with('─'),
+        "rule must start with thin line: {rule}"
+    );
+
     let row = lines.next().expect("registry table row");
 
     assert!(
@@ -168,7 +174,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let mut remove = Command::cargo_bin("termtrace").expect("binary should build");
     let removed = remove
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "session", "remove", "demo"])
+        .args(["session", "remove", "demo"])
         .assert()
         .success()
         .get_output()
@@ -222,7 +228,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
     let mut incomplete_status = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_status
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["status", "interrupted"])
+        .args(["status", "--json", "interrupted"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""lifecycle":"incomplete""#))
@@ -231,7 +237,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
     let mut incomplete_control = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_control
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["control", "mark", "interrupted", "--label", "probe"])
+        .args(["send", "interrupted", "mark:probe", "--json"])
         .assert()
         .failure()
         .stdout(predicate::str::contains(r#""lifecycle":"incomplete""#))
@@ -240,7 +246,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
     let mut incomplete_screen = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_screen
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "screen", "interrupted"])
+        .args(["screen", "--json", "interrupted"])
         .assert()
         .failure()
         .stdout(predicate::str::contains(r#""operation":"screen""#))
@@ -250,15 +256,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
     let mut incomplete_video = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_video
         .env("TERMTRACE_STATE_DIR", &state)
-        .args([
-            "--response",
-            "full",
-            "video",
-            "interrupted",
-            "--renderer",
-            "semantic",
-            "-o",
-        ])
+        .args(["video", "interrupted", "--renderer", "semantic", "-o"])
         .arg(temporary.path().join("incomplete.mp4"))
         .assert()
         .failure()
@@ -280,7 +278,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
     let mut stale_status = Command::cargo_bin("termtrace").expect("binary should build");
     stale_status
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["status", "interrupted"])
+        .args(["status", "--json", "interrupted"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""lifecycle":"stale""#))
@@ -289,7 +287,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
     let mut stale_screen = Command::cargo_bin("termtrace").expect("binary should build");
     stale_screen
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "screen", "interrupted"])
+        .args(["screen", "--json", "interrupted"])
         .assert()
         .failure()
         .stdout(predicate::str::contains(r#""operation":"screen""#))
@@ -299,15 +297,7 @@ fn status_and_control_preserve_incomplete_and_stale_registry_lifecycle() {
     let mut stale_video = Command::cargo_bin("termtrace").expect("binary should build");
     stale_video
         .env("TERMTRACE_STATE_DIR", &state)
-        .args([
-            "--response",
-            "full",
-            "video",
-            "interrupted",
-            "--renderer",
-            "semantic",
-            "-o",
-        ])
+        .args(["video", "interrupted", "--renderer", "semantic", "-o"])
         .arg(temporary.path().join("stale.mp4"))
         .assert()
         .failure()

@@ -229,7 +229,7 @@ fn events_follow_resumes_filtered_durable_records_without_duplicates() {
 
     wait_for_control(&session);
     let follower = StdCommand::new(binary)
-        .args(["--response", "full", "analyze", "events"])
+        .args(["analyze", "events"])
         .arg(&session)
         .args(["--follow", "--type", "output", "--metadata-only"])
         .stdout(Stdio::piped())
@@ -376,7 +376,7 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
     ));
 
     let historical = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
-        .args(["--response", "full", "analyze", "events"])
+        .args(["analyze", "events"])
         .arg(&session)
         .args(["--follow", "--from-event-seq", "0", "--to-event-seq", "1"])
         .output()
@@ -387,7 +387,7 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
     assert_eq!(first["seq"], 0);
 
     let mut follower = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
-        .args(["--response", "full", "analyze", "events"])
+        .args(["analyze", "events"])
         .arg(&session)
         .args([
             "--follow",
@@ -515,7 +515,7 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
     writer.sync_all().expect("sync forgery");
 
     let followed = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
-        .args(["--response", "full", "analyze", "events"])
+        .args(["analyze", "events"])
         .arg(&session)
         .args([
             "--follow",
@@ -562,7 +562,7 @@ fn events_follow_rejects_replaced_actor_source_descriptor() {
     fs::copy(&original, &path).expect("identical imported replacement");
 
     let followed = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
-        .args(["--response", "full", "analyze", "events"])
+        .args(["analyze", "events"])
         .arg(&session)
         .args([
             "--follow",
@@ -609,12 +609,12 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
 
     let mut marker = Command::cargo_bin("termtrace").expect("binary should build");
     marker
-        .args(["control", "mark"])
+        .args(["send"])
         .arg(&session)
-        .args(["--label", "settled"])
+        .args(["mark:settled", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""kind":"marked""#));
+        .stdout(predicate::str::contains(r#""type": "mark""#));
 
     let mut incomplete_index = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_index
@@ -663,22 +663,22 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
     assert_eq!(snapshot_manifest.state_selection, StateSelection::Presented);
 
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
-    stop.args(["stop", "--wait", "--timeout-ms", "5000"])
+    stop.args(["stop", "--json", "--wait", "--timeout-ms", "5000"])
         .arg(&session)
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""kind":"completed""#));
+        .stdout(predicate::str::contains(r#""kind": "completed""#));
 
     let output = child.wait_with_output().expect("wait for live recorder");
     assert!(output.status.success(), "recorder failed: {output:?}");
 
     let mut status = Command::cargo_bin("termtrace").expect("binary should build");
     status
-        .args(["status", "--wait-complete"])
+        .args(["status", "--json", "--wait-complete"])
         .arg(&session)
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""kind":"completed""#));
+        .stdout(predicate::str::contains(r#""kind": "completed""#));
 
     let mut marker_range = Command::cargo_bin("termtrace").expect("binary should build");
     marker_range
@@ -727,7 +727,7 @@ fn marker_listing_distinguishes_each_repeated_label_occurrence() {
 
     let markers = Command::cargo_bin("termtrace")
         .expect("binary should build")
-        .args(["--response", "full", "analyze", "markers"])
+        .args(["analyze", "markers"])
         .arg(&session)
         .assert()
         .success()

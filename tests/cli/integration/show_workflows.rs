@@ -14,7 +14,8 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
     start
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "start",
+            "record",
+            "-d",
             "demo",
             "--",
             "/bin/sh",
@@ -33,7 +34,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
     let mut live_show = Command::cargo_bin("termtrace").expect("binary should build");
     live_show
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["show", "demo"])
+        .args(["screen", "demo"])
         .assert()
         .success()
         .stdout(predicate::str::contains("SHOWME"));
@@ -41,7 +42,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
     let mut live_json = Command::cargo_bin("termtrace").expect("binary should build");
     let live = live_json
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["show", "demo", "--format", "json-compact"])
+        .args(["screen", "demo", "--format", "json-compact"])
         .assert()
         .success();
 
@@ -58,7 +59,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
     let stable = stable_frame
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "show",
+            "screen",
             "demo",
             "--stable-for",
             "20ms",
@@ -93,7 +94,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
     let mut completed_json = Command::cargo_bin("termtrace").expect("binary should build");
     completed_json
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["show", "demo", "--format", "json-compact"])
+        .args(["screen", "demo", "--format", "json-compact"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -104,7 +105,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
 
     let mut warm = Command::cargo_bin("termtrace").expect("binary should build");
     warm.env("TERMTRACE_STATE_DIR", &state)
-        .args(["show", "demo", "--format", "json-compact"])
+        .args(["screen", "demo", "--format", "json-compact"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -152,7 +153,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
     let mut fallback = Command::cargo_bin("termtrace").expect("binary should build");
     fallback
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["show", "demo", "--format", "json-compact"])
+        .args(["screen", "demo", "--format", "json-compact"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -187,7 +188,7 @@ fn completed_cache_rejects_forged_state_and_same_length_source_tampering() {
         return Command::cargo_bin("termtrace")
             .expect("binary")
             .env("TERMTRACE_STATE_DIR", &state_root)
-            .arg("show")
+            .arg("screen")
             .arg(&session)
             .args(["--format", "json-compact"])
             .assert()
@@ -249,7 +250,7 @@ fn completed_cache_rejects_forged_state_and_same_length_source_tampering() {
     Command::cargo_bin("termtrace")
         .expect("binary")
         .env("TERMTRACE_STATE_DIR", &state_root)
-        .arg("show")
+        .arg("screen")
         .arg(&session)
         .assert()
         .failure();
@@ -282,7 +283,7 @@ fn show_requires_explicit_permission_for_hidden_states() {
 
     let mut default_show = Command::cargo_bin("termtrace").expect("binary should build");
     default_show
-        .arg("show")
+        .arg("screen")
         .arg(&session)
         .assert()
         .success()
@@ -290,7 +291,7 @@ fn show_requires_explicit_permission_for_hidden_states() {
 
     let mut rejected = Command::cargo_bin("termtrace").expect("binary should build");
     rejected
-        .arg("show")
+        .arg("screen")
         .arg(&session)
         .args(["--state", &hidden.record.state_id.to_string()])
         .assert()
@@ -299,7 +300,7 @@ fn show_requires_explicit_permission_for_hidden_states() {
 
     let mut included = Command::cargo_bin("termtrace").expect("binary should build");
     included
-        .arg("show")
+        .arg("screen")
         .arg(&session)
         .args([
             "--state",
@@ -345,11 +346,11 @@ fn show_requires_explicit_prefix_recovery_for_incomplete_evidence() {
     fs_err::remove_file(session.join("completion.json")).expect("remove completion fixture");
 
     let mut implicit = Command::cargo_bin("termtrace").expect("binary should build");
-    implicit.arg("show").arg(&session).assert().failure();
+    implicit.arg("screen").arg(&session).assert().failure();
 
     let mut recovered = Command::cargo_bin("termtrace").expect("binary should build");
     recovered
-        .arg("show")
+        .arg("screen")
         .arg(&session)
         .args(["--recover-prefix", "--format", "json-compact"])
         .assert()
@@ -372,7 +373,7 @@ fn artifact_import_chains_ansi_files_and_stdin() {
     let imported = temporary.path().join("imported-ansi");
     let mut import_file = Command::cargo_bin("termtrace").expect("binary should build");
     import_file
-        .args(["--response", "full", "artifact", "import", "--input"])
+        .args(["artifact", "import", "--input"])
         .arg(&ansi)
         .arg("--out")
         .arg(&imported)
@@ -398,7 +399,7 @@ fn artifact_import_chains_ansi_files_and_stdin() {
     assert_eq!(canonical_output_bytes(&imported_log), ansi_bytes);
 
     let mut show = Command::cargo_bin("termtrace").expect("binary should build");
-    show.arg("show")
+    show.arg("screen")
         .arg(&imported)
         .args(["--format", "json-compact"])
         .assert()
@@ -408,7 +409,7 @@ fn artifact_import_chains_ansi_files_and_stdin() {
 
     let mut vt_show = Command::cargo_bin("termtrace").expect("binary should build");
     vt_show
-        .arg("show")
+        .arg("screen")
         .arg(&imported)
         .args(["--format", "vt"])
         .assert()
@@ -418,7 +419,7 @@ fn artifact_import_chains_ansi_files_and_stdin() {
 
     let mut html_show = Command::cargo_bin("termtrace").expect("binary should build");
     html_show
-        .arg("show")
+        .arg("screen")
         .arg(&imported)
         .args(["--format", "html"])
         .assert()
@@ -437,7 +438,7 @@ fn artifact_import_chains_ansi_files_and_stdin() {
 
     let mut stdin_show = Command::cargo_bin("termtrace").expect("binary should build");
     stdin_show
-        .arg("show")
+        .arg("screen")
         .arg(&stdin_imported)
         .assert()
         .success()
@@ -452,10 +453,11 @@ fn synchronization_commands_reject_incomplete_stability() {
     let idle_output = idle_start
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "start",
+            "record",
+            "-d",
             "idle",
-            "--until-idle",
-            "10ms",
+            "--json",
+            "--until-idle=10ms",
             "--timeout",
             "5s",
             "--",
@@ -484,7 +486,8 @@ fn synchronization_commands_reject_incomplete_stability() {
     start
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "start",
+            "record",
+            "-d",
             "stable-contract",
             "--until-screen",
             "READY",
@@ -516,7 +519,7 @@ fn synchronization_commands_reject_incomplete_stability() {
     let mut show = Command::cargo_bin("termtrace").expect("binary should build");
     show.env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "show",
+            "screen",
             "stable-contract",
             "--stable-for",
             "200ms",

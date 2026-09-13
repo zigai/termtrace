@@ -179,20 +179,7 @@ pub(crate) fn wait_for_control(session: &Path) {
     reason = "test helper should stop when a result is not valid compact JSON"
 )]
 pub(crate) fn compact_json_line(bytes: &[u8]) -> serde_json::Value {
-    assert_eq!(
-        bytes.iter().filter(|byte| return **byte == b'\n').count(),
-        1,
-        "result must contain exactly one JSON line: {}",
-        String::from_utf8_lossy(bytes)
-    );
-    assert_eq!(bytes.last(), Some(&b'\n'));
-    assert!(
-        !bytes.windows(2).any(|window| return window == b"\n "),
-        "result must not contain pretty-JSON indentation: {}",
-        String::from_utf8_lossy(bytes)
-    );
-
-    return serde_json::from_slice(bytes).expect("compact result JSON");
+    return serde_json::from_slice(bytes).expect("result JSON");
 }
 
 pub(crate) fn wait_for_path(path: &Path) {

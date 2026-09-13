@@ -133,7 +133,7 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
         };
 
         let mut show = Command::cargo_bin("termtrace").expect("binary should build");
-        show.arg("show")
+        show.arg("screen")
             .arg(&canonical)
             .args(["--state-hash", state_hash, "--format", "json-compact"])
             .assert()

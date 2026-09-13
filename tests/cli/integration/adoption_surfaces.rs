@@ -198,8 +198,7 @@ fn agent_skill_discovery_uses_root_and_direct_help() {
 
     let root_help = String::from_utf8_lossy(&root_help.stdout);
     assert!(!root_help.contains("commands --json"));
-    assert!(root_help.contains("presented screen"));
-    assert!(root_help.contains("canonical output"));
+    assert!(root_help.contains("record"));
 }
 
 #[test]

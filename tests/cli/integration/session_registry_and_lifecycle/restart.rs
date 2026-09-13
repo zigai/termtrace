@@ -10,7 +10,7 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
     let mut start = Command::cargo_bin("termtrace").expect("binary should build");
     let started = start
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["start", "demo", "--cwd"])
+        .args(["record", "-d", "demo", "--json", "--cwd"])
         .arg(&working)
         .args([
             "--cols",
@@ -39,7 +39,8 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
 
     let predecessor = PathBuf::from(
         started_json
-            .pointer("/path")
+            .pointer("/canonical_session_display")
+            .or_else(|| return started_json.pointer("/path"))
             .and_then(serde_json::Value::as_str)
             .expect("predecessor path"),
     );
@@ -48,7 +49,7 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
     let mut restart = Command::cargo_bin("termtrace").expect("binary should build");
     let restarted = restart
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "restart", "demo"])
+        .args(["restart", "--json", "demo"])
         .assert()
         .success();
 
@@ -149,7 +150,8 @@ fn restart_applies_only_explicit_successor_overrides() {
     start
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "start",
+            "record",
+            "-d",
             "demo",
             "--cols",
             "80",
@@ -177,7 +179,7 @@ fn restart_applies_only_explicit_successor_overrides() {
     let mut restart = Command::cargo_bin("termtrace").expect("binary should build");
     let restarted = restart
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "restart", "demo", "--cwd"])
+        .args(["restart", "--json", "demo", "--cwd"])
         .arg(&changed_cwd)
         .args([
             "--cols",
@@ -294,7 +296,7 @@ fn restart_verifies_resupplied_environment_and_requires_explicit_change() {
     let mut start = Command::cargo_bin("termtrace").expect("binary should build");
     start
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["start", "secret-restart", "--environment-spec-stdin"])
+        .args(["record", "-d", "secret-restart", "--environment-spec-stdin"])
         .args([
             "--provenance",
             "custom",

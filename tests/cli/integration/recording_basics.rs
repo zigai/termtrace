@@ -112,27 +112,6 @@ fn output_budget_exhaustion_returns_failure_after_fast_child_exit() {
 }
 
 #[test]
-fn agent_record_stdout_is_one_json_response() {
-    let temporary = TempDir::new().expect("temporary directory");
-    let session = temporary.path().join("agent-record");
-    let output = Command::cargo_bin("termtrace")
-        .expect("binary should build")
-        .args(["--response", "agent", "record", "--no-input", "--out"])
-        .arg(&session)
-        .args(["--", "/bin/printf", "CHILD_OUTPUT"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let response = compact_json_line(&output);
-    assert_eq!(response["ok"], true);
-    assert_eq!(response["type"], "record");
-    assert_eq!(response["output"], "CHILD_OUTPUT");
-}
-
-#[test]
 fn semantic_record_without_ghostty_has_stable_nonwarning_stderr() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("semantic-only-session");

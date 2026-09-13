@@ -1,7 +1,6 @@
 //! session registry and lifecycle CLI integration tests.
 
 use crate::support::*;
-use termtrace_model::protocol::cli_response::CliResponseEnvelope;
 
 mod binding;
 mod gc;

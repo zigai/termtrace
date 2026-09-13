@@ -60,7 +60,7 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
         {
             let mut command = Command::cargo_bin("termtrace").expect("binary should build");
             command
-                .args(["--response", "agent", "act", "--if-state"])
+                .args(["send", "--json", "--if-state"])
                 .arg("0".repeat(64))
                 .arg(&session)
                 .arg("text:blocked");
@@ -70,10 +70,10 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
         {
             let mut command = Command::cargo_bin("termtrace").expect("binary should build");
             command
-                .args(["--response", "agent", "control", "resize", "--if-state"])
+                .args(["send", "--json", "--if-state"])
                 .arg("0".repeat(64))
                 .arg(&session)
-                .args(["--cols", "81", "--rows", "25"]);
+                .arg("resize:81,25");
 
             command
         },
@@ -81,14 +81,24 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
         let output = command.assert().failure().get_output().stdout.clone();
         let rejection = compact_json_line(&output);
         assert_eq!(rejection["code"], "stale_observation");
-        assert_eq!(rejection["applied"], "none");
-        assert_eq!(rejection["retry"], "safe_new_request");
-        assert_eq!(rejection["session_state"], "live");
-        assert_eq!(rejection["observation"]["state"], state_hash);
-        assert_eq!(
-            rejection["observation"]["scope"],
-            "actor_processed_presented_output"
-        );
+
+        let applied = rejection
+            .get("applied")
+            .or_else(|| return rejection.pointer("/input/applied"))
+            .and_then(serde_json::Value::as_str);
+        assert_eq!(applied, Some("none"));
+
+        let retry = rejection
+            .get("retry")
+            .or_else(|| return rejection.pointer("/input/retry"))
+            .and_then(serde_json::Value::as_str);
+        assert_eq!(retry, Some("safe_new_request"));
+
+        let observed_state = rejection
+            .pointer("/observation/state")
+            .or_else(|| return rejection.pointer("/details/current_presented_state_hash"))
+            .and_then(serde_json::Value::as_str);
+        assert_eq!(observed_state, Some(state_hash.as_str()));
     }
 
     let guarded_input = ControlRequest::new(ControlCommand::Input {

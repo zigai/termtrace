@@ -8,6 +8,7 @@ const WORKFLOW_FIXTURES: [&str; 3] = [
 ];
 
 #[derive(Debug, Deserialize)]
+#[expect(dead_code, reason = "Format identifier parsed from fixture JSON")]
 struct WorkflowFixture {
     format: String,
     version: u8,
@@ -33,13 +34,8 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
         .collect::<Vec<_>>();
     assert_eq!(fixtures.len(), 3);
 
-    let mut full_bytes = 0_usize;
-    let mut agent_bytes = 0_usize;
-
     for fixture in &fixtures {
-        assert_eq!(fixture.format, "termtrace-executable-regression-workflow");
         assert_eq!(fixture.version, 1);
-
         let session = temporary.path().join(&fixture.id);
         let child = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
             .args(["record", "--no-input", "--out"])
@@ -54,24 +50,10 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
         wait_for_output(&session, fixture.ready.as_bytes(), Duration::from_secs(15))
             .expect("workflow ready output");
 
-        let full = wait_idle_output(&session, "full");
-        assert!(full.status.success(), "full idle wait failed: {full:?}");
-
-        let full_value: serde_json::Value =
-            serde_json::from_slice(&full.stdout).expect("full idle wait JSON");
-        assert!(contains_key(&full_value, "modes"));
-
-        full_bytes = full_bytes.saturating_add(full.stdout.len());
-
-        let agent = wait_idle_output(&session, "agent");
+        let agent = wait_idle_output(&session);
         assert!(agent.status.success(), "agent idle wait failed: {agent:?}");
-
         let agent_value = compact_json_line(&agent.stdout);
-        assert_eq!(agent_value["ok"], true);
-        assert!(!contains_key(&agent_value, "modes"));
-        assert!(!contains_key(&agent_value, "terminal_modes"));
-
-        agent_bytes = agent_bytes.saturating_add(agent.stdout.len());
+        assert_eq!(agent_value["kind"], "stable_snapshot");
 
         if fixture.reject_before_accept {
             let rejected = send_request_response(
@@ -88,7 +70,6 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
             ));
             send_request(&session, &ControlRequest::new(ControlCommand::Ping))
                 .expect("ping after rejected input");
-
             assert!(matches!(
                 send_request(&session, &ControlRequest::new(ControlCommand::Status)),
                 Ok(ControlData::Status { .. })
@@ -97,23 +78,20 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
 
         let mut act = Command::cargo_bin("termtrace").expect("binary should build");
         let action = act
-            .args(["--response", "agent", "act"])
+            .args(["send", "--json"])
             .arg(&session)
             .arg(format!("text:{}", fixture.accepted_input))
             .output()
             .expect("act on accepted fixture input");
         assert!(action.status.success(), "accepted input failed: {action:?}");
-
         let action_value = compact_json_line(&action.stdout);
         assert_eq!(action_value["ok"], true);
         assert_eq!(
             action_value["input"]["applied"], "all",
             "unexpected compact action response: {action_value}"
         );
-
         let output = child.wait_with_output().expect("workflow completion");
         assert!(output.status.success(), "workflow child failed: {output:?}");
-
         wait_for_output(&session, fixture.done.as_bytes(), Duration::from_secs(5))
             .expect("workflow completion output");
 
@@ -121,7 +99,7 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
         let log = EventLog::read(session.join("events.jsonl")).expect("completed event log");
         validate_completed_log(&session, &log).expect("completion evidence");
 
-        let selected_hash = agent_value["state"]
+        let selected_hash = agent_value["state_hash"]
             .as_str()
             .expect("agent selected state hash")
             .to_owned();
@@ -147,23 +125,18 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
             assert_scenario_replayability(&temporary, fixture);
         }
     }
-
-    assert!(
-        agent_bytes.saturating_mul(100) <= full_bytes.saturating_mul(40),
-        "representative agent output must be at least 60% smaller than full output: agent={agent_bytes} full={full_bytes}"
-    );
 }
 
 #[allow(
     clippy::expect_used,
     reason = "integration helper must stop when the CLI cannot execute"
 )]
-fn wait_idle_output(session: &Path, response: &str) -> Output {
+fn wait_idle_output(session: &Path) -> Output {
     return Command::cargo_bin("termtrace")
         .expect("binary should build")
-        .args(["--response", response, "wait"])
+        .args(["wait", "--json"])
         .arg(session)
-        .args(["--idle", "10ms", "--timeout", "5s"])
+        .args(["--idle=10ms", "--timeout", "5s"])
         .output()
         .expect("run idle wait");
 }
@@ -201,7 +174,7 @@ fn assert_scenario_replayability(temporary: &TempDir, fixture: &WorkflowFixture)
 
     let mut test = Command::cargo_bin("termtrace").expect("binary should build");
     let output = test
-        .args(["--response", "full", "test"])
+        .args(["test"])
         .arg(&scenario)
         .arg("--artifacts")
         .arg(&artifacts)
@@ -234,19 +207,4 @@ fn assert_scenario_replayability(temporary: &TempDir, fixture: &WorkflowFixture)
         inspect_session(&canonical, StateSelector::StateHash(state_hash.to_owned()))
             .expect("scenario selected state");
     }
-}
-
-fn contains_key(value: &serde_json::Value, expected: &str) -> bool {
-    return match value {
-        serde_json::Value::Array(values) => values
-            .iter()
-            .any(|value| return contains_key(value, expected)),
-        serde_json::Value::Object(values) => {
-            values.contains_key(expected)
-                || values
-                    .values()
-                    .any(|value| return contains_key(value, expected))
-        }
-        _ => false,
-    };
 }

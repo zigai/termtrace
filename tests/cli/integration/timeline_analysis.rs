@@ -514,9 +514,11 @@ fn explain_attributes_controls_without_claiming_pixel_flicker() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""format":"termtrace-diagnose""#))
-        .stdout(predicate::str::contains(r#""code":"full_viewport_clear""#))
-        .stdout(predicate::str::contains(r#""code":"clear_then_repaint""#))
+        .stdout(predicate::str::contains(
+            r#""format": "termtrace-diagnose""#,
+        ))
+        .stdout(predicate::str::contains(r#""code": "full_viewport_clear""#))
+        .stdout(predicate::str::contains(r#""code": "clear_then_repaint""#))
         .stdout(predicate::str::contains(
             "semantic evidence does not by itself prove a visible pixel clear",
         ));

@@ -8,10 +8,10 @@ use termtrace_evidence::event_log::EventLog;
 fn doctor_and_wait_help_remain_directly_discoverable() {
     let mut doctor = Command::cargo_bin("termtrace").expect("binary should build");
     doctor
-        .args(["--response", "full", "doctor", "--json"])
+        .args(["doctor", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""id":"semantic""#));
+        .stdout(predicate::str::contains(r#""id": "semantic""#));
 
     let mut wait_help = Command::cargo_bin("termtrace").expect("binary should build");
     wait_help
@@ -32,9 +32,9 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
     let output = start
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
-            "start",
+            "record",
+            "-d",
+            "--json",
             "--until-screen",
             "READY",
             "--timeout",
@@ -61,9 +61,8 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
     let output = act
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
-            "act",
+            "send",
+            "--json",
             "workflow",
             "text:PING",
             "--request-id",
@@ -97,9 +96,8 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
     let retry_output = retry
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
-            "act",
+            "send",
+            "--json",
             "workflow",
             "text:PING",
             "--request-id",
@@ -124,9 +122,8 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
     let output = unmet
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
-            "act",
+            "send",
+            "--json",
             "workflow",
             "text:X",
             "--until-screen",
@@ -160,9 +157,8 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
     explicit_wait
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
             "wait",
+            "--json",
             "workflow",
             "--screen",
             "PING",
@@ -175,14 +171,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
     let mut screen = Command::cargo_bin("termtrace").expect("binary should build");
     let output = screen
         .env("TERMTRACE_STATE_DIR", &state)
-        .args([
-            "--response",
-            "full",
-            "screen",
-            "workflow",
-            "--screen",
-            "sparse",
-        ])
+        .args(["screen", "--json", "workflow", "--screen", "sparse"])
         .assert()
         .success()
         .get_output()
@@ -201,28 +190,21 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
     let mut unchanged = Command::cargo_bin("termtrace").expect("binary should build");
     unchanged
         .env("TERMTRACE_STATE_DIR", &state)
-        .args([
-            "--response",
-            "full",
-            "screen",
-            "workflow",
-            "--since",
-            state_hash,
-        ])
+        .args(["screen", "--json", "workflow", "--since", state_hash])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""unchanged":true"#));
+        .stdout(predicate::str::contains(r#""unchanged": true"#));
 
     let mut show = Command::cargo_bin("termtrace").expect("binary should build");
     show.env("TERMTRACE_STATE_DIR", &state)
-        .args(["show", "workflow", "--format", "json-compact"])
+        .args(["screen", "workflow", "--format", "json-compact"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""source_kind":"live_session""#));
 
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
     send.env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "send", "workflow", "--text", "Y"])
+        .args(["send", "workflow", "--text", "Y"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""bytes_written":1"#));
@@ -230,14 +212,15 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
     wait.env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
             "wait",
+            "--json",
             "workflow",
             "--screen",
             "Y",
+            "--stable-for",
+            "20ms",
             "--timeout",
-            "1s",
+            "2s",
         ])
         .assert()
         .success();
@@ -246,29 +229,20 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
     changed
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
-            "screen",
-            "workflow",
-            "--screen",
-            "diff",
-            "--since",
-            state_hash,
+            "screen", "--json", "workflow", "--screen", "diff", "--since", state_hash,
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""encoding":"diff_rows""#));
+        .stdout(predicate::str::contains(r#""encoding": "diff_rows""#));
 
     let mut wait_idle = Command::cargo_bin("termtrace").expect("binary should build");
     wait_idle
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
             "wait",
+            "--json",
             "workflow",
-            "--idle",
-            "10ms",
+            "--idle=10ms",
             "--timeout",
             "1s",
         ])
@@ -277,18 +251,18 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
 
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
     stop.env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "stop", "workflow", "--wait"])
+        .args(["stop", "workflow", "--wait"])
         .assert()
         .success();
 
     let mut completed_screen = Command::cargo_bin("termtrace").expect("binary should build");
     completed_screen
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "screen", "workflow"])
+        .args(["screen", "--json", "workflow"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""lifecycle":"completed""#))
-        .stdout(predicate::str::contains(r#""ended":true"#));
+        .stdout(predicate::str::contains(r#""lifecycle": "completed""#))
+        .stdout(predicate::str::contains(r#""ended": true"#));
 }
 
 #[test]
@@ -299,9 +273,9 @@ fn child_completed_wait_returns_the_output_drained_frame() {
     start
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
-            "start",
+            "record",
+            "-d",
+            "--json",
             "drained-frame",
             "--",
             "/bin/sh",
@@ -315,9 +289,8 @@ fn child_completed_wait_returns_the_output_drained_frame() {
     let result = wait
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
             "wait",
+            "--json",
             "drained-frame",
             "--screen",
             "NEVER_APPEARS",
@@ -345,7 +318,7 @@ fn child_completed_wait_returns_the_output_drained_frame() {
     let mut completed = Command::cargo_bin("termtrace").expect("binary should build");
     let output = completed
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "screen", "drained-frame"])
+        .args(["screen", "--json", "drained-frame"])
         .assert()
         .success()
         .get_output()
@@ -364,9 +337,9 @@ fn child_completed_wait_returns_the_output_drained_frame() {
     start
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
-            "start",
+            "record",
+            "-d",
+            "--json",
             "drained-action",
             "--",
             "/bin/sh",
@@ -380,9 +353,8 @@ fn child_completed_wait_returns_the_output_drained_frame() {
     let output = action
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
-            "act",
+            "send",
+            "--json",
             "drained-action",
             "text:Z",
             "--until-screen",
@@ -428,7 +400,7 @@ fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("fixture ready");
 
     let action = StdCommand::new(binary)
-        .args(["--response", "full", "act"])
+        .args(["send", "--json"])
         .arg(&session)
         .args([
             "raw:A",
@@ -447,7 +419,7 @@ fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
 
     let mut interleaved = Command::cargo_bin("termtrace").expect("binary should build");
     let rejected = interleaved
-        .args(["--response", "full", "act"])
+        .args(["send", "--json"])
         .arg(&session)
         .arg("raw:B")
         .assert()
@@ -477,7 +449,7 @@ fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
 
     let mut after = Command::cargo_bin("termtrace").expect("binary should build");
     after
-        .args(["--response", "full", "act"])
+        .args(["send", "--json"])
         .arg(&session)
         .arg("raw:B")
         .assert()
@@ -513,7 +485,7 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
 
     let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
     let inspection_bytes = inspect
-        .args(["inspect"])
+        .args(["last-action", "--json"])
         .arg(&session)
         .assert()
         .success()
@@ -540,7 +512,7 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
 
     let mut diagnose = Command::cargo_bin("termtrace").expect("binary should build");
     let diagnostics_bytes = diagnose
-        .args(["diagnose"])
+        .args(["analyze", "diagnose", "--last-action", "--json"])
         .arg(&session)
         .assert()
         .success()
@@ -591,7 +563,7 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
     let bug_report = temporary.path().join("bug-report");
     let mut bug_report_command = Command::cargo_bin("termtrace").expect("binary should build");
     bug_report_command
-        .arg("bug-report")
+        .args(["bundle", "--profile", "debug"])
         .arg(&session)
         .args(["-o"])
         .arg(&bug_report)
@@ -625,11 +597,10 @@ fn debug_and_handoff_facades_cover_the_last_canonical_action() {
     let bug_report_with_screenshot = temporary.path().join("bug-report-with-screenshot");
     let mut screenshot_report = Command::cargo_bin("termtrace").expect("binary should build");
     screenshot_report
-        .arg("bug-report")
+        .args(["bundle", "--profile", "debug", "--screenshot"])
         .arg(&session)
         .args(["-o"])
         .arg(&bug_report_with_screenshot)
-        .arg("--screenshot")
         .assert()
         .success();
 
@@ -655,7 +626,7 @@ fn bug_report_supports_completed_sessions_without_input_actions() {
     let report = temporary.path().join("no-action-report");
     let mut bug_report = Command::cargo_bin("termtrace").expect("binary should build");
     bug_report
-        .arg("bug-report")
+        .args(["bundle", "--profile", "debug"])
         .arg(&session)
         .args(["-o"])
         .arg(&report)
@@ -692,9 +663,9 @@ fn last_action_uses_the_full_journaled_multi_atom_request_boundary() {
     start
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
-            "start",
+            "record",
+            "-d",
+            "--json",
             "--until-screen",
             "READY",
             "--timeout",
@@ -711,9 +682,8 @@ fn last_action_uses_the_full_journaled_multi_atom_request_boundary() {
     let mut act = Command::cargo_bin("termtrace").expect("binary should build");
     act.env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
-            "act",
+            "send",
+            "--json",
             "sequence",
             "text:hello",
             "enter",
@@ -729,14 +699,14 @@ fn last_action_uses_the_full_journaled_multi_atom_request_boundary() {
 
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
     stop.env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "stop", "sequence", "--wait"])
+        .args(["stop", "sequence", "--wait"])
         .assert()
         .success();
 
     let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
     let output = inspect
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["inspect", "sequence"])
+        .args(["last-action", "--json", "sequence"])
         .assert()
         .success()
         .get_output()
@@ -797,9 +767,9 @@ fn last_action_uses_the_full_journaled_multi_atom_action_boundary() {
     start
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
-            "start",
+            "record",
+            "-d",
+            "--json",
             "--until-screen",
             "READY",
             "--timeout",
@@ -816,9 +786,8 @@ fn last_action_uses_the_full_journaled_multi_atom_action_boundary() {
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
     send.env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
-            "act",
+            "send",
+            "--json",
             "sequence-send",
             "text:world",
             "enter",
@@ -831,9 +800,8 @@ fn last_action_uses_the_full_journaled_multi_atom_action_boundary() {
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
     wait.env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
             "wait",
+            "--json",
             "sequence-send",
             "--screen",
             "RESULT:world",
@@ -845,14 +813,14 @@ fn last_action_uses_the_full_journaled_multi_atom_action_boundary() {
 
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
     stop.env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "stop", "sequence-send", "--wait"])
+        .args(["stop", "sequence-send", "--wait"])
         .assert()
         .success();
 
     let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
     let output = inspect
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["inspect", "sequence-send"])
+        .args(["last-action", "--json", "sequence-send"])
         .assert()
         .success()
         .get_output()

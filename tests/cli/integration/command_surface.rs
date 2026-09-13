@@ -51,7 +51,7 @@ fn session_recovery_preserves_context_and_never_claims_completion() {
 
     Command::cargo_bin("termtrace")
         .expect("binary")
-        .arg("show")
+        .arg("screen")
         .arg(&recovered)
         .arg("--recover-prefix")
         .assert()
@@ -83,28 +83,26 @@ fn session_recovery_preserves_context_and_never_claims_completion() {
 }
 
 #[test]
-fn root_help_groups_commands_by_workflow() {
+fn root_help_presents_flat_command_list() {
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
     command
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Commands:\n  Sessions:"))
-        .stdout(predicate::str::contains("\n  Interaction:"))
-        .stdout(predicate::str::contains("\n  Investigation:"))
-        .stdout(predicate::str::contains("\n  Artifacts:"))
-        .stdout(predicate::str::contains("\n  Automation:"))
-        .stdout(predicate::str::contains("\n  System:"))
+        .stdout(predicate::str::contains("Commands:\n  record"))
+        .stdout(predicate::str::contains("Sessions:").not())
+        .stdout(predicate::str::contains("Interaction:").not())
+        .stdout(predicate::str::contains("Investigation:").not())
+        .stdout(predicate::str::contains("Artifacts:").not())
+        .stdout(predicate::str::contains("Automation:").not())
+        .stdout(predicate::str::contains("System:").not())
         .stdout(predicate::str::contains("\n  Recording:").not())
         .stdout(predicate::str::contains("\n  Live workflow:").not())
         .stdout(predicate::str::contains("\n  Command groups:").not())
         .stdout(predicate::str::contains("bundle-verify").not())
         .stdout(predicate::str::contains("export-asciicast").not())
         .stdout(predicate::str::contains(
-            "Run `termtrace <command> --help` for more details.",
-        ))
-        .stdout(predicate::str::contains(
-            "tmux       Record managed tmux panes for their full lifetime",
+            "tmux        Record managed tmux panes for their full lifetime",
         ));
 }
 
@@ -153,18 +151,22 @@ fn native_screenshot_help_uses_the_solver_without_a_noop_flag() {
 
 #[test]
 fn top_level_debug_and_handoff_commands_are_directly_discoverable() {
-    for command_name in ["inspect", "diagnose"] {
-        let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-        command
-            .args([command_name, "--help"])
-            .assert()
-            .success()
-            .stdout(predicate::str::contains("<SESSION>"))
-            .stdout(predicate::str::contains("--last-action").not())
-            .stdout(predicate::str::contains("--since-last-action").not());
-    }
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+    command
+        .args(["last-action", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<SESSION>"));
 
-    for command_name in ["screenshot", "bundle", "bug-report"] {
+    let mut diagnose = Command::cargo_bin("termtrace").expect("binary should build");
+    diagnose
+        .args(["analyze", "diagnose", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<SESSION>"))
+        .stdout(predicate::str::contains("--last-action"));
+
+    for command_name in ["screenshot", "bundle"] {
         let mut command = Command::cargo_bin("termtrace").expect("binary should build");
         command
             .args([command_name, "--help"])
@@ -174,9 +176,9 @@ fn top_level_debug_and_handoff_commands_are_directly_discoverable() {
             .stdout(predicate::str::contains("--out <OUT>"));
     }
 
-    let mut bug_report = Command::cargo_bin("termtrace").expect("binary should build");
-    bug_report
-        .args(["bug-report", "--help"])
+    let mut bundle = Command::cargo_bin("termtrace").expect("binary should build");
+    bundle
+        .args(["bundle", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("--screenshot"));
@@ -285,7 +287,7 @@ fn complex_selector_help_stays_within_one_hundred_columns() {
             &["Target selection:"][..],
         ),
         (&["playback", "--help"][..], "termtrace playback", &[][..]),
-        (&["show", "--help"][..], "termtrace show", &[][..]),
+        (&["screen", "--help"][..], "termtrace screen", &[][..]),
         (&["wait", "--help"][..], "termtrace wait", &[][..]),
         (
             &["artifact", "save", "--help"][..],
@@ -355,7 +357,7 @@ fn wait_help_exposes_the_consolidated_idle_surface() {
     wait.args(["wait", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("--idle [<IDLE>]"))
+        .stdout(predicate::str::contains("--idle[=<IDLE>]"))
         .stdout(predicate::str::contains("--allow-incomplete"))
         .stdout(predicate::str::contains("--require-live-stability"))
         .stdout(predicate::str::contains("--full-state"))
@@ -395,12 +397,6 @@ fn wait_requires_the_screen_flag_for_screen_predicates() {
 
 #[test]
 fn nested_command_paths_dispatch() {
-    let mut keys = Command::cargo_bin("termtrace").expect("binary should build");
-    keys.args(["control", "keys"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("ctrl"));
-
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("nested-session");
     let mut record = Command::cargo_bin("termtrace").expect("binary should build");
@@ -905,11 +901,12 @@ fn completions_are_generated_from_the_current_command_graph() {
     ] {
         let mut command = Command::cargo_bin("termtrace").expect("binary should build");
         command
-            .args(["tooling", "completions", shell])
+            .args(["completion", shell])
             .assert()
             .success()
             .stdout(predicate::str::contains(signature))
-            .stdout(predicate::str::contains("control"))
+            .stdout(predicate::str::contains("send"))
+            .stdout(predicate::str::contains("screen"))
             .stdout(predicate::str::contains("analyze"))
             .stdout(predicate::str::contains("artifact"))
             .stdout(predicate::str::contains("timeline"))
@@ -987,7 +984,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
     let schema_directory = temporary.path().join("schemas");
     let mut first = Command::cargo_bin("termtrace").expect("binary should build");
     let first = first
-        .args(["tooling", "schemas", "--out"])
+        .args(["schema", "--out"])
         .arg(&schema_directory)
         .assert()
         .success()
@@ -1009,7 +1006,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
 
     let mut second = Command::cargo_bin("termtrace").expect("binary should build");
     let second = second
-        .args(["tooling", "schemas", "--out"])
+        .args(["schema", "--out"])
         .arg(&schema_directory)
         .assert()
         .success()
@@ -1024,7 +1021,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
 
     let mut schema_help = Command::cargo_bin("termtrace").expect("binary should build");
     schema_help
-        .args(["tooling", "schemas", "--help"])
+        .args(["schema", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains(

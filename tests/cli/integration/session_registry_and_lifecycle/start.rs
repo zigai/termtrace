@@ -8,14 +8,14 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
     let assertion = start
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
-            "start",
+            "record",
+            "-d",
+            "demo",
+            "--json",
             "--cols",
             "90",
             "--rows",
             "25",
-            "demo",
             "/bin/sh",
             "-c",
             "trap 'exit 0' TERM; printf READY; while :; do sleep 0.1; done",
@@ -57,15 +57,14 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
     let mut status = Command::cargo_bin("termtrace").expect("binary should build");
     let status = status
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["status", "demo"])
+        .args(["status", "--json", "demo"])
         .assert()
         .success();
 
     let status = compact_json_line(&status.get_output().stdout);
-    assert_eq!(status["type"], "status");
+    assert_eq!(status["lifecycle"], "live");
     assert_eq!(status["session"], "demo");
     assert_eq!(status["lifecycle"], "live");
-    assert_eq!(status["session_state"], "live");
     assert!(status["pid"].as_u64().is_some());
 
     let session_count = fs_err::read_dir(state.join("sessions"))
@@ -75,7 +74,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["start", "demo", "--", "/bin/true"])
+        .args(["record", "-d", "demo", "--", "/bin/true"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("alias is already"));
@@ -117,8 +116,10 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
     let failed = failed
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "start",
+            "record",
+            "-d",
             "broken",
+            "--json",
             "--",
             "/definitely/missing/termtrace-command",
         ])
@@ -130,10 +131,13 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
 
     let failed = compact_json_line(&failed);
     assert_eq!(failed["startup_state"], "completed_failure");
-    assert_eq!(failed["code"], "spawn_failed");
-    assert_eq!(failed["session_state"], "ended");
 
-    let failed_session = PathBuf::from(failed["path"].as_str().expect("failed session path"));
+    let failed_session = PathBuf::from(
+        failed["canonical_session_display"]
+            .as_str()
+            .or_else(|| return failed["path"].as_str())
+            .expect("failed session path"),
+    );
     assert!(failed_session.join("completion.json").is_file());
     assert!(
         state.join("registry/broken.json").is_file(),
@@ -148,7 +152,16 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
     let mut successful = Command::cargo_bin("termtrace").expect("binary should build");
     let successful = successful
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["start", "fast-success", "--", "/bin/sh", "-c", "exit 0"])
+        .args([
+            "record",
+            "-d",
+            "fast-success",
+            "--json",
+            "--",
+            "/bin/sh",
+            "-c",
+            "exit 0",
+        ])
         .assert()
         .success()
         .get_output()
@@ -157,14 +170,12 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
 
     let successful = compact_json_line(&successful);
     assert_eq!(successful["startup_state"], "completed_success");
-    assert!(successful.get("ready").is_none());
-    assert_eq!(successful["session_state"], "ended");
-    assert_eq!(successful["exit_code"], 0);
+    assert_eq!(successful["completion"]["exit_code"], 0);
 
     let mut wait_idle = Command::cargo_bin("termtrace").expect("binary should build");
     wait_idle
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["wait", "fast-success", "--idle"])
+        .args(["wait", "--json", "fast-success", "--idle"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""quality":"completed""#));
@@ -172,19 +183,18 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
     let mut completed_screen = Command::cargo_bin("termtrace").expect("binary should build");
     completed_screen
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["--response", "full", "screen", "fast-success"])
+        .args(["screen", "--json", "fast-success"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""lifecycle":"completed""#))
-        .stdout(predicate::str::contains(r#""ended":true"#));
+        .stdout(predicate::str::contains(r#""lifecycle": "completed""#))
+        .stdout(predicate::str::contains(r#""ended": true"#));
 
     let mut require_live_stability = Command::cargo_bin("termtrace").expect("binary should build");
     require_live_stability
         .env("TERMTRACE_STATE_DIR", &state)
         .args([
-            "--response",
-            "full",
             "wait",
+            "--json",
             "fast-success",
             "--idle",
             "--require-live-stability",
@@ -197,7 +207,16 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
     let mut unsuccessful = Command::cargo_bin("termtrace").expect("binary should build");
     let unsuccessful = unsuccessful
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["start", "fast-failure", "--", "/bin/sh", "-c", "exit 7"])
+        .args([
+            "record",
+            "-d",
+            "fast-failure",
+            "--json",
+            "--",
+            "/bin/sh",
+            "-c",
+            "exit 7",
+        ])
         .assert()
         .code(7)
         .get_output()
@@ -206,17 +225,15 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
 
     let unsuccessful = compact_json_line(&unsuccessful);
     assert_eq!(unsuccessful["startup_state"], "completed_failure");
-    assert!(unsuccessful.get("ready").is_none());
-    assert_eq!(unsuccessful["session_state"], "ended");
-    assert_eq!(unsuccessful["exit_code"], 7);
+    assert_eq!(unsuccessful["completion"]["exit_code"], 7);
 
     let mut status = Command::cargo_bin("termtrace").expect("binary should build");
     status
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["status", "fast-failure"])
+        .args(["status", "--json", "fast-failure"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""type":"completed""#));
+        .stdout(predicate::str::contains(r#""kind": "completed""#));
 }
 
 #[test]
@@ -229,9 +246,10 @@ fn concurrent_start_reservation_launches_only_one_recorder() {
         command
             .env("TERMTRACE_STATE_DIR", &state)
             .args([
-                "start",
+                "record",
+                "-d",
                 "contended",
-                "--",
+                "--json",
                 "/bin/sh",
                 "-c",
                 "trap 'exit 0' TERM; while :; do sleep 0.1; done",
@@ -250,7 +268,7 @@ fn concurrent_start_reservation_launches_only_one_recorder() {
     let winner = if first.status.success() { &first } else { &second };
     let loser = if first.status.success() { &second } else { &first };
     let started = compact_json_line(&winner.stdout);
-    assert_eq!(started["session"], "contended");
+    assert_eq!(started["alias"], "contended");
     assert!(
         String::from_utf8_lossy(&loser.stderr).contains("reserved or registered"),
         "unexpected loser diagnostic: {}",

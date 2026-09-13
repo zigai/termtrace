@@ -57,8 +57,8 @@ fn live_control_drives_and_audits_a_detached_session() {
         .args(["session", "list", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""lifecycle":"live""#))
-        .stdout(predicate::str::contains(r#""alias":"live-demo""#));
+        .stdout(predicate::str::contains(r#""lifecycle": "live""#))
+        .stdout(predicate::str::contains(r#""alias": "live-demo""#));
 
     let first_boundary = match send_request(&session, &ControlRequest::new(ControlCommand::Status))
         .expect("first observer-free status")
@@ -104,20 +104,14 @@ fn live_control_drives_and_audits_a_detached_session() {
     for arguments in [
         vec!["status", session.to_str().expect("UTF-8 path")],
         vec![
-            "control",
-            "mark",
+            "send",
             session.to_str().expect("UTF-8 path"),
-            "--label",
-            "before-input",
+            "mark:before-input",
         ],
         vec![
-            "control",
-            "resize",
+            "send",
             session.to_str().expect("UTF-8 path"),
-            "--cols",
-            "100",
-            "--rows",
-            "30",
+            "resize:100,30",
         ],
     ] {
         let mut command = Command::cargo_bin("termtrace").expect("binary should build");
@@ -141,7 +135,7 @@ fn live_control_drives_and_audits_a_detached_session() {
     thread::sleep(Duration::from_millis(50));
 
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
-    send.arg("act")
+    send.arg("send")
         .arg(&session)
         .args(["text:hello\n", "--intent", "complete shell read"])
         .assert()
@@ -182,7 +176,7 @@ fn live_control_drives_and_audits_a_detached_session() {
     for selector in selectors {
         let mut show = Command::cargo_bin("termtrace").expect("binary should build");
         let shown = show
-            .arg("show")
+            .arg("screen")
             .arg(&session)
             .args(selector)
             .args(["--format", "json-compact"])
@@ -224,10 +218,10 @@ fn live_control_drives_and_audits_a_detached_session() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            r#""mutation_journal_status":"verified""#,
+            r#""mutation_journal_status": "verified""#,
         ))
         .stdout(predicate::str::contains(
-            r#""mutation_journal_records_verified":4"#,
+            r#""mutation_journal_records_verified": 4"#,
         ));
 }
 

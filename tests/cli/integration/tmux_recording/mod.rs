@@ -62,8 +62,6 @@ impl PrivateTmux {
 
         let mut generate = Command::cargo_bin("termtrace").expect("binary should build");
         generate.args([
-            "--response",
-            "full",
             "tmux",
             "config",
             "--output-root",

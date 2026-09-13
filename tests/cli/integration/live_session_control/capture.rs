@@ -50,9 +50,9 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
 
     let mut compact_idle = Command::cargo_bin("termtrace").expect("binary should build");
     let compact_output = compact_idle
-        .arg("wait")
+        .args(["wait", "--json"])
         .arg(&stable_session)
-        .args(["--idle", "10ms", "--timeout", "2s"])
+        .args(["--idle=10ms", "--timeout", "2s"])
         .assert()
         .success()
         .get_output()
@@ -67,19 +67,19 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     );
     assert_eq!(
         compact
-            .pointer("/state")
+            .pointer("/state_hash")
             .and_then(serde_json::Value::as_str),
         Some(state_hash.as_str())
     );
-    assert!(compact.pointer("/screen").is_some());
+    assert!(compact.pointer("/frame").is_some() || compact.pointer("/screen").is_some());
     assert!(compact.pointer("/boundary").is_none());
     assert!(compact.pointer("/semantic_state_zstd").is_none());
 
     let mut full_idle = Command::cargo_bin("termtrace").expect("binary should build");
     full_idle
-        .args(["--response", "full", "wait"])
+        .args(["wait", "--json"])
         .arg(&stable_session)
-        .args(["--idle", "10ms", "--timeout", "2s", "--full-state"])
+        .args(["--idle=10ms", "--timeout", "2s", "--full-state"])
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""semantic_state_zstd""#));
@@ -219,21 +219,21 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
 
     let mut strict_idle = Command::cargo_bin("termtrace").expect("binary should build");
     strict_idle
-        .arg("wait")
+        .args(["wait", "--json"])
         .arg(&closed_session)
-        .args(["--idle", "1s", "--timeout", "3s"])
+        .args(["--idle=1s", "--timeout", "3s"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("output_closed"));
 
     let mut permissive_idle = Command::cargo_bin("termtrace").expect("binary should build");
     permissive_idle
-        .arg("wait")
+        .args(["wait", "--json"])
         .arg(&closed_session)
-        .args(["--idle", "1s", "--timeout", "3s", "--allow-incomplete"])
+        .args(["--idle=1s", "--timeout", "3s", "--allow-incomplete"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""quality":"output_closed""#));
+        .stdout(predicate::str::contains(r#""quality": "output_closed""#));
 
     let _closed_status = closed_child.wait().expect("closed recorder exit");
 }

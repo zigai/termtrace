@@ -355,7 +355,7 @@ fn managed_client_runners_leave_the_callers_worktree_untouched() {
     python
         .env("TERMTRACE_CLIENT_ASSETS", &assets)
         .current_dir(&worktree)
-        .args(["tooling", "client", "python", "-"])
+        .args(["client", "python", "-"])
         .write_stdin("from termtrace import Terminal\nprint(Terminal.__name__)\n")
         .assert()
         .success()
@@ -365,7 +365,7 @@ fn managed_client_runners_leave_the_callers_worktree_untouched() {
     typescript_run
         .env("TERMTRACE_CLIENT_ASSETS", &assets)
         .current_dir(&worktree)
-        .args(["tooling", "client", "typescript", "-"])
+        .args(["client", "typescript", "-"])
         .write_stdin(
             "import { managedRunnerMarker } from '@termtrace/test';\nconsole.log(managedRunnerMarker);\n",
         )
@@ -390,7 +390,7 @@ fn managed_client_runners_leave_the_callers_worktree_untouched() {
     typescript_file
         .env("TERMTRACE_CLIENT_ASSETS", &assets)
         .current_dir(&worktree)
-        .args(["tooling", "client", "typescript"])
+        .args(["client", "typescript"])
         .arg(source.join("client.ts"))
         .assert()
         .success()

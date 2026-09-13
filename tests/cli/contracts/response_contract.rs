@@ -5,160 +5,38 @@ fn termtrace() -> Command {
 }
 
 #[test]
-fn agent_success_is_one_compact_versioned_object() {
+fn version_supports_json_and_plain_text() {
     let output = termtrace()
-        .args(["--response", "agent", "version"])
+        .args(["version", "--json"])
         .output()
         .expect("run version command");
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        output.stderr.is_empty(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(output.status.success());
 
-    let response = compact_json_line(&output.stdout);
-    validate_json_value("cli-response.schema.json", &response);
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert!(response["termtrace_version"].is_string());
 
-    assert_eq!(response["v"], 1);
-    assert_eq!(response["ok"], true);
-    assert_eq!(response["type"], "version");
-    assert!(
-        output.stdout.len() <= 64 * 1024,
-        "agent response was {} bytes",
-        output.stdout.len()
-    );
-}
-
-#[test]
-fn explicit_agent_help_is_versioned_but_default_help_stays_readable() {
-    let agent = termtrace()
-        .args(["--response", "agent", "--help"])
-        .output()
-        .expect("run agent help");
-    assert!(agent.status.success());
-
-    let response = compact_json_line(&agent.stdout);
-    validate_json_value("cli-response.schema.json", &response);
-
-    assert_eq!(response["v"], 1);
-    assert_eq!(response["ok"], true);
-    assert_eq!(response["type"], "help");
-    assert!(response["output"]
-        .as_str()
-        .is_some_and(|help| return help.contains("canonical output")));
-
-    let default = termtrace()
-        .arg("--help")
-        .output()
-        .expect("run default help");
-    assert!(default.status.success());
-    assert!(!String::from_utf8_lossy(&default.stdout).contains("Agent workflow:"));
-}
-
-#[test]
-fn agent_argument_failure_keeps_stdout_strict() {
-    let output = termtrace()
-        .args(["--response", "agent", "not-a-command"])
-        .output()
-        .expect("run invalid command");
-    assert!(!output.status.success());
-
-    let response = compact_json_line(&output.stdout);
-    validate_json_value("cli-response.schema.json", &response);
-
-    assert_eq!(response["v"], 1);
-    assert_eq!(response["ok"], false);
-    assert_eq!(response["type"], "arguments");
-    assert_eq!(response["code"], "invalid_arguments");
-    assert_eq!(response["applied"], "none");
-    assert_eq!(response["retry"], "safe_new_request");
-    assert_eq!(response["session_state"], "unknown");
-    assert!(!output.stderr.is_empty());
-    assert!(!String::from_utf8_lossy(&output.stderr).contains("{\"v\""));
-}
-
-#[test]
-fn environment_selects_agent_and_flag_takes_precedence() {
-    let agent = termtrace()
-        .env("TERMTRACE_RESPONSE", "agent")
+    let plain = termtrace()
         .arg("version")
         .output()
-        .expect("run agent version");
-    assert!(agent.status.success());
-
-    let response = compact_json_line(&agent.stdout);
-    assert_eq!(response["v"], 1);
-    assert_eq!(response["ok"], true);
-    assert_eq!(response["type"], "version");
-
-    let quiet = termtrace()
-        .env("TERMTRACE_RESPONSE", "agent")
-        .args(["--response", "quiet", "version"])
-        .output()
-        .expect("run quiet version");
-    assert!(quiet.status.success());
-    assert!(quiet.stdout.is_empty());
-    assert!(quiet.stderr.is_empty());
+        .expect("run plain version");
+    assert!(plain.status.success());
+    assert!(String::from_utf8_lossy(&plain.stdout).starts_with("termtrace"));
 }
 
 #[test]
-fn mutation_failure_has_retry_state_without_second_stdout_error() {
+fn quiet_mode_suppresses_stdout() {
     let output = termtrace()
-        .args([
-            "--response",
-            "agent",
-            "act",
-            "name:response-contract-session-that-does-not-exist",
-            "text:x",
-        ])
-        .output()
-        .expect("run missing-session action");
-    assert!(!output.status.success());
-
-    let response = compact_json_line(&output.stdout);
-    assert_eq!(response["ok"], false);
-    assert!(response["applied"].is_string());
-    assert!(response["retry"].is_string());
-    assert!(response["session_state"].is_string());
-    assert_eq!(
-        output
-            .stdout
-            .iter()
-            .filter(|byte| return **byte == b'\n')
-            .count(),
-        1
-    );
-}
-
-#[test]
-fn full_preserves_legacy_forensic_payload_and_quiet_is_exit_only() {
-    let full = termtrace()
-        .args(["--response", "full", "version", "--json"])
-        .output()
-        .expect("run full version");
-    assert!(full.status.success());
-
-    let value = compact_json_line(&full.stdout);
-    assert!(value.get("termtrace_version").is_some());
-    assert!(value.get("ok").is_none());
-
-    let quiet = termtrace()
-        .args(["--response", "quiet", "version", "--json"])
+        .args(["-q", "version"])
         .output()
         .expect("run quiet version");
-    assert!(quiet.status.success());
-    assert!(quiet.stdout.is_empty());
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
 
-    let quiet_failure = termtrace()
-        .args(["--response", "quiet", "not-a-command"])
+    let failed = termtrace()
+        .args(["-q", "not-a-command"])
         .output()
         .expect("run quiet failure");
-    assert!(!quiet_failure.status.success());
-    assert!(quiet_failure.stdout.is_empty());
-    assert!(quiet_failure.stderr.is_empty());
+    assert_eq!(failed.status.code(), Some(2));
+    assert!(failed.stdout.is_empty());
+    assert!(failed.stderr.is_empty());
 }

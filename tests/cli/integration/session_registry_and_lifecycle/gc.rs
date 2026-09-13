@@ -91,15 +91,7 @@ fn retention_never_terminates_an_authenticated_idle_recorder() {
     let started = Command::cargo_bin("termtrace")
         .expect("binary")
         .env("TERMTRACE_STATE_DIR", &state)
-        .args([
-            "--response",
-            "full",
-            "start",
-            "idle",
-            "--",
-            "/bin/sleep",
-            "15",
-        ])
+        .args(["record", "-d", "idle", "--json", "--", "/bin/sleep", "15"])
         .assert()
         .success();
 
@@ -133,7 +125,7 @@ fn retention_never_terminates_an_authenticated_idle_recorder() {
     let status = Command::cargo_bin("termtrace")
         .expect("binary")
         .env("TERMTRACE_STATE_DIR", &state)
-        .args(["status", "idle"])
+        .args(["status", "--json", "idle"])
         .assert()
         .success();
     assert_eq!(
@@ -222,26 +214,6 @@ fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomple
         serde_json::from_slice(&dry_run.get_output().stdout).expect("GC dry-run report");
     assert_eq!(dry_run["changes_applied"], false);
     assert!(dry_run.get("applied").is_none());
-
-    let envelope: CliResponseEnvelope =
-        serde_json::from_value(dry_run.clone()).expect("GC response envelope");
-    assert_eq!(
-        envelope.fields.get("changes_applied"),
-        Some(&serde_json::Value::Bool(false))
-    );
-
-    let round_trip = serde_json::to_value(envelope).expect("round-trip GC response envelope");
-    let schema: serde_json::Value = serde_json::from_slice(include_bytes!(
-        "../../../../schemas/cli-response.schema.json"
-    ))
-    .expect("CLI response schema");
-
-    let validator = jsonschema::validator_for(&schema).expect("CLI response schema validator");
-    assert!(
-        validator.is_valid(&round_trip),
-        "round-tripped GC response must satisfy the CLI response schema"
-    );
-    assert_eq!(round_trip["changes_applied"], false);
     assert_eq!(dry_run["candidates"].as_array().map(Vec::len), Some(1));
     assert_eq!(dry_run["protected_registered"], 1);
     assert!(dry_run["skipped_non_completed"]

@@ -313,7 +313,7 @@ fn screenshots_serialize_non_utf8_output_paths_without_panicking() {
     let destination = temporary.path().join(filename);
     let output = Command::cargo_bin("termtrace")
         .expect("binary should build")
-        .args(["--response", "full", "screenshot"])
+        .args(["screenshot"])
         .arg(&session)
         .arg("--out")
         .arg(&destination)
@@ -359,7 +359,7 @@ fn state_hash_selectors_reach_every_exact_state_workflow() {
         .stdout(predicate::str::contains(&final_hash));
 
     let mut show = Command::cargo_bin("termtrace").expect("binary should build");
-    show.arg("show")
+    show.arg("screen")
         .arg(&session)
         .args(["--state-hash", &final_hash, "--format", "json-compact"])
         .assert()
@@ -421,7 +421,7 @@ fn state_hash_selectors_reach_every_exact_state_workflow() {
 
     let mut invalid = Command::cargo_bin("termtrace").expect("binary should build");
     invalid
-        .arg("show")
+        .arg("screen")
         .arg(&session)
         .args(["--state-hash", &final_hash.to_uppercase()])
         .assert()
@@ -444,7 +444,7 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
 
     let mut dry_run = Command::cargo_bin("termtrace").expect("binary should build");
     dry_run
-        .args(["--response", "full", "bundle"])
+        .args(["bundle"])
         .arg(&session)
         .args(["--profile", "debug", "--out"])
         .arg(temporary.path().join("unused"))
