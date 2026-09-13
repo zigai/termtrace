@@ -135,7 +135,7 @@ def main() -> None:
     if args.subcommand == "emit-run-manifest":
         binary = Path(args.binary).resolve()
         version = json.loads(subprocess.check_output(
-            [str(binary), "--response", "full", "version", "--json"], timeout=30
+            [str(binary), "version", "--json"], timeout=30
         ))
         if isinstance(version, list) and len(version) == 1:
             version = version[0]

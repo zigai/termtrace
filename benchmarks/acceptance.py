@@ -167,8 +167,7 @@ class AcceptanceRunner:
         self.profile.write_text(profile["ghostty_config"])
 
     def cli(self, *args: str | Path) -> list[str]:
-        return [str(self.binary), "--response", "full", *(str(arg) for arg in args)]
-
+        return [str(self.binary), *(str(arg) for arg in args)]
     def run(self, command: list[str], *, timeout: float | None = None,
             check: bool = True, memory_limit: int | None = None) -> Sample:
         limit = memory_limit or self.limit
@@ -491,12 +490,12 @@ class AcceptanceRunner:
         name = f"acceptance-{os.getpid()}"
         scenario = ROOT / "skills/termtrace/examples/ready.termtrace.json"
         commands = {
-            "start": self.cli("start", name, *self.recording_args(), "--until-screen", "READY", "--", "/bin/sh", "-c", "printf READY; cat"),
-            "act": self.cli("act", name, "text:x", "enter"),
+            "start": self.cli("record", "-d", name, *self.recording_args(), "--until-screen", "READY", "--", "/bin/sh", "-c", "printf READY; cat"),
+            "act": self.cli("send", name, "text:x", "enter"),
             "send": self.cli("send", name, "--text", "x\n"),
             "wait": self.cli("wait", name, "--screen", "READY"),
             "screen": self.cli("screen", name, "--screen", "text"),
-            "control resize": self.cli("control", "resize", name, "--cols", "120", "--rows", "40", "--pixel-width", "1200", "--pixel-height", "800"),
+            "control resize": self.cli("send", name, "resize:120,40"),
             "restart": self.cli("restart", name),
             "stop": self.cli("stop", name, "--wait"),
             "screenshot": self.cli("screenshot", name, "--renderer", "semantic", "--out", self.output / "workflow-screenshot"),
@@ -600,7 +599,7 @@ class AcceptanceRunner:
                                        start_new_session=True)
             with MemoryMonitor(process, self.limit) as monitor:
                 try:
-                    self.run(self.cli("control", "mark", session, "--label", f"follow-{iteration}"))
+                    self.run(self.cli("send", session, f"mark:follow-{iteration}"))
                     deadline = time.monotonic() + self.measurement.timeout_seconds
                     while True:
                         lines = target.read_bytes().split(b"\n")[:-1]
