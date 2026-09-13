@@ -4,8 +4,9 @@ Choose the least-sensitive artifact that proves the requested outcome.
 
 ## Screenshots and native pixels
 
-- Use `termtrace screenshot SESSION -o FILE.png` for manifested semantic PNG
-  or SVG output, exact selectors, or explicit native capture.
+- Use `termtrace screenshot SESSION -o DIRECTORY` for manifested semantic PNG
+  or SVG output (saving `screen.png` and manifest inside the output directory),
+  exact selectors, or explicit native capture.
 - Use native capture only after `termtrace doctor --json` reports the
   required environment ready. Retain the geometry probes and exact profile
   hashes.

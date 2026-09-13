@@ -1,6 +1,6 @@
 # Managed client workflows
 
-Use individual CLI commands (`termtrace act`, `termtrace screen --json`, etc.) when a workflow will finish in
+Use individual CLI commands (`termtrace send`, `termtrace screen --json`, etc.) when a workflow will finish in
 two or three actions. Beyond that, use the Python SDK (`import termtrace` / `from termtrace import Terminal`)
 so repeated observations and actions do not pay process startup and discovery costs. Use `termtrace test`
 when assertions should be repeatable. A managed client script is appropriate for branching, loops,
@@ -13,12 +13,14 @@ When orchestrating multi-step interactive workflows, import the SDK:
 ```python
 from termtrace import Terminal
 
-terminal = Terminal.start(["my-app", "--arg"])
-terminal.wait_screen(contains="Ready", timeout_ms=5000)
-terminal.act("text:help", "enter", until_screen="Commands")
-screen = terminal.screen()
-print(screen.text)
-terminal.stop()
+with Terminal() as terminal:
+    with terminal.launch(["my-app", "--arg"]) as session:
+        session.screen.wait_for_text("Ready", timeout=5.0)
+        session.keyboard.type("help\n")
+        session.screen.wait_for_text("Commands", timeout=5.0)
+        screen = session.screen.text()
+        print(screen)
+        session.stop()
 ```
 
 ## Run a script file via managed runners

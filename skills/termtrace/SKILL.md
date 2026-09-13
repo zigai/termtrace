@@ -69,7 +69,7 @@ from an older command name.
 3. Use the returned presented-state hash with `screen --since STATE` to receive
    only a changed screen. Pass it through `--if-state` when an action is valid
    only for that exact presentation.
-4. For multi-action or interactive loops, use the Python SDK (`Terminal.start` / `Terminal.attach`).
+4. For multi-action or interactive loops, use the Python SDK (`Terminal().launch` / `Terminal().attach`).
 5. Mark meaningful workflow milestones only: `send my-app mark:checkpoint`.
 6. Check exit codes and `--json` error structures. Exit code 0 indicates success;
    non-zero indicates failure. Diagnostic logs go to stderr via `TERMTRACE_LOG`.
