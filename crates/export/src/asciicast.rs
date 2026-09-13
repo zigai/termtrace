@@ -37,9 +37,23 @@ struct CastEnvironment<'term> {
 pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<()> {
     let session = session_directory.as_ref();
     let output = output.as_ref();
+    let mut writer = secure_writer(output)?;
+    export_to_writer(session, &mut writer, output)?;
+    finish_writer(writer, output)?;
+
+    return Ok(());
+}
+
+/// Export an asciinema v2 cast to an arbitrary writer.
+pub fn export_to_writer(
+    session_directory: impl AsRef<Path>,
+    mut writer: impl Write,
+    display_path: impl AsRef<Path>,
+) -> Result<()> {
+    let session = session_directory.as_ref();
+    let path = display_path.as_ref();
     let log = EventLogSummary::read(session.join("events.jsonl"))?;
     let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
-    let mut writer = secure_writer(output)?;
     write_line(
         &mut writer,
         &CastHeader {
@@ -52,7 +66,7 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
                 term: &log.header.term,
             },
         },
-        output,
+        path,
     )?;
 
     let mut inputs: HashMap<Uuid, ByteString> = HashMap::new();
@@ -66,8 +80,8 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
                 &mut writer,
                 seconds,
                 "o",
-                String::from_utf8_lossy(data.as_bytes()).as_ref(),
-                output,
+                &String::from_utf8_lossy(data.as_bytes()),
+                path,
             )?,
             Event::InputIntent {
                 operation_id, data, ..
@@ -84,8 +98,8 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
                         &mut writer,
                         seconds,
                         "i",
-                        String::from_utf8_lossy(data.as_bytes()).as_ref(),
-                        output,
+                        &String::from_utf8_lossy(data.as_bytes()),
+                        path,
                     )?;
                 }
             }
@@ -103,7 +117,7 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
                 ..
             } => {
                 if let Some((cols, rows)) = resizes.remove(operation_id) {
-                    write_cast_event(&mut writer, seconds, "r", &format!("{cols}x{rows}"), output)?;
+                    write_line(&mut writer, &(seconds, "r", format!("{cols}x{rows}")), path)?;
                 }
             }
             Event::InputResult { operation_id, .. } => {
@@ -117,8 +131,6 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
     }
 
     cursor.finish()?;
-
-    finish_writer(writer, output)?;
 
     return Ok(());
 }
