@@ -6,7 +6,7 @@ use nix::{
     sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg, Termios},
     unistd::isatty,
 };
-use std::io;
+use std::io::{self, Write as _};
 
 pub(super) struct RawTerminalGuard {
     original: Option<Termios>,
@@ -39,9 +39,14 @@ impl RawTerminalGuard {
         let Some(original) = self.original.take() else {
             return Ok(());
         };
-
-        return tcsetattr(io::stdin(), SetArg::TCSANOW, &original)
+        let res = tcsetattr(io::stdin(), SetArg::TCSANOW, &original)
             .map_err(|error| return terminal_error("restore terminal mode", error.to_string()));
+
+        let mut stdout = io::stdout().lock();
+        let _ = stdout.write_all(b"\x1b[?1049l\x1b[?25h");
+        let _ = stdout.flush();
+
+        return res;
     }
 }
 
