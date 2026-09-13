@@ -32,7 +32,7 @@ test -f "$archive_root/NOTICE"
 
 "$binary" version --json | python3 -c 'import json,sys; value=json.load(sys.stdin); assert value["termtrace_version"] and value["build_revision"]'
 "$binary" doctor --require core,semantic
-"$binary" tooling client status
+"$binary" client status
 
 session="$work/install-check.termtrace"
 "$binary" record --no-input --out "$session" -- /bin/sh -c 'printf RELEASE-CHECK'

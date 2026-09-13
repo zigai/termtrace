@@ -24,7 +24,7 @@ wait_completed() {
     printf 'Timed out waiting for %s completed recordings\n' "$1" >&2
     exit 1
 }
-"$recorder" --response full tmux config --tmux "$tmux_binary" --launch-hook \
+"$recorder" -F tmux config --tmux "$tmux_binary" --launch-hook \
     --ghostty-profile off --output-root "$root/state" >"$root/tmux.conf"
 printf '%s\n' 'set-option -g default-shell /bin/sh' \
     'set-window-option -g remain-on-exit on' >>"$root/tmux.conf"
