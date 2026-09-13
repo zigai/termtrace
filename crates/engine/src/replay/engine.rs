@@ -1114,7 +1114,7 @@ fn visit_recording_states_with_engine(
         |record, state, engine| return visitor(&record, state, engine),
     )?;
 
-    if exhausted {
+    if exhausted && completed {
         let _pending = cursor.finish()?;
     }
 

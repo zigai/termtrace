@@ -315,7 +315,7 @@ pub fn observe_validated_prefix(
 
     let manifest = read_manifest(&canonical)?;
     let source = SourceIdentity::capture_candidate(&canonical)?;
-    let log = EventLogSummary::read(canonical.join("events.jsonl"))?;
+    let log = EventLogSummary::snapshot(canonical.join("events.jsonl"))?;
     let inspection = inspect_prefix_stream(
         &canonical,
         state_selector_for_session(&canonical, &point, None)?,
