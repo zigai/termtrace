@@ -793,4 +793,42 @@ mod tests {
         assert_eq!(spans[0].state_id, 7);
         assert_eq!((spans[0].start_frame, spans[0].end_frame), (0, 2));
     }
+    #[test]
+    fn semantic_video_frame_rendering_uses_full_truecolor_and_ansi256_resolution() {
+        let mut engine = GhosttyVt::new(4, 1, 0).expect("semantic engine");
+        // Cell 0: TrueColor background (123, 45, 67)
+        // Cell 1: ANSI-256 color index 196 (255, 0, 0)
+        engine.write(b"\x1b[48;2;123;45;67m \x1b[48;5;196m ");
+        let state = engine.snapshot().expect("semantic state");
+        let pixels = render_video_rgba(
+            &state,
+            state.cols,
+            state.rows,
+            SemanticRasterProfile::Direct,
+        )
+        .expect("render video rgba");
+
+        let width = usize::from(state.cols) * usize::from(SEMANTIC_CELL_WIDTH);
+        // Cell 0: (x in 0..12, y in 0..24), each pixel is RGBA(123, 45, 67, 255)
+        for y in 0..24 {
+            for x in 0..12 {
+                let offset = (y * width + x) * 4;
+                assert_eq!(pixels[offset], 123);
+                assert_eq!(pixels[offset + 1], 45);
+                assert_eq!(pixels[offset + 2], 67);
+                assert_eq!(pixels[offset + 3], 255);
+            }
+        }
+
+        // Cell 1: (x in 12..24, y in 0..24), each pixel is RGBA(255, 0, 0, 255)
+        for y in 0..24 {
+            for x in 12..24 {
+                let offset = (y * width + x) * 4;
+                assert_eq!(pixels[offset], 255);
+                assert_eq!(pixels[offset + 1], 0);
+                assert_eq!(pixels[offset + 2], 0);
+                assert_eq!(pixels[offset + 3], 255);
+            }
+        }
+    }
 }

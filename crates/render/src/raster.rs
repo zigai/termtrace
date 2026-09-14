@@ -134,6 +134,14 @@ fn rasterize_svg_pixmap(
     if profile == SemanticRasterProfile::Direct {
         let mut pixmap = Pixmap::new(size.width(), size.height())
             .ok_or_else(|| return render_error("allocate semantic PNG surface"))?;
+        if let Some(background) = opaque_background {
+            pixmap.fill(Color::from_rgba8(
+                background.r,
+                background.g,
+                background.b,
+                u8::MAX,
+            ));
+        }
         resvg::render(&tree, Transform::default(), &mut pixmap.as_mut());
 
         return Ok(pixmap);
@@ -149,6 +157,14 @@ fn rasterize_svg_pixmap(
         .ok_or_else(|| return render_error("allocate semantic PNG surface"))?;
     let mut intermediate = Pixmap::new(width, height)
         .ok_or_else(|| return render_error("allocate semantic PNG surface"))?;
+    if let Some(background) = opaque_background {
+        intermediate.fill(Color::from_rgba8(
+            background.r,
+            background.g,
+            background.b,
+            u8::MAX,
+        ));
+    }
     resvg::render(
         &tree,
         Transform::from_scale(2.0, 2.0),
@@ -279,6 +295,58 @@ mod tests {
 
         assert!(first > 0);
         assert!(last < pixmap.height().saturating_sub(1));
+    }
+
+    #[test]
+    fn prompt_and_cli_glyphs_render_cleanly() {
+        let mut terminal = GhosttyVt::new(10, 1, 0).expect("create terminal");
+        terminal.write("   ❯ ".as_bytes());
+        let mut state = terminal.snapshot().expect("snapshot terminal");
+        state.cursor.visible = false;
+        let pixmap = rasterize_state(&state);
+        let background = state.colors.background;
+        for (i, glyph) in ["", " ", "", " ", "", " ", "❯", " ", ""].iter().enumerate() {
+            if *glyph == " " {
+                continue;
+            }
+            let col = i as u32;
+            let has_pixels = (col * 12..(col + 1) * 12).any(|x| {
+                (0..24).any(|y| {
+                    pixmap.pixel(x, y).is_some_and(|p| !is_background(p, background))
+                })
+            });
+            assert!(has_pixels, "glyph {glyph} must paint non-background pixels");
+        }
+    }
+
+    #[test]
+    fn truecolor_and_ansi256_render_exact_palette_colors() {
+        let mut terminal = GhosttyVt::new(8, 2, 0).expect("create terminal");
+        // TrueColor RGB (123, 45, 67) background and ANSI-256 color index 196 (red: 255, 0, 0) background
+        terminal.write(b"\x1b[48;2;123;45;67m  \x1b[48;5;196m  ");
+        let mut state = terminal.snapshot().expect("snapshot");
+        state.cursor.visible = false;
+        let pixmap = rasterize_state(&state);
+
+        // Cells 0 and 1 have background (123, 45, 67)
+        for x in 0..24 {
+            for y in 0..24 {
+                let pixel = pixmap.pixel(x, y).expect("pixel exists");
+                assert_eq!(pixel.red(), 123);
+                assert_eq!(pixel.green(), 45);
+                assert_eq!(pixel.blue(), 67);
+            }
+        }
+
+        // Cells 2 and 3 have ANSI-256 index 196 background (255, 0, 0)
+        for x in 24..48 {
+            for y in 0..24 {
+                let pixel = pixmap.pixel(x, y).expect("pixel exists");
+                assert_eq!(pixel.red(), 255);
+                assert_eq!(pixel.green(), 0);
+                assert_eq!(pixel.blue(), 0);
+            }
+        }
     }
 
     #[test]
