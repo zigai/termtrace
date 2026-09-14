@@ -3,6 +3,7 @@
 *.rlib
 
 # Repository-local bootstrap tools and dependency caches
+/.cache/
 /.tools/
 /.zig-cache/
 /zig-cache/
