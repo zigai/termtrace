@@ -915,6 +915,7 @@ mod action_response_tests {
         action_applied_response, action_error_response, action_observation, action_projection,
     };
     use crate::cli::control::args::SendArgs;
+    use std::{path::PathBuf, time::Duration};
     use termtrace_model::{
         protocol::control::{ControlData, ControlErrorDetails},
         terminal::observation::{ActorBoundaries, CaptureQuality},
@@ -1104,7 +1105,7 @@ mod action_response_tests {
     #[test]
     fn action_projection_selects_lightweight_detail_by_default() {
         let args = SendArgs {
-            session: std::path::PathBuf::from("test-session"),
+            session: PathBuf::from("test-session"),
             atoms: Vec::new(),
             stdin: false,
             text: None,
@@ -1115,8 +1116,8 @@ mod action_response_tests {
             until_screen: Some("ready".to_owned()),
             until_screen_regex: None,
             until_idle: None,
-            timeout: std::time::Duration::from_secs(30),
-            pace: std::time::Duration::ZERO,
+            timeout: Duration::from_secs(30),
+            pace: Duration::ZERO,
             intent: None,
             if_state: None,
             request_id: None,
@@ -1130,7 +1131,7 @@ mod action_response_tests {
     #[test]
     fn action_projection_preserves_full_rich_spans_when_verbose_requested() {
         let args = SendArgs {
-            session: std::path::PathBuf::from("test-session"),
+            session: PathBuf::from("test-session"),
             atoms: Vec::new(),
             stdin: false,
             text: None,
@@ -1141,8 +1142,8 @@ mod action_response_tests {
             until_screen: Some("ready".to_owned()),
             until_screen_regex: None,
             until_idle: None,
-            timeout: std::time::Duration::from_secs(30),
-            pace: std::time::Duration::ZERO,
+            timeout: Duration::from_secs(30),
+            pace: Duration::ZERO,
             intent: None,
             if_state: None,
             request_id: None,

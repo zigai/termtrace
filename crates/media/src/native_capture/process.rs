@@ -10,6 +10,7 @@ use nix::{
 };
 use serde::de::DeserializeOwned;
 use std::{
+    env,
     fs::{self, OpenOptions},
     io::{ErrorKind, Read, Write as _},
     os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
@@ -159,9 +160,9 @@ pub(super) fn spawn_xvfb(
     };
 
     let effective_dpi = dpi.or_else(|| {
-        std::env::var("TERMTRACE_DPI")
+        return env::var("TERMTRACE_DPI")
             .ok()
-            .and_then(|v| v.parse::<u32>().ok())
+            .and_then(|v| return v.parse::<u32>().ok());
     });
 
     let mut args = vec![
@@ -231,10 +232,10 @@ pub(super) fn spawn_geometry_probe(
             .env("GDK_SCALE", scaling.gdk_scale.to_string())
             .env("GDK_DPI_SCALE", format!("{}", scaling.gdk_dpi_scale));
     } else {
-        if let Ok(scale) = std::env::var("GDK_SCALE") {
+        if let Ok(scale) = env::var("GDK_SCALE") {
             command.env("GDK_SCALE", scale);
         }
-        if let Ok(dpi_scale) = std::env::var("GDK_DPI_SCALE") {
+        if let Ok(dpi_scale) = env::var("GDK_DPI_SCALE") {
             command.env("GDK_DPI_SCALE", dpi_scale);
         }
     }
@@ -326,10 +327,10 @@ pub(super) fn spawn_ghostty(
             .env("GDK_SCALE", scaling.gdk_scale.to_string())
             .env("GDK_DPI_SCALE", format!("{}", scaling.gdk_dpi_scale));
     } else {
-        if let Ok(scale) = std::env::var("GDK_SCALE") {
+        if let Ok(scale) = env::var("GDK_SCALE") {
             command.env("GDK_SCALE", scale);
         }
-        if let Ok(dpi_scale) = std::env::var("GDK_DPI_SCALE") {
+        if let Ok(dpi_scale) = env::var("GDK_DPI_SCALE") {
             command.env("GDK_DPI_SCALE", dpi_scale);
         }
     }

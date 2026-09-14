@@ -76,7 +76,9 @@ struct SemanticFontFace {
 
 impl SemanticFontFace {
     fn supports_grapheme(&self, grapheme: &str) -> bool {
-        let mut meaningful = grapheme.chars().filter(|c| !is_variation_selector(*c));
+        let mut meaningful = grapheme
+            .chars()
+            .filter(|c| return !is_variation_selector(*c));
         let Some(first) = meaningful.next() else {
             return false;
         };

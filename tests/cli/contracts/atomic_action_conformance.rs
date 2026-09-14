@@ -494,7 +494,7 @@ fn frame_contains(frame: &ScreenFrame, expected: &str) -> bool {
         ScreenFrameData::Cells { rows } => {
             return rows.iter().any(|row| return row.text.contains(expected));
         }
-        ScreenFrameData::None => false,
+        ScreenFrameData::None => return false,
     }
 }
 

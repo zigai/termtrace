@@ -5,8 +5,10 @@ use super::{
 use crate::{timeline::resolve_source_range, Error, Result};
 use serde::Serialize;
 use std::{
+    env,
     fmt::Write as _,
-    io::{BufRead, BufReader, Write},
+    fs::File,
+    io::{BufRead, BufReader, BufWriter, Write},
     path::Path,
 };
 use termtrace_evidence::{
@@ -29,6 +31,7 @@ use termtrace_model::{
     value::ByteString,
 };
 use uuid::Uuid;
+use zstd::stream::write::Encoder as ZstdEncoder;
 
 mod control;
 mod rank;
@@ -174,17 +177,17 @@ pub fn index_session_with_options(
     let staging = session_directory.join(format!(".derived.{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
     let sampling_stride_ns = options.sampling_stride_ns.or_else(|| {
-        std::env::var("TERMTRACE_INDEX_SAMPLING_STRIDE_NS")
+        return env::var("TERMTRACE_INDEX_SAMPLING_STRIDE_NS")
             .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .filter(|&v| v > 0)
+            .and_then(|v| return v.parse::<u64>().ok())
+            .filter(|&v| return v > 0)
             .or_else(|| {
-                std::env::var("TERMTRACE_INDEX_FPS")
+                return env::var("TERMTRACE_INDEX_FPS")
                     .ok()
-                    .and_then(|v| v.parse::<u32>().ok())
-                    .filter(|&fps| fps > 0)
-                    .map(|fps| 1_000_000_000_u64 / u64::from(fps))
-            })
+                    .and_then(|v| return v.parse::<u32>().ok())
+                    .filter(|&fps| return fps > 0)
+                    .map(|fps| return 1_000_000_000_u64 / u64::from(fps));
+            });
     });
     let result = write_source_index(
         &staging,
@@ -489,8 +492,8 @@ fn write_source_index(
                                  state: &SemanticState,
                                  checkpoint: bool,
                                  ranks: &mut TimelineRanks,
-                                 states: &mut zstd::stream::write::Encoder<std::fs::File>,
-                                 index: &mut std::io::BufWriter<std::fs::File>,
+                                 states: &mut ZstdEncoder<File>,
+                                 index: &mut BufWriter<File>,
                                  retained_state_count: &mut u64,
                                  final_retained_state_hash: &mut Option<String>,
                                  previous_retained_state: &mut Option<SemanticState>,

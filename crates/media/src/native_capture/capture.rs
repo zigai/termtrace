@@ -16,7 +16,9 @@ use super::{
     validate_visual_manifest, Error, Result,
 };
 use crate::error::finish_with_cleanup;
-use std::{fs, path::Path, process::Command, sync::atomic::AtomicBool, thread, time::Duration};
+use std::{
+    env, fs, path::Path, process::Command, str, sync::atomic::AtomicBool, thread, time::Duration,
+};
 use termtrace_engine::{replay::visit_session_states_while, timeline::resolve_source_range};
 use termtrace_evidence::{
     artifact::{
@@ -33,7 +35,7 @@ use termtrace_model::{
         visual_directory_name_for, CaptureKind, CaptureOptions, CaptureOutcome, VisualManifest,
         GHOSTTY_EFFECTIVE_CONFIG_NAME, VISUAL_MANIFEST_VERSION,
     },
-    execution::session::GHOSTTY_REPLAY_PROFILE_NAME,
+    execution::session::{GeometrySource, SessionManifest, GHOSTTY_REPLAY_PROFILE_NAME},
     terminal::replay::SourceRange,
 };
 
@@ -659,7 +661,7 @@ impl DisplayScaling {
     #[must_use]
     pub fn new(scale: f64, dpi: Option<u32>) -> Self {
         let base_dpi = 96.0;
-        let effective_dpi = dpi.unwrap_or_else(|| (base_dpi * scale).round() as u32);
+        let effective_dpi = dpi.unwrap_or_else(|| return (base_dpi * scale).round() as u32);
         let effective_scale = if dpi.is_some() && (scale - 1.0).abs() < f64::EPSILON {
             effective_dpi as f64 / base_dpi
         } else {
@@ -670,25 +672,25 @@ impl DisplayScaling {
 
         let gdk_dpi_scale = effective_scale / (gdk_scale as f64);
 
-        Self {
+        return Self {
             dpi: effective_dpi,
             scale: effective_scale,
             gdk_scale,
             gdk_dpi_scale,
-        }
+        };
     }
 
     /// Calculate display scaling from a given DPI value.
     #[must_use]
     pub fn from_dpi(dpi: u32) -> Self {
         let scale = dpi as f64 / 96.0;
-        Self::new(scale, Some(dpi))
+        return Self::new(scale, Some(dpi));
     }
 
     /// Calculate display scaling from a given scale factor.
     #[must_use]
     pub fn from_scale(scale: f64) -> Self {
-        Self::new(scale, None)
+        return Self::new(scale, None);
     }
 }
 
@@ -696,7 +698,7 @@ impl DisplayScaling {
 /// environment variables, or recorded session provenance/geometry heuristics.
 pub fn resolve_display_scaling(
     options: &CaptureOptions,
-    manifest: Option<&termtrace_model::execution::session::SessionManifest>,
+    manifest: Option<&SessionManifest>,
 ) -> DisplayScaling {
     // 1. Explicit options
     if let Some(dpi) = options.dpi {
@@ -707,54 +709,49 @@ pub fn resolve_display_scaling(
     }
 
     // 2. Explicit environment variables
-    if let Ok(dpi_str) = std::env::var("TERMTRACE_DPI") {
-        if let Ok(dpi) = dpi_str.parse::<u32>() {
-            if dpi > 0 {
-                return DisplayScaling::from_dpi(dpi);
-            }
-        }
+    if let Ok(dpi_str) = env::var("TERMTRACE_DPI")
+        && let Ok(dpi) = dpi_str.parse::<u32>()
+        && dpi > 0
+    {
+        return DisplayScaling::from_dpi(dpi);
     }
     if let Ok(scale_str) =
-        std::env::var("TERMTRACE_DISPLAY_SCALE").or_else(|_| std::env::var("TERMTRACE_SCALE"))
+        env::var("TERMTRACE_DISPLAY_SCALE").or_else(|_| return env::var("TERMTRACE_SCALE"))
+        && let Ok(scale) = scale_str.parse::<f64>()
+        && scale > 0.0
     {
-        if let Ok(scale) = scale_str.parse::<f64>() {
-            if scale > 0.0 {
-                return DisplayScaling::from_scale(scale);
-            }
-        }
+        return DisplayScaling::from_scale(scale);
     }
-    if let Ok(gdk_scale_str) = std::env::var("GDK_SCALE") {
-        if let Ok(gdk_scale) = gdk_scale_str.parse::<u32>() {
-            let dpi_scale = std::env::var("GDK_DPI_SCALE")
-                .ok()
-                .and_then(|s| s.parse::<f64>().ok())
-                .unwrap_or(1.0);
-            let total_scale = (gdk_scale as f64) * dpi_scale;
-            return DisplayScaling::new(total_scale, None);
-        }
+    if let Ok(gdk_scale_str) = env::var("GDK_SCALE")
+        && let Ok(gdk_scale) = gdk_scale_str.parse::<u32>()
+    {
+        let dpi_scale = env::var("GDK_DPI_SCALE")
+            .ok()
+            .and_then(|s| return s.parse::<f64>().ok())
+            .unwrap_or(1.0);
+        let total_scale = (gdk_scale as f64) * dpi_scale;
+        return DisplayScaling::new(total_scale, None);
     }
 
     // 3. Manifest provenance environment detection
     if let Some(manifest) = manifest {
-        if let Some(env_scale) = manifest.execution_provenance.environment.get("GDK_SCALE") {
-            if let Some(scale_str) = env_scale
+        if let Some(env_scale) = manifest.execution_provenance.environment.get("GDK_SCALE")
+            && let Some(scale_str) = env_scale
                 .value
                 .as_ref()
-                .and_then(|b| std::str::from_utf8(b.as_bytes()).ok())
-            {
-                if let Ok(gdk_scale) = scale_str.parse::<u32>() {
-                    let dpi_scale = manifest
-                        .execution_provenance
-                        .environment
-                        .get("GDK_DPI_SCALE")
-                        .and_then(|v| v.value.as_ref())
-                        .and_then(|b| std::str::from_utf8(b.as_bytes()).ok())
-                        .and_then(|s| s.parse::<f64>().ok())
-                        .unwrap_or(1.0);
-                    let total_scale = (gdk_scale as f64) * dpi_scale;
-                    return DisplayScaling::new(total_scale, None);
-                }
-            }
+                .and_then(|b| return str::from_utf8(b.as_bytes()).ok())
+            && let Ok(gdk_scale) = scale_str.parse::<u32>()
+        {
+            let dpi_scale = manifest
+                .execution_provenance
+                .environment
+                .get("GDK_DPI_SCALE")
+                .and_then(|v| return v.value.as_ref())
+                .and_then(|b| return str::from_utf8(b.as_bytes()).ok())
+                .and_then(|s| return s.parse::<f64>().ok())
+                .unwrap_or(1.0);
+            let total_scale = (gdk_scale as f64) * dpi_scale;
+            return DisplayScaling::new(total_scale, None);
         }
         // 4. Geometry-based high-DPI detection from recorded cell dimensions
         if manifest.geometry.cols > 0 && manifest.geometry.rows > 0 {
@@ -767,16 +764,14 @@ pub fn resolve_display_scaling(
                 return DisplayScaling::from_scale(1.5);
             }
         }
-        if manifest.geometry_provenance.source
-            == termtrace_model::execution::session::GeometrySource::GhosttyFit
+        if manifest.geometry_provenance.source == GeometrySource::GhosttyFit
+            && let Some(target) = manifest.geometry_provenance.capture_target
         {
-            if let Some(target) = manifest.geometry_provenance.capture_target {
-                if target.width >= 3840 || target.height >= 2160 {
-                    return DisplayScaling::from_scale(2.0);
-                }
-                if target.width >= 2560 || target.height >= 1440 {
-                    return DisplayScaling::from_scale(1.5);
-                }
+            if target.width >= 3840 || target.height >= 2160 {
+                return DisplayScaling::from_scale(2.0);
+            }
+            if target.width >= 2560 || target.height >= 1440 {
+                return DisplayScaling::from_scale(1.5);
             }
         }
     }

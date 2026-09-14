@@ -119,19 +119,19 @@ fn resolve_cell<'cell>(
     };
 
     let mut foreground = cell.resolved_foreground.unwrap_or_else(|| {
-        resolve_color(
+        return resolve_color(
             cell.style.foreground,
             state.colors.foreground,
             &state.colors.palette,
-        )
+        );
     });
 
     let mut background = cell.resolved_background.unwrap_or_else(|| {
-        resolve_color(
+        return resolve_color(
             cell.style.background,
             state.colors.background,
             &state.colors.palette,
-        )
+        );
     });
 
     if cell.style.inverse {
@@ -497,73 +497,88 @@ pub(crate) fn resolve_color(spec: ColorSpec, default: Rgb, palette: &[Rgb]) -> R
 #[must_use]
 pub(crate) fn default_ansi256_color(index: u8) -> Rgb {
     match index {
-        0..=15 => {
-            const ANSI16: [Rgb; 16] = [
-                Rgb { r: 0, g: 0, b: 0 },   // 0: black
-                Rgb { r: 205, g: 0, b: 0 }, // 1: red
-                Rgb { r: 0, g: 205, b: 0 }, // 2: green
-                Rgb {
-                    r: 205,
-                    g: 205,
-                    b: 0,
-                }, // 3: yellow
-                Rgb { r: 0, g: 0, b: 238 }, // 4: blue
-                Rgb {
-                    r: 205,
-                    g: 0,
-                    b: 205,
-                }, // 5: magenta
-                Rgb {
-                    r: 0,
-                    g: 205,
-                    b: 205,
-                }, // 6: cyan
-                Rgb {
-                    r: 229,
-                    g: 229,
-                    b: 229,
-                }, // 7: white
-                Rgb {
-                    r: 127,
-                    g: 127,
-                    b: 127,
-                }, // 8: bright black
-                Rgb { r: 255, g: 0, b: 0 }, // 9: bright red
-                Rgb { r: 0, g: 255, b: 0 }, // 10: bright green
-                Rgb {
-                    r: 255,
-                    g: 255,
-                    b: 0,
-                }, // 11: bright yellow
-                Rgb {
-                    r: 92,
-                    g: 92,
-                    b: 255,
-                }, // 12: bright blue
-                Rgb {
-                    r: 255,
-                    g: 0,
-                    b: 255,
-                }, // 13: bright magenta
-                Rgb {
-                    r: 0,
-                    g: 255,
-                    b: 255,
-                }, // 14: bright cyan
-                Rgb {
-                    r: 255,
-                    g: 255,
-                    b: 255,
-                }, // 15: bright white
-            ];
-            return ANSI16[usize::from(index)];
+        0 => return Rgb { r: 0, g: 0, b: 0 },
+        1 => return Rgb { r: 205, g: 0, b: 0 },
+        2 => return Rgb { r: 0, g: 205, b: 0 },
+        3 => {
+            return Rgb {
+                r: 205,
+                g: 205,
+                b: 0,
+            };
+        }
+        4 => return Rgb { r: 0, g: 0, b: 238 },
+        5 => {
+            return Rgb {
+                r: 205,
+                g: 0,
+                b: 205,
+            };
+        }
+        6 => {
+            return Rgb {
+                r: 0,
+                g: 205,
+                b: 205,
+            };
+        }
+        7 => {
+            return Rgb {
+                r: 229,
+                g: 229,
+                b: 229,
+            };
+        }
+        8 => {
+            return Rgb {
+                r: 127,
+                g: 127,
+                b: 127,
+            };
+        }
+        9 => return Rgb { r: 255, g: 0, b: 0 },
+        10 => return Rgb { r: 0, g: 255, b: 0 },
+        11 => {
+            return Rgb {
+                r: 255,
+                g: 255,
+                b: 0,
+            };
+        }
+        12 => {
+            return Rgb {
+                r: 92,
+                g: 92,
+                b: 255,
+            };
+        }
+        13 => {
+            return Rgb {
+                r: 255,
+                g: 0,
+                b: 255,
+            };
+        }
+        14 => {
+            return Rgb {
+                r: 0,
+                g: 255,
+                b: 255,
+            };
+        }
+        15 => {
+            return Rgb {
+                r: 255,
+                g: 255,
+                b: 255,
+            };
         }
         16..=231 => {
             let i = index - 16;
             let r = i / 36;
             let g = (i / 6) % 6;
             let b = i % 6;
-            let conv = |v: u8| if v == 0 { 0 } else { v * 40 + 55 };
+            let conv = |v: u8| if v == 0 { return 0 } else { return v * 40 + 55 };
             return Rgb {
                 r: conv(r),
                 g: conv(g),

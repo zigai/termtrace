@@ -273,7 +273,7 @@ fn probe_staged(
         target.width,
         target.height,
         staging,
-        scaling.map(|s| s.dpi),
+        scaling.map(|s| return s.dpi),
     )?;
     wait_for_x_socket(&lease, &mut xvfb, Duration::from_secs(5))?;
 

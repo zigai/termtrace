@@ -1176,17 +1176,21 @@ fn replay_records<'record>(
         }
 
         if let Some(stride_ns) = sampling_stride_ns {
-            if current_stride_end_ns.is_none() {
-                current_stride_end_ns = Some(record.monotonic_ns.saturating_add(stride_ns));
-            } else if record.monotonic_ns >= current_stride_end_ns.unwrap() {
-                if let Some((seq, offset, time_ns)) = pending_sampled_capture.take() {
-                    continue_replay =
-                        builder.capture(Some(seq), Some(offset), time_ns, &mut state_sink)?;
-                    if !continue_replay {
-                        break 'events;
-                    }
+            match current_stride_end_ns {
+                None => {
+                    current_stride_end_ns = Some(record.monotonic_ns.saturating_add(stride_ns));
                 }
-                current_stride_end_ns = Some(record.monotonic_ns.saturating_add(stride_ns));
+                Some(stride_end_ns) if record.monotonic_ns >= stride_end_ns => {
+                    if let Some((seq, offset, time_ns)) = pending_sampled_capture.take() {
+                        continue_replay =
+                            builder.capture(Some(seq), Some(offset), time_ns, &mut state_sink)?;
+                        if !continue_replay {
+                            break 'events;
+                        }
+                    }
+                    current_stride_end_ns = Some(record.monotonic_ns.saturating_add(stride_ns));
+                }
+                Some(_) => {}
             }
         }
         let seed_byte_start = source_byte_start(&record, seed_record, &mut resize_intents)?;
@@ -1225,7 +1229,7 @@ fn replay_records<'record>(
                 builder.budget.charge_output(bytes.len())?;
                 if sampling_stride_ns.is_some() {
                     for chunk in bytes.chunks(4_096) {
-                        if cancelled.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+                        if cancelled.is_some_and(|flag| return flag.load(Ordering::Relaxed)) {
                             break 'events;
                         }
 

@@ -1,4 +1,5 @@
 use super::*;
+use std::time::{Duration, Instant};
 use termtrace_evidence::event_log::{EventLogWriter, SessionClock};
 use termtrace_model::execution::event::{Event, EventLogHeader};
 
@@ -214,7 +215,7 @@ fn video_stride_samples_intermediate_flutter_into_compact_index() {
         fs_err::read_to_string(video_dir.join("state-index.jsonl")).expect("state index");
     let entries: Vec<StateIndexEntry> = video_index_content
         .lines()
-        .map(|line| serde_json::from_str(line).expect("entry"))
+        .map(|line| return serde_json::from_str(line).expect("entry"))
         .collect();
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].state_id, 0);
@@ -312,7 +313,7 @@ fn high_resolution_canvas_video_stride_completes_in_seconds() {
     }
     drop(writer);
 
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let outcome = index_session_with_options(
         &session,
         IndexOptions {
@@ -325,7 +326,7 @@ fn high_resolution_canvas_video_stride_completes_in_seconds() {
 
     println!("4K high resolution 300x100 indexing completed in: {elapsed:?}");
     assert!(
-        elapsed < std::time::Duration::from_secs(5),
+        elapsed < Duration::from_secs(5),
         "indexing 4K session with video stride took too long: {elapsed:?}"
     );
     assert_eq!(outcome.state_selection, StateSelection::All);
