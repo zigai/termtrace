@@ -5,12 +5,16 @@ use crate::font::semantic_font_set;
 use crate::semantic_svg::render_svg_scene;
 use resvg::tiny_skia::{Color, FilterQuality, Pixmap, PixmapPaint, Transform};
 use resvg::usvg::{Options, Tree};
-use std::{io::Write, sync::Arc};
+use std::{cell::RefCell, io::Write, sync::Arc};
 use termtrace_model::artifact::save::SemanticRasterProfile;
 use termtrace_model::terminal::state::{
     Rgb, SemanticState, MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS,
 };
 use termtrace_terminal::supported_geometry_cell_count;
+
+thread_local! {
+    static INTERMEDIATE_SURFACE: RefCell<Option<Pixmap>> = const { RefCell::new(None) };
+}
 
 /// Stable semantic PNG rasterizer identity.
 pub const SEMANTIC_PNG_RENDERER: &str = "termtrace-semantic-png-resvg-v4";
@@ -155,8 +159,20 @@ fn rasterize_svg_pixmap(
         .height()
         .checked_mul(2)
         .ok_or_else(|| return render_error("allocate semantic PNG surface"))?;
-    let mut intermediate = Pixmap::new(width, height)
+    let mut intermediate = INTERMEDIATE_SURFACE
+        .with(|cell| {
+            let mut slot = cell.borrow_mut();
+            if let Some(surface) = slot.take()
+                && surface.width() == width
+                && surface.height() == height
+            {
+                return Some(surface);
+            }
+
+            return Pixmap::new(width, height);
+        })
         .ok_or_else(|| return render_error("allocate semantic PNG surface"))?;
+
     if let Some(background) = opaque_background {
         intermediate.fill(Color::from_rgba8(
             background.r,
@@ -164,7 +180,10 @@ fn rasterize_svg_pixmap(
             background.b,
             u8::MAX,
         ));
+    } else {
+        intermediate.fill(Color::TRANSPARENT);
     }
+
     resvg::render(
         &tree,
         Transform::from_scale(2.0, 2.0),
@@ -196,9 +215,12 @@ fn rasterize_svg_pixmap(
         None,
     );
 
+    INTERMEDIATE_SURFACE.with(|cell| {
+        *cell.borrow_mut() = Some(intermediate);
+    });
+
     return Ok(target);
 }
-
 pub(super) fn validate_geometry(cols: u16, rows: u16, label: &str) -> Result<()> {
     if supported_geometry_cell_count(cols, rows).is_none() {
         return Err(render_error(format!(
@@ -314,11 +336,11 @@ mod tests {
             }
             let col = i as u32;
             let has_pixels = (col * 12..(col + 1) * 12).any(|x| {
-                (0..24).any(|y| {
-                    pixmap
+                return (0..24).any(|y| {
+                    return pixmap
                         .pixel(x, y)
-                        .is_some_and(|p| !is_background(p, background))
-                })
+                        .is_some_and(|p| return !is_background(p, background));
+                });
             });
             assert!(has_pixels, "glyph {glyph} must paint non-background pixels");
         }
