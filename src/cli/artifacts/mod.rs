@@ -34,6 +34,7 @@ use std::{
     time::Duration,
 };
 use termtrace_engine::{
+    replay::index_session,
     timeline::{resolve_session_source_selection, SourceRange},
     Error,
 };
@@ -230,16 +231,7 @@ pub(super) fn run_video_facade(
             ));
         }
 
-        if out.exists() {
-            return Err(Error::ArtifactExists { path: out.clone() }).into_diagnostic();
-        }
-
-        let sidecar = video_sidecar_path(out);
-        if sidecar.exists() {
-            return Err(Error::ArtifactExists { path: sidecar }).into_diagnostic();
-        }
-
-        Some(sidecar)
+        Some(video_sidecar_path(out))
     } else {
         None
     };
@@ -257,18 +249,52 @@ pub(super) fn run_video_facade(
         ));
     }
 
-    if arguments.renderer == VideoSourceArg::Native
-        && !session.join("visual/manifest.json").is_file()
-    {
-        return Err(miette::miette!(
-            "native renderer requires a verified capture manifest; run `termtrace artifact capture --session {}` after checking `termtrace doctor --require native-video --explain`, or explicitly choose `--renderer semantic`",
-            session.display()
-        ));
-    }
-
     let preset_config = VideoPresetConfig::from_preset(arguments.preset);
     let requested_fps = arguments.fps;
     let provisional_fps = requested_fps.unwrap_or(preset_config.fps);
+
+    if arguments.renderer == VideoSourceArg::Native
+        && !session.join("visual/manifest.json").is_file()
+    {
+        require_cli_capability(NATIVE_VIDEO_CAPABILITY)?;
+
+        match index_session(&session) {
+            Ok(_) | Err(Error::ArtifactExists { .. }) => {}
+            Err(error) => return Err(error).into_diagnostic(),
+        }
+
+        let visual_dir = session.join(termtrace_media::native_capture::VISUAL_DIRECTORY);
+        if visual_dir.exists() && !visual_dir.join("manifest.json").is_file() {
+            let _ = fs_err::remove_dir_all(&visual_dir);
+        }
+
+        write_progress(
+            response,
+            format_args!("Capturing native video for {}...", session.display()),
+        );
+
+        let helper = env::current_exe().into_diagnostic()?;
+        let (target, geometry_solver) =
+            native_capture_target(&helper, &session, arguments.resolution).into_diagnostic()?;
+
+        capture(
+            &helper,
+            &CaptureOptions {
+                session_directory: session.clone(),
+                width: target.width,
+                height: target.height,
+                fps: provisional_fps,
+                start_monotonic_ns: None,
+                end_monotonic_ns: None,
+                state_selection: StateSelection::All,
+                geometry_solver,
+                kind: CaptureKind::Video,
+                destination: None,
+            },
+        )
+        .into_diagnostic()?;
+    }
+
     let raster_profile = preset_config.raster_profile(arguments.semantic_raster_profile);
     let source = match arguments.renderer {
         VideoSourceArg::Native => PresentationSourceRequest::Native,
@@ -404,14 +430,46 @@ pub(super) fn run_video_facade(
     );
 
     let outcome = export_presentation(&plan, &sidecar).into_diagnostic()?;
-    fs_err::hard_link(&outcome.video, &output)
-        .map_err(|source| {
-            return Error::Filesystem {
+    if output.exists() || output.symlink_metadata().is_ok() {
+        if output.is_dir() {
+            fs_err::remove_dir_all(&output)
+                .map_err(|source| {
+                    return Error::Filesystem {
+                        path: output.clone(),
+                        source,
+                    };
+                })
+                .into_diagnostic()?;
+        } else {
+            fs_err::remove_file(&output)
+                .map_err(|source| {
+                    return Error::Filesystem {
+                        path: output.clone(),
+                        source,
+                    };
+                })
+                .into_diagnostic()?;
+        }
+    }
+
+    if let Err(source) = fs_err::hard_link(&outcome.video, &output) {
+        if source.kind() == io::ErrorKind::CrossesDevices || source.raw_os_error() == Some(18) {
+            fs_err::copy(&outcome.video, &output)
+                .map_err(|source| {
+                    return Error::Filesystem {
+                        path: output.clone(),
+                        source,
+                    };
+                })
+                .into_diagnostic()?;
+        } else {
+            return Err(Error::Filesystem {
                 path: output.clone(),
                 source,
-            };
-        })
-        .into_diagnostic()?;
+            })
+            .into_diagnostic();
+        }
+    }
 
     write_progress(
         response,

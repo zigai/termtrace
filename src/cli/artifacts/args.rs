@@ -327,7 +327,7 @@ pub(in crate::cli) enum VideoCursorStyleArg {
 pub(in crate::cli) struct VideoFacadeArgs {
     /// Completed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
-    /// New MP4 output file; a manifested `.termtrace` sidecar is retained.
+    /// MP4 output file; a manifested `.termtrace` sidecar is retained.
     #[arg(short, long, value_parser = parse_video_output_path)]
     pub(in crate::cli) out: Option<PathBuf>,
     /// Resolve and print the presentation plan without rendering.
