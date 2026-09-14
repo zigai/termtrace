@@ -2,8 +2,8 @@
 
 use crate::error::Result;
 use crate::font::{
-    semantic_font_set, SemanticFontSet, SEMANTIC_RASTER_SYMBOLS_FONT_FAMILY,
-    SEMANTIC_RASTER_TEXT_FONT_FAMILY, SEMANTIC_SYMBOLS_FONT_FAMILY, SEMANTIC_TEXT_FONT_FAMILY,
+    semantic_font_set, SemanticFontSet, SEMANTIC_RASTER_SYMBOLS_FONT_STACK,
+    SEMANTIC_RASTER_TEXT_FONT_STACK, SEMANTIC_SYMBOLS_FONT_STACK, SEMANTIC_TEXT_FONT_STACK,
 };
 use std::fmt::{self, Display, Formatter, Write};
 use std::mem;
@@ -118,17 +118,21 @@ fn resolve_cell<'cell>(
         WideKind::SpacerTail | WideKind::SpacerHead => return None,
     };
 
-    let mut foreground = resolve_color(
-        cell.style.foreground,
-        state.colors.foreground,
-        &state.colors.palette,
-    );
+    let mut foreground = cell.resolved_foreground.unwrap_or_else(|| {
+        resolve_color(
+            cell.style.foreground,
+            state.colors.foreground,
+            &state.colors.palette,
+        )
+    });
 
-    let mut background = resolve_color(
-        cell.style.background,
-        state.colors.background,
-        &state.colors.palette,
-    );
+    let mut background = cell.resolved_background.unwrap_or_else(|| {
+        resolve_color(
+            cell.style.background,
+            state.colors.background,
+            &state.colors.palette,
+        )
+    });
 
     if cell.style.inverse {
         mem::swap(&mut foreground, &mut background);
@@ -394,7 +398,9 @@ fn is_terminal_graphic(grapheme: &str) -> bool {
         return false;
     }
     return ('\u{2500}'..='\u{257f}').contains(&character)
-        || ('\u{2580}'..='\u{259f}').contains(&character);
+        || ('\u{2580}'..='\u{259f}').contains(&character)
+        || ('\u{e0a0}'..='\u{e0a3}').contains(&character)
+        || ('\u{e0b0}'..='\u{e0d4}').contains(&character);
 }
 
 pub(super) fn write_font_faces(svg: &mut String, font_set: &SemanticFontSet) {
@@ -420,9 +426,15 @@ pub(super) fn select_font_role(
     if font_set.supports_grapheme(SemanticFontRole::SymbolsFallback, grapheme) {
         return SemanticFontRole::SymbolsFallback;
     }
+
+    if primary != SemanticFontRole::Regular
+        && font_set.supports_grapheme(SemanticFontRole::Regular, grapheme)
+    {
+        return SemanticFontRole::Regular;
+    }
+
     return primary;
 }
-
 fn font_geometry(role: SemanticFontRole) -> (u16, u16) {
     if role == SemanticFontRole::SymbolsFallback {
         return (SEMANTIC_SYMBOLS_FONT_SIZE, SEMANTIC_SYMBOLS_BASELINE);
@@ -430,50 +442,102 @@ fn font_geometry(role: SemanticFontRole) -> (u16, u16) {
     return (SEMANTIC_FONT_SIZE, SEMANTIC_TEXT_BASELINE);
 }
 
+
 fn font_attributes(
     role: SemanticFontRole,
     embedded: bool,
 ) -> (&'static str, &'static str, &'static str) {
     match (role, embedded) {
         (SemanticFontRole::Regular, true) => {
-            return (SEMANTIC_TEXT_FONT_FAMILY, "normal", "normal");
+            return (SEMANTIC_TEXT_FONT_STACK, "normal", "normal");
         }
         (SemanticFontRole::Bold, true) => {
-            return (SEMANTIC_TEXT_FONT_FAMILY, "bold", "normal");
+            return (SEMANTIC_TEXT_FONT_STACK, "bold", "normal");
         }
         (SemanticFontRole::Italic, true) => {
-            return (SEMANTIC_TEXT_FONT_FAMILY, "normal", "italic");
+            return (SEMANTIC_TEXT_FONT_STACK, "normal", "italic");
         }
         (SemanticFontRole::BoldItalic, true) => {
-            return (SEMANTIC_TEXT_FONT_FAMILY, "bold", "italic");
+            return (SEMANTIC_TEXT_FONT_STACK, "bold", "italic");
         }
         (SemanticFontRole::SymbolsFallback, true) => {
-            return (SEMANTIC_SYMBOLS_FONT_FAMILY, "normal", "normal");
+            return (SEMANTIC_SYMBOLS_FONT_STACK, "normal", "normal");
         }
         (SemanticFontRole::Regular, false) => {
-            return (SEMANTIC_RASTER_TEXT_FONT_FAMILY, "normal", "normal");
+            return (SEMANTIC_RASTER_TEXT_FONT_STACK, "normal", "normal");
         }
         (SemanticFontRole::Bold, false) => {
-            return (SEMANTIC_RASTER_TEXT_FONT_FAMILY, "bold", "normal");
+            return (SEMANTIC_RASTER_TEXT_FONT_STACK, "bold", "normal");
         }
         (SemanticFontRole::Italic, false) => {
-            return (SEMANTIC_RASTER_TEXT_FONT_FAMILY, "normal", "italic");
+            return (SEMANTIC_RASTER_TEXT_FONT_STACK, "normal", "italic");
         }
         (SemanticFontRole::BoldItalic, false) => {
-            return (SEMANTIC_RASTER_TEXT_FONT_FAMILY, "bold", "italic");
+            return (SEMANTIC_RASTER_TEXT_FONT_STACK, "bold", "italic");
         }
         (SemanticFontRole::SymbolsFallback, false) => {
-            return (SEMANTIC_RASTER_SYMBOLS_FONT_FAMILY, "normal", "normal");
+            return (SEMANTIC_RASTER_SYMBOLS_FONT_STACK, "normal", "normal");
         }
     }
 }
 
-fn resolve_color(spec: ColorSpec, default: Rgb, palette: &[Rgb]) -> Rgb {
+pub(crate) fn resolve_color(spec: ColorSpec, default: Rgb, palette: &[Rgb]) -> Rgb {
     match spec {
         ColorSpec::None => return default,
         ColorSpec::Rgb(color) => return color,
         ColorSpec::Palette(index) => {
-            return palette.get(usize::from(index)).copied().unwrap_or(default);
+            if let Some(color) = palette.get(usize::from(index)).copied() {
+                return color;
+            }
+            return default_ansi256_color(index);
+        }
+    }
+}
+
+/// Standard xterm / ANSI-256 color lookup when the recorded palette does not contain the requested index.
+#[must_use]
+pub(crate) fn default_ansi256_color(index: u8) -> Rgb {
+    match index {
+        0..=15 => {
+            const ANSI16: [Rgb; 16] = [
+                Rgb { r: 0, g: 0, b: 0 },       // 0: black
+                Rgb { r: 205, g: 0, b: 0 },     // 1: red
+                Rgb { r: 0, g: 205, b: 0 },     // 2: green
+                Rgb { r: 205, g: 205, b: 0 },   // 3: yellow
+                Rgb { r: 0, g: 0, b: 238 },     // 4: blue
+                Rgb { r: 205, g: 0, b: 205 },   // 5: magenta
+                Rgb { r: 0, g: 205, b: 205 },   // 6: cyan
+                Rgb { r: 229, g: 229, b: 229 }, // 7: white
+                Rgb { r: 127, g: 127, b: 127 }, // 8: bright black
+                Rgb { r: 255, g: 0, b: 0 },     // 9: bright red
+                Rgb { r: 0, g: 255, b: 0 },     // 10: bright green
+                Rgb { r: 255, g: 255, b: 0 },   // 11: bright yellow
+                Rgb { r: 92, g: 92, b: 255 },   // 12: bright blue
+                Rgb { r: 255, g: 0, b: 255 },   // 13: bright magenta
+                Rgb { r: 0, g: 255, b: 255 },   // 14: bright cyan
+                Rgb { r: 255, g: 255, b: 255 }, // 15: bright white
+            ];
+            return ANSI16[usize::from(index)];
+        }
+        16..=231 => {
+            let i = index - 16;
+            let r = i / 36;
+            let g = (i / 6) % 6;
+            let b = i % 6;
+            let conv = |v: u8| if v == 0 { 0 } else { v * 40 + 55 };
+            return Rgb {
+                r: conv(r),
+                g: conv(g),
+                b: conv(b),
+            };
+        }
+        232..=255 => {
+            let gray = (index - 232) * 10 + 8;
+            return Rgb {
+                r: gray,
+                g: gray,
+                b: gray,
+            };
         }
     }
 }

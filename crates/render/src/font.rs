@@ -17,8 +17,17 @@ use zstd::stream::decode_all;
 pub const SEMANTIC_TEXT_FONT_FAMILY: &str = "Termtrace JetBrains Mono";
 /// Termtrace-scoped family for the Symbols Nerd Font fallback.
 pub const SEMANTIC_SYMBOLS_FONT_FAMILY: &str = "Termtrace Symbols Nerd Font";
+/// Embedded font-family stack prioritizing JetBrains Mono with Symbols Nerd Font fallback.
+pub const SEMANTIC_TEXT_FONT_STACK: &str =
+    "'Termtrace JetBrains Mono', 'Termtrace Symbols Nerd Font', monospace";
+/// Embedded font-family stack prioritizing Symbols Nerd Font with JetBrains Mono fallback.
+pub const SEMANTIC_SYMBOLS_FONT_STACK: &str =
+    "'Termtrace Symbols Nerd Font', 'Termtrace JetBrains Mono', monospace";
 pub(crate) const SEMANTIC_RASTER_TEXT_FONT_FAMILY: &str = "JetBrains Mono";
-pub(crate) const SEMANTIC_RASTER_SYMBOLS_FONT_FAMILY: &str = "Symbols Nerd Font";
+pub(crate) const SEMANTIC_RASTER_TEXT_FONT_STACK: &str =
+    "'JetBrains Mono', 'Symbols Nerd Font', monospace";
+pub(crate) const SEMANTIC_RASTER_SYMBOLS_FONT_STACK: &str =
+    "'Symbols Nerd Font', 'JetBrains Mono', monospace";
 const FONT_SET_HASH_DOMAIN: &[u8] = b"termtrace-semantic-font-set-v1\0";
 const FONT_BUNDLE_MAGIC: &[u8; 8] = b"TTFONT01";
 const FONT_COUNT: u16 = 5;
@@ -67,10 +76,20 @@ struct SemanticFontFace {
 
 impl SemanticFontFace {
     fn supports_grapheme(&self, grapheme: &str) -> bool {
-        return grapheme
-            .chars()
-            .all(|character| return self.coverage.contains(&u32::from(character)));
+        let mut meaningful = grapheme.chars().filter(|c| !is_variation_selector(*c));
+        let Some(first) = meaningful.next() else {
+            return false;
+        };
+        return self.coverage.contains(&u32::from(first))
+            && meaningful.all(|character| return self.coverage.contains(&u32::from(character)));
     }
+}
+
+fn is_variation_selector(character: char) -> bool {
+    return matches!(
+        character,
+        '\u{fe00}'..='\u{fe0f}' | '\u{e0100}'..='\u{e01ef}'
+    );
 }
 
 /// Lazily initialized immutable set of bundled semantic font faces.
