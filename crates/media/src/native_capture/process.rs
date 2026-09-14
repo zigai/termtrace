@@ -149,6 +149,7 @@ pub(super) fn spawn_xvfb(
     width: u16,
     height: u16,
     staging: &Path,
+    dpi: Option<u32>,
 ) -> Result<ManagedChild> {
     let log = secure_file(&staging.join("xvfb.log"))?;
     let mut command = if let Some(helper) = helper {
@@ -157,20 +158,36 @@ pub(super) fn spawn_xvfb(
         Command::new("Xvfb")
     };
 
+    let effective_dpi = dpi.or_else(|| {
+        std::env::var("TERMTRACE_DPI")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+    });
+
+    let mut args = vec![
+        "-screen".to_owned(),
+        "0".to_owned(),
+        format!("{width}x{height}x24"),
+    ];
+
+    if let Some(dpi) = effective_dpi {
+        args.push("-dpi".to_owned());
+        args.push(dpi.to_string());
+    }
+
+    args.extend([
+        "-nolisten".to_owned(),
+        "tcp".to_owned(),
+        "-noreset".to_owned(),
+        "-extension".to_owned(),
+        "GLX".to_owned(),
+    ]);
+
     let mut process = ManagedChild::spawn_group(
         "Xvfb",
         command
             .arg(format!(":{}", lease.number))
-            .args([
-                "-screen",
-                "0",
-                &format!("{width}x{height}x24"),
-                "-nolisten",
-                "tcp",
-                "-noreset",
-                "-extension",
-                "GLX",
-            ])
+            .args(&args)
             .stdin(Stdio::null()),
     )?;
 
@@ -193,21 +210,31 @@ pub(super) fn spawn_geometry_probe(
     let stdout = secure_file(&staging.join(format!("{stem}.stdout.log")))?;
     let stderr = secure_file(&staging.join(format!("{stem}.stderr.log")))?;
 
+    let mut command = owned_command(helper, "dbus-run-session")?;
+    command
+        .arg("--")
+        .arg("ghostty")
+        .args(overrides)
+        .arg("-e")
+        .arg(helper)
+        .arg("geometry-probe")
+        .arg("--out")
+        .arg(report)
+        .env("DISPLAY", display)
+        .env("XDG_CONFIG_HOME", profile)
+        .env("GDK_BACKEND", "x11")
+        .env("LIBGL_ALWAYS_SOFTWARE", "1");
+
+    if let Ok(scale) = std::env::var("GDK_SCALE") {
+        command.env("GDK_SCALE", scale);
+    }
+    if let Ok(dpi_scale) = std::env::var("GDK_DPI_SCALE") {
+        command.env("GDK_DPI_SCALE", dpi_scale);
+    }
+
     return ManagedChild::spawn_logged(
         "ghostty geometry probe",
-        owned_command(helper, "dbus-run-session")?
-            .arg("--")
-            .arg("ghostty")
-            .args(overrides)
-            .arg("-e")
-            .arg(helper)
-            .arg("geometry-probe")
-            .arg("--out")
-            .arg(report)
-            .env("DISPLAY", display)
-            .env("XDG_CONFIG_HOME", profile)
-            .env("GDK_BACKEND", "x11")
-            .env("LIBGL_ALWAYS_SOFTWARE", "1")
+        command
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr)),
@@ -229,6 +256,7 @@ pub(super) fn spawn_ghostty(
     ready: &Path,
     overrides: &[String],
     profile: Option<&Path>,
+    scaling: Option<super::capture::DisplayScaling>,
 ) -> Result<ManagedChild> {
     let stdout = secure_file(&staging.join("ghostty.stdout.log"))?;
     let stderr = secure_file(&staging.join("ghostty.stderr.log"))?;
@@ -284,7 +312,22 @@ pub(super) fn spawn_ghostty(
     command
         .env("DISPLAY", display)
         .env("GDK_BACKEND", "x11")
-        .env("LIBGL_ALWAYS_SOFTWARE", "1")
+        .env("LIBGL_ALWAYS_SOFTWARE", "1");
+
+    if let Some(scaling) = scaling {
+        command
+            .env("GDK_SCALE", scaling.gdk_scale.to_string())
+            .env("GDK_DPI_SCALE", format!("{}", scaling.gdk_dpi_scale));
+    } else {
+        if let Ok(scale) = std::env::var("GDK_SCALE") {
+            command.env("GDK_SCALE", scale);
+        }
+        if let Ok(dpi_scale) = std::env::var("GDK_DPI_SCALE") {
+            command.env("GDK_DPI_SCALE", dpi_scale);
+        }
+    }
+
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
@@ -292,7 +335,6 @@ pub(super) fn spawn_ghostty(
     if let Some(profile) = profile {
         command.env("XDG_CONFIG_HOME", profile);
     }
-
     return ManagedChild::spawn_logged("ghostty", &mut command);
 }
 

@@ -853,6 +853,7 @@ pub(super) fn replay_for_index<'record>(
     header: &EventLogHeader,
     records: impl Iterator<Item = Result<Cow<'record, EventRecord>>>,
     source_range: Option<SourceRange>,
+    sampling_stride_ns: Option<u64>,
     mut state_sink: impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<()>,
 ) -> Result<ReplayArtifacts> {
     return replay_records(
@@ -862,6 +863,7 @@ pub(super) fn replay_for_index<'record>(
         true,
         None,
         None,
+        sampling_stride_ns,
         |record, state, engine| {
             state_sink(record, state, engine)?;
 
@@ -994,6 +996,7 @@ fn replay_with_limits_and_formats_control(
         include_final_formats,
         seed,
         None,
+        None,
         state_sink,
     );
 }
@@ -1111,6 +1114,7 @@ fn visit_recording_states_with_engine(
         false,
         None,
         Some(cancelled),
+        None,
         |record, state, engine| return visitor(&record, state, engine),
     )?;
 
@@ -1134,12 +1138,14 @@ fn replay_records<'record>(
     include_final_formats: bool,
     seed: Option<ReplaySeed>,
     cancelled: Option<&AtomicBool>,
+    sampling_stride_ns: Option<u64>,
     mut state_sink: impl FnMut(StateRecord, &SemanticState, &GhosttyVt) -> Result<bool>,
 ) -> Result<ReplayArtifacts> {
     let mut resize_intents = HashMap::new();
+    let mut current_stride_end_ns: Option<u64> = None;
+    let mut pending_sampled_capture: Option<(u64, u64, u64)> = None;
 
     let mut continue_replay = true;
-
     if source_range.is_none() {
         continue_replay = if let Some(seed) = seed.as_ref() {
             state_sink(
@@ -1169,6 +1175,24 @@ fn replay_records<'record>(
             break;
         }
 
+        if let Some(stride_ns) = sampling_stride_ns {
+            if current_stride_end_ns.is_none() {
+                current_stride_end_ns = Some(record.monotonic_ns.saturating_add(stride_ns));
+            } else if record.monotonic_ns >= current_stride_end_ns.unwrap() {
+                if let Some((seq, offset, time_ns)) = pending_sampled_capture.take() {
+                    continue_replay = builder.capture(
+                        Some(seq),
+                        Some(offset),
+                        time_ns,
+                        &mut state_sink,
+                    )?;
+                    if !continue_replay {
+                        break 'events;
+                    }
+                }
+                current_stride_end_ns = Some(record.monotonic_ns.saturating_add(stride_ns));
+            }
+        }
         let seed_byte_start = source_byte_start(&record, seed_record, &mut resize_intents)?;
         let Some(seed_byte_start) = seed_byte_start else {
             continue;
@@ -1203,35 +1227,58 @@ fn replay_records<'record>(
                     return invalid_replay("replay checkpoint output cursor is outside its event");
                 })?;
                 builder.budget.charge_output(bytes.len())?;
-
-                for (relative_offset, byte) in bytes.iter().enumerate() {
-                    if relative_offset % 4_096 == 0 {
-                        if cancelled.is_some_and(|flag| {
-                            return flag.load(Ordering::Relaxed);
-                        }) {
+                if sampling_stride_ns.is_some() {
+                    for chunk in bytes.chunks(4_096) {
+                        if cancelled.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
                             break 'events;
                         }
 
                         builder.budget.check_elapsed()?;
+                        builder.engine.write(chunk);
+                        drop(builder.engine.take_responses());
                     }
 
-                    let offset = seed_byte_start
-                        .checked_add(relative_offset)
-                        .ok_or_else(|| return invalid_replay("output byte offset overflow"))?;
-
-                    builder.engine.write(slice::from_ref(byte));
-                    drop(builder.engine.take_responses());
-
                     if emit {
-                        continue_replay = builder.capture(
-                            Some(record.seq),
-                            Some(u64::try_from(offset).unwrap_or(u64::MAX)),
-                            record.monotonic_ns,
-                            &mut state_sink,
-                        )?;
+                        let last_offset = seed_byte_start
+                            .checked_add(bytes.len().saturating_sub(1))
+                            .ok_or_else(|| return invalid_replay("output byte offset overflow"))?;
 
-                        if !continue_replay {
-                            break 'events;
+                        pending_sampled_capture = Some((
+                            record.seq,
+                            u64::try_from(last_offset).unwrap_or(u64::MAX),
+                            record.monotonic_ns,
+                        ));
+                    }
+                } else {
+                    for (relative_offset, byte) in bytes.iter().enumerate() {
+                        if relative_offset % 4_096 == 0 {
+                            if cancelled.is_some_and(|flag| {
+                                return flag.load(Ordering::Relaxed);
+                            }) {
+                                break 'events;
+                            }
+
+                            builder.budget.check_elapsed()?;
+                        }
+
+                        let offset = seed_byte_start
+                            .checked_add(relative_offset)
+                            .ok_or_else(|| return invalid_replay("output byte offset overflow"))?;
+
+                        builder.engine.write(slice::from_ref(byte));
+                        drop(builder.engine.take_responses());
+
+                        if emit {
+                            continue_replay = builder.capture(
+                                Some(record.seq),
+                                Some(u64::try_from(offset).unwrap_or(u64::MAX)),
+                                record.monotonic_ns,
+                                &mut state_sink,
+                            )?;
+
+                            if !continue_replay {
+                                break 'events;
+                            }
                         }
                     }
                 }
@@ -1258,15 +1305,28 @@ fn replay_records<'record>(
                 status: OperationStatus::Applied,
                 ..
             } => {
+                if let Some((seq, offset, time_ns)) = pending_sampled_capture.take() {
+                    continue_replay = builder.capture(
+                        Some(seq),
+                        Some(offset),
+                        time_ns,
+                        &mut state_sink,
+                    )?;
+                    if !continue_replay {
+                        break 'events;
+                    }
+                }
                 let geometry = resize_intents.remove(operation_id).ok_or_else(|| {
-                    return invalid_replay("applied resize result is missing its intent");
+                    return invalid_replay("resize result without corresponding intent");
                 })?;
+
                 builder.engine.resize(
                     geometry.cols,
                     geometry.rows,
                     cell_size(geometry.pixel_width, geometry.cols),
                     cell_size(geometry.pixel_height, geometry.rows),
                 )?;
+                drop(builder.engine.take_responses());
 
                 builder.budget.set_geometry(geometry.cols, geometry.rows)?;
 
@@ -1288,6 +1348,15 @@ fn replay_records<'record>(
             }
             _ => {}
         }
+    }
+
+    if continue_replay && let Some((seq, offset, time_ns)) = pending_sampled_capture.take() {
+        continue_replay = builder.capture(
+            Some(seq),
+            Some(offset),
+            time_ns,
+            &mut state_sink,
+        )?;
     }
 
     if continue_replay

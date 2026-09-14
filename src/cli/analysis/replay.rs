@@ -125,6 +125,7 @@ pub(in crate::cli) fn run_index(
             end_monotonic_ns,
             live_snapshot: arguments.live_snapshot,
             state_selection,
+            sampling_stride_ns: None,
         },
     )
     .into_diagnostic()?;

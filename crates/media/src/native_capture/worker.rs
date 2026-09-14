@@ -149,7 +149,7 @@ impl NativeReplayWorker {
 
         let lease = DisplayLease::acquire()?;
         let display = format!(":{}", lease.number);
-        let mut xvfb = spawn_xvfb(Some(helper), &lease, target.width, target.height, &work.0)?;
+        let mut xvfb = spawn_xvfb(Some(helper), &lease, target.width, target.height, &work.0, None)?;
         wait_for_x_socket(&lease, &mut xvfb, timeout.min(Duration::from_secs(5)))?;
 
         let socket = work.0.join("control.sock");

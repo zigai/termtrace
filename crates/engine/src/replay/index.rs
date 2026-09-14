@@ -25,6 +25,7 @@ use termtrace_model::{
         SourceRange, StateIndexEntry, StateInspection, StateRecord, StateSelection, StateSelector,
         DERIVED_DIRECTORY, GHOSTTY_REVISION, STATE_FORMAT_VERSION,
     },
+    terminal::state::SemanticState,
     value::ByteString,
 };
 use uuid::Uuid;
@@ -70,7 +71,34 @@ pub fn index_session_range(
         },
     );
 }
+/// Generate video-optimized replay artifacts sampled at 1/FPS increments.
+///
+/// # Errors
+///
+/// Returns an error for invalid source logs, existing artifacts, replay
+/// failures, serialization failures, or non-durable filesystem operations.
+pub fn index_session_for_video(
+    session_directory: impl AsRef<Path>,
+    fps: u32,
+) -> Result<IndexOutcome> {
+    return index_session_with_options(session_directory, IndexOptions::for_video(fps));
+}
 
+/// Generate replay artifacts sampled at an explicit monotonic nanosecond stride.
+///
+/// # Errors
+///
+/// Returns an error for invalid source logs, existing artifacts, replay
+/// failures, serialization failures, or non-durable filesystem operations.
+pub fn index_session_with_stride(
+    session_directory: impl AsRef<Path>,
+    stride_ns: u64,
+) -> Result<IndexOutcome> {
+    return index_session_with_options(
+        session_directory,
+        IndexOptions::default().with_sampling_stride(stride_ns),
+    );
+}
 /// Generate replay artifacts under explicit completion and retention policy.
 ///
 /// # Errors
@@ -143,15 +171,28 @@ pub fn index_session_with_options(
     if destination.exists() {
         return Err(Error::ArtifactExists { path: destination });
     }
-
     let staging = session_directory.join(format!(".derived.{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
+    let sampling_stride_ns = options.sampling_stride_ns.or_else(|| {
+        std::env::var("TERMTRACE_INDEX_SAMPLING_STRIDE_NS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|&v| v > 0)
+            .or_else(|| {
+                std::env::var("TERMTRACE_INDEX_FPS")
+                    .ok()
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .filter(|&fps| fps > 0)
+                    .map(|fps| 1_000_000_000_u64 / u64::from(fps))
+            })
+    });
     let result = write_source_index(
         &staging,
         &IndexSource::File(&event_path, &summary),
         source_range,
         source_complete,
         options.state_selection,
+        sampling_stride_ns,
     )
     .and_then(|(artifacts, retained_state_count)| {
         if let Some(identity) = identity.as_ref() {
@@ -372,6 +413,26 @@ pub(crate) fn write_index(
         source_range,
         source_complete,
         state_selection,
+        None,
+    );
+}
+
+#[cfg(test)]
+pub(crate) fn write_index_with_stride(
+    directory: &Path,
+    log: &EventLog,
+    source_range: Option<SourceRange>,
+    source_complete: bool,
+    state_selection: StateSelection,
+    sampling_stride_ns: Option<u64>,
+) -> Result<(ReplayArtifacts, u64)> {
+    return write_source_index(
+        directory,
+        &IndexSource::Memory(log),
+        source_range,
+        source_complete,
+        state_selection,
+        sampling_stride_ns,
     );
 }
 
@@ -381,6 +442,7 @@ fn write_source_index(
     source_range: Option<SourceRange>,
     source_complete: bool,
     state_selection: StateSelection,
+    sampling_stride_ns: Option<u64>,
 ) -> Result<(ReplayArtifacts, u64)> {
     write_control_index(directory, source, source_range)?;
     let mut ranks = TimelineRanks::new(directory, source.records()?, source_range)?;
@@ -419,12 +481,71 @@ fn write_source_index(
     let mut retained_state_count = 0_u64;
     let mut final_retained_state_hash = None;
     let mut previous_retained_state = None;
+    let mut current_bucket: Option<u64> = None;
+    let mut pending_state: Option<(StateRecord, SemanticState)> = None;
     let mut records = source.records()?;
+
+    let commit_retained_state = |
+        mut record: StateRecord,
+        state: &SemanticState,
+        checkpoint: bool,
+        ranks: &mut TimelineRanks,
+        states: &mut zstd::stream::write::Encoder<std::fs::File>,
+        index: &mut std::io::BufWriter<std::fs::File>,
+        retained_state_count: &mut u64,
+        final_retained_state_hash: &mut Option<String>,
+        previous_retained_state: &mut Option<SemanticState>,
+        directory: &Path,
+    | -> Result<()> {
+        if state_selection == StateSelection::Presented {
+            record.state_id = *retained_state_count;
+            record.delta = state_delta(previous_retained_state.as_ref(), state);
+            *previous_retained_state = Some(state.clone());
+        }
+
+        write_json_line(states, &record, directory)?;
+
+        let state_key = (
+            record.monotonic_ns,
+            record.event_seq.unwrap_or(0),
+            2,
+            record.event_byte_offset.unwrap_or(0),
+        );
+        let (timeline_rank, control_index_offset, control_rank) = if checkpoint {
+            let (rank, offset, control_count) = ranks.before(state_key, record.state_id)?;
+
+            (Some(rank), Some(offset), Some(control_count))
+        } else {
+            (None, None, None)
+        };
+
+        let entry = StateIndexEntry {
+            state_id: record.state_id,
+            state_hash: record.state_hash.clone(),
+            event_seq: record.event_seq,
+            event_byte_offset: record.event_byte_offset,
+            monotonic_ns: record.monotonic_ns,
+            presented: record.presented,
+            checkpoint,
+            timeline_rank,
+            control_index_offset,
+            control_rank,
+        };
+        write_json_line(index, &entry, directory)?;
+        *final_retained_state_hash = Some(record.state_hash);
+        *retained_state_count = retained_state_count
+            .checked_add(1)
+            .ok_or_else(|| return invalid_replay("retained semantic state count overflow"))?;
+
+        return Ok(());
+    };
+
     let artifacts = replay_for_index(
         source.header(),
         records.by_ref(),
         source_range,
-        |mut record, state, engine| {
+        sampling_stride_ns,
+        |record, state, engine| {
             let checkpoint_candidate = state_selection == StateSelection::All
                 && !state.modes.alternate_screen
                 && record.state_id % REPLAY_CHECKPOINT_STATE_INTERVAL == 0;
@@ -469,49 +590,78 @@ fn write_source_index(
                 return Ok(());
             }
 
-            if state_selection == StateSelection::Presented {
-                record.state_id = retained_state_count;
-                record.delta = state_delta(previous_retained_state.as_ref(), state);
-                previous_retained_state = Some(state.clone());
-            }
+            if let Some(stride_ns) = sampling_stride_ns {
+                let bucket = record.monotonic_ns / stride_ns;
+                if retained_state_count == 0 && record.event_seq.is_none() {
+                    commit_retained_state(
+                        record,
+                        state,
+                        checkpoint,
+                        &mut ranks,
+                        &mut states,
+                        &mut index,
+                        &mut retained_state_count,
+                        &mut final_retained_state_hash,
+                        &mut previous_retained_state,
+                        directory,
+                    )?;
+                    current_bucket = Some(bucket);
+                    return Ok(());
+                }
 
-            write_json_line(&mut states, &record, directory)?;
-
-            let state_key = (
-                record.monotonic_ns,
-                record.event_seq.unwrap_or(0),
-                2,
-                record.event_byte_offset.unwrap_or(0),
-            );
-            let (timeline_rank, control_index_offset, control_rank) = if checkpoint {
-                let (rank, offset, control_count) = ranks.before(state_key, record.state_id)?;
-
-                (Some(rank), Some(offset), Some(control_count))
+                if current_bucket == Some(bucket) {
+                    pending_state = Some((record, state.clone()));
+                } else {
+                    if let Some((pending_rec, pending_st)) = pending_state.take() {
+                        commit_retained_state(
+                            pending_rec,
+                            &pending_st,
+                            false,
+                            &mut ranks,
+                            &mut states,
+                            &mut index,
+                            &mut retained_state_count,
+                            &mut final_retained_state_hash,
+                            &mut previous_retained_state,
+                            directory,
+                        )?;
+                    }
+                    current_bucket = Some(bucket);
+                    pending_state = Some((record, state.clone()));
+                }
             } else {
-                (None, None, None)
-            };
-
-            let entry = StateIndexEntry {
-                state_id: record.state_id,
-                state_hash: record.state_hash.clone(),
-                event_seq: record.event_seq,
-                event_byte_offset: record.event_byte_offset,
-                monotonic_ns: record.monotonic_ns,
-                presented: record.presented,
-                checkpoint,
-                timeline_rank,
-                control_index_offset,
-                control_rank,
-            };
-            write_json_line(&mut index, &entry, directory)?;
-            final_retained_state_hash = Some(record.state_hash);
-            retained_state_count = retained_state_count
-                .checked_add(1)
-                .ok_or_else(|| return invalid_replay("retained semantic state count overflow"))?;
+                commit_retained_state(
+                    record,
+                    state,
+                    checkpoint,
+                    &mut ranks,
+                    &mut states,
+                    &mut index,
+                    &mut retained_state_count,
+                    &mut final_retained_state_hash,
+                    &mut previous_retained_state,
+                    directory,
+                )?;
+            }
 
             return Ok(());
         },
     )?;
+
+    if let Some((pending_rec, pending_st)) = pending_state.take() {
+        commit_retained_state(
+            pending_rec,
+            &pending_st,
+            false,
+            &mut ranks,
+            &mut states,
+            &mut index,
+            &mut retained_state_count,
+            &mut final_retained_state_hash,
+            &mut previous_retained_state,
+            directory,
+        )?;
+    }
 
     // Range replay can stop early; verify that its pass still reaches the same
     // complete canonical prefix before publishing any derived artifact.

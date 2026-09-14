@@ -41,6 +41,26 @@ pub struct CaptureOptions {
     pub kind: CaptureKind,
     /// Optional caller-selected artifact directory.
     pub destination: Option<PathBuf>,
+    /// Optional display scaling factor (e.g. 1.0, 1.5, 2.0).
+    pub scale: Option<f64>,
+    /// Optional display DPI (e.g. 96, 144, 192).
+    pub dpi: Option<u32>,
+}
+
+impl CaptureOptions {
+    /// Configure display DPI explicitly.
+    #[must_use]
+    pub fn with_dpi(mut self, dpi: u32) -> Self {
+        self.dpi = Some(dpi);
+        self
+    }
+
+    /// Configure display scaling factor explicitly.
+    #[must_use]
+    pub fn with_scale(mut self, scale: f64) -> Self {
+        self.scale = Some(scale);
+        self
+    }
 }
 
 /// Native capture product and exact endpoint when applicable.

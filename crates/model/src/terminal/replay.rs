@@ -100,6 +100,33 @@ pub struct IndexOptions {
     pub live_snapshot: bool,
     /// Semantic states retained in artifacts.
     pub state_selection: StateSelection,
+    /// Optional sampling stride in monotonic nanoseconds (e.g. 1/FPS increments for video indexing)
+    /// rather than recording and hashing every intermediate byte/flutter delta.
+    pub sampling_stride_ns: Option<u64>,
+}
+
+impl IndexOptions {
+    /// Configure video indexing options with a sampling stride for the given FPS.
+    #[must_use]
+    pub fn for_video(fps: u32) -> Self {
+        let stride_ns = if fps > 0 {
+            1_000_000_000_u64 / u64::from(fps)
+        } else {
+            0
+        };
+        Self {
+            state_selection: StateSelection::Presented,
+            sampling_stride_ns: (stride_ns > 0).then_some(stride_ns),
+            ..Self::default()
+        }
+    }
+
+    /// Configure options with an explicit sampling stride in nanoseconds.
+    #[must_use]
+    pub fn with_sampling_stride(mut self, stride_ns: u64) -> Self {
+        self.sampling_stride_ns = (stride_ns > 0).then_some(stride_ns);
+        self
+    }
 }
 
 /// Fine-grained changes for one viewport row.
