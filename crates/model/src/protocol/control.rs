@@ -30,7 +30,7 @@ pub struct ClockSample {
 /// Current control protocol version.
 pub const CONTROL_PROTOCOL_VERSION: u32 = 17;
 /// Maximum encoded request or response size.
-pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 4 * 1024 * 1024;
+pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Derive an input atom's operation identity from its request and zero-based index.
 pub fn derive_input_operation_id(request_id: Uuid, index: usize) -> Uuid {
@@ -703,8 +703,12 @@ pub enum ActionPostconditionResult {
     None {
         /// Always true after complete input application.
         matched: bool,
+        /// Exact terminating state hash when known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        state_hash: Option<String>,
         /// Exact immediate post-input frame.
-        frame: ScreenFrame,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        frame: Option<ScreenFrame>,
     },
     /// Final state of an idle postcondition.
     Idle {
@@ -712,8 +716,12 @@ pub enum ActionPostconditionResult {
         matched: bool,
         /// Typed stability quality.
         quality: StableCaptureQuality,
+        /// Exact terminating state hash when known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        state_hash: Option<String>,
         /// Exact terminating frame.
-        frame: ScreenFrame,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        frame: Option<ScreenFrame>,
     },
     /// Final state of a screen postcondition.
     Screen {
@@ -721,8 +729,12 @@ pub enum ActionPostconditionResult {
         matched: bool,
         /// Closed completion classification.
         quality: ScreenPostconditionQuality,
+        /// Exact terminating state hash when known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        state_hash: Option<String>,
         /// Exact terminating frame.
-        frame: ScreenFrame,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        frame: Option<ScreenFrame>,
     },
 }
 

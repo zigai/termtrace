@@ -89,20 +89,36 @@ fn region_cell_limit_is_typed_and_never_clipped() {
         region: Some(ScreenRegion {
             top: 0,
             left: 0,
-            right: 300,
-            bottom: 250,
+            right: 600,
+            bottom: 500,
         }),
     };
     assert_eq!(
-        validate_screen_region(&request, 300, 250),
+        validate_screen_region(&request, 600, 500),
         Err(ScreenFrameError::ResourceLimit {
             limit: ScreenFrameLimitKind::CellCount,
-            requested: 75_000,
+            requested: 300_000,
             maximum: u64::from(MAX_SCREEN_FRAME_CELLS),
             detail: FrameDetail::Spans,
             region: request.region.expect("region"),
         })
     );
+}
+
+#[test]
+fn validate_screen_region_4k_grid_succeeds() {
+    let request = ScreenProjectionRequest {
+        detail: FrameDetail::Spans,
+        region: Some(ScreenRegion {
+            top: 0,
+            left: 0,
+            right: 548,
+            bottom: 135,
+        }),
+    };
+    let region = validate_screen_region(&request, 548, 135).expect("4k region succeeds");
+    assert_eq!(region.width(), 548);
+    assert_eq!(region.height(), 135);
 }
 
 #[test]
@@ -240,7 +256,7 @@ fn serialized_byte_limit_returns_bounded_error() {
 #[test]
 fn escaped_projection_strings_are_bounded_before_projection_clones() {
     let mut state = semantic_fixture();
-    state.grid[0].cells[0].grapheme = "\u{0001}".repeat(250_000);
+    state.grid[0].cells[0].grapheme = "\u{0001}".repeat(1_500_000);
     let region =
         validate_screen_region(&ScreenProjectionRequest::default(), state.cols, state.rows)
             .expect("region");

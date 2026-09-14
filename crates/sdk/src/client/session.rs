@@ -167,6 +167,7 @@ impl Session {
                 matched,
                 quality,
                 frame,
+                ..
             } => (
                 ActionCompletion::Idle { matched, quality },
                 frame,
@@ -176,6 +177,7 @@ impl Session {
                 matched,
                 quality,
                 frame,
+                ..
             } => (
                 ActionCompletion::Screen { matched, quality },
                 frame,

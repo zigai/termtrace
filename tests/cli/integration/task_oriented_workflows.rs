@@ -355,6 +355,7 @@ fn child_completed_wait_returns_the_output_drained_frame() {
         .args([
             "send",
             "--json",
+            "--verbose",
             "drained-action",
             "text:Z",
             "--until-screen",

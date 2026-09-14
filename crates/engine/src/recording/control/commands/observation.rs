@@ -9,6 +9,7 @@ use super::{
 };
 use nix::time::{clock_gettime, ClockId};
 use termtrace_model::protocol::control::ClockSample;
+use termtrace_model::terminal::screen::FrameDetail;
 
 fn system_monotonic_ns() -> Result<u64> {
     let time = clock_gettime(ClockId::CLOCK_MONOTONIC)
@@ -112,17 +113,24 @@ pub(super) fn evaluate_action_postcondition(
 
     return match &waiting.action.postcondition {
         AdmittedPostcondition::None => {
-            let frame = actor_screen_frame(
-                session_id,
-                event_log,
-                live,
-                actor_boundaries(event_log),
-                projection,
-                CaptureQuality::Live,
-            )?;
+            let (frame, state_hash) = if projection.detail == FrameDetail::None {
+                (None, Some(presented_state_hash(live)?))
+            } else {
+                let frame = actor_screen_frame(
+                    session_id,
+                    event_log,
+                    live,
+                    actor_boundaries(event_log),
+                    projection,
+                    CaptureQuality::Live,
+                )?;
+                let hash = frame.state_hash.clone();
+                (Some(frame), Some(hash))
+            };
 
             Ok(Some(ActionPostconditionResult::None {
                 matched: true,
+                state_hash,
                 frame,
             }))
         }
@@ -133,7 +141,7 @@ pub(super) fn evaluate_action_postcondition(
             let state_hash = presented_state_hash(live)?;
             match &waiting.matching_state {
                 Some((prior_hash, _)) if prior_hash == &state_hash => {}
-                _ => waiting.matching_state = Some((state_hash, now)),
+                _ => waiting.matching_state = Some((state_hash.clone(), now)),
             }
 
             let stable = waiting.matching_state.as_ref().is_some_and(|(_, since)| {
@@ -162,19 +170,25 @@ pub(super) fn evaluate_action_postcondition(
             } else {
                 CaptureQuality::Live
             };
-
-            let frame = actor_screen_frame(
-                session_id,
-                event_log,
-                live,
-                actor_boundaries(event_log),
-                projection,
-                capture_quality,
-            )?;
+            let (frame, state_hash) = if projection.detail == FrameDetail::None {
+                (None, Some(state_hash))
+            } else {
+                let frame = actor_screen_frame(
+                    session_id,
+                    event_log,
+                    live,
+                    actor_boundaries(event_log),
+                    projection,
+                    capture_quality,
+                )?;
+                let hash = frame.state_hash.clone();
+                (Some(frame), Some(hash))
+            };
 
             Ok(Some(ActionPostconditionResult::Idle {
                 matched: stable,
                 quality,
+                state_hash,
                 frame,
             }))
         }
@@ -207,19 +221,25 @@ pub(super) fn evaluate_action_postcondition(
             } else {
                 CaptureQuality::Live
             };
-
-            let frame = actor_screen_frame(
-                session_id,
-                event_log,
-                live,
-                actor_boundaries(event_log),
-                projection,
-                capture_quality,
-            )?;
+            let (frame, state_hash) = if projection.detail == FrameDetail::None {
+                (None, Some(state_hash))
+            } else {
+                let frame = actor_screen_frame(
+                    session_id,
+                    event_log,
+                    live,
+                    actor_boundaries(event_log),
+                    projection,
+                    capture_quality,
+                )?;
+                let hash = frame.state_hash.clone();
+                (Some(frame), Some(hash))
+            };
 
             Ok(Some(ActionPostconditionResult::Screen {
                 matched,
                 quality,
+                state_hash,
                 frame,
             }))
         }

@@ -64,7 +64,7 @@ pub(super) fn validate_frame(encoded: &[u8]) -> Result<()> {
         || u64::try_from(encoded.len()).unwrap_or(u64::MAX) > MAX_CONTROL_MESSAGE_BYTES
     {
         return Err(Error::InvalidControlProtocol {
-            reason: "message must be one newline-terminated JSON object no larger than 1 MiB"
+            reason: "message must be one newline-terminated JSON object no larger than 16 MiB"
                 .to_owned(),
         });
     }

@@ -16,10 +16,14 @@ use uuid::Uuid;
 
 /// Rich screen projection format version.
 pub const SCREEN_FRAME_VERSION: u32 = 1;
+/// Absolute runaway safety cap for malicious input (supporting dual-4K/ultrawide viewports).
+pub const CANVAS_MAX_CELLS: u32 = 262_144;
+/// Default maximum serialized bytes in one rich projection.
+pub const DEFAULT_MAX_SCREEN_FRAME_JSON_BYTES: u64 = 8 * 1024 * 1024;
 /// Maximum terminal cells returned by one rich projection.
-pub const MAX_SCREEN_FRAME_CELLS: u32 = 65_536;
+pub const MAX_SCREEN_FRAME_CELLS: u32 = CANVAS_MAX_CELLS;
 /// Maximum serialized bytes in one rich projection.
-pub const MAX_SCREEN_FRAME_JSON_BYTES: u64 = 4 * 1024 * 1024;
+pub const MAX_SCREEN_FRAME_JSON_BYTES: u64 = DEFAULT_MAX_SCREEN_FRAME_JSON_BYTES;
 
 /// Stable snapshot fields optionally retained by pure normalizers.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -34,6 +38,8 @@ pub struct ScreenSnapshotOptions {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FrameDetail {
+    /// Observation metadata only; no cell or text payload.
+    None,
     /// Deterministic convenience text with authoritative row wrap facts.
     Text,
     /// Lossless appearance spans.
@@ -237,6 +243,8 @@ pub struct ScreenCellRow {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "detail", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ScreenFrameData {
+    /// Observation metadata only; no cell or text payload.
+    None,
     /// Convenience text and authoritative wrap facts.
     Text {
         /// Ordered projected rows.
@@ -308,7 +316,7 @@ impl ScreenFrame {
         mut visit: impl FnMut(ScreenRowMetadata<'_>, u16, &str, WideKind, &ScreenAppearance),
     ) {
         match &self.data {
-            ScreenFrameData::Text { .. } => {}
+            ScreenFrameData::None | ScreenFrameData::Text { .. } => {}
             ScreenFrameData::Spans { rows } => {
                 for row in rows {
                     let metadata = ScreenRowMetadata {

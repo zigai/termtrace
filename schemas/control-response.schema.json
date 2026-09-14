@@ -65,7 +65,14 @@
           "description": "No presented-state postcondition was requested.",
           "properties": {
             "frame": {
-              "$ref": "#/$defs/ScreenFrame",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ScreenFrame"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "description": "Exact immediate post-input frame."
             },
             "kind": {
@@ -75,12 +82,18 @@
             "matched": {
               "description": "Always true after complete input application.",
               "type": "boolean"
+            },
+            "state_hash": {
+              "description": "Exact terminating state hash when known.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
-            "matched",
-            "frame"
+            "matched"
           ],
           "type": "object"
         },
@@ -89,7 +102,14 @@
           "description": "Final state of an idle postcondition.",
           "properties": {
             "frame": {
-              "$ref": "#/$defs/ScreenFrame",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ScreenFrame"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "description": "Exact terminating frame."
             },
             "kind": {
@@ -103,13 +123,19 @@
             "quality": {
               "$ref": "#/$defs/StableCaptureQuality",
               "description": "Typed stability quality."
+            },
+            "state_hash": {
+              "description": "Exact terminating state hash when known.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
             "matched",
-            "quality",
-            "frame"
+            "quality"
           ],
           "type": "object"
         },
@@ -118,7 +144,14 @@
           "description": "Final state of a screen postcondition.",
           "properties": {
             "frame": {
-              "$ref": "#/$defs/ScreenFrame",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ScreenFrame"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "description": "Exact terminating frame."
             },
             "kind": {
@@ -132,13 +165,19 @@
             "quality": {
               "$ref": "#/$defs/ScreenPostconditionQuality",
               "description": "Closed completion classification."
+            },
+            "state_hash": {
+              "description": "Exact terminating state hash when known.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
             "matched",
-            "quality",
-            "frame"
+            "quality"
           ],
           "type": "object"
         }
@@ -1235,6 +1274,11 @@
       "description": "Requested rich-screen representation.",
       "oneOf": [
         {
+          "const": "none",
+          "description": "Observation metadata only; no cell or text payload.",
+          "type": "string"
+        },
+        {
           "const": "text",
           "description": "Deterministic convenience text with authoritative row wrap facts.",
           "type": "string"
@@ -1807,6 +1851,20 @@
     "ScreenFrameData": {
       "description": "Structurally discriminated rich row payload.",
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Observation metadata only; no cell or text payload.",
+          "properties": {
+            "detail": {
+              "const": "none",
+              "type": "string"
+            }
+          },
+          "required": [
+            "detail"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "description": "Convenience text and authoritative wrap facts.",

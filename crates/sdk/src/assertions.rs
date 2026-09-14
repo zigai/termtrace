@@ -184,7 +184,13 @@ fn data_for_profile(
                 rows: rows.iter().map(cell_row_from_spans).collect(),
             });
         }
-        (SnapshotProfile::Spans | SnapshotProfile::Cells, ScreenFrameData::Text { .. }) => {
+        (SnapshotProfile::Text, ScreenFrameData::None) => {
+            return Ok(ScreenFrameData::None);
+        }
+        (
+            SnapshotProfile::Spans | SnapshotProfile::Cells,
+            ScreenFrameData::Text { .. } | ScreenFrameData::None,
+        ) => {
             return Err(ScreenFrameError::Serialization);
         }
     }
@@ -418,8 +424,8 @@ pub fn assert_no_wrapped_rows(frame: &ScreenFrame) -> Result<(), ExpectationMism
             .filter(|row| return row.soft_wrapped || row.wrap_continuation)
             .map(|row| return row.row)
             .collect(),
+        ScreenFrameData::None => Vec::new(),
     };
-
     if wrapped.is_empty() {
         return Ok(());
     }
@@ -584,6 +590,7 @@ fn frame_text(frame: &ScreenFrame) -> String {
             .map(|row| return row.text.as_str())
             .collect::<Vec<&str>>()
             .join("\n"),
+        ScreenFrameData::None => String::new(),
     };
 }
 
@@ -604,8 +611,8 @@ fn frame_excerpt(frame: &ScreenFrame) -> String {
             .take(MAX_EXCERPT_ROWS)
             .map(|row| return (row.row, row.text.as_str()))
             .collect(),
+        ScreenFrameData::None => Vec::new(),
     };
-
     return rows
         .iter()
         .map(|(row, text)| format!("{row}: {text}"))

@@ -102,8 +102,8 @@ pub struct ActionResult {
     pub input: ActionInputResult,
     /// Postcondition outcome.
     pub completion: ActionCompletion,
-    /// Exact terminating screen frame.
-    pub frame: ScreenFrame,
+    /// Exact terminating screen frame, if returned.
+    pub frame: Option<ScreenFrame>,
     /// Actor sequence boundaries enclosing the action.
     pub boundaries: ActorBoundaries,
 }

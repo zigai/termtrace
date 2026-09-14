@@ -658,6 +658,20 @@
       "oneOf": [
         {
           "additionalProperties": false,
+          "description": "Observation metadata only; no cell or text payload.",
+          "properties": {
+            "detail": {
+              "const": "none",
+              "type": "string"
+            }
+          },
+          "required": [
+            "detail"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Convenience text and authoritative wrap facts.",
           "properties": {
             "detail": {

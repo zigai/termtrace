@@ -417,6 +417,7 @@ fn oversized_response_error(
         );
     };
     let detail = match &frame.data {
+        ScreenFrameData::None => FrameDetail::None,
         ScreenFrameData::Text { .. } => FrameDetail::Text,
         ScreenFrameData::Spans { .. } => FrameDetail::Spans,
         ScreenFrameData::Cells { .. } => FrameDetail::Cells,
@@ -471,7 +472,7 @@ fn rich_response_context(
             let frame = match postcondition {
                 ActionPostconditionResult::None { frame, .. }
                 | ActionPostconditionResult::Idle { frame, .. }
-                | ActionPostconditionResult::Screen { frame, .. } => frame,
+                | ActionPostconditionResult::Screen { frame, .. } => frame.as_ref()?,
             };
 
             (frame, boundaries.clone(), "action_response")
@@ -627,7 +628,7 @@ mod tests {
                         matched: true,
                         quality:
                             termtrace_model::protocol::control::ScreenPostconditionQuality::MatchedUnsettled,
-                        frame,
+                        frame: Some(frame),
                     },
                     boundaries: boundaries(),
                 },
@@ -682,13 +683,15 @@ mod tests {
                         matched: true,
                         quality:
                             termtrace_model::protocol::control::ScreenPostconditionQuality::MatchedUnsettled,
-                        frame: spans_frame,
+                        frame: Some(spans_frame),
                     },
                     boundaries: boundaries(),
                 },
             },
         };
-        let spans_bytes = serde_json::to_vec(&spans_response).expect("spans json").len();
+        let spans_bytes = serde_json::to_vec(&spans_response)
+            .expect("spans json")
+            .len();
         assert!(spans_bytes > 1_500_000);
 
         let text_frame = project_screen_frame(
@@ -724,7 +727,7 @@ mod tests {
                         matched: true,
                         quality:
                             termtrace_model::protocol::control::ScreenPostconditionQuality::MatchedUnsettled,
-                        frame: text_frame,
+                        frame: Some(text_frame),
                     },
                     boundaries: boundaries(),
                 },

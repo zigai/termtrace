@@ -171,11 +171,11 @@ pub fn validate_screen_region(
     }
 
     let cell_count = u32::from(region.width()) * u32::from(region.height());
-    if cell_count > MAX_SCREEN_FRAME_CELLS {
+    if cell_count > CANVAS_MAX_CELLS {
         return Err(ScreenFrameError::ResourceLimit {
             limit: ScreenFrameLimitKind::CellCount,
             requested: u64::from(cell_count),
-            maximum: u64::from(MAX_SCREEN_FRAME_CELLS),
+            maximum: u64::from(CANVAS_MAX_CELLS),
             detail: request.detail,
             region,
         });
@@ -220,11 +220,13 @@ pub fn project_screen_frame(
     let (frame_hash, serialized_bytes) = screen_frame_hash_and_bytes(&frame)?;
     frame.frame_hash = frame_hash;
 
-    if serialized_bytes > MAX_SCREEN_FRAME_JSON_BYTES {
+    let cell_count = u32::from(region.width()) * u32::from(region.height());
+    let max_bytes = max_projection_bytes(cell_count);
+    if serialized_bytes > max_bytes {
         return Err(ScreenFrameError::ResourceLimit {
             limit: ScreenFrameLimitKind::SerializedBytes,
             requested: serialized_bytes,
-            maximum: MAX_SCREEN_FRAME_JSON_BYTES,
+            maximum: max_bytes,
             detail: request.detail,
             region,
         });
@@ -287,11 +289,26 @@ fn validate_semantic_state(state: &SemanticState) -> Result<(), ScreenFrameError
     return Ok(());
 }
 
+const BYTES_PER_CELL_ESTIMATE: u64 = 128;
+
+/// Scale allowed serialization bytes with the requested region size.
+#[must_use]
+pub fn max_projection_bytes(cell_count: u32) -> u64 {
+    return DEFAULT_MAX_SCREEN_FRAME_JSON_BYTES
+        .max(u64::from(cell_count).saturating_mul(BYTES_PER_CELL_ESTIMATE));
+}
+
 fn validate_projection_clone_bytes(
     state: &SemanticState,
     region: ScreenRegion,
     detail: FrameDetail,
 ) -> Result<(), ScreenFrameError> {
+    if detail == FrameDetail::None {
+        return Ok(());
+    }
+
+    let cell_count = u32::from(region.width()) * u32::from(region.height());
+    let max_bytes = max_projection_bytes(cell_count);
     let mut requested = 0u64;
     for row in selected_rows(state, region) {
         for cell in selected_cells(row.cells.as_slice(), region) {
@@ -304,6 +321,7 @@ fn validate_projection_clone_bytes(
                 };
 
             let cloned_bytes = match detail {
+                FrameDetail::None => 0,
                 FrameDetail::Text => convenience_bytes,
                 FrameDetail::Spans => convenience_bytes
                     .saturating_mul(2)
@@ -312,11 +330,11 @@ fn validate_projection_clone_bytes(
             };
             requested = requested.saturating_add(cloned_bytes);
 
-            if requested > MAX_SCREEN_FRAME_JSON_BYTES {
+            if requested > max_bytes {
                 return Err(ScreenFrameError::ResourceLimit {
                     limit: ScreenFrameLimitKind::SerializedBytes,
                     requested,
-                    maximum: MAX_SCREEN_FRAME_JSON_BYTES,
+                    maximum: max_bytes,
                     detail,
                     region,
                 });
@@ -350,6 +368,7 @@ fn project_data(
     detail: FrameDetail,
 ) -> ScreenFrameData {
     match detail {
+        FrameDetail::None => return ScreenFrameData::None,
         FrameDetail::Text => {
             let rows: Vec<ScreenTextRow> = selected_rows(state, region)
                 .map(|row| {

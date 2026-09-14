@@ -595,23 +595,24 @@ pub(super) fn action_projection(arguments: &SendArgs) -> ScreenProjectionRequest
     }
 
     return ScreenProjectionRequest {
-        detail: FrameDetail::Text,
+        detail: FrameDetail::None,
         region: None,
     };
 }
 
 #[derive(serde::Serialize)]
 pub(super) struct ActionObservation<'data> {
-    pub(super) state: &'data str,
-    #[serde(flatten)]
-    pub(super) frame: &'data ScreenFrame,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) state: Option<&'data str>,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub(super) frame: Option<&'data ScreenFrame>,
 }
 
 #[cfg(test)]
 pub(super) fn action_observation(frame: &ScreenFrame) -> Result<serde_json::Value> {
     return serde_json::to_value(ActionObservation {
-        state: &frame.state_hash,
-        frame,
+        state: Some(&frame.state_hash),
+        frame: Some(frame),
     })
     .into_diagnostic();
 }
@@ -687,19 +688,27 @@ pub(super) fn action_applied_response(
         outcomes: (!input.atoms.is_empty()).then_some(&input.atoms),
     };
 
-    let (postcondition_summary, ended, matched, frame) = match postcondition {
-        ActionPostconditionResult::None { matched, frame } => (
+    let (postcondition_summary, ended, matched, state_hash, frame) = match postcondition {
+        ActionPostconditionResult::None {
+            matched,
+            state_hash,
+            frame,
+        } => (
             ActionPostconditionSummary::None {
                 matched: *matched,
                 outcome: "matched",
             },
             false,
             *matched,
-            frame,
+            state_hash
+                .as_deref()
+                .or_else(|| return frame.as_ref().map(|f| return f.state_hash.as_str())),
+            frame.as_ref(),
         ),
         ActionPostconditionResult::Idle {
             matched,
             quality,
+            state_hash,
             frame,
         } => (
             ActionPostconditionSummary::Idle {
@@ -711,11 +720,15 @@ pub(super) fn action_applied_response(
                 StableCaptureQuality::ChildCompleted | StableCaptureQuality::OutputClosed
             ),
             *matched,
-            frame,
+            state_hash
+                .as_deref()
+                .or_else(|| return frame.as_ref().map(|f| return f.state_hash.as_str())),
+            frame.as_ref(),
         ),
         ActionPostconditionResult::Screen {
             matched,
             quality,
+            state_hash,
             frame,
         } => (
             ActionPostconditionSummary::Screen {
@@ -728,7 +741,10 @@ pub(super) fn action_applied_response(
                     | ScreenPostconditionQuality::OutputClosed
             ),
             *matched,
-            frame,
+            state_hash
+                .as_deref()
+                .or_else(|| return frame.as_ref().map(|f| return f.state_hash.as_str())),
+            frame.as_ref(),
         ),
     };
 
@@ -740,7 +756,7 @@ pub(super) fn action_applied_response(
         input: input_summary,
         postcondition: postcondition_summary,
         observation: ActionObservation {
-            state: &frame.state_hash,
+            state: state_hash,
             frame,
         },
         ended,
@@ -900,9 +916,9 @@ mod action_response_tests {
     };
     use crate::cli::control::args::SendArgs;
     use termtrace_model::{
-        terminal::screen::FrameDetail,
         protocol::control::{ControlData, ControlErrorDetails},
         terminal::observation::{ActorBoundaries, CaptureQuality},
+        terminal::screen::FrameDetail,
         terminal::screen::{ScreenFrameSource, ScreenProjectionRequest},
     };
     use termtrace_terminal::{project_screen_frame, GhosttyVt};
@@ -1085,9 +1101,8 @@ mod action_response_tests {
         assert_eq!(value["state_hash"], frame.state_hash);
         assert_eq!(value["version"], 1);
     }
-
     #[test]
-    fn action_projection_selects_lightweight_text_detail_by_default() {
+    fn action_projection_selects_lightweight_detail_by_default() {
         let args = SendArgs {
             session: std::path::PathBuf::from("test-session"),
             atoms: Vec::new(),
@@ -1109,8 +1124,7 @@ mod action_response_tests {
             json: false,
         };
         let projection = action_projection(&args);
-        assert_eq!(projection.detail, FrameDetail::Text);
-        assert!(projection.region.is_none());
+        assert_eq!(projection.detail, FrameDetail::None);
     }
 
     #[test]

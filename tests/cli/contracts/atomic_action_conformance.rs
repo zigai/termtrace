@@ -107,7 +107,7 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
                 "trap 'exit 0' TERM; printf READY; count=0; while IFS= read -r line; do count=$((count + 1)); printf '\\r\\nCOUNT:%s:%s' \"$count\" \"$line\"; done",
             ),
         ])
-        .geometry(160, 45)
+        .geometry(300, 150)
         .start()
         .expect("launch oversized action fixture");
 
@@ -143,8 +143,8 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
             region: Some(ScreenRegion {
                 top: 0,
                 left: 0,
-                right: 160,
-                bottom: 45,
+                right: 300,
+                bottom: 150,
             }),
         },
         ..ActionOptions::default()
@@ -254,8 +254,9 @@ fn action_termination_frame_remains_live_actor_evidence() {
         panic!("unexpected action completion: {:?}", result.completion);
     };
 
+    let frame = result.frame.as_ref().expect("frame");
     assert_eq!(
-        result.frame.capture_quality,
+        frame.capture_quality,
         CaptureQuality::Live,
         "actor-owned action frame is not validated completed evidence"
     );
@@ -392,6 +393,7 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
         })
         .expect("Rust stable capture");
 
+    let frame = result.frame.as_ref().expect("frame");
     let matched = matches!(
         result.completion,
         ActionCompletion::Screen {
@@ -399,19 +401,19 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
             quality: ScreenPostconditionQuality::Matched
                 | ScreenPostconditionQuality::MatchedUnsettled,
         }
-    ) && frame_contains(&result.frame, &fixture.expected_text);
+    ) && frame_contains(frame, &fixture.expected_text);
 
     let actor_boundaries = matches!(
-        &result.frame.source,
+        &frame.source,
         ScreenFrameSource::Actor { boundaries, .. }
             if boundaries == &result.boundaries
     );
 
     let summary = SdkSummary {
-        state_hash_valid: result.frame.state_hash.len() == 64,
+        state_hash_valid: frame.state_hash.len() == 64,
         atom_count: result.input.atom_count,
         matched,
-        presented: result.frame.presented,
+        presented: frame.presented,
         retry_exact: retry == result,
         stable_quality: stable.quality == StableCaptureQuality::Stable,
         actor_boundaries,
@@ -492,6 +494,7 @@ fn frame_contains(frame: &ScreenFrame, expected: &str) -> bool {
         ScreenFrameData::Cells { rows } => {
             return rows.iter().any(|row| return row.text.contains(expected));
         }
+        ScreenFrameData::None => false,
     }
 }
 

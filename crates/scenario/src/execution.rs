@@ -460,6 +460,7 @@ fn rich_frame_snapshot(frame: &ScreenFrame) -> ScenarioFrameSnapshot {
             .iter()
             .map(|row| return row.text.as_str())
             .collect::<Vec<&str>>(),
+        ScreenFrameData::None => Vec::new(),
     }
     .join("\n");
 
