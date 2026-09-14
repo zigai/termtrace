@@ -52,14 +52,14 @@ impl CaptureOptions {
     #[must_use]
     pub fn with_dpi(mut self, dpi: u32) -> Self {
         self.dpi = Some(dpi);
-        self
+        return self;
     }
 
     /// Configure display scaling factor explicitly.
     #[must_use]
     pub fn with_scale(mut self, scale: f64) -> Self {
         self.scale = Some(scale);
-        self
+        return self;
     }
 }
 

@@ -321,9 +321,11 @@ fn top_level_video_auto_captures_native_and_overwrites_output() {
         .assert()
         .success();
 
-    assert!(output.is_file(), "output video should still exist after clean overwrite");
+    assert!(
+        output.is_file(),
+        "output video should still exist after clean overwrite"
+    );
 }
-
 
 #[test]
 fn complex_selector_help_stays_within_one_hundred_columns() {

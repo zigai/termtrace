@@ -485,18 +485,17 @@ fn write_source_index(
     let mut pending_state: Option<(StateRecord, SemanticState)> = None;
     let mut records = source.records()?;
 
-    let commit_retained_state = |
-        mut record: StateRecord,
-        state: &SemanticState,
-        checkpoint: bool,
-        ranks: &mut TimelineRanks,
-        states: &mut zstd::stream::write::Encoder<std::fs::File>,
-        index: &mut std::io::BufWriter<std::fs::File>,
-        retained_state_count: &mut u64,
-        final_retained_state_hash: &mut Option<String>,
-        previous_retained_state: &mut Option<SemanticState>,
-        directory: &Path,
-    | -> Result<()> {
+    let commit_retained_state = |mut record: StateRecord,
+                                 state: &SemanticState,
+                                 checkpoint: bool,
+                                 ranks: &mut TimelineRanks,
+                                 states: &mut zstd::stream::write::Encoder<std::fs::File>,
+                                 index: &mut std::io::BufWriter<std::fs::File>,
+                                 retained_state_count: &mut u64,
+                                 final_retained_state_hash: &mut Option<String>,
+                                 previous_retained_state: &mut Option<SemanticState>,
+                                 directory: &Path|
+     -> Result<()> {
         if state_selection == StateSelection::Presented {
             record.state_id = *retained_state_count;
             record.delta = state_delta(previous_retained_state.as_ref(), state);

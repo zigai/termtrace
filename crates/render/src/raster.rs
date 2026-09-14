@@ -305,14 +305,19 @@ mod tests {
         state.cursor.visible = false;
         let pixmap = rasterize_state(&state);
         let background = state.colors.background;
-        for (i, glyph) in ["", " ", "", " ", "", " ", "❯", " ", ""].iter().enumerate() {
+        for (i, glyph) in ["", " ", "", " ", "", " ", "❯", " ", ""]
+            .iter()
+            .enumerate()
+        {
             if *glyph == " " {
                 continue;
             }
             let col = i as u32;
             let has_pixels = (col * 12..(col + 1) * 12).any(|x| {
                 (0..24).any(|y| {
-                    pixmap.pixel(x, y).is_some_and(|p| !is_background(p, background))
+                    pixmap
+                        .pixel(x, y)
+                        .is_some_and(|p| !is_background(p, background))
                 })
             });
             assert!(has_pixels, "glyph {glyph} must paint non-background pixels");

@@ -57,7 +57,6 @@ pub(super) fn export_with_capability_check(
 
     validate_planned_source(&plan.source)?;
 
-
     let parent = destination
         .parent()
         .ok_or_else(|| return plan_error("presentation destination must have a parent"))?;

@@ -442,7 +442,6 @@ fn font_geometry(role: SemanticFontRole) -> (u16, u16) {
     return (SEMANTIC_FONT_SIZE, SEMANTIC_TEXT_BASELINE);
 }
 
-
 fn font_attributes(
     role: SemanticFontRole,
     embedded: bool,
@@ -500,22 +499,62 @@ pub(crate) fn default_ansi256_color(index: u8) -> Rgb {
     match index {
         0..=15 => {
             const ANSI16: [Rgb; 16] = [
-                Rgb { r: 0, g: 0, b: 0 },       // 0: black
-                Rgb { r: 205, g: 0, b: 0 },     // 1: red
-                Rgb { r: 0, g: 205, b: 0 },     // 2: green
-                Rgb { r: 205, g: 205, b: 0 },   // 3: yellow
-                Rgb { r: 0, g: 0, b: 238 },     // 4: blue
-                Rgb { r: 205, g: 0, b: 205 },   // 5: magenta
-                Rgb { r: 0, g: 205, b: 205 },   // 6: cyan
-                Rgb { r: 229, g: 229, b: 229 }, // 7: white
-                Rgb { r: 127, g: 127, b: 127 }, // 8: bright black
-                Rgb { r: 255, g: 0, b: 0 },     // 9: bright red
-                Rgb { r: 0, g: 255, b: 0 },     // 10: bright green
-                Rgb { r: 255, g: 255, b: 0 },   // 11: bright yellow
-                Rgb { r: 92, g: 92, b: 255 },   // 12: bright blue
-                Rgb { r: 255, g: 0, b: 255 },   // 13: bright magenta
-                Rgb { r: 0, g: 255, b: 255 },   // 14: bright cyan
-                Rgb { r: 255, g: 255, b: 255 }, // 15: bright white
+                Rgb { r: 0, g: 0, b: 0 },   // 0: black
+                Rgb { r: 205, g: 0, b: 0 }, // 1: red
+                Rgb { r: 0, g: 205, b: 0 }, // 2: green
+                Rgb {
+                    r: 205,
+                    g: 205,
+                    b: 0,
+                }, // 3: yellow
+                Rgb { r: 0, g: 0, b: 238 }, // 4: blue
+                Rgb {
+                    r: 205,
+                    g: 0,
+                    b: 205,
+                }, // 5: magenta
+                Rgb {
+                    r: 0,
+                    g: 205,
+                    b: 205,
+                }, // 6: cyan
+                Rgb {
+                    r: 229,
+                    g: 229,
+                    b: 229,
+                }, // 7: white
+                Rgb {
+                    r: 127,
+                    g: 127,
+                    b: 127,
+                }, // 8: bright black
+                Rgb { r: 255, g: 0, b: 0 }, // 9: bright red
+                Rgb { r: 0, g: 255, b: 0 }, // 10: bright green
+                Rgb {
+                    r: 255,
+                    g: 255,
+                    b: 0,
+                }, // 11: bright yellow
+                Rgb {
+                    r: 92,
+                    g: 92,
+                    b: 255,
+                }, // 12: bright blue
+                Rgb {
+                    r: 255,
+                    g: 0,
+                    b: 255,
+                }, // 13: bright magenta
+                Rgb {
+                    r: 0,
+                    g: 255,
+                    b: 255,
+                }, // 14: bright cyan
+                Rgb {
+                    r: 255,
+                    g: 255,
+                    b: 255,
+                }, // 15: bright white
             ];
             return ANSI16[usize::from(index)];
         }

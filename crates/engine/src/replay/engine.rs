@@ -1180,12 +1180,8 @@ fn replay_records<'record>(
                 current_stride_end_ns = Some(record.monotonic_ns.saturating_add(stride_ns));
             } else if record.monotonic_ns >= current_stride_end_ns.unwrap() {
                 if let Some((seq, offset, time_ns)) = pending_sampled_capture.take() {
-                    continue_replay = builder.capture(
-                        Some(seq),
-                        Some(offset),
-                        time_ns,
-                        &mut state_sink,
-                    )?;
+                    continue_replay =
+                        builder.capture(Some(seq), Some(offset), time_ns, &mut state_sink)?;
                     if !continue_replay {
                         break 'events;
                     }
@@ -1306,12 +1302,8 @@ fn replay_records<'record>(
                 ..
             } => {
                 if let Some((seq, offset, time_ns)) = pending_sampled_capture.take() {
-                    continue_replay = builder.capture(
-                        Some(seq),
-                        Some(offset),
-                        time_ns,
-                        &mut state_sink,
-                    )?;
+                    continue_replay =
+                        builder.capture(Some(seq), Some(offset), time_ns, &mut state_sink)?;
                     if !continue_replay {
                         break 'events;
                     }
@@ -1351,12 +1343,7 @@ fn replay_records<'record>(
     }
 
     if continue_replay && let Some((seq, offset, time_ns)) = pending_sampled_capture.take() {
-        continue_replay = builder.capture(
-            Some(seq),
-            Some(offset),
-            time_ns,
-            &mut state_sink,
-        )?;
+        continue_replay = builder.capture(Some(seq), Some(offset), time_ns, &mut state_sink)?;
     }
 
     if continue_replay
