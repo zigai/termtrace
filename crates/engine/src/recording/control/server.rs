@@ -607,6 +607,135 @@ mod tests {
     }
 
     #[test]
+    fn oversized_action_applied_response_retains_action_response_scope() {
+        let frame = actor_frame();
+        let response = ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id: Uuid::nil(),
+            result: ControlResult::Ok {
+                data: ControlData::ActionApplied {
+                    input: termtrace_model::protocol::control::ActionInputResult {
+                        sequence_id: Uuid::nil(),
+                        atom_count: 1,
+                        bytes_written: 4,
+                        first_intent_event_seq: 1,
+                        last_result_event_seq: 2,
+                        pace_ns: 0,
+                        atoms: Vec::new(),
+                    },
+                    postcondition: ActionPostconditionResult::Screen {
+                        matched: true,
+                        quality:
+                            termtrace_model::protocol::control::ScreenPostconditionQuality::MatchedUnsettled,
+                        frame,
+                    },
+                    boundaries: boundaries(),
+                },
+            },
+        };
+        let (code, _, details) =
+            oversized_response_error(&response, MAX_CONTROL_MESSAGE_BYTES + 42);
+        assert_eq!(code, "screen_frame_resource_limit");
+
+        let details = details.expect("action response details");
+        assert_eq!(details.scope, "action_response");
+        let screen = details.screen_frame.expect("screen-frame details");
+        assert_eq!(screen.limit_kind.as_deref(), Some("response_bytes"));
+        assert_eq!(screen.requested, Some(MAX_CONTROL_MESSAGE_BYTES + 42));
+        assert_eq!(screen.maximum, Some(MAX_CONTROL_MESSAGE_BYTES));
+        assert_eq!(screen.detail, Some(FrameDetail::Spans));
+    }
+
+    #[test]
+    fn canvas_4k_lightweight_text_projection_stays_compact_compared_to_rich_spans() {
+        let mut terminal = GhosttyVt::new(384, 108, 0).expect("4K terminal");
+        terminal.write(b"READY\r\nCOUNT:1:test");
+        let state = terminal.snapshot().expect("semantic state");
+
+        let spans_frame = project_screen_frame(
+            &state,
+            &ScreenProjectionRequest::default(),
+            ScreenFrameSource::Actor {
+                session_id: Uuid::nil(),
+                boundaries: boundaries(),
+                observed_monotonic_ns: 13,
+            },
+            true,
+            CaptureQuality::Live,
+        )
+        .expect("spans frame");
+        let spans_response = ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id: Uuid::nil(),
+            result: ControlResult::Ok {
+                data: ControlData::ActionApplied {
+                    input: termtrace_model::protocol::control::ActionInputResult {
+                        sequence_id: Uuid::nil(),
+                        atom_count: 1,
+                        bytes_written: 4,
+                        first_intent_event_seq: 1,
+                        last_result_event_seq: 2,
+                        pace_ns: 0,
+                        atoms: Vec::new(),
+                    },
+                    postcondition: ActionPostconditionResult::Screen {
+                        matched: true,
+                        quality:
+                            termtrace_model::protocol::control::ScreenPostconditionQuality::MatchedUnsettled,
+                        frame: spans_frame,
+                    },
+                    boundaries: boundaries(),
+                },
+            },
+        };
+        let spans_bytes = serde_json::to_vec(&spans_response).expect("spans json").len();
+        assert!(spans_bytes > 1_500_000);
+
+        let text_frame = project_screen_frame(
+            &state,
+            &ScreenProjectionRequest {
+                detail: FrameDetail::Text,
+                region: None,
+            },
+            ScreenFrameSource::Actor {
+                session_id: Uuid::nil(),
+                boundaries: boundaries(),
+                observed_monotonic_ns: 13,
+            },
+            true,
+            CaptureQuality::Live,
+        )
+        .expect("text frame");
+        let text_response = ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id: Uuid::nil(),
+            result: ControlResult::Ok {
+                data: ControlData::ActionApplied {
+                    input: termtrace_model::protocol::control::ActionInputResult {
+                        sequence_id: Uuid::nil(),
+                        atom_count: 1,
+                        bytes_written: 4,
+                        first_intent_event_seq: 1,
+                        last_result_event_seq: 2,
+                        pace_ns: 0,
+                        atoms: Vec::new(),
+                    },
+                    postcondition: ActionPostconditionResult::Screen {
+                        matched: true,
+                        quality:
+                            termtrace_model::protocol::control::ScreenPostconditionQuality::MatchedUnsettled,
+                        frame: text_frame,
+                    },
+                    boundaries: boundaries(),
+                },
+            },
+        };
+        let text_bytes = serde_json::to_vec(&text_response).expect("text json").len();
+        assert!(text_bytes < 100_000);
+        assert!(text_bytes < spans_bytes / 15);
+    }
+
+    #[test]
     fn connection_limiter_never_oversubscribes_or_leaks() {
         let active = AtomicUsize::new(0);
         let barrier = Barrier::new(2);

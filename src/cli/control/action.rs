@@ -4,9 +4,9 @@ use super::*;
 use std::mem::take;
 use termtrace_model::{
     protocol::control::{PointerOperation, ProcessSignal, ScreenPredicate},
+    terminal::screen::FrameDetail,
     terminal::state::MouseButton,
 };
-use termtrace_sdk::wait_for_screen;
 
 fn parse_click_str(s: &str) -> Result<(u16, u16)> {
     let (x_str, y_str) = s
@@ -322,7 +322,7 @@ pub(in crate::cli) fn run_send(
                             let capture_req = ControlRequest::new(ControlCommand::CaptureStable {
                                 stable_for_ns,
                                 timeout_ns,
-                                projection: ScreenProjectionRequest::default(),
+                                projection: action_projection(&arguments),
                             });
 
                             match send_request_response(&resolved.path, &capture_req) {
@@ -348,18 +348,28 @@ pub(in crate::cli) fn run_send(
                             predicate,
                             timeout_ns,
                         } => {
-                            let wait_timeout = Duration::from_nanos(timeout_ns);
-                            match wait_for_screen(
-                                &resolved.path,
+                            let wait_req = ControlRequest::new(ControlCommand::WaitScreen {
                                 predicate,
-                                Duration::ZERO,
-                                wait_timeout,
-                            ) {
-                                Ok(outcome) => (
-                                    outcome.matched,
-                                    "screen",
-                                    if outcome.matched { "matched" } else { "deadline" },
-                                ),
+                                stable_for_ns: 0,
+                                timeout_ns,
+                                projection: action_projection(&arguments),
+                            });
+
+                            match send_request_response(&resolved.path, &wait_req) {
+                                Ok(resp) => match resp.result {
+                                    ControlResult::Ok { data } => {
+                                        let matched = matches!(
+                                            data,
+                                            ControlData::ScreenWait { matched, .. } if matched
+                                        );
+                                        (
+                                            matched,
+                                            "screen",
+                                            if matched { "matched" } else { "deadline" },
+                                        )
+                                    }
+                                    ControlResult::Error { .. } => (false, "screen", "error"),
+                                },
                                 Err(_) => (false, "screen", "deadline"),
                             }
                         }
@@ -405,7 +415,7 @@ pub(in crate::cli) fn run_send(
                     pace_ns: u64::try_from(arguments.pace.as_nanos()).unwrap_or(u64::MAX),
                     include_atom_outcomes: arguments.verbose,
                     postcondition: op_postcondition,
-                    projection: ScreenProjectionRequest::default(),
+                    projection: action_projection(&arguments),
                 });
                 request.request_id = request_id;
 
@@ -577,6 +587,17 @@ pub(super) fn action_postcondition(arguments: &SendArgs) -> ActionPostcondition 
         };
     }
     return ActionPostcondition::None;
+}
+
+pub(super) fn action_projection(arguments: &SendArgs) -> ScreenProjectionRequest {
+    if arguments.verbose {
+        return ScreenProjectionRequest::default();
+    }
+
+    return ScreenProjectionRequest {
+        detail: FrameDetail::Text,
+        region: None,
+    };
 }
 
 #[derive(serde::Serialize)]
@@ -874,8 +895,12 @@ pub(super) fn input_failure_application(details: Option<&ControlErrorDetails>) -
 
 #[cfg(test)]
 mod action_response_tests {
-    use super::{action_applied_response, action_error_response, action_observation};
+    use super::{
+        action_applied_response, action_error_response, action_observation, action_projection,
+    };
+    use crate::cli::control::args::SendArgs;
     use termtrace_model::{
+        terminal::screen::FrameDetail,
         protocol::control::{ControlData, ControlErrorDetails},
         terminal::observation::{ActorBoundaries, CaptureQuality},
         terminal::screen::{ScreenFrameSource, ScreenProjectionRequest},
@@ -1059,5 +1084,59 @@ mod action_response_tests {
         assert_eq!(value["state"], frame.state_hash);
         assert_eq!(value["state_hash"], frame.state_hash);
         assert_eq!(value["version"], 1);
+    }
+
+    #[test]
+    fn action_projection_selects_lightweight_text_detail_by_default() {
+        let args = SendArgs {
+            session: std::path::PathBuf::from("test-session"),
+            atoms: Vec::new(),
+            stdin: false,
+            text: None,
+            file: None,
+            resize: None,
+            signal: None,
+            mark: None,
+            until_screen: Some("ready".to_owned()),
+            until_screen_regex: None,
+            until_idle: None,
+            timeout: std::time::Duration::from_secs(30),
+            pace: std::time::Duration::ZERO,
+            intent: None,
+            if_state: None,
+            request_id: None,
+            verbose: false,
+            json: false,
+        };
+        let projection = action_projection(&args);
+        assert_eq!(projection.detail, FrameDetail::Text);
+        assert!(projection.region.is_none());
+    }
+
+    #[test]
+    fn action_projection_preserves_full_rich_spans_when_verbose_requested() {
+        let args = SendArgs {
+            session: std::path::PathBuf::from("test-session"),
+            atoms: Vec::new(),
+            stdin: false,
+            text: None,
+            file: None,
+            resize: None,
+            signal: None,
+            mark: None,
+            until_screen: Some("ready".to_owned()),
+            until_screen_regex: None,
+            until_idle: None,
+            timeout: std::time::Duration::from_secs(30),
+            pace: std::time::Duration::ZERO,
+            intent: None,
+            if_state: None,
+            request_id: None,
+            verbose: true,
+            json: false,
+        };
+        let projection = action_projection(&args);
+        assert_eq!(projection.detail, FrameDetail::Spans);
+        assert!(projection.region.is_none());
     }
 }
