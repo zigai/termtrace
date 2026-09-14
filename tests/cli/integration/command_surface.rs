@@ -255,6 +255,7 @@ fn top_level_video_never_falls_back_from_native_to_semantic() {
 
     let mut video = Command::cargo_bin("termtrace").expect("binary should build");
     video
+        .env("PATH", "")
         .arg("video")
         .arg(&session)
         .args(["-o"])
@@ -263,15 +264,66 @@ fn top_level_video_never_falls_back_from_native_to_semantic() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "explicitly choose `--renderer semantic`",
+            "required capability `native-video` is blocked",
         ));
-
     assert!(!output.exists(), "native failure must not publish a video");
     assert!(
         !temporary.path().join("native.mp4.termtrace").exists(),
         "native failure must not publish a semantic sidecar"
     );
 }
+#[test]
+fn top_level_video_auto_captures_native_and_overwrites_output() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("session");
+    let output = temporary.path().join("native.mp4");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "printf native"])
+        .assert()
+        .success();
+
+    assert!(
+        !session.join("visual/manifest.json").exists(),
+        "session must not have visual capture initially"
+    );
+
+    let mut video = Command::cargo_bin("termtrace").expect("binary should build");
+    video
+        .arg("video")
+        .arg(&session)
+        .args(["-o"])
+        .arg(&output)
+        .args(["--renderer", "native"])
+        .assert()
+        .success();
+
+    assert!(
+        session.join("visual/manifest.json").exists(),
+        "termtrace video should automatically capture native visual manifest"
+    );
+    assert!(output.is_file(), "output video should be published");
+    assert!(
+        temporary.path().join("native.mp4.termtrace").is_dir(),
+        "sidecar directory should be published"
+    );
+
+    // Rerun on existing output file to verify clean overwrite without EEXIST
+    let mut rerun = Command::cargo_bin("termtrace").expect("binary should build");
+    rerun
+        .arg("video")
+        .arg(&session)
+        .args(["-o"])
+        .arg(&output)
+        .args(["--renderer", "native"])
+        .assert()
+        .success();
+
+    assert!(output.is_file(), "output video should still exist after clean overwrite");
+}
+
 
 #[test]
 fn complex_selector_help_stays_within_one_hundred_columns() {
@@ -658,6 +710,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
 
     let mut native_default = Command::cargo_bin("termtrace").expect("binary should build");
     native_default
+        .env("PATH", "")
         .args(["video"])
         .arg(&session)
         .arg("--edit")
@@ -666,12 +719,8 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "native renderer requires a verified capture manifest",
-        ))
-        .stderr(predicate::str::contains(
-            "checking `termtrace doctor --require native-video --explain`",
-        ))
-        .stderr(predicate::str::contains("--renderer semantic"));
+            "required capability `native-video` is blocked",
+        ));
 
     let mut index = Command::cargo_bin("termtrace").expect("binary should build");
     index

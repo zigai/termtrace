@@ -57,11 +57,6 @@ pub(super) fn export_with_capability_check(
 
     validate_planned_source(&plan.source)?;
 
-    if destination.exists() {
-        return Err(Error::ArtifactExists {
-            path: destination.to_path_buf(),
-        });
-    }
 
     let parent = destination
         .parent()
@@ -84,6 +79,24 @@ pub(super) fn export_with_capability_check(
     create_private_directory(&staging)?;
     let _staging_cleanup = DirectoryCleanup(staging.clone());
     export_staged(plan, &staging)?;
+    if destination.exists() || destination.symlink_metadata().is_ok() {
+        if destination.is_dir() {
+            fs_err::remove_dir_all(destination).map_err(|source| {
+                return Error::Filesystem {
+                    path: destination.to_path_buf(),
+                    source,
+                };
+            })?;
+        } else {
+            fs_err::remove_file(destination).map_err(|source| {
+                return Error::Filesystem {
+                    path: destination.to_path_buf(),
+                    source,
+                };
+            })?;
+        }
+    }
+
     commit_directory(parent, &staging, destination)?;
 
     return Ok(PresentationOutcome {
