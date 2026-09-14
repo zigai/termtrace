@@ -1,18 +1,21 @@
 import asyncio
 import math
 import sys
+import time
 import uuid
 from pathlib import Path
 
 import pytest
 
-from termtrace import BytesAtom, KeyAtom, PasteAtom, TextAtom
+from termtrace import BytesAtom, KeyAtom, PasteAtom, Terminal, TextAtom
 from termtrace.atoms import encode_input_sequence
+from termtrace.environment import EnvironmentOptions
 from termtrace.errors import ProtocolMismatchError, RequestTimeoutError
 from termtrace.session.async_ import AsyncSession
 from termtrace.session.sync import Session
 from termtrace.transport.async_ import AsyncTerminal
 from termtrace.transport.protocol import DriverHelloData, encode_driver_request
+from termtrace.transport.requests import launch_request
 from termtrace.transport.sync import DriverTransport
 
 
@@ -165,3 +168,135 @@ def test_atomic_input_sequence_builder_is_typed_bounded_and_correlated() -> None
             pace_ms=40_000,
             verbose=False,
         )
+
+def test_sync_request_timeout_during_blocking_write(tmp_path: Path) -> None:
+    driver = tmp_path / "blocking_driver"
+    driver.write_text(
+        "#!/bin/sh\nexec sleep 30\n",
+        encoding="utf-8",
+    )
+    driver.chmod(0o700)
+    transport = DriverTransport(driver)
+    # Create large payload that exceeds OS pipe buffer (> 64KB)
+    large_command = launch_request(
+        ["/bin/sh", "-c", "echo 1"],
+        default_evidence_root=tmp_path,
+        evidence_root=tmp_path,
+        owner="test",
+        cols=160,
+        rows=45,
+        working_directory=None,
+        environment=EnvironmentOptions(set={"BIG": "x" * (128 * 1024)}),
+        output_byte_budget=None,
+    )
+    start = time.monotonic()
+    with pytest.raises(RequestTimeoutError):
+        transport.request(large_command, DriverHelloData, timeout=0.05)
+    elapsed = time.monotonic() - start
+    assert elapsed < 1.0, f"Write blocked too long: {elapsed}s"
+    assert transport.closed is True
+    transport.close()
+
+
+def test_queued_sync_lock_timeout_does_not_abort_transport(tmp_path: Path) -> None:
+    driver = tmp_path / "echo_driver"
+    driver.write_text(
+        "#!/bin/sh\nwhile IFS= read -r line; do\n  printf '%s\\n' \"$line\"\ndone\n",
+        encoding="utf-8",
+    )
+    driver.chmod(0o700)
+    transport = DriverTransport(driver)
+    with transport._lock:
+        with pytest.raises(RequestTimeoutError):
+            transport.request({"method": "hello"}, DriverHelloData, timeout=0.02)
+    assert transport.closed is False
+    transport.close()
+
+
+def test_queued_async_lock_cancellation_does_not_abort_transport() -> None:
+    async def exercise() -> None:
+        script = "import sys, time\ntime.sleep(60)\n"
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            script,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        terminal = AsyncTerminal(process, None)
+        await terminal._lock.acquire()
+        task = asyncio.create_task(
+            terminal.request({"method": "hello"}, DriverHelloData, request_timeout=1.0)
+        )
+        await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert terminal.closed is False
+        terminal._lock.release()
+        await terminal.close()
+
+    asyncio.run(exercise())
+
+
+def test_sync_terminal_init_failure_reaps_driver(tmp_path: Path) -> None:
+    driver = tmp_path / "bad_driver"
+    driver.write_text(
+        "#!/bin/sh\nprintf 'not-json\\n'\nexec sleep 30\n",
+        encoding="utf-8",
+    )
+    driver.chmod(0o700)
+    with pytest.raises(ProtocolMismatchError):
+        Terminal(binary_path=driver)
+
+
+def test_async_terminal_create_failure_reaps_driver(tmp_path: Path) -> None:
+    async def exercise() -> None:
+        driver = tmp_path / "bad_driver_async"
+        driver.write_text(
+            "#!/bin/sh\nprintf 'not-json\\n'\nexec sleep 30\n",
+            encoding="utf-8",
+        )
+        driver.chmod(0o700)
+        with pytest.raises(ProtocolMismatchError):
+            await AsyncTerminal.create(binary_path=driver)
+
+    asyncio.run(exercise())
+
+
+def test_sync_readline_enforces_stream_limit_without_timeout(tmp_path: Path) -> None:
+    driver = tmp_path / "giant_driver"
+    # Output 5MB without newline
+    driver.write_text(
+        "#!/bin/sh\nhead -c 5242880 /dev/zero | tr '\\0' 'A'\nexec sleep 30\n",
+        encoding="utf-8",
+    )
+    driver.chmod(0o700)
+    transport = DriverTransport(driver)
+    with pytest.raises(ProtocolMismatchError, match="bounded stream limit"):
+        transport._readline(None)
+    transport.close()
+
+
+def test_async_driver_close_escalates_to_kill(tmp_path: Path) -> None:
+    async def exercise() -> None:
+        driver = tmp_path / "stubborn_driver"
+        driver.write_text(
+            "#!/bin/sh\ntrap '' TERM\nexec sleep 300\n",
+            encoding="utf-8",
+        )
+        driver.chmod(0o700)
+        process = await asyncio.create_subprocess_exec(
+            str(driver),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+        )
+        terminal = AsyncTerminal(process, None)
+        start = time.monotonic()
+        await terminal.close()
+        elapsed = time.monotonic() - start
+        assert elapsed < 12.0
+        assert process.returncode is not None
+
+    asyncio.run(exercise())

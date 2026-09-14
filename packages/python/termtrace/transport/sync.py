@@ -50,9 +50,41 @@ class DriverTransport:
             raise ProtocolMismatchError("driver pipes were not created")
         self._stdin = self._process.stdin
         self._stdout = self._process.stdout
+        os.set_blocking(self._stdin.fileno(), False)
+        os.set_blocking(self._stdout.fileno(), False)
         self._lock = threading.Lock()
         self._read_buffer = bytearray()
         self._closed = False
+
+    def _write_all(self, data: bytes, timeout: float | None, deadline: float | None) -> None:
+        total_written = 0
+        fd = self._stdin.fileno()
+        view = memoryview(data)
+        while total_written < len(data):
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._abort()
+                    assert timeout is not None
+                    raise RequestTimeoutError(timeout)
+                _, writable, _ = select.select([], [self._stdin], [], remaining)
+                if not writable:
+                    self._abort()
+                    assert timeout is not None
+                    raise RequestTimeoutError(timeout)
+            else:
+                select.select([], [self._stdin], [])
+            try:
+                written = os.write(fd, view[total_written:])
+            except BlockingIOError:
+                continue
+            except (BrokenPipeError, OSError) as error:
+                self._abort()
+                raise ProtocolMismatchError(f"driver closed stdin: {error}") from None
+            if written == 0:
+                self._abort()
+                raise ProtocolMismatchError("driver closed stdin during write")
+            total_written += written
 
     def request(
         self,
@@ -64,15 +96,18 @@ class DriverTransport:
         if self._closed:
             raise ProtocolMismatchError("driver is closed")
         correlation_id, payload = correlated_request(method, request_id, timeout)
-        deadline = None if timeout is None else time.monotonic() + timeout
-        acquired = self._lock.acquire() if timeout is None else self._lock.acquire(timeout=timeout)
+        if timeout is None:
+            deadline = None
+            acquired = self._lock.acquire()
+        else:
+            deadline = time.monotonic() + timeout
+            remaining_lock = max(0.0, deadline - time.monotonic())
+            acquired = self._lock.acquire(timeout=remaining_lock)
         if not acquired:
             assert timeout is not None
-            self._abort()
             raise RequestTimeoutError(timeout)
         try:
-            self._stdin.write(payload + b"\n")
-            self._stdin.flush()
+            self._write_all(payload + b"\n", timeout, deadline)
             remaining = None if deadline is None else deadline - time.monotonic()
             if remaining is not None and remaining <= 0:
                 self._abort()
@@ -89,66 +124,100 @@ class DriverTransport:
         return decode_driver_response(line, correlation_id, response_type)
 
     def _readline(self, timeout: float | None) -> bytes:
-        if timeout is None:
-            return self._stdout.readline()
-        if not math.isfinite(timeout) or timeout <= 0:
+        if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
             raise ValueError("request timeout must be finite and greater than zero")
 
-        deadline = time.monotonic() + timeout
+        deadline = None if timeout is None else time.monotonic() + timeout
+        search_start = 0
         while True:
-            newline = self._read_buffer.find(b"\n")
+            newline = self._read_buffer.find(b"\n", search_start)
             if newline >= 0:
                 line = bytes(self._read_buffer[: newline + 1])
                 del self._read_buffer[: newline + 1]
                 return line
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                self._abort()
-                raise RequestTimeoutError(timeout)
-            ready, _, _ = select.select([self._stdout], [], [], remaining)
-            if not ready:
-                self._abort()
-                raise RequestTimeoutError(timeout)
-            chunk = os.read(self._stdout.fileno(), 64 * 1024)
+
+            search_start = max(0, len(self._read_buffer) - 1)
+
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._abort()
+                    assert timeout is not None
+                    raise RequestTimeoutError(timeout)
+                ready, _, _ = select.select([self._stdout], [], [], remaining)
+                if not ready:
+                    self._abort()
+                    assert timeout is not None
+                    raise RequestTimeoutError(timeout)
+            else:
+                select.select([self._stdout], [], [])
+
+            try:
+                chunk = os.read(self._stdout.fileno(), 64 * 1024)
+            except BlockingIOError:
+                continue
             if not chunk:
                 return b""
             self._read_buffer.extend(chunk)
             if len(self._read_buffer) > DRIVER_RESPONSE_STREAM_LIMIT:
                 self._abort()
                 raise ProtocolMismatchError("driver response exceeded the bounded stream limit")
-
     def _abort(self) -> None:
+        if self._closed:
+            return
         self._closed = True
+        try:
+            self._stdin.close()
+        except Exception:
+            pass
         if self._process.poll() is None:
-            self._process.terminate()
             try:
+                self._process.terminate()
                 self._process.wait(timeout=1)
             except subprocess.TimeoutExpired:
-                self._process.kill()
-                self._process.wait(timeout=1)
-        self._stdin.close()
-        self._stdout.close()
+                try:
+                    self._process.kill()
+                    self._process.wait(timeout=1)
+                except (subprocess.TimeoutExpired, ProcessLookupError):
+                    pass
+            except ProcessLookupError:
+                pass
+        try:
+            self._stdout.close()
+        except Exception:
+            pass
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        if self._process.poll() is not None:
-            self._stdin.close()
-            self._stdout.close()
-            return
-        self._stdin.close()
         try:
-            self._process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self._process.terminate()
-            self._process.wait(timeout=5)
-        self._stdout.close()
+            self._stdin.close()
+        except Exception:
+            pass
+        if self._process.poll() is None:
+            try:
+                self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    self._process.terminate()
+                    self._process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    try:
+                        self._process.kill()
+                        self._process.wait(timeout=2)
+                    except (subprocess.TimeoutExpired, ProcessLookupError):
+                        pass
+                except ProcessLookupError:
+                    pass
+        try:
+            self._stdout.close()
+        except Exception:
+            pass
 
     @property
     def closed(self) -> bool:
         return self._closed
-
 
 class Terminal:
     """Context-managed synchronous client over one driver process."""
@@ -161,8 +230,11 @@ class Terminal:
     ) -> None:
         self._transport = DriverTransport(resolve_binary(binary_path))
         self._evidence_root = None if evidence_root is None else Path(evidence_root)
-        self._transport.request({"method": "hello"}, DriverHelloData)
-
+        try:
+            self._transport.request({"method": "hello"}, DriverHelloData)
+        except BaseException:
+            self._transport.close()
+            raise
     def launch(
         self,
         command: Sequence[str | Path],

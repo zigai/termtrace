@@ -58,9 +58,12 @@ class AsyncTerminal:
             limit=DRIVER_RESPONSE_STREAM_LIMIT,
         )
         terminal = cls(process, None if evidence_root is None else Path(evidence_root))
-        await terminal.request({"method": "hello"}, DriverHelloData)
+        try:
+            await terminal.request({"method": "hello"}, DriverHelloData)
+        except BaseException:
+            await terminal.close()
+            raise
         return terminal
-
     async def launch(
         self,
         command: Sequence[str | Path],
@@ -124,54 +127,113 @@ class AsyncTerminal:
         if self._closed:
             raise ProtocolMismatchError("driver is closed")
         correlation_id, payload = correlated_request(method, request_id, request_timeout)
+        loop = asyncio.get_running_loop()
+        if request_timeout is None:
+            deadline = None
+            await self._lock.acquire()
+        else:
+            deadline = loop.time() + request_timeout
+            remaining_lock = max(0.0, deadline - loop.time())
+            try:
+                async with asyncio.timeout(remaining_lock):
+                    await self._lock.acquire()
+            except TimeoutError:
+                raise RequestTimeoutError(request_timeout) from None
+            except asyncio.CancelledError:
+                raise
+
+        sent = False
         try:
-            async with asyncio.timeout(request_timeout):
-                async with self._lock:
-                    if self._closed:
-                        raise ProtocolMismatchError("driver is closed")
-                    self._stdin.write(payload + b"\n")
-                    await self._stdin.drain()
+            if self._closed:
+                raise ProtocolMismatchError("driver is closed")
+            remaining_req = None if deadline is None else max(0.0, deadline - loop.time())
+            if remaining_req is not None and remaining_req <= 0:
+                await self.close()
+                assert request_timeout is not None
+                raise RequestTimeoutError(request_timeout)
+
+            async with asyncio.timeout(remaining_req):
+                sent = True
+                self._stdin.write(payload + b"\n")
+                await self._stdin.drain()
+                try:
                     line = await self._stdout.readline()
+                except ValueError as error:
+                    await self.close()
+                    raise ProtocolMismatchError(
+                        "driver response exceeded the bounded stream limit"
+                    ) from error
         except TimeoutError:
-            self._abort_transport()
+            if sent:
+                await self.close()
             assert request_timeout is not None
             raise RequestTimeoutError(request_timeout) from None
         except asyncio.CancelledError:
-            self._abort_transport()
+            if sent:
+                await self.close()
             raise
+        finally:
+            self._lock.release()
+
         if not line:
             raise ProtocolMismatchError("driver closed before its correlated response")
         return decode_driver_response(line, correlation_id, response_type)
 
     def _abort_transport(self) -> None:
         self._closed = True
-        self._stdin.close()
-        if self._process.returncode is not None:
-            return
         try:
-            self._process.terminate()
-        except ProcessLookupError:
-            return
+            self._stdin.close()
+        except Exception:
+            pass
+        if self._process.returncode is None:
+            try:
+                self._process.terminate()
+            except ProcessLookupError:
+                pass
 
     async def close(self) -> None:
+        if self._closed:
+            return
         self._closed = True
-        self._stdin.close()
         try:
-            await self._stdin.wait_closed()
-        except (BrokenPipeError, ConnectionResetError):
+            self._stdin.close()
+            async with asyncio.timeout(1):
+                await self._stdin.wait_closed()
+        except Exception:
             pass
+
         if self._process.returncode is not None:
             return
+
         try:
             async with asyncio.timeout(5):
                 await self._process.wait()
+                return
         except TimeoutError:
+            pass
+
+        if self._process.returncode is None:
             try:
                 self._process.terminate()
             except ProcessLookupError:
                 return
-            await self._process.wait()
+            try:
+                async with asyncio.timeout(3):
+                    await self._process.wait()
+                    return
+            except TimeoutError:
+                pass
 
+        if self._process.returncode is None:
+            try:
+                self._process.kill()
+            except ProcessLookupError:
+                return
+            try:
+                async with asyncio.timeout(2):
+                    await self._process.wait()
+            except TimeoutError:
+                pass
     @property
     def closed(self) -> bool:
         return self._closed

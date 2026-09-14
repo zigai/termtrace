@@ -2,7 +2,7 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
 import { addAbortListener } from "node:events";
 import { randomUUID } from "node:crypto";
-import type { Readable, Writable } from "node:stream";
+import { Transform, type Readable, type Writable } from "node:stream";
 import { RequestTimeoutError } from "../errors.js";
 
 import {
@@ -21,6 +21,7 @@ import {
 const PROCESS_TREE_TERMINATION_GRACE_MS = 5_000;
 const DRIVER_CLOSE_TIMEOUT_MS = 5_000;
 const MAX_PENDING_REQUESTS = 256;
+const MAX_DRIVER_RESPONSE_BYTES = 4 * 1024 * 1024 + 1;
 
 export type DriverRequestOptions = {
     readonly requestId?: string;
@@ -39,6 +40,7 @@ type PendingRequest = {
 /** Owns a driver subprocess and guarantees one correlated response per request. */
 export class DriverClient {
     readonly #process: ChildProcessByStdio<Writable, Readable, Readable>;
+    readonly #limiter: Transform;
     readonly #lines: Interface;
     readonly #pending: Array<PendingRequest> = [];
     #closed = false;
@@ -58,8 +60,53 @@ export class DriverClient {
             this.#process.once("error", () => resolve());
         });
         this.#process.stderr.resume();
-        this.#lines = createInterface({ input: this.#process.stdout, crlfDelay: Infinity });
+
+        let currentLineBytes = 0;
+
+        this.#limiter = new Transform({
+            transform(chunk: Buffer, _encoding, callback) {
+                let start = 0;
+                while (start < chunk.length) {
+                    const newlineIndex = chunk.indexOf(0x0a, start);
+                    if (newlineIndex === -1) {
+                        currentLineBytes += chunk.length - start;
+                        if (currentLineBytes > MAX_DRIVER_RESPONSE_BYTES) {
+                            return callback(
+                                new TermtraceProtocolError(
+                                    "driver response exceeded the bounded stream limit",
+                                ),
+                            );
+                        }
+                        break;
+                    }
+
+                    currentLineBytes += newlineIndex - start + 1;
+                    if (currentLineBytes > MAX_DRIVER_RESPONSE_BYTES) {
+                        return callback(
+                            new TermtraceProtocolError(
+                                "driver response exceeded the bounded stream limit",
+                            ),
+                        );
+                    }
+
+                    currentLineBytes = 0;
+                    start = newlineIndex + 1;
+                }
+
+                this.push(chunk);
+                callback();
+            },
+        });
+        this.#limiter.on("error", (cause) => {
+            if (!this.#terminating) {
+                void this.#terminateWithFailure(cause);
+            }
+        });
+
+        const boundedOutput = this.#process.stdout.pipe(this.#limiter);
+        this.#lines = createInterface({ input: boundedOutput, crlfDelay: Infinity });
         this.#lines.on("line", (line) => this.#acceptLine(line));
+        this.#lines.on("error", () => {});
         this.#process.once("error", (cause) => {
             if (!this.#terminating) {
                 this.#closeWithError(cause);
@@ -210,6 +257,7 @@ export class DriverClient {
         if (this.#termination !== undefined) return this.#termination;
         this.#closed = true;
         this.#terminating = true;
+        this.#limiter.destroy();
         this.#lines.close();
         this.#termination = this.#terminateProcessTree(cause);
         return this.#termination;

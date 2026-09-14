@@ -150,3 +150,25 @@ test("aborting an in-flight request reaps the driver tree and rejects all FIFO w
         rmSync(directory, { recursive: true, force: true });
     }
 }, 10_000);
+
+test("rejects driver responses exceeding the bounded stream limit", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "termtrace-driver-limit-"));
+    const binary = join(directory, "driver");
+    writeFileSync(
+        binary,
+        "#!/bin/sh\nIFS= read -r request\nhead -c 5242880 /dev/zero | tr '\\0' 'A'\nexec sleep 30\n",
+    );
+    chmodSync(binary, 0o700);
+    const client = new DriverClient(binary);
+
+    try {
+        await expect(
+            client.request({ method: "hello" }, "hello", {
+                requestId: "00000000-0000-0000-0000-000000000099",
+            }),
+        ).rejects.toThrow("driver response exceeded the bounded stream limit");
+    } finally {
+        await client.close();
+        rmSync(directory, { recursive: true, force: true });
+    }
+}, 10_000);

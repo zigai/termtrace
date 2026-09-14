@@ -13,7 +13,7 @@ use nix::{
     unistd::{pipe, write as fd_write, Uid},
 };
 use std::{
-    io::{BufRead as _, BufReader, ErrorKind, Read as _, Write as _},
+    io::{ErrorKind, Read as _, Write as _},
     os::fd::{AsFd as _, OwnedFd},
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
@@ -140,9 +140,17 @@ fn control_server_loop(
             continue;
         }
 
+        const MAX_ACCEPT_BATCH: usize = 32;
+        let mut accepted_count = 0;
+
         loop {
+            if accepted_count >= MAX_ACCEPT_BATCH {
+                break;
+            }
+
             match listener.accept() {
                 Ok((stream, _)) => {
+                    accepted_count = accepted_count.saturating_add(1);
                     let Some(permit) = ConnectionPermit::acquire(&active, MAX_CONTROL_CONNECTIONS)
                     else {
                         continue;
@@ -187,38 +195,15 @@ fn handle_control_connection(
         });
     }
 
-    let timeout = Some(Duration::from_secs(10));
-    stream
-        .set_read_timeout(timeout)
-        .and_then(|()| return stream.set_write_timeout(timeout))
-        .map_err(|error| {
-            return terminal_error("configure control connection", error.to_string());
-        })?;
-
-    let mut encoded = Vec::new();
-    BufReader::new(stream.try_clone().map_err(|error| {
-        return terminal_error("clone control connection", error.to_string());
-    })?)
-    .take(MAX_CONTROL_MESSAGE_BYTES + 1)
-    .read_until(b'\n', &mut encoded)
-    .map_err(|error| return terminal_error("read control request", error.to_string()))?;
-
-    // Reachability checks connect and close without submitting a request.
-    if encoded.is_empty() {
+    let request_timeout = Duration::from_secs(10);
+    let Some(request) = read_control_request(&mut stream, cancel, request_timeout)? else {
         return Ok(());
-    }
+    };
 
-    validate_frame(&encoded)?;
-    let request: ControlRequest = serde_json::from_slice(&encoded).map_err(|source| {
-        return Error::InvalidJson {
-            path: PathBuf::from("<control-socket>"),
-            json_path: "$".to_owned(),
-            source,
-        };
-    })?;
     if request.version != CONTROL_PROTOCOL_VERSION {
         return write_control_response(
             &mut stream,
+            cancel,
             &ControlResponse {
                 version: CONTROL_PROTOCOL_VERSION,
                 request_id: request.request_id,
@@ -228,14 +213,12 @@ fn handle_control_connection(
                     details: None,
                 },
             },
+            request_timeout,
         );
     }
 
     let request_id = request.request_id;
     let response_timeout = control_response_timeout(&request.command, Duration::from_secs(2));
-    stream
-        .set_write_timeout(Some(response_timeout))
-        .map_err(|error| return terminal_error("configure wait response", error.to_string()))?;
 
     let (response_sender, response_receiver) = mpsc::sync_channel(1);
     let mut message = RuntimeMessage::Control {
@@ -263,7 +246,8 @@ fn handle_control_connection(
                             details: None,
                         },
                     };
-                    let _ = write_control_response(&mut stream, &response);
+                    let _ =
+                        write_control_response(&mut stream, cancel, &response, response_timeout);
 
                     return Err(terminal_error(
                         "dispatch control request",
@@ -273,7 +257,12 @@ fn handle_control_connection(
 
                 message = returned;
 
-                thread::sleep(Duration::from_millis(10));
+                let mut descriptors = [PollFd::new(cancel.as_fd(), PollFlags::POLLIN)];
+                if poll(&mut descriptors, PollTimeout::from(10_u16)).is_ok()
+                    && poll_ready(&descriptors[0])
+                {
+                    return Ok(());
+                }
             }
             Err(mpsc::TrySendError::Disconnected(_)) => {
                 let response = ControlResponse {
@@ -285,7 +274,7 @@ fn handle_control_connection(
                         details: None,
                     },
                 };
-                let _ = write_control_response(&mut stream, &response);
+                let _ = write_control_response(&mut stream, cancel, &response, response_timeout);
 
                 return Err(terminal_error(
                     "dispatch control request",
@@ -313,7 +302,8 @@ fn handle_control_connection(
                             details: None,
                         },
                     };
-                    let _ = write_control_response(&mut stream, &response);
+                    let _ =
+                        write_control_response(&mut stream, cancel, &response, response_timeout);
 
                     return Err(terminal_error(
                         "wait for control response",
@@ -331,7 +321,7 @@ fn handle_control_connection(
                         details: None,
                     },
                 };
-                let _ = write_control_response(&mut stream, &response);
+                let _ = write_control_response(&mut stream, cancel, &response, response_timeout);
 
                 return Err(terminal_error(
                     "wait for control response",
@@ -341,7 +331,7 @@ fn handle_control_connection(
         }
     };
 
-    return write_control_response(&mut stream, &response);
+    return write_control_response(&mut stream, cancel, &response, response_timeout);
 }
 
 fn cancellation_requested(cancel: &OwnedFd) -> Result<bool> {
@@ -358,7 +348,124 @@ fn cancellation_requested(cancel: &OwnedFd) -> Result<bool> {
     }
 }
 
-fn write_control_response(stream: &mut UnixStream, response: &ControlResponse) -> Result<()> {
+fn read_control_request(
+    stream: &mut UnixStream,
+    cancel: &OwnedFd,
+    timeout: Duration,
+) -> Result<Option<ControlRequest>> {
+    stream.set_nonblocking(true).map_err(|error| {
+        return terminal_error(
+            "configure nonblocking control connection",
+            error.to_string(),
+        );
+    })?;
+
+    let deadline = Instant::now() + timeout;
+    let mut encoded = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let max_bytes = usize::try_from(MAX_CONTROL_MESSAGE_BYTES).unwrap_or(usize::MAX);
+
+    loop {
+        if cancellation_requested(cancel)? {
+            return Ok(None);
+        }
+
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(terminal_error(
+                "read control request",
+                "request read deadline exceeded",
+            ));
+        }
+
+        let remaining = deadline
+            .saturating_duration_since(now)
+            .max(Duration::from_millis(1));
+        let poll_timeout = PollTimeout::try_from(remaining).unwrap_or(PollTimeout::NONE);
+
+        let mut descriptors = [
+            PollFd::new(stream.as_fd(), PollFlags::POLLIN),
+            PollFd::new(cancel.as_fd(), PollFlags::POLLIN),
+        ];
+
+        match poll(&mut descriptors, poll_timeout) {
+            Ok(_) => {}
+            Err(Errno::EINTR) => continue,
+            Err(error) => {
+                return Err(terminal_error("poll control request", error.to_string()));
+            }
+        }
+
+        if poll_ready(&descriptors[1]) {
+            return Ok(None);
+        }
+
+        if !poll_ready(&descriptors[0]) {
+            continue;
+        }
+
+        match stream.read(&mut chunk) {
+            Ok(0) => {
+                break;
+            }
+            Ok(count) => {
+                let Some(slice) = chunk.get(..count) else {
+                    continue;
+                };
+                if let Some(newline_index) = slice.iter().position(|b| return *b == b'\n') {
+                    if encoded.len().saturating_add(newline_index) > max_bytes {
+                        return Err(Error::ControlRejected {
+                            code: "request_too_large".to_owned(),
+                            message: format!(
+                                "control request exceeds the {MAX_CONTROL_MESSAGE_BYTES}-byte limit"
+                            ),
+                        });
+                    }
+                    if let Some(sub) = slice.get(..=newline_index) {
+                        encoded.extend_from_slice(sub);
+                    }
+                    break;
+                }
+
+                if encoded.len().saturating_add(count) > max_bytes {
+                    return Err(Error::ControlRejected {
+                        code: "request_too_large".to_owned(),
+                        message: format!(
+                            "control request exceeds the {MAX_CONTROL_MESSAGE_BYTES}-byte limit"
+                        ),
+                    });
+                }
+                encoded.extend_from_slice(slice);
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+            Err(error) => {
+                return Err(terminal_error("read control request", error.to_string()));
+            }
+        }
+    }
+
+    if encoded.is_empty() {
+        return Ok(None);
+    }
+
+    validate_frame(&encoded)?;
+    let request: ControlRequest = serde_json::from_slice(&encoded).map_err(|source| {
+        return Error::InvalidJson {
+            path: PathBuf::from("<control-socket>"),
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
+
+    return Ok(Some(request));
+}
+
+fn write_control_response(
+    stream: &mut UnixStream,
+    cancel: &OwnedFd,
+    response: &ControlResponse,
+    timeout: Duration,
+) -> Result<()> {
     let encoded = serde_json::to_vec(response).map_err(|source| {
         return Error::InvalidJson {
             path: PathBuf::from("<control-socket>"),
@@ -368,7 +475,7 @@ fn write_control_response(stream: &mut UnixStream, response: &ControlResponse) -
     })?;
 
     let response_bytes = u64::try_from(encoded.len().saturating_add(1)).unwrap_or(u64::MAX);
-    let encoded = if response_bytes > MAX_CONTROL_MESSAGE_BYTES {
+    let mut payload = if response_bytes > MAX_CONTROL_MESSAGE_BYTES {
         let (code, message, details) = oversized_response_error(response, response_bytes);
 
         serde_json::to_vec(&ControlResponse {
@@ -390,12 +497,83 @@ fn write_control_response(stream: &mut UnixStream, response: &ControlResponse) -
     } else {
         encoded
     };
+    payload.push(b'\n');
 
-    return stream
-        .write_all(&encoded)
-        .and_then(|()| return stream.write_all(b"\n"))
-        .and_then(|()| return stream.flush())
-        .map_err(|error| return terminal_error("write control response", error.to_string()));
+    write_all_with_cancellation(stream, cancel, &payload, timeout)?;
+    return Ok(());
+}
+
+fn write_all_with_cancellation(
+    stream: &mut UnixStream,
+    cancel: &OwnedFd,
+    mut payload: &[u8],
+    timeout: Duration,
+) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+
+    while !payload.is_empty() {
+        if cancellation_requested(cancel)? {
+            return Ok(());
+        }
+
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(terminal_error(
+                "write control response",
+                "response write deadline exceeded",
+            ));
+        }
+
+        let remaining = deadline
+            .saturating_duration_since(now)
+            .max(Duration::from_millis(1));
+        let poll_timeout = PollTimeout::try_from(remaining).unwrap_or(PollTimeout::NONE);
+
+        let mut descriptors = [
+            PollFd::new(stream.as_fd(), PollFlags::POLLOUT),
+            PollFd::new(cancel.as_fd(), PollFlags::POLLIN),
+        ];
+
+        match poll(&mut descriptors, poll_timeout) {
+            Ok(_) => {}
+            Err(Errno::EINTR) => continue,
+            Err(error) => {
+                return Err(terminal_error("poll control response", error.to_string()));
+            }
+        }
+
+        if poll_ready(&descriptors[1]) {
+            return Ok(());
+        }
+
+        let revents = descriptors[0].revents().unwrap_or(PollFlags::empty());
+        if !revents.intersects(
+            PollFlags::POLLOUT | PollFlags::POLLHUP | PollFlags::POLLERR | PollFlags::POLLNVAL,
+        ) {
+            continue;
+        }
+
+        match stream.write(payload) {
+            Ok(0) => {
+                return Err(terminal_error(
+                    "write control response",
+                    "control peer closed connection prematurely",
+                ));
+            }
+            Ok(count) => {
+                let Some(remaining) = payload.get(count..) else {
+                    return Ok(());
+                };
+                payload = remaining;
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+            Err(error) => {
+                return Err(terminal_error("write control response", error.to_string()));
+            }
+        }
+    }
+
+    return Ok(());
 }
 
 fn oversized_response_error(
@@ -529,6 +707,7 @@ mod tests {
     use super::*;
     use std::sync::Barrier;
     use termtrace_evidence::event_log::CanonicalBoundary;
+    use termtrace_model::protocol::control::{ActionInputResult, ScreenPostconditionQuality};
     use termtrace_model::{
         terminal::observation::ActorBoundaries, terminal::observation::CaptureQuality,
         terminal::screen::ScreenProjectionRequest,
@@ -615,7 +794,7 @@ mod tests {
             request_id: Uuid::nil(),
             result: ControlResult::Ok {
                 data: ControlData::ActionApplied {
-                    input: termtrace_model::protocol::control::ActionInputResult {
+                    input: ActionInputResult {
                         sequence_id: Uuid::nil(),
                         atom_count: 1,
                         bytes_written: 4,
@@ -626,8 +805,8 @@ mod tests {
                     },
                     postcondition: ActionPostconditionResult::Screen {
                         matched: true,
-                        quality:
-                            termtrace_model::protocol::control::ScreenPostconditionQuality::MatchedUnsettled,
+                        quality: ScreenPostconditionQuality::MatchedUnsettled,
+                        state_hash: None,
                         frame: Some(frame),
                     },
                     boundaries: boundaries(),
@@ -670,7 +849,7 @@ mod tests {
             request_id: Uuid::nil(),
             result: ControlResult::Ok {
                 data: ControlData::ActionApplied {
-                    input: termtrace_model::protocol::control::ActionInputResult {
+                    input: ActionInputResult {
                         sequence_id: Uuid::nil(),
                         atom_count: 1,
                         bytes_written: 4,
@@ -681,8 +860,8 @@ mod tests {
                     },
                     postcondition: ActionPostconditionResult::Screen {
                         matched: true,
-                        quality:
-                            termtrace_model::protocol::control::ScreenPostconditionQuality::MatchedUnsettled,
+                        quality: ScreenPostconditionQuality::MatchedUnsettled,
+                        state_hash: None,
                         frame: Some(spans_frame),
                     },
                     boundaries: boundaries(),
@@ -714,7 +893,7 @@ mod tests {
             request_id: Uuid::nil(),
             result: ControlResult::Ok {
                 data: ControlData::ActionApplied {
-                    input: termtrace_model::protocol::control::ActionInputResult {
+                    input: ActionInputResult {
                         sequence_id: Uuid::nil(),
                         atom_count: 1,
                         bytes_written: 4,
@@ -725,8 +904,8 @@ mod tests {
                     },
                     postcondition: ActionPostconditionResult::Screen {
                         matched: true,
-                        quality:
-                            termtrace_model::protocol::control::ScreenPostconditionQuality::MatchedUnsettled,
+                        quality: ScreenPostconditionQuality::MatchedUnsettled,
+                        state_hash: None,
                         frame: Some(text_frame),
                     },
                     boundaries: boundaries(),
@@ -766,5 +945,25 @@ mod tests {
         let _permit = ConnectionPermit::acquire(&active, 1).expect("worker released capacity");
 
         assert!(ConnectionPermit::acquire(&active, 1).is_none());
+    }
+
+    #[test]
+    fn incomplete_request_read_is_interrupted_promptly_on_shutdown() {
+        let (sender, _receiver) = mpsc::sync_channel(1);
+        let socket_name = format!("termtrace-test-h1-{}", Uuid::now_v7());
+        let worker = spawn_control_server(&socket_name, sender).expect("control server");
+        let socket = control_socket_address(&socket_name).expect("socket address");
+        let mut client = UnixStream::connect_addr(&socket).expect("connect client");
+        client.write_all(b"{\"version\":5").expect("partial write");
+        client.flush().expect("flush partial write");
+
+        let start = Instant::now();
+        worker.stop().expect("stop control server");
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "shutdown took {elapsed:?}, expected < 1s"
+        );
     }
 }
