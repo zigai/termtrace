@@ -34,7 +34,7 @@ use std::{
     time::Duration,
 };
 use termtrace_engine::{
-    replay::index_session,
+    replay::index_session_for_video,
     timeline::{resolve_session_source_selection, SourceRange},
     Error,
 };
@@ -50,7 +50,7 @@ use termtrace_export::{
     bundle::{create as create_bundle, plan as plan_bundle, verify_profile},
 };
 use termtrace_media::native_capture::{
-    capture, native_capture_target, CaptureKind, CaptureOptions,
+    capture, native_capture_target, CaptureKind, CaptureOptions, VISUAL_DIRECTORY,
 };
 use termtrace_media::presentation::{
     export as export_presentation, plan_with_source as plan_presentation,
@@ -258,12 +258,12 @@ pub(super) fn run_video_facade(
     {
         require_cli_capability(NATIVE_VIDEO_CAPABILITY)?;
 
-        match index_session(&session) {
+        match index_session_for_video(&session, u32::from(provisional_fps)) {
             Ok(_) | Err(Error::ArtifactExists { .. }) => {}
             Err(error) => return Err(error).into_diagnostic(),
         }
 
-        let visual_dir = session.join(termtrace_media::native_capture::VISUAL_DIRECTORY);
+        let visual_dir = session.join(VISUAL_DIRECTORY);
         if visual_dir.exists() && !visual_dir.join("manifest.json").is_file() {
             let _ = fs_err::remove_dir_all(&visual_dir);
         }
@@ -466,7 +466,7 @@ pub(super) fn run_video_facade(
                 .into_diagnostic()?;
         } else {
             return Err(Error::Filesystem {
-                path: output.clone(),
+                path: output,
                 source,
             })
             .into_diagnostic();

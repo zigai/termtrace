@@ -205,6 +205,7 @@ pub(super) fn spawn_geometry_probe(
     report: &Path,
     overrides: &[String],
     profile: &Path,
+    scaling: Option<super::capture::DisplayScaling>,
     stem: &str,
 ) -> Result<ManagedChild> {
     let stdout = secure_file(&staging.join(format!("{stem}.stdout.log")))?;
@@ -225,11 +226,17 @@ pub(super) fn spawn_geometry_probe(
         .env("GDK_BACKEND", "x11")
         .env("LIBGL_ALWAYS_SOFTWARE", "1");
 
-    if let Ok(scale) = std::env::var("GDK_SCALE") {
-        command.env("GDK_SCALE", scale);
-    }
-    if let Ok(dpi_scale) = std::env::var("GDK_DPI_SCALE") {
-        command.env("GDK_DPI_SCALE", dpi_scale);
+    if let Some(scaling) = scaling {
+        command
+            .env("GDK_SCALE", scaling.gdk_scale.to_string())
+            .env("GDK_DPI_SCALE", format!("{}", scaling.gdk_dpi_scale));
+    } else {
+        if let Ok(scale) = std::env::var("GDK_SCALE") {
+            command.env("GDK_SCALE", scale);
+        }
+        if let Ok(dpi_scale) = std::env::var("GDK_DPI_SCALE") {
+            command.env("GDK_DPI_SCALE", dpi_scale);
+        }
     }
 
     return ManagedChild::spawn_logged(

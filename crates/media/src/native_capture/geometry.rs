@@ -260,7 +260,21 @@ fn probe_staged(
     let root = materialize_profile(&staging.join("ghostty-profile"), &profile.replay_config)?;
     let lease = DisplayLease::acquire()?;
     let display = format!(":{}", lease.number);
-    let mut xvfb = spawn_xvfb(Some(helper), &lease, target.width, target.height, staging, None)?;
+    let scaling = if target.width >= 2880 || target.height >= 1800 {
+        Some(super::capture::DisplayScaling::from_scale(2.0))
+    } else if target.width >= 2560 || target.height >= 1440 {
+        Some(super::capture::DisplayScaling::from_scale(1.5))
+    } else {
+        None
+    };
+    let mut xvfb = spawn_xvfb(
+        Some(helper),
+        &lease,
+        target.width,
+        target.height,
+        staging,
+        scaling.map(|s| s.dpi),
+    )?;
     wait_for_x_socket(&lease, &mut xvfb, Duration::from_secs(5))?;
 
     let report_path = staging.join("geometry.json");
@@ -271,6 +285,7 @@ fn probe_staged(
         &report_path,
         &ghostty_overrides(),
         &root,
+        scaling,
         "ghostty",
     )?;
     let report = wait_for_json(&report_path, &mut ghostty, Duration::from_secs(20))?;

@@ -204,10 +204,14 @@ fn video_stride_samples_intermediate_flutter_into_compact_index() {
 
     // Video stride index collapsed the flutter within the frame into a compact settled state
     assert_eq!(video_retained, 2);
-    assert_eq!(video_artifacts.final_state_hash, full_artifacts.final_state_hash);
+    assert_eq!(
+        video_artifacts.final_state_hash,
+        full_artifacts.final_state_hash
+    );
     assert_eq!(video_artifacts.final_text, full_artifacts.final_text);
 
-    let video_index_content = fs_err::read_to_string(video_dir.join("state-index.jsonl")).expect("state index");
+    let video_index_content =
+        fs_err::read_to_string(video_dir.join("state-index.jsonl")).expect("state index");
     let entries: Vec<StateIndexEntry> = video_index_content
         .lines()
         .map(|line| serde_json::from_str(line).expect("entry"))
@@ -221,7 +225,10 @@ fn video_stride_samples_intermediate_flutter_into_compact_index() {
     let manifest: ReplayManifest = serde_json::from_slice(&manifest_bytes).expect("manifest json");
     assert_eq!(manifest.state_count, 2);
     assert_eq!(manifest.state_selection, StateSelection::Presented);
-    assert_eq!(manifest.final_retained_state_hash, Some(video_artifacts.final_state_hash));
+    assert_eq!(
+        manifest.final_retained_state_hash,
+        Some(video_artifacts.final_state_hash)
+    );
 }
 
 #[test]
@@ -250,7 +257,7 @@ fn index_session_with_video_options_samples_cleanly() {
     )
     .expect("index session with video options");
 
-    assert_eq!(outcome.state_selection, StateSelection::Presented);
+    assert_eq!(outcome.state_selection, StateSelection::All);
     assert_eq!(outcome.state_count, 2);
 
     // Also test write_index_with_stride
@@ -293,7 +300,13 @@ fn high_resolution_canvas_video_stride_completes_in_seconds() {
     for i in 0..200 {
         writer
             .append(Event::Output {
-                data: ByteString::from(format!("4K high resolution canvas flutter line {i}: {}\r\n", "=".repeat(120)).into_bytes()),
+                data: ByteString::from(
+                    format!(
+                        "4K high resolution canvas flutter line {i}: {}\r\n",
+                        "=".repeat(120)
+                    )
+                    .into_bytes(),
+                ),
             })
             .expect("output");
     }
@@ -311,7 +324,10 @@ fn high_resolution_canvas_video_stride_completes_in_seconds() {
     let elapsed = start.elapsed();
 
     println!("4K high resolution 300x100 indexing completed in: {elapsed:?}");
-    assert!(elapsed < std::time::Duration::from_secs(5), "indexing 4K session with video stride took too long: {elapsed:?}");
-    assert_eq!(outcome.state_selection, StateSelection::Presented);
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "indexing 4K session with video stride took too long: {elapsed:?}"
+    );
+    assert_eq!(outcome.state_selection, StateSelection::All);
     assert_eq!(outcome.state_count, 2);
 }

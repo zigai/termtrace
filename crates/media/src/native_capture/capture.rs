@@ -666,11 +666,7 @@ impl DisplayScaling {
             scale
         };
 
-        let gdk_scale = if effective_scale >= 2.0 {
-            effective_scale.floor() as u32
-        } else {
-            1
-        };
+        let gdk_scale = if effective_scale >= 2.0 { effective_scale.floor() as u32 } else { 1 };
 
         let gdk_dpi_scale = effective_scale / (gdk_scale as f64);
 
@@ -718,8 +714,8 @@ pub fn resolve_display_scaling(
             }
         }
     }
-    if let Ok(scale_str) = std::env::var("TERMTRACE_DISPLAY_SCALE")
-        .or_else(|_| std::env::var("TERMTRACE_SCALE"))
+    if let Ok(scale_str) =
+        std::env::var("TERMTRACE_DISPLAY_SCALE").or_else(|_| std::env::var("TERMTRACE_SCALE"))
     {
         if let Ok(scale) = scale_str.parse::<f64>() {
             if scale > 0.0 {
@@ -741,7 +737,11 @@ pub fn resolve_display_scaling(
     // 3. Manifest provenance environment detection
     if let Some(manifest) = manifest {
         if let Some(env_scale) = manifest.execution_provenance.environment.get("GDK_SCALE") {
-            if let Some(scale_str) = env_scale.value.as_ref().and_then(|b| std::str::from_utf8(b.as_bytes()).ok()) {
+            if let Some(scale_str) = env_scale
+                .value
+                .as_ref()
+                .and_then(|b| std::str::from_utf8(b.as_bytes()).ok())
+            {
                 if let Ok(gdk_scale) = scale_str.parse::<u32>() {
                     let dpi_scale = manifest
                         .execution_provenance
@@ -763,16 +763,32 @@ pub fn resolve_display_scaling(
             if cell_w >= 18.0 && cell_h >= 36.0 {
                 return DisplayScaling::from_scale(2.0);
             }
+            if cell_w >= 14.0 && cell_h >= 28.0 {
+                return DisplayScaling::from_scale(1.5);
+            }
+        }
+        if manifest.geometry_provenance.source
+            == termtrace_model::execution::session::GeometrySource::GhosttyFit
+        {
+            if let Some(target) = manifest.geometry_provenance.capture_target {
+                if target.width >= 3840 || target.height >= 2160 {
+                    return DisplayScaling::from_scale(2.0);
+                }
+                if target.width >= 2560 || target.height >= 1440 {
+                    return DisplayScaling::from_scale(1.5);
+                }
+            }
         }
     }
 
-    // 5. Viewport resolution heuristic (e.g. 4K canvases >= 2880x1800)
+    // 5. Viewport resolution heuristic (e.g. 4K canvases >= 2880x1800, QHD >= 2560x1440)
     if options.width >= 2880 || options.height >= 1800 {
         return DisplayScaling::from_scale(2.0);
     }
-
-    // Default: 1.0 (96 DPI)
-    DisplayScaling::from_scale(1.0)
+    if options.width >= 2560 || options.height >= 1440 {
+        return DisplayScaling::from_scale(1.5);
+    }
+    return DisplayScaling::from_scale(1.0);
 }
 
 #[cfg(test)]
@@ -837,17 +853,37 @@ mod tests {
     #[test]
     fn resolve_display_scaling_respects_options_and_viewport_resolution() {
         let opt_1x = options(24);
-        assert_eq!(resolve_display_scaling(&opt_1x, None), DisplayScaling::from_scale(1.0));
+        assert_eq!(
+            resolve_display_scaling(&opt_1x, None),
+            DisplayScaling::from_scale(1.0)
+        );
 
         let opt_explicit_dpi = options(24).with_dpi(192);
-        assert_eq!(resolve_display_scaling(&opt_explicit_dpi, None), DisplayScaling::from_dpi(192));
+        assert_eq!(
+            resolve_display_scaling(&opt_explicit_dpi, None),
+            DisplayScaling::from_dpi(192)
+        );
 
         let opt_explicit_scale = options(24).with_scale(1.5);
-        assert_eq!(resolve_display_scaling(&opt_explicit_scale, None), DisplayScaling::from_scale(1.5));
+        assert_eq!(
+            resolve_display_scaling(&opt_explicit_scale, None),
+            DisplayScaling::from_scale(1.5)
+        );
+
+        let mut opt_2k = options(24);
+        opt_2k.width = 2560;
+        opt_2k.height = 1440;
+        assert_eq!(
+            resolve_display_scaling(&opt_2k, None),
+            DisplayScaling::from_scale(1.5)
+        );
 
         let mut opt_4k = options(24);
         opt_4k.width = 3840;
         opt_4k.height = 2160;
-        assert_eq!(resolve_display_scaling(&opt_4k, None), DisplayScaling::from_scale(2.0));
+        assert_eq!(
+            resolve_display_scaling(&opt_4k, None),
+            DisplayScaling::from_scale(2.0)
+        );
     }
 }
