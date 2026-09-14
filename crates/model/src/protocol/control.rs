@@ -30,7 +30,7 @@ pub struct ClockSample {
 /// Current control protocol version.
 pub const CONTROL_PROTOCOL_VERSION: u32 = 17;
 /// Maximum encoded request or response size.
-pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 1024 * 1024;
+pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Derive an input atom's operation identity from its request and zero-based index.
 pub fn derive_input_operation_id(request_id: Uuid, index: usize) -> Uuid {

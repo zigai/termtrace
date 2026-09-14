@@ -89,15 +89,15 @@ fn region_cell_limit_is_typed_and_never_clipped() {
         region: Some(ScreenRegion {
             top: 0,
             left: 0,
-            right: 200,
-            bottom: 100,
+            right: 300,
+            bottom: 250,
         }),
     };
     assert_eq!(
-        validate_screen_region(&request, 200, 100),
+        validate_screen_region(&request, 300, 250),
         Err(ScreenFrameError::ResourceLimit {
             limit: ScreenFrameLimitKind::CellCount,
-            requested: 20_000,
+            requested: 75_000,
             maximum: u64::from(MAX_SCREEN_FRAME_CELLS),
             detail: FrameDetail::Spans,
             region: request.region.expect("region"),
@@ -240,7 +240,7 @@ fn serialized_byte_limit_returns_bounded_error() {
 #[test]
 fn escaped_projection_strings_are_bounded_before_projection_clones() {
     let mut state = semantic_fixture();
-    state.grid[0].cells[0].grapheme = "\u{0001}".repeat(50_000);
+    state.grid[0].cells[0].grapheme = "\u{0001}".repeat(250_000);
     let region =
         validate_screen_region(&ScreenProjectionRequest::default(), state.cols, state.rows)
             .expect("region");

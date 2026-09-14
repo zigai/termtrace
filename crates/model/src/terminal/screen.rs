@@ -17,9 +17,9 @@ use uuid::Uuid;
 /// Rich screen projection format version.
 pub const SCREEN_FRAME_VERSION: u32 = 1;
 /// Maximum terminal cells returned by one rich projection.
-pub const MAX_SCREEN_FRAME_CELLS: u32 = 16_384;
+pub const MAX_SCREEN_FRAME_CELLS: u32 = 65_536;
 /// Maximum serialized bytes in one rich projection.
-pub const MAX_SCREEN_FRAME_JSON_BYTES: u64 = 768 * 1024;
+pub const MAX_SCREEN_FRAME_JSON_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Stable snapshot fields optionally retained by pure normalizers.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
