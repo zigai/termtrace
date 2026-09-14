@@ -95,6 +95,8 @@ pub(super) fn run_original(
         geometry_solver: None,
         kind: CaptureKind::Video,
         destination: None,
+        scale: None,
+        dpi: None,
     };
 
     let provenance = serde_json::to_string(&profile.provenance).into_diagnostic()?;

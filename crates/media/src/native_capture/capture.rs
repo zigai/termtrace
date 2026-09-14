@@ -321,9 +321,17 @@ fn capture_staged(
         None
     };
 
+    let scaling = resolve_display_scaling(options, Some(&manifest));
     let lease = DisplayLease::acquire()?;
     let display = format!(":{}", lease.number);
-    let mut xvfb = spawn_xvfb(Some(helper), &lease, options.width, options.height, staging)?;
+    let mut xvfb = spawn_xvfb(
+        Some(helper),
+        &lease,
+        options.width,
+        options.height,
+        staging,
+        Some(scaling.dpi),
+    )?;
     wait_for_x_socket(&lease, &mut xvfb, Duration::from_secs(5))?;
 
     let geometry_path = staging.join("geometry-preflight.json");
@@ -342,6 +350,7 @@ fn capture_staged(
         &ready_file,
         &overrides,
         profile_root.as_deref(),
+        Some(scaling),
     )?;
     let geometry_report =
         super::process::wait_for_json(&geometry_path, &mut ghostty, Duration::from_secs(20))?;
@@ -632,6 +641,140 @@ pub(super) fn preserve_failed(parent: &Path, staging: &Path, error: Error) -> Er
     }
 }
 
+/// Display scaling and DPI configuration for headless X11 capture.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DisplayScaling {
+    /// X11 screen resolution in dots per inch (passed to Xvfb -dpi).
+    pub dpi: u32,
+    /// Overall display scale factor (e.g. 1.0, 1.5, 2.0).
+    pub scale: f64,
+    /// Integer GDK window scaling factor (set as GDK_SCALE in Ghostty).
+    pub gdk_scale: u32,
+    /// Fractional GDK font scaling factor (set as GDK_DPI_SCALE in Ghostty).
+    pub gdk_dpi_scale: f64,
+}
+
+impl DisplayScaling {
+    /// Calculate display scaling from an overall scale factor and optional explicit DPI.
+    #[must_use]
+    pub fn new(scale: f64, dpi: Option<u32>) -> Self {
+        let base_dpi = 96.0;
+        let effective_dpi = dpi.unwrap_or_else(|| (base_dpi * scale).round() as u32);
+        let effective_scale = if dpi.is_some() && (scale - 1.0).abs() < f64::EPSILON {
+            effective_dpi as f64 / base_dpi
+        } else {
+            scale
+        };
+
+        let gdk_scale = if effective_scale >= 2.0 {
+            effective_scale.floor() as u32
+        } else {
+            1
+        };
+
+        let gdk_dpi_scale = effective_scale / (gdk_scale as f64);
+
+        Self {
+            dpi: effective_dpi,
+            scale: effective_scale,
+            gdk_scale,
+            gdk_dpi_scale,
+        }
+    }
+
+    /// Calculate display scaling from a given DPI value.
+    #[must_use]
+    pub fn from_dpi(dpi: u32) -> Self {
+        let scale = dpi as f64 / 96.0;
+        Self::new(scale, Some(dpi))
+    }
+
+    /// Calculate display scaling from a given scale factor.
+    #[must_use]
+    pub fn from_scale(scale: f64) -> Self {
+        Self::new(scale, None)
+    }
+}
+
+/// Resolve display scaling for native headless capture from explicit options,
+/// environment variables, or recorded session provenance/geometry heuristics.
+pub fn resolve_display_scaling(
+    options: &CaptureOptions,
+    manifest: Option<&termtrace_model::execution::session::SessionManifest>,
+) -> DisplayScaling {
+    // 1. Explicit options
+    if let Some(dpi) = options.dpi {
+        return DisplayScaling::from_dpi(dpi);
+    }
+    if let Some(scale) = options.scale {
+        return DisplayScaling::from_scale(scale);
+    }
+
+    // 2. Explicit environment variables
+    if let Ok(dpi_str) = std::env::var("TERMTRACE_DPI") {
+        if let Ok(dpi) = dpi_str.parse::<u32>() {
+            if dpi > 0 {
+                return DisplayScaling::from_dpi(dpi);
+            }
+        }
+    }
+    if let Ok(scale_str) = std::env::var("TERMTRACE_DISPLAY_SCALE")
+        .or_else(|_| std::env::var("TERMTRACE_SCALE"))
+    {
+        if let Ok(scale) = scale_str.parse::<f64>() {
+            if scale > 0.0 {
+                return DisplayScaling::from_scale(scale);
+            }
+        }
+    }
+    if let Ok(gdk_scale_str) = std::env::var("GDK_SCALE") {
+        if let Ok(gdk_scale) = gdk_scale_str.parse::<u32>() {
+            let dpi_scale = std::env::var("GDK_DPI_SCALE")
+                .ok()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(1.0);
+            let total_scale = (gdk_scale as f64) * dpi_scale;
+            return DisplayScaling::new(total_scale, None);
+        }
+    }
+
+    // 3. Manifest provenance environment detection
+    if let Some(manifest) = manifest {
+        if let Some(env_scale) = manifest.execution_provenance.environment.get("GDK_SCALE") {
+            if let Some(scale_str) = env_scale.value.as_ref().and_then(|b| std::str::from_utf8(b.as_bytes()).ok()) {
+                if let Ok(gdk_scale) = scale_str.parse::<u32>() {
+                    let dpi_scale = manifest
+                        .execution_provenance
+                        .environment
+                        .get("GDK_DPI_SCALE")
+                        .and_then(|v| v.value.as_ref())
+                        .and_then(|b| std::str::from_utf8(b.as_bytes()).ok())
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .unwrap_or(1.0);
+                    let total_scale = (gdk_scale as f64) * dpi_scale;
+                    return DisplayScaling::new(total_scale, None);
+                }
+            }
+        }
+        // 4. Geometry-based high-DPI detection from recorded cell dimensions
+        if manifest.geometry.cols > 0 && manifest.geometry.rows > 0 {
+            let cell_w = manifest.geometry.pixel_width as f64 / manifest.geometry.cols as f64;
+            let cell_h = manifest.geometry.pixel_height as f64 / manifest.geometry.rows as f64;
+            if cell_w >= 18.0 && cell_h >= 36.0 {
+                return DisplayScaling::from_scale(2.0);
+            }
+        }
+    }
+
+    // 5. Viewport resolution heuristic (e.g. 4K canvases >= 2880x1800)
+    if options.width >= 2880 || options.height >= 1800 {
+        return DisplayScaling::from_scale(2.0);
+    }
+
+    // Default: 1.0 (96 DPI)
+    DisplayScaling::from_scale(1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -650,9 +793,10 @@ mod tests {
             geometry_solver: None,
             kind: CaptureKind::Video,
             destination: None,
+            scale: None,
+            dpi: None,
         };
     }
-
     #[test]
     fn native_capture_accepts_public_video_frame_rates_only() {
         for fps in [24, 30, 60] {
@@ -660,5 +804,50 @@ mod tests {
         }
 
         assert!(validate_options(&options(25)).is_err());
+    }
+
+    #[test]
+    fn display_scaling_computes_dpi_and_gdk_factors() {
+        let s1 = DisplayScaling::from_scale(1.0);
+        assert_eq!(s1.dpi, 96);
+        assert_eq!(s1.gdk_scale, 1);
+        assert!((s1.gdk_dpi_scale - 1.0).abs() < f64::EPSILON);
+
+        let s1_5 = DisplayScaling::from_scale(1.5);
+        assert_eq!(s1_5.dpi, 144);
+        assert_eq!(s1_5.gdk_scale, 1);
+        assert!((s1_5.gdk_dpi_scale - 1.5).abs() < f64::EPSILON);
+
+        let s2 = DisplayScaling::from_scale(2.0);
+        assert_eq!(s2.dpi, 192);
+        assert_eq!(s2.gdk_scale, 2);
+        assert!((s2.gdk_dpi_scale - 1.0).abs() < f64::EPSILON);
+
+        let s2_5 = DisplayScaling::from_scale(2.5);
+        assert_eq!(s2_5.dpi, 240);
+        assert_eq!(s2_5.gdk_scale, 2);
+        assert!((s2_5.gdk_dpi_scale - 1.25).abs() < f64::EPSILON);
+
+        let from_dpi = DisplayScaling::from_dpi(192);
+        assert_eq!(from_dpi.scale, 2.0);
+        assert_eq!(from_dpi.gdk_scale, 2);
+        assert!((from_dpi.gdk_dpi_scale - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn resolve_display_scaling_respects_options_and_viewport_resolution() {
+        let opt_1x = options(24);
+        assert_eq!(resolve_display_scaling(&opt_1x, None), DisplayScaling::from_scale(1.0));
+
+        let opt_explicit_dpi = options(24).with_dpi(192);
+        assert_eq!(resolve_display_scaling(&opt_explicit_dpi, None), DisplayScaling::from_dpi(192));
+
+        let opt_explicit_scale = options(24).with_scale(1.5);
+        assert_eq!(resolve_display_scaling(&opt_explicit_scale, None), DisplayScaling::from_scale(1.5));
+
+        let mut opt_4k = options(24);
+        opt_4k.width = 3840;
+        opt_4k.height = 2160;
+        assert_eq!(resolve_display_scaling(&opt_4k, None), DisplayScaling::from_scale(2.0));
     }
 }

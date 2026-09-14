@@ -256,7 +256,7 @@ fn capture_staged(
         .map(|lease| return format!(":{}", lease.number));
 
     let mut xvfb = if let Some(lease) = lease.as_ref() {
-        let mut server = spawn_xvfb(Some(helper), lease, options.width, options.height, staging)?;
+        let mut server = spawn_xvfb(Some(helper), lease, options.width, options.height, staging, options.dpi)?;
         wait_for_x_socket(lease, &mut server, Duration::from_secs(5))?;
 
         Some(server)

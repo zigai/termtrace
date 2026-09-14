@@ -720,6 +720,8 @@ pub(super) fn run_capture(
             geometry_solver,
             kind: CaptureKind::Video,
             destination: None,
+            scale: None,
+            dpi: None,
         },
     )
     .into_diagnostic()?;

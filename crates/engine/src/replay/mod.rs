@@ -42,8 +42,8 @@ pub(crate) use index::load_nearest_replay_seed;
 #[cfg(test)]
 pub(crate) use index::write_index;
 pub use index::{
-    derived_directory_name, derived_directory_name_for, index_session, index_session_range,
-    index_session_with_options,
+    derived_directory_name, derived_directory_name_for, index_session, index_session_for_video,
+    index_session_range, index_session_with_options, index_session_with_stride,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -18,7 +18,7 @@ mod worker;
 
 pub use crate::{Error, Result};
 pub use capability::native_capabilities;
-pub use capture::capture;
+pub use capture::{capture, resolve_display_scaling, DisplayScaling};
 pub use geometry::{native_capture_target, probe_ghostty_geometry, solve_ghostty_geometry};
 pub use original::{capture_original, capture_original_with_backend, OriginalCaptureBackend};
 pub use termtrace_model::artifact::visual::{
