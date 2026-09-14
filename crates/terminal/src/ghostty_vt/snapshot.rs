@@ -56,7 +56,6 @@ impl<'engine> Snapshot<'engine> {
         })?;
 
         let dirty = self.dirty_state()?;
-        let previous = self.last_snapshot.as_ref();
         let cols = self.render_get(
             "get columns",
             sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_COLS,
@@ -69,17 +68,56 @@ impl<'engine> Snapshot<'engine> {
         let active_style = self.active_style()?;
         let metadata = self.terminal_metadata()?;
 
-        if dirty == DirtyState::Clean
-            && let Some(state) = previous
-            && state.cols == cols
-            && state.rows == rows
-            && state.cursor == cursor
-            && state.active_style == active_style
-            && state.metadata == metadata
-            && self.modes_equal(&state.modes)?
-        {
-            return Ok(None);
+        if dirty == DirtyState::Clean {
+            let unchanged = match self.last_snapshot.as_ref() {
+                Some(state) if state.cols == cols && state.rows == rows => {
+                    state.cursor == cursor
+                        && state.active_style == active_style
+                        && state.metadata == metadata
+                        && self.modes_equal(&state.modes)?
+                }
+                _ => false,
+            };
+
+            if unchanged {
+                return Ok(None);
+            }
+
+            let modes_outcome = match self.last_snapshot.as_ref() {
+                Some(state) if state.cols == cols && state.rows == rows => {
+                    if self.modes_equal(&state.modes)? {
+                        Some(None)
+                    } else {
+                        Some(Some(self.mode_state()?))
+                    }
+                }
+                _ => None,
+            };
+
+            if let Some(new_modes) = modes_outcome {
+                self.reset_render_dirty()?;
+
+                let Some(state) = self.last_snapshot.as_mut() else {
+                    return Ok(None);
+                };
+                state.cursor = cursor;
+                if let Some(modes) = new_modes {
+                    state.modes = modes;
+                }
+                state.active_style = active_style;
+                state.metadata = metadata;
+                state.dirty = DirtyState::Clean;
+                state.dirty_rows.clear();
+
+                for row in &mut state.grid {
+                    row.dirty = false;
+                }
+
+                return Ok(Some(state.clone()));
+            }
         }
+
+        let previous = self.last_snapshot.as_ref();
 
         let modes = match previous {
             Some(state) if self.modes_equal(&state.modes)? => state.modes.clone(),
@@ -94,7 +132,6 @@ impl<'engine> Snapshot<'engine> {
         } else {
             self.color_state()?
         };
-
         let grid = self.grid(cols, rows, dirty, previous)?;
         let dirty_rows = grid
             .iter()
