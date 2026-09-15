@@ -136,7 +136,7 @@ run_one() {
 require_tools
 if [[ "${1:-acceptance}" == acceptance ]]; then
     shift || true
-    exec uv run --project "$root/packages/python" python "$root/benchmarks/acceptance.py" "$@"
+    exec uv run --project "$root/benchmarks" python "$root/benchmarks/acceptance.py" "$@"
 fi
 command=${1:-}
 case "$command" in
@@ -150,7 +150,7 @@ case "$command" in
         run_one "$command"
         ;;
     all)
-        uv run --project "$root/packages/python" python "$root/benchmarks/acceptance.py"
+        uv run --project "$root/benchmarks" python "$root/benchmarks/acceptance.py"
         validate_contracts
         ensure_binary
         create_run_dir

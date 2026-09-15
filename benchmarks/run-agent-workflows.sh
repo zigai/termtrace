@@ -107,15 +107,3 @@ recorder=
 
 measure bounded-timeline "$binary" analyze timeline "$session" --jsonl
 jq -e 'select(.kind == "output_page") | .page.truncated == true and .page.limit == 100 and .page.next_offset == 100' "$work/bounded-timeline.stdout" >/dev/null
-
-client_worktree=$work/client-worktree
-client_script=$work/client-workflow.py
-
-mkdir -p "$client_worktree"
-printf '%s\n' 'from termtrace import ProtocolMismatchError' 'print(ProtocolMismatchError.__name__)' >"$client_script"
-
-pushd "$client_worktree" >/dev/null
-measure managed-client-python "$binary" client python "$client_script"
-popd >/dev/null
-
-test -z "$(find "$client_worktree" -mindepth 1 -print -quit)"

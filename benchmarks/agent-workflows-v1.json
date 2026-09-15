@@ -22,11 +22,6 @@
       "id": "bounded-timeline",
       "maximum_stdout_bytes": 49152,
       "maximum_commands": 1
-    },
-    {
-      "id": "managed-client-python",
-      "maximum_stdout_bytes": 128,
-      "maximum_commands": 1
     }
   ]
 }
