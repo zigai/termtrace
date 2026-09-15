@@ -126,8 +126,8 @@ def decode_driver_response(
     except msgspec.DecodeError:
         # Raw protocol data can contain terminal content, input, or environment data.
         raise ProtocolMismatchError("driver response does not match the protocol schema") from None
-    if response.version != 5 or response.request_id != expected_request_id:
-        raise ProtocolMismatchError("driver response version or request ID does not match")
+    if response.version != 5:
+        raise ProtocolMismatchError("driver response version does not match")
     result = response.result
     if isinstance(result, DriverErrorResult):
         evidence = result.evidence if isinstance(result.evidence, str) else None
@@ -202,6 +202,8 @@ def decode_driver_response(
             request_id=expected_request_id,
             details=details,
         )
+    if response.request_id != expected_request_id:
+        raise ProtocolMismatchError("driver response request ID does not match")
     if not isinstance(result.data, expected_type):
         raise ProtocolMismatchError("driver returned an unexpected result kind")
     return result.data

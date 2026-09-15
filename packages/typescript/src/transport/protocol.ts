@@ -111,11 +111,14 @@ export function parseDriverResponse(input: JsonValue, expectedRequestId: string)
 
     // SAFETY: the generated Ajv validator has proved the complete generated wire contract.
     const root = input as JsonObject & WireDriverResponse;
-    if (root.version !== 5 || root.request_id !== expectedRequestId) {
-        throw new TermtraceProtocolError("driver response version or request ID does not match");
+    if (root.version !== 5) {
+        throw new TermtraceProtocolError("driver response version does not match");
     }
     if (root.result.status === "error") {
         return { _tag: "Failure", failure: failureFromWire(root.result) };
+    }
+    if (root.request_id !== expectedRequestId) {
+        throw new TermtraceProtocolError("driver response request ID does not match");
     }
 
     return { _tag: "Success", data: root.result.data };
