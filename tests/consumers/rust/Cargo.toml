@@ -3,8 +3,19 @@ name = "termtrace-rust-consumer"
 version = "0.0.0"
 edition = "2024"
 publish = false
-
-[workspace]
+default-run = "termtrace-rust-consumer"
+[features]
+default = []
+local = ["termtrace-sdk/in-process"]
 
 [dependencies]
-termtrace-sdk = { path = "../../../crates/sdk" }
+termtrace-sdk = { path = "../../../crates/sdk", default-features = false }
+
+[[bin]]
+name = "termtrace-rust-consumer"
+path = "src/main.rs"
+
+[[bin]]
+name = "local"
+path = "src/bin/local.rs"
+required-features = ["local"]
