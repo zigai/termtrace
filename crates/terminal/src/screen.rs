@@ -6,36 +6,18 @@ pub use termtrace_model::terminal::screen::*;
 use termtrace_model::{
     terminal::observation::CaptureQuality,
     terminal::state::{
-        CellState, CellStyle, ColorState, CursorState, ModeState, RowState, SemanticState,
-        TerminalMetadata, WideKind,
+        CellState, ColorSpec, ColorState, CursorState, CursorStyle, ModeState, RowState,
+        SemanticState, WideKind,
     },
 };
 
 const SCREEN_FRAME_HASH_DOMAIN: &[u8] = b"termtrace-screen-frame-v1\0";
-const SEMANTIC_STATE_HASH_DOMAIN: &[u8] = b"termtrace-semantic-state-v2\0";
-
-#[derive(Serialize)]
-struct StateHashMetadata<'state> {
-    cols: u16,
-    rows: u16,
-    cursor: &'state CursorState,
-    modes: &'state ModeState,
-    colors: &'state ColorState,
-    active_style: &'state CellStyle,
-    metadata: &'state TerminalMetadata,
-}
-
-#[derive(Serialize)]
-struct StateHashRow<'state> {
-    row: u16,
-    soft_wrapped: bool,
-    wrap_continuation: bool,
-    cells: &'state [CellState],
-}
+const SEMANTIC_STATE_HASH_DOMAIN: &[u8] = b"termtrace-semantic-state-v3\0";
+const SEMANTIC_ROW_HASH_DOMAIN: &[u8] = b"termtrace-semantic-row-v3\0";
 
 /// Hash normalized semantic terminal state using the stable v2 contract.
 pub fn semantic_state_hash(state: &SemanticState) -> Result<String, ScreenFrameError> {
-    let mut hash = semantic_state_metadata_hasher(state)?;
+    let mut hash = semantic_state_metadata_hasher(state);
     for row in &state.grid {
         hash.update(hash_semantic_row(row)?.as_bytes());
     }
@@ -43,30 +25,103 @@ pub fn semantic_state_hash(state: &SemanticState) -> Result<String, ScreenFrameE
     return Ok(hash.finalize().to_hex().to_string());
 }
 
-/// Hash one semantic row, excluding transient renderer dirtiness.
-pub fn hash_semantic_row(row: &RowState) -> Result<blake3::Hash, ScreenFrameError> {
-    let normalized = StateHashRow {
-        row: row.row,
-        soft_wrapped: row.soft_wrapped,
-        wrap_continuation: row.wrap_continuation,
-        cells: &row.cells,
+fn hash_color_spec(hasher: &mut blake3::Hasher, spec: ColorSpec) {
+    match spec {
+        ColorSpec::None => hasher.update(&[0, 0, 0, 0]),
+        ColorSpec::Palette(idx) => hasher.update(&[1, idx, 0, 0]),
+        ColorSpec::Rgb(rgb) => hasher.update(&[2, rgb.r, rgb.g, rgb.b]),
+    };
+}
+
+fn hash_cell(hasher: &mut blake3::Hasher, cell: &CellState) {
+    hasher.update(&cell.column.to_le_bytes());
+    let wide_byte = match cell.wide_kind {
+        WideKind::Narrow => 0,
+        WideKind::Wide => 1,
+        WideKind::SpacerTail => 2,
+        WideKind::SpacerHead => 3,
+    };
+    hasher.update(&[wide_byte, cell.selected as u8]);
+
+    match cell.resolved_foreground {
+        Some(rgb) => hasher.update(&[1, rgb.r, rgb.g, rgb.b]),
+        None => hasher.update(&[0, 0, 0, 0]),
     };
 
+    match cell.resolved_background {
+        Some(rgb) => hasher.update(&[1, rgb.r, rgb.g, rgb.b]),
+        None => hasher.update(&[0, 0, 0, 0]),
+    };
+
+    let mut bits = 0_u16;
+    if cell.style.bold {
+        bits |= 1 << 0;
+    }
+
+    if cell.style.italic {
+        bits |= 1 << 1;
+    }
+
+    if cell.style.faint {
+        bits |= 1 << 2;
+    }
+
+    if cell.style.blink {
+        bits |= 1 << 3;
+    }
+
+    if cell.style.inverse {
+        bits |= 1 << 4;
+    }
+
+    if cell.style.invisible {
+        bits |= 1 << 5;
+    }
+
+    if cell.style.strikethrough {
+        bits |= 1 << 6;
+    }
+
+    if cell.style.overline {
+        bits |= 1 << 7;
+    }
+
+    hasher.update(&bits.to_le_bytes());
+    hasher.update(&cell.style.underline.to_le_bytes());
+    hash_color_spec(hasher, cell.style.foreground);
+    hash_color_spec(hasher, cell.style.background);
+    hash_color_spec(hasher, cell.style.underline_color);
+
+    let bytes = cell.grapheme.as_bytes();
+    let len = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
+    hasher.update(&len.to_le_bytes());
+    hasher.update(bytes);
+}
+
+/// Hash one semantic row, excluding transient renderer dirtiness.
+pub fn hash_semantic_row(row: &RowState) -> Result<blake3::Hash, ScreenFrameError> {
     let mut hash = blake3::Hasher::new();
-    serde_json::to_writer(&mut hash, &normalized)
-        .map_err(|_| return ScreenFrameError::Serialization)?;
+    hash.update(SEMANTIC_ROW_HASH_DOMAIN);
+    hash.update(&row.row.to_le_bytes());
+    hash.update(&[row.soft_wrapped as u8, row.wrap_continuation as u8]);
+    let cell_count = u32::try_from(row.cells.len()).unwrap_or(u32::MAX);
+    hash.update(&cell_count.to_le_bytes());
+
+    for cell in &row.cells {
+        hash_cell(&mut hash, cell);
+    }
 
     return Ok(hash.finalize());
 }
 
-/// Compose a v2 state hash from metadata and cached row hashes in grid order.
+/// Compose a v3 state hash from metadata and cached row hashes in grid order.
 ///
 /// Callers must supply one digest from [`hash_semantic_row`] per state grid row.
 pub fn semantic_state_hash_from_row_hashes(
     state: &SemanticState,
     row_hashes: &[blake3::Hash],
 ) -> Result<String, ScreenFrameError> {
-    let mut hash = semantic_state_metadata_hasher(state)?;
+    let mut hash = semantic_state_metadata_hasher(state);
     for row_hash in row_hashes {
         hash.update(row_hash.as_bytes());
     }
@@ -74,25 +129,121 @@ pub fn semantic_state_hash_from_row_hashes(
     return Ok(hash.finalize().to_hex().to_string());
 }
 
-fn semantic_state_metadata_hasher(
-    state: &SemanticState,
-) -> Result<blake3::Hasher, ScreenFrameError> {
-    let metadata = StateHashMetadata {
-        cols: state.cols,
-        rows: state.rows,
-        cursor: &state.cursor,
-        modes: &state.modes,
-        colors: &state.colors,
-        active_style: &state.active_style,
-        metadata: &state.metadata,
-    };
-
+fn semantic_state_metadata_hasher(state: &SemanticState) -> blake3::Hasher {
     let mut hash = blake3::Hasher::new();
     hash.update(SEMANTIC_STATE_HASH_DOMAIN);
-    serde_json::to_writer(&mut hash, &metadata)
-        .map_err(|_| return ScreenFrameError::Serialization)?;
+    hash.update(&state.cols.to_le_bytes());
+    hash.update(&state.rows.to_le_bytes());
 
-    return Ok(hash);
+    // Cursor
+    hash.update(&[
+        state.cursor.visible as u8,
+        state.cursor.blinking as u8,
+        state.cursor.in_viewport as u8,
+    ]);
+    hash.update(&state.cursor.column.unwrap_or(u16::MAX).to_le_bytes());
+    hash.update(&state.cursor.row.unwrap_or(u16::MAX).to_le_bytes());
+    hash.update(&[state.cursor.wide_tail.map_or(2, |v| return v as u8)]);
+    let style_id = match state.cursor.style {
+        CursorStyle::Bar => 0,
+        CursorStyle::Block => 1,
+        CursorStyle::Underline => 2,
+        CursorStyle::HollowBlock => 3,
+    };
+    hash.update(&[style_id]);
+
+    // Modes
+    hash.update(&[
+        state.modes.synchronized_output as u8,
+        state.modes.alternate_screen as u8,
+        state.modes.wraparound as u8,
+        state.modes.bracketed_paste as u8,
+    ]);
+    let mode_count = u32::try_from(state.modes.values.len()).unwrap_or(u32::MAX);
+    hash.update(&mode_count.to_le_bytes());
+
+    for mode in &state.modes.values {
+        hash.update(&mode.number.to_le_bytes());
+        hash.update(&[mode.enabled as u8]);
+    }
+
+    // Colors
+    hash.update(&[
+        state.colors.background.r,
+        state.colors.background.g,
+        state.colors.background.b,
+    ]);
+    hash.update(&[
+        state.colors.foreground.r,
+        state.colors.foreground.g,
+        state.colors.foreground.b,
+    ]);
+
+    if let Some(cursor_col) = state.colors.cursor {
+        hash.update(&[1, cursor_col.r, cursor_col.g, cursor_col.b]);
+    } else {
+        hash.update(&[0, 0, 0, 0]);
+    }
+
+    let palette_count = u32::try_from(state.colors.palette.len()).unwrap_or(u32::MAX);
+    hash.update(&palette_count.to_le_bytes());
+
+    for col in &state.colors.palette {
+        hash.update(&[col.r, col.g, col.b]);
+    }
+
+    // Active style
+    let mut active_bits = 0_u16;
+    if state.active_style.bold {
+        active_bits |= 1 << 0;
+    }
+
+    if state.active_style.italic {
+        active_bits |= 1 << 1;
+    }
+
+    if state.active_style.faint {
+        active_bits |= 1 << 2;
+    }
+
+    if state.active_style.blink {
+        active_bits |= 1 << 3;
+    }
+
+    if state.active_style.inverse {
+        active_bits |= 1 << 4;
+    }
+
+    if state.active_style.invisible {
+        active_bits |= 1 << 5;
+    }
+
+    if state.active_style.strikethrough {
+        active_bits |= 1 << 6;
+    }
+
+    if state.active_style.overline {
+        active_bits |= 1 << 7;
+    }
+
+    hash.update(&active_bits.to_le_bytes());
+    hash.update(&state.active_style.underline.to_le_bytes());
+    hash_color_spec(&mut hash, state.active_style.foreground);
+    hash_color_spec(&mut hash, state.active_style.background);
+    hash_color_spec(&mut hash, state.active_style.underline_color);
+
+    // Metadata
+    let title_bytes = state.metadata.title.as_bytes();
+    let title_len = u32::try_from(title_bytes.len()).unwrap_or(u32::MAX);
+    hash.update(&title_len.to_le_bytes());
+    hash.update(title_bytes);
+
+    let pwd_bytes = state.metadata.working_directory.as_bytes();
+    let pwd_len = u32::try_from(pwd_bytes.len()).unwrap_or(u32::MAX);
+    hash.update(&pwd_len.to_le_bytes());
+    hash.update(pwd_bytes);
+
+    return hash;
 }
 
 /// Project viewport rows as text, replacing empty cells with spaces and
@@ -102,10 +253,10 @@ pub fn semantic_viewport_text(state: &SemanticState) -> String {
     let mut output = String::new();
     for (index, row) in state.grid.iter().enumerate() {
         for cell in &row.cells {
-            if cell.grapheme.is_empty() {
-                output.push(' ');
-            } else {
+            if !cell.grapheme.is_empty() {
                 output.push_str(&cell.grapheme);
+            } else if cell.wide_kind == WideKind::Narrow {
+                output.push(' ');
             }
         }
 
@@ -222,6 +373,7 @@ pub fn project_screen_frame(
 
     let cell_count = u32::from(region.width()) * u32::from(region.height());
     let max_bytes = max_projection_bytes(cell_count);
+
     if serialized_bytes > max_bytes {
         return Err(ScreenFrameError::ResourceLimit {
             limit: ScreenFrameLimitKind::SerializedBytes,
@@ -309,6 +461,7 @@ fn validate_projection_clone_bytes(
 
     let cell_count = u32::from(region.width()) * u32::from(region.height());
     let max_bytes = max_projection_bytes(cell_count);
+
     let mut requested = 0u64;
     for row in selected_rows(state, region) {
         for cell in selected_cells(row.cells.as_slice(), region) {
@@ -445,7 +598,7 @@ fn screen_cell(row: u16, cell: &CellState) -> ScreenCell {
     return ScreenCell {
         row,
         column: cell.column,
-        grapheme: cell.grapheme.clone(),
+        grapheme: cell.grapheme.to_string(),
         wide_kind: cell.wide_kind,
         appearance: appearance(cell),
     };
@@ -486,7 +639,7 @@ fn project_spans(cells: &[CellState]) -> Vec<ScreenSpan> {
             span.cell_count = span.cell_count.saturating_add(1);
             append_convenience_cell(&mut span.text, cell);
             span.cells.push(SpanCell {
-                grapheme: cell.grapheme.clone(),
+                grapheme: cell.grapheme.to_string(),
                 wide_kind: cell.wide_kind,
             });
             continue;
@@ -501,7 +654,7 @@ fn project_spans(cells: &[CellState]) -> Vec<ScreenSpan> {
             text,
             appearance: cell_appearance,
             cells: vec![SpanCell {
-                grapheme: cell.grapheme.clone(),
+                grapheme: cell.grapheme.to_string(),
                 wide_kind: cell.wide_kind,
             }],
         });

@@ -9,6 +9,7 @@ use super::{
     },
 };
 use crate::{Error, Result};
+use compact_str::CompactString;
 use std::{ffi::c_void, mem::size_of, ptr, slice, str};
 use termtrace_model::value::ByteString;
 
@@ -93,7 +94,6 @@ impl<'engine> Snapshot<'engine> {
                 }
                 _ => None,
             };
-
             if let Some(new_modes) = modes_outcome {
                 self.reset_render_dirty()?;
 
@@ -101,9 +101,11 @@ impl<'engine> Snapshot<'engine> {
                     return Ok(None);
                 };
                 state.cursor = cursor;
+
                 if let Some(modes) = new_modes {
                     state.modes = modes;
                 }
+
                 state.active_style = active_style;
                 state.metadata = metadata;
                 state.dirty = DirtyState::Clean;
@@ -132,6 +134,7 @@ impl<'engine> Snapshot<'engine> {
         } else {
             self.color_state()?
         };
+
         let grid = self.grid(cols, rows, dirty, previous)?;
         let dirty_rows = grid
             .iter()
@@ -803,8 +806,8 @@ fn decode_wide_kind(wide: sys::GhosttyCellWide) -> Result<WideKind> {
     }
 }
 
-fn read_grapheme(cells: sys::GhosttyRenderStateRowCells) -> Result<String> {
-    let mut stack_buffer = [0_u8; 16];
+fn read_grapheme(cells: sys::GhosttyRenderStateRowCells) -> Result<CompactString> {
+    let mut stack_buffer = [0_u8; 24];
     let mut buffer = sys::GhosttyBuffer {
         ptr: stack_buffer.as_mut_ptr(),
         cap: stack_buffer.len(),
@@ -820,7 +823,7 @@ fn read_grapheme(cells: sys::GhosttyRenderStateRowCells) -> Result<String> {
 
     if first == sys::GhosttyResult_GHOSTTY_SUCCESS {
         if buffer.len == 0 {
-            return Ok(String::new());
+            return Ok(CompactString::new(""));
         }
 
         if let Some(bytes) = stack_buffer.get(..buffer.len) {
@@ -831,7 +834,7 @@ fn read_grapheme(cells: sys::GhosttyRenderStateRowCells) -> Result<String> {
                 };
             })?;
 
-            return Ok(grapheme.to_owned());
+            return Ok(CompactString::new(grapheme));
         }
     }
 
@@ -853,13 +856,14 @@ fn read_grapheme(cells: sys::GhosttyRenderStateRowCells) -> Result<String> {
         )
     })?;
     bytes.truncate(buffer.len);
-
-    return String::from_utf8(bytes).map_err(|_| {
+    let text = str::from_utf8(&bytes).map_err(|_| {
         return Error::GhosttyVt {
             operation: "decode cell grapheme",
             result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
         };
-    });
+    })?;
+
+    return Ok(CompactString::new(text));
 }
 
 fn optional_cell_color(cells: sys::GhosttyRenderStateRowCells, key: u32) -> Result<Option<Rgb>> {

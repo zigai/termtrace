@@ -30,7 +30,7 @@ pub enum PresentationTransition {
     ExitSynchronizedOutput,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
 enum PresentationParseState {
     #[default]
     Ground,
@@ -39,7 +39,7 @@ enum PresentationParseState {
     CsiPassthrough,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
 struct CsiModeParser {
     private: bool,
     valid: bool,
@@ -63,6 +63,38 @@ impl PresentationTracker {
             pending: Vec::new(),
             synchronized_output,
         };
+    }
+
+    /// Feed a byte slice using SIMD scanning when in ground state.
+    ///
+    /// Returns a prefix slice of bytes that are all `PresentationAction::Immediate`,
+    /// or if the prefix is empty and an action occurred on the first byte, returns that action.
+    #[inline]
+    pub fn push_slice<'bytes>(
+        &mut self,
+        bytes: &'bytes [u8],
+    ) -> (&'bytes [u8], Option<PresentationAction>) {
+        let Some(&first_byte) = bytes.first() else {
+            return (&[], None);
+        };
+
+        if self.state == PresentationParseState::Ground {
+            if let Some(pos) = memchr::memchr2(0x1b, 0x9b, bytes) {
+                if pos > 0 {
+                    return (bytes.get(..pos).unwrap_or(&[]), None);
+                }
+
+                let action = self.push(first_byte);
+
+                return (&[], Some(action));
+            }
+
+            return (bytes, None);
+        }
+
+        let action = self.push(first_byte);
+
+        return (&[], Some(action));
     }
 
     /// Feed one byte and classify how it must be delivered to the terminal.
@@ -446,5 +478,88 @@ mod tests {
         assert!(!tracker.push(b'0'));
         assert!(tracker.push(0x9c));
         assert_eq!(tracker.bytes(), &[0x9d, b'0', 0x9c]);
+    }
+
+    #[test]
+    fn presentation_tracker_push_slice_matches_byte_push_exactly() {
+        let test_inputs = [
+            b"simple plain text without escapes".as_slice(),
+            b"visible\x1b[?2026hhidden\x1b[?2026l".as_slice(),
+            b"\x1b[?25;2026h\x1b[?2026lremaining text".as_slice(),
+            b"\x9b?2026ltext after 8-bit csi".as_slice(),
+            b"prefix\x1b[?2026h\x1b[?2026l\x9b?2026hsuffix".as_slice(),
+            b"\x1b[?2026h".as_slice(),
+            b"\x1b".as_slice(),
+        ];
+
+        for input in test_inputs {
+            let mut byte_tracker = PresentationTracker::new(false);
+            let mut byte_commands = Vec::new();
+            let mut byte_framed = Vec::new();
+
+            for byte in input {
+                match byte_tracker.push(*byte) {
+                    PresentationAction::Immediate => byte_framed.push(*byte),
+                    PresentationAction::Buffered => {}
+                    PresentationAction::Sequence { bytes, command } => {
+                        byte_framed.extend(bytes);
+
+                        if let Some(cmd) = command {
+                            byte_commands.push(cmd);
+                        }
+                    }
+                }
+            }
+
+            byte_framed.extend(byte_tracker.finish());
+
+            let mut slice_tracker = PresentationTracker::new(false);
+            let mut slice_commands = Vec::new();
+            let mut slice_framed = Vec::new();
+
+            let mut offset = 0;
+            while offset < input.len() {
+                let remaining = input.get(offset..).unwrap_or(&[]);
+                let (immediate, action) = slice_tracker.push_slice(remaining);
+
+                if !immediate.is_empty() {
+                    slice_framed.extend_from_slice(immediate);
+                    offset += immediate.len();
+                    continue;
+                }
+
+                let Some(action) = action else {
+                    break;
+                };
+
+                offset += 1;
+
+                match action {
+                    PresentationAction::Immediate => {
+                        if let Some(&b) = input.get(offset - 1) {
+                            slice_framed.push(b);
+                        }
+                    }
+                    PresentationAction::Buffered => {}
+                    PresentationAction::Sequence { bytes, command } => {
+                        slice_framed.extend(bytes);
+
+                        if let Some(cmd) = command {
+                            slice_commands.push(cmd);
+                        }
+                    }
+                }
+            }
+
+            slice_framed.extend(slice_tracker.finish());
+            assert_eq!(
+                byte_framed, slice_framed,
+                "framed bytes must match for input {input:?}"
+            );
+            assert_eq!(
+                byte_commands, slice_commands,
+                "commands must match for input {input:?}"
+            );
+        }
     }
 }

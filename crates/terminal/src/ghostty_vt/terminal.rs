@@ -68,9 +68,40 @@ impl VtInputLimiter {
 
     fn write(&mut self, bytes: &[u8], mut emit: impl FnMut(&[u8])) {
         let mut output = [0_u8; TERMINAL_WRITE_CHUNK_BYTES];
-
         let mut output_len = 0;
-        for &byte in bytes {
+        let mut offset = 0;
+
+        while offset < bytes.len() {
+            if self.state == VtInputState::Ground && self.utf8_continuations == 0 {
+                let remaining = bytes.get(offset..).unwrap_or(&[]);
+                match memchr::memchr2(0x1b, 0x9d, remaining) {
+                    None => {
+                        flush_output(&output, &mut output_len, &mut emit);
+                        self.utf8_continuations = tail_utf8_continuations(remaining);
+                        emit(remaining);
+
+                        return;
+                    }
+                    Some(0) => {
+                        // Byte at offset is 0x1b or 0x9d, handle below
+                    }
+                    Some(pos) => {
+                        flush_output(&output, &mut output_len, &mut emit);
+
+                        let prefix = remaining.get(..pos).unwrap_or(&[]);
+                        self.utf8_continuations = tail_utf8_continuations(prefix);
+                        emit(prefix);
+                        offset += pos;
+                    }
+                }
+            }
+
+            let Some(&byte) = bytes.get(offset) else {
+                break;
+            };
+
+            offset += 1;
+
             if self.state == VtInputState::Ground && self.utf8_continuations > 0 {
                 if (0x80..=0xbf).contains(&byte) {
                     self.utf8_continuations -= 1;
@@ -229,6 +260,60 @@ fn flush_output(
     }
 
     *output_len = 0;
+}
+
+fn tail_utf8_continuations(bytes: &[u8]) -> u8 {
+    let len = bytes.len();
+    if len == 0 {
+        return 0;
+    }
+
+    let Some(&b0) = bytes.get(len.saturating_sub(1)) else {
+        return 0;
+    };
+
+    match b0 {
+        0xc2..=0xdf => return 1,
+        0xe0..=0xef => return 2,
+        0xf0..=0xf4 => return 3,
+        _ => {}
+    }
+
+    if (0x80..=0xbf).contains(&b0) && len >= 2 {
+        let Some(&b1) = bytes.get(len.saturating_sub(2)) else {
+            return 0;
+        };
+
+        match b1 {
+            0xc2..=0xdf => return 0,
+            0xe0..=0xef => return 1,
+            0xf0..=0xf4 => return 2,
+            _ => {}
+        }
+
+        if (0x80..=0xbf).contains(&b1) && len >= 3 {
+            let Some(&b2) = bytes.get(len.saturating_sub(3)) else {
+                return 0;
+            };
+
+            match b2 {
+                0xe0..=0xef => return 0,
+                0xf0..=0xf4 => return 1,
+                _ => {}
+            }
+
+            if (0x80..=0xbf).contains(&b2) && len >= 4 {
+                let Some(&b3) = bytes.get(len.saturating_sub(4)) else {
+                    return 0;
+                };
+                if (0xf0..=0xf4).contains(&b3) {
+                    return 0;
+                }
+            }
+        }
+    }
+
+    return 0;
 }
 
 impl GhosttyVt {
@@ -695,5 +780,50 @@ mod tests {
         terminal.write(b"\x1b[3;5H\x1b[6n");
         assert_eq!(terminal.take_responses(), vec![b"\x1b[3;5R".to_vec()]);
         assert!(terminal.take_responses().is_empty());
+    }
+
+    #[test]
+    fn tail_utf8_continuations_calculates_exact_incomplete_counts() {
+        assert_eq!(tail_utf8_continuations(b""), 0);
+        assert_eq!(tail_utf8_continuations(b"hello"), 0);
+        assert_eq!(tail_utf8_continuations(&[0xc2]), 1);
+        assert_eq!(tail_utf8_continuations(&[0xc2, 0xa0]), 0);
+        assert_eq!(tail_utf8_continuations(&[0xe2]), 2);
+        assert_eq!(tail_utf8_continuations(&[0xe2, 0x82]), 1);
+        assert_eq!(tail_utf8_continuations(&[0xe2, 0x82, 0xac]), 0);
+        assert_eq!(tail_utf8_continuations(&[0xf0]), 3);
+        assert_eq!(tail_utf8_continuations(&[0xf0, 0x9f]), 2);
+        assert_eq!(tail_utf8_continuations(&[0xf0, 0x9f, 0x98]), 1);
+        assert_eq!(tail_utf8_continuations(&[0xf0, 0x9f, 0x98, 0x80]), 0);
+        assert_eq!(tail_utf8_continuations(&[0x80]), 0);
+        assert_eq!(tail_utf8_continuations(b"prefix\xc2"), 1);
+        assert_eq!(tail_utf8_continuations(b"prefix\xe2\x82"), 1);
+        assert_eq!(tail_utf8_continuations(b"prefix\xf0\x9f\x98"), 1);
+    }
+
+    #[test]
+    fn simd_fast_path_handles_large_and_mixed_buffers_losslessly() {
+        let mut limiter = VtInputLimiter::new(1024);
+        let mut emitted = Vec::new();
+
+        // Pure ASCII large buffer
+        let large_ascii = vec![b'a'; 65536];
+        limiter.write(&large_ascii, |chunk| emitted.extend_from_slice(chunk));
+
+        assert_eq!(emitted, large_ascii);
+
+        // Buffer with ESC and normal text
+        emitted.clear();
+        let mixed = b"hello\x1b[31mworld\x1b[0m!\n";
+        limiter.write(mixed, |chunk| emitted.extend_from_slice(chunk));
+
+        assert_eq!(emitted, mixed);
+
+        // Buffer split on UTF-8 continuation
+        emitted.clear();
+        limiter.write(&[0xd0], |chunk| emitted.extend_from_slice(chunk));
+        limiter.write(&[0x9d], |chunk| emitted.extend_from_slice(chunk));
+
+        assert_eq!(emitted, &[0xd0, 0x9d]);
     }
 }

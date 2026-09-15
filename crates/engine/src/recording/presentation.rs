@@ -88,16 +88,37 @@ pub(super) fn process_semantic_output(
     data: &[u8],
 ) -> Result<()> {
     let mut immediate_start: Option<usize> = None;
-    for (offset, byte) in data.iter().enumerate() {
-        match live.presentation_tracker.push(*byte) {
+
+    let mut offset = 0;
+    while offset < data.len() {
+        let remaining = data.get(offset..).unwrap_or(&[]);
+        let (immediate, action) = live.presentation_tracker.push_slice(remaining);
+
+        if !immediate.is_empty() {
+            if immediate_start.is_none() {
+                immediate_start = Some(offset);
+            }
+
+            offset += immediate.len();
+            continue;
+        }
+
+        let Some(action) = action else {
+            break;
+        };
+
+        let current_offset = offset;
+        offset += 1;
+
+        match action {
             PresentationAction::Immediate => {
                 if immediate_start.is_none() {
-                    immediate_start = Some(offset);
+                    immediate_start = Some(current_offset);
                 }
             }
             PresentationAction::Buffered => {
                 if let Some(start) = immediate_start.take() {
-                    let end = offset.max(start);
+                    let end = current_offset.max(start);
                     live.source_byte_offset = Some(u64::try_from(start).unwrap_or(u64::MAX));
                     process_semantic_bytes(
                         live,
@@ -108,10 +129,10 @@ pub(super) fn process_semantic_output(
                     )?;
                 }
 
-                live.source_byte_offset = Some(u64::try_from(offset).unwrap_or(u64::MAX));
+                live.source_byte_offset = Some(u64::try_from(current_offset).unwrap_or(u64::MAX));
             }
             PresentationAction::Sequence { bytes, command } => {
-                let seq_start = offset.saturating_add(1).saturating_sub(bytes.len());
+                let seq_start = current_offset.saturating_add(1).saturating_sub(bytes.len());
                 if let Some(start) = immediate_start.take() {
                     let end = seq_start.max(start);
                     live.source_byte_offset = Some(u64::try_from(start).unwrap_or(u64::MAX));
@@ -124,7 +145,7 @@ pub(super) fn process_semantic_output(
                     )?;
                 }
 
-                live.source_byte_offset = Some(u64::try_from(offset).unwrap_or(u64::MAX));
+                live.source_byte_offset = Some(u64::try_from(current_offset).unwrap_or(u64::MAX));
 
                 let before_command =
                     if command == Some(true) { Some(live.semantic.snapshot()?) } else { None };

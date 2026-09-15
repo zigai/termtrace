@@ -1,6 +1,7 @@
 //! Stable Rust value types exposed by the Ghostty VT adapter.
 
 use crate::value::ByteString;
+use compact_str::CompactString;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -189,7 +190,8 @@ pub struct CellState {
     /// Zero-based column.
     pub column: u16,
     /// Full UTF-8 grapheme cluster; empty for a blank cell.
-    pub grapheme: String,
+    #[schemars(with = "String")]
+    pub grapheme: CompactString,
     /// Native width role; never inferred from the grapheme.
     pub wide_kind: WideKind,
     /// Visual style.

@@ -231,8 +231,9 @@ fn snapshot_normalization_omits_volatile_source_identity() {
 #[test]
 fn serialized_byte_limit_returns_bounded_error() {
     let mut state = semantic_fixture();
-    state.grid[0].cells[0].grapheme =
-        "x".repeat(usize::try_from(MAX_SCREEN_FRAME_JSON_BYTES).expect("byte limit") + 1);
+    state.grid[0].cells[0].grapheme = "x"
+        .repeat(usize::try_from(MAX_SCREEN_FRAME_JSON_BYTES).expect("byte limit") + 1)
+        .into();
     let error = project_screen_frame(
         &state,
         &ScreenProjectionRequest::default(),
@@ -256,7 +257,7 @@ fn serialized_byte_limit_returns_bounded_error() {
 #[test]
 fn escaped_projection_strings_are_bounded_before_projection_clones() {
     let mut state = semantic_fixture();
-    state.grid[0].cells[0].grapheme = "\u{0001}".repeat(1_500_000);
+    state.grid[0].cells[0].grapheme = "\u{0001}".repeat(1_500_000).into();
     let region =
         validate_screen_region(&ScreenProjectionRequest::default(), state.cols, state.rows)
             .expect("region");
@@ -350,4 +351,13 @@ fn common_viewport_projection_metrics() {
             }
         }
     }
+}
+
+#[test]
+fn semantic_viewport_text_preserves_wide_characters_without_spacer_tail_spaces() {
+    let mut terminal = crate::GhosttyVt::new(10, 1, 0).expect("terminal");
+    terminal.write("世界".as_bytes());
+    let state = terminal.snapshot().expect("snapshot");
+    let text = semantic_viewport_text(&state);
+    assert_eq!(text, "世界");
 }

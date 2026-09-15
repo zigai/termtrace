@@ -9,11 +9,11 @@ rust-version = "1.97.1"
 
 [dependencies]
 blake3 = "1.8.2"
+compact_str = { version = "0.8.2", features = ["serde"] }
+memchr = "2.8.3"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 termtrace-model = { version = "=0.1.0", path = "../model" }
-
-[dev-dependencies]
 proptest = "1.11.0"
 
 [lints]

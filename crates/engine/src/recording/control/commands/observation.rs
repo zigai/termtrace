@@ -1,11 +1,10 @@
 use super::{
     action, actor_boundaries, compile_screen_predicate, control_rejected, encode_all,
-    evaluate_screen_predicate, presented_state_hash, project_screen_frame, semantic_state_hash,
-    semantic_viewport_text, terminal_error, ActionPostcondition, ActionPostconditionResult,
-    ActorBoundaries, ByteString, CaptureQuality, CompiledScreenPredicate, ControlCommand,
-    ControlData, Duration, Error, EventLogWriter, Instant, LiveTerminal, Result, ScreenFrame,
-    ScreenFrameSource, ScreenPostconditionQuality, ScreenProjectionRequest, SessionActor,
-    StableCaptureQuality, Uuid,
+    evaluate_screen_predicate, presented_state_hash, project_screen_frame, semantic_viewport_text,
+    terminal_error, ActionPostcondition, ActionPostconditionResult, ActorBoundaries, ByteString,
+    CaptureQuality, CompiledScreenPredicate, ControlCommand, ControlData, Duration, Error,
+    EventLogWriter, Instant, LiveTerminal, Result, ScreenFrame, ScreenFrameSource,
+    ScreenPostconditionQuality, ScreenProjectionRequest, SessionActor, StableCaptureQuality, Uuid,
 };
 use nix::time::{clock_gettime, ClockId};
 use termtrace_model::protocol::control::ClockSample;
@@ -124,6 +123,7 @@ pub(super) fn evaluate_action_postcondition(
                     projection,
                     CaptureQuality::Live,
                 )?;
+
                 let hash = frame.state_hash.clone();
                 (Some(frame), Some(hash))
             };
@@ -170,6 +170,7 @@ pub(super) fn evaluate_action_postcondition(
             } else {
                 CaptureQuality::Live
             };
+
             let (frame, state_hash) = if projection.detail == FrameDetail::None {
                 (None, Some(state_hash))
             } else {
@@ -181,6 +182,7 @@ pub(super) fn evaluate_action_postcondition(
                     projection,
                     capture_quality,
                 )?;
+
                 let hash = frame.state_hash.clone();
                 (Some(frame), Some(hash))
             };
@@ -221,6 +223,7 @@ pub(super) fn evaluate_action_postcondition(
             } else {
                 CaptureQuality::Live
             };
+
             let (frame, state_hash) = if projection.detail == FrameDetail::None {
                 (None, Some(state_hash))
             } else {
@@ -232,6 +235,7 @@ pub(super) fn evaluate_action_postcondition(
                     projection,
                     capture_quality,
                 )?;
+
                 let hash = frame.state_hash.clone();
                 (Some(frame), Some(hash))
             };
@@ -314,9 +318,9 @@ impl SessionActor<'_> {
                     }
                 };
 
-                let state_hash = match semantic_state_hash(&self.live.presented) {
+                let state_hash = match presented_state_hash(&self.live) {
                     Ok(state_hash) => state_hash,
-                    Err(error) => return Some(Err(Error::ScreenFrame(error))),
+                    Err(error) => return Some(Err(error)),
                 };
 
                 Ok(ControlData::Snapshot {
