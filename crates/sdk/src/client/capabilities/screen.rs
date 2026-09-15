@@ -30,8 +30,8 @@ pub struct StableScreenCapture {
     pub stable_for_ns: u64,
 }
 
-impl Screen<'_> {
-    pub(crate) fn session(&self) -> &Session {
+impl<'session> Screen<'session> {
+    pub(crate) fn session(&self) -> &'session Session {
         return self.session;
     }
 

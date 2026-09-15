@@ -19,37 +19,37 @@ use termtrace_model::terminal::screen::{
     FrameDetail, ScreenFrame, ScreenProjectionRequest, ScreenRegion,
 };
 
-impl Screen<'_> {
+impl<'session> Screen<'session> {
     /// Bind an immutable specification to this screen without performing I/O.
     #[must_use]
-    pub fn locator(&self, spec: LocatorSpec) -> Locator<'_> {
+    pub fn locator(&self, spec: LocatorSpec) -> Locator<'session> {
         return Locator::new(self.session(), spec);
     }
 
     /// Bind a nonempty literal text query without performing I/O.
-    pub fn get_by_text(&self, text: impl Into<String>) -> Result<Locator<'_>, QueryError> {
+    pub fn get_by_text(&self, text: impl Into<String>) -> Result<Locator<'session>, QueryError> {
         return Ok(self.locator(LocatorSpec::text(text)?));
     }
 
     /// Bind an already compiled host-native regular expression without performing I/O.
-    pub fn get_by_regex(&self, regex: Regex) -> Result<Locator<'_>, QueryError> {
+    pub fn get_by_regex(&self, regex: Regex) -> Result<Locator<'session>, QueryError> {
         return Ok(self.locator(LocatorSpec::regex(regex)?));
     }
 
     /// Bind one absolute row scope without performing I/O.
     #[must_use]
-    pub fn row(&self, row: u16) -> Locator<'_> {
+    pub fn row(&self, row: u16) -> Locator<'session> {
         return self.locator(LocatorSpec::default().in_row(row));
     }
 
     /// Bind one exact absolute region without performing I/O.
-    pub fn region(&self, region: ScreenRegion) -> Result<Locator<'_>, QueryError> {
+    pub fn region(&self, region: ScreenRegion) -> Result<Locator<'session>, QueryError> {
         return Ok(self.locator(LocatorSpec::default().in_region(region)?));
     }
 
     /// Bind a complete appearance filter without performing I/O.
     #[must_use]
-    pub fn filter(&self, style: StyleFilter) -> Locator<'_> {
+    pub fn filter(&self, style: StyleFilter) -> Locator<'session> {
         return self.locator(LocatorSpec::default().with_style(style));
     }
 }
