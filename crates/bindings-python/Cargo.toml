@@ -1,0 +1,23 @@
+[package]
+name = "termtrace-python"
+version = "0.1.0"
+edition = "2024"
+description = "Native Python bindings for Termtrace"
+repository = "https://github.com/zigai/termtrace"
+license-file.workspace = true
+rust-version = "1.97.1"
+publish = false
+
+[lib]
+name = "_termtrace"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+termtrace-model = { version = "=0.1.0", path = "../model" }
+termtrace-sdk = { version = "=0.1.0", path = "../sdk", features = ["in-process", "scenario"] }
+pyo3 = { version = "0.29.2", features = ["extension-module"] }
+pyo3-async-runtimes = { version = "0.29.0", features = ["tokio-runtime"] }
+tokio = { version = "1.44", features = ["rt", "sync", "rt-multi-thread"] }
+serde_json = "1.0.145"
+[lints]
+workspace = true

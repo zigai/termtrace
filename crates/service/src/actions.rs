@@ -107,3 +107,107 @@ pub struct ActionResult {
     /// Actor sequence boundaries enclosing the action.
     pub boundaries: ActorBoundaries,
 }
+
+/// Fluent builder for constructing atomic sequences of input atoms and action options.
+#[derive(Clone, Debug, Default)]
+pub struct ActionBuilder {
+    atoms: Vec<InputAtom>,
+    options: ActionOptions,
+}
+
+impl ActionBuilder {
+    /// Construct a new empty action builder.
+    #[must_use]
+    pub fn new() -> Self {
+        return Self::default();
+    }
+
+    /// Append literal terminal text.
+    #[must_use]
+    pub fn text(mut self, text: impl Into<String>) -> Self {
+        self.atoms.push(InputAtom::Text(text.into()));
+
+        return self;
+    }
+
+    /// Append raw terminal bytes.
+    #[must_use]
+    pub fn bytes(mut self, bytes: impl Into<Vec<u8>>) -> Self {
+        self.atoms.push(InputAtom::Bytes(bytes.into()));
+
+        return self;
+    }
+
+    /// Append a symbolic named key with modifier flags.
+    #[must_use]
+    pub fn key(mut self, key: NamedKey, modifiers: KeyModifiers) -> Self {
+        self.atoms.push(InputAtom::Key { key, modifiers });
+
+        return self;
+    }
+
+    /// Append bracketed paste text.
+    #[must_use]
+    pub fn paste(mut self, text: impl Into<String>) -> Self {
+        self.atoms.push(InputAtom::Paste(text.into()));
+
+        return self;
+    }
+
+    /// Enforce an optimistic state guard before applying any mutation.
+    #[must_use]
+    pub fn if_state(mut self, state_hash: impl Into<String>) -> Self {
+        self.options.if_state = Some(state_hash.into());
+
+        return self;
+    }
+
+    /// Attach a human-readable caller intent.
+    #[must_use]
+    pub fn intent(mut self, intent: impl Into<String>) -> Self {
+        self.options.caller_intent = Some(intent.into());
+
+        return self;
+    }
+
+    /// Set pacing delay between atoms.
+    #[must_use]
+    pub fn pace(mut self, delay: Duration) -> Self {
+        self.options.pace = delay;
+
+        return self;
+    }
+
+    /// Await a screen condition after input application.
+    #[must_use]
+    pub fn until_screen(mut self, predicate: ScreenPredicate, timeout: Duration) -> Self {
+        self.options.postcondition = ActionCondition::Screen { predicate, timeout };
+
+        return self;
+    }
+
+    /// Await idle stability after input application.
+    #[must_use]
+    pub fn until_idle(mut self, stable_for: Duration, timeout: Duration) -> Self {
+        self.options.postcondition = ActionCondition::Idle {
+            stable_for,
+            timeout,
+        };
+
+        return self;
+    }
+
+    /// Request a terminating frame projection.
+    #[must_use]
+    pub fn projection(mut self, projection: ScreenProjectionRequest) -> Self {
+        self.options.projection = projection;
+
+        return self;
+    }
+
+    /// Build into atoms and options tuple.
+    #[must_use]
+    pub fn build(self) -> (Vec<InputAtom>, ActionOptions) {
+        return (self.atoms, self.options);
+    }
+}

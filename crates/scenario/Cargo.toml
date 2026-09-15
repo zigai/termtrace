@@ -2,7 +2,10 @@
 name = "termtrace-scenario"
 version = "0.1.0"
 edition = "2024"
-publish = false
+description = "Strict evidence-native terminal scenario test runner for Termtrace"
+repository = "https://github.com/zigai/termtrace"
+license-file.workspace = true
+rust-version = "1.97.1"
 
 [dependencies]
 blake3 = "1.8.2"
@@ -14,11 +17,11 @@ uuid = { version = "1.18.1", features = ["serde", "v7"] }
 thiserror = "2.0.17"
 xmlwriter = "0.1.0"
 zstd = "0.13.3"
-termtrace-model = { path = "../model" }
-termtrace-evidence = { path = "../evidence" }
-termtrace-engine = { path = "../engine" }
-termtrace-render = { path = "../render" }
-termtrace-sdk = { path = "../sdk", features = ["in-process"] }
+termtrace-model = { version = "=0.1.0", path = "../model" }
+termtrace-evidence = { version = "=0.1.0", path = "../evidence" }
+termtrace-engine = { version = "=0.1.0", path = "../engine" }
+termtrace-render = { version = "=0.1.0", path = "../render" }
+termtrace-service = { version = "=0.1.0", path = "../service" }
 
 [dev-dependencies]
 tempfile = "3.23.0"

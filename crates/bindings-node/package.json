@@ -1,0 +1,29 @@
+{
+  "name": "@termtrace/core",
+  "version": "0.1.0",
+  "description": "Native Node.js and TypeScript bindings for Termtrace terminal recording and semantic debugging",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": "./index.js",
+    "./testing": "./testing.js"
+  },
+  "napi": {
+    "name": "termtrace",
+    "triples": {
+      "default": true
+    }
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.10.0"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">= 18.0.0"
+  }
+}

@@ -34,7 +34,9 @@ use termtrace_model::{
     terminal::state::KeyModifiers,
     value::ByteString,
 };
-use termtrace_sdk::{send_request, Error as SdkError, Session, StableCaptureOptions, Terminal};
+use termtrace_service::{
+    client::Session, send_request, Error as SdkError, StableCaptureOptions, Terminal,
+};
 use uuid::Uuid;
 
 /// Execute a scenario in a fresh canonical session.

@@ -1,0 +1,25 @@
+[package]
+name = "termtrace-node"
+version = "0.1.0"
+edition = "2024"
+description = "Native Node.js and TypeScript bindings for Termtrace"
+repository = "https://github.com/zigai/termtrace"
+license-file.workspace = true
+rust-version = "1.97.1"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+termtrace-model = { version = "=0.1.0", path = "../model" }
+termtrace-sdk = { version = "=0.1.0", path = "../sdk", features = ["in-process", "scenario"] }
+napi = { version = "3.12.5", default-features = false, features = ["napi8", "async", "tokio_rt"] }
+napi-derive = "3.6.6"
+tokio = { version = "1.44", features = ["rt", "sync", "rt-multi-thread"] }
+serde_json = "1.0.145"
+
+[build-dependencies]
+napi-build = "2.4.2"
+[lints]
+workspace = true

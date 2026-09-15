@@ -1,7 +1,5 @@
 //! Coherent errors exposed by the blocking SDK boundary.
 
-#[cfg(feature = "in-process")]
-use crate::{actions::ActionResult, client::StableScreenCapture};
 use std::{io::Error as IoError, path::PathBuf, result::Result as StdResult};
 use termtrace_model::{
     protocol::control::InputSequenceFailureDetails,
@@ -19,6 +17,56 @@ pub enum RetrySafety {
     NewRequest,
     /// Evidence cannot establish a safe automatic retry.
     Unknown,
+}
+/// Machine-readable classification of SDK and service errors.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ErrorKind {
+    /// Invalid protocol message from driver.
+    InvalidDriverProtocol,
+    /// Transport I/O failure on driver connection.
+    DriverTransport,
+    /// Evidence storage or validation error.
+    Evidence,
+    /// Terminal engine or replay error.
+    Engine,
+    /// Artifact export error.
+    Export,
+    /// Native media capture or render error.
+    Media,
+    /// Filesystem error.
+    Filesystem,
+    /// Invalid JSON document error.
+    InvalidJson,
+    /// Control command rejected by session actor.
+    ControlRejected,
+    /// Session control endpoint is unavailable.
+    ControlUnavailable,
+    /// Control command timed out.
+    ControlTimeout,
+    /// Control transport socket error.
+    ControlTransport,
+    /// Control protocol format violation.
+    InvalidControlProtocol,
+    /// Rich screen frame projection failure.
+    ScreenFrame,
+    /// Action atom validation failure.
+    InvalidAtom,
+    /// Action guard rejected due to state hash mismatch.
+    StaleState,
+    /// Actor was busy processing another action.
+    ActionBusy,
+    /// Partial input failure with known prefix.
+    PartialInput,
+    /// Terminating frame projection failed.
+    ActionTerminatingFrame,
+    /// Strict action postcondition was incomplete.
+    PostconditionIncomplete,
+    /// Strict stable capture was incomplete.
+    StableCaptureIncomplete,
+    /// Caller contract or SDK invariant violation.
+    InvalidOperation,
+    /// Invalid duration argument.
+    InvalidDuration,
 }
 
 /// Failures translated at the SDK boundary.
@@ -41,22 +89,6 @@ pub enum Error {
         #[source]
         source: IoError,
     },
-    /// Canonical evidence access or verification failed.
-    #[error(transparent)]
-    #[cfg(feature = "in-process")]
-    Evidence(#[from] termtrace_evidence::Error),
-    /// Replay, observation, analysis, or recording coordination failed.
-    #[error(transparent)]
-    #[cfg(feature = "in-process")]
-    Engine(#[from] termtrace_engine::Error),
-    /// Evidence export failed.
-    #[error(transparent)]
-    #[cfg(feature = "in-process")]
-    Export(#[from] termtrace_export::Error),
-    /// Media production failed.
-    #[error(transparent)]
-    #[cfg(feature = "in-process")]
-    Media(#[from] termtrace_media::Error),
     /// A filesystem operation failed.
     #[error("filesystem operation failed for `{path}`")]
     Filesystem {
@@ -197,19 +229,6 @@ pub enum Error {
         source: ScreenFrameError,
     },
     /// A strict action postcondition returned incomplete evidence.
-    #[error("action postcondition did not complete successfully")]
-    #[cfg(feature = "in-process")]
-    PostconditionIncomplete {
-        /// Complete incomplete action result retained for inspection.
-        result: Box<ActionResult>,
-    },
-    /// A strict stable capture returned incomplete evidence.
-    #[error("stable capture did not reach the requested stable interval")]
-    #[cfg(feature = "in-process")]
-    StableCaptureIncomplete {
-        /// Complete incomplete capture retained for inspection.
-        result: Box<StableScreenCapture>,
-    },
     /// An SDK invariant or caller contract was invalid.
     #[error("invalid SDK operation: {reason}")]
     InvalidOperation {
@@ -217,6 +236,31 @@ pub enum Error {
         reason: String,
     },
 }
+impl Error {
+    /// Machine-readable error classification.
+    #[must_use]
+    pub fn kind(&self) -> ErrorKind {
+        return match self {
+            Self::InvalidDriverProtocol { .. } => ErrorKind::InvalidDriverProtocol,
+            Self::DriverTransport { .. } => ErrorKind::DriverTransport,
+            Self::Filesystem { .. } => ErrorKind::Filesystem,
+            Self::ControlRejected { .. } => ErrorKind::ControlRejected,
+            Self::ControlUnavailable { .. } => ErrorKind::ControlUnavailable,
+            Self::ControlTimeout { .. } => ErrorKind::ControlTimeout,
+            Self::ControlTransport { .. } => ErrorKind::ControlTransport,
+            Self::InvalidControlProtocol { .. } => ErrorKind::InvalidControlProtocol,
+            Self::ScreenFrame(_) => ErrorKind::ScreenFrame,
+            Self::InvalidAtom { .. } => ErrorKind::InvalidAtom,
+            Self::StaleState { .. } => ErrorKind::StaleState,
+            Self::ActionBusy { .. } => ErrorKind::ActionBusy,
+            Self::PartialInput { .. } => ErrorKind::PartialInput,
+            Self::ActionTerminatingFrame { .. } => ErrorKind::ActionTerminatingFrame,
+            Self::InvalidOperation { .. } => ErrorKind::InvalidOperation,
+            Self::InvalidJson { .. } => ErrorKind::InvalidJson,
+            Self::InvalidDuration { .. } => ErrorKind::InvalidDuration,
+        };
+    }
+}
 
 /// SDK result type.
-pub type Result<T> = StdResult<T, Error>;
+pub type Result<T, E = Error> = StdResult<T, E>;

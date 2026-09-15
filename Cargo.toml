@@ -8,12 +8,15 @@ members = [
     "crates/render",
     "crates/media",
     "crates/export",
+    "crates/service",
     "crates/sdk",
     "crates/scenario",
     "crates/schema",
     "crates/test-fixture",
+    "crates/bindings-python",
+    "crates/bindings-node",
 ]
-exclude = ["fuzz"]
+exclude = ["fuzz", "tests/consumers/rust"]
 
 [workspace.package]
 license-file = "LICENSE"
@@ -60,7 +63,8 @@ termtrace-model = { path = "crates/model" }
 termtrace-render = { path = "crates/render" }
 termtrace-scenario = { path = "crates/scenario" }
 termtrace-schema = { path = "crates/schema" }
-termtrace-sdk = { path = "crates/sdk", features = ["in-process"] }
+    termtrace-service = { path = "crates/service" }
+    termtrace-sdk = { path = "crates/sdk", features = ["in-process"] }
 termtrace-terminal = { path = "crates/terminal" }
 tracing = "0.1.41"
 tracing-error = "0.2.1"

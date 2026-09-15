@@ -9,6 +9,7 @@ use super::super::{
     ScreenRegion, ScreenWaitOutcome, Session, StableCaptureOptions, StableCaptureQuality,
     StatePoint, Uuid,
 };
+use crate::screen::frame_text;
 
 /// Presented-screen operations.
 pub struct Screen<'session> {
@@ -97,6 +98,39 @@ impl<'session> Screen<'session> {
         timeout: Duration,
     ) -> Result<ScreenWaitOutcome> {
         return wait_for_screen(&self.session.path, predicate, stable_for, timeout);
+    }
+
+    /// Return convenience text for the complete presented viewport.
+    pub fn text(&self) -> Result<String> {
+        let frame = self.frame(ScreenProjectionRequest {
+            detail: FrameDetail::Text,
+            region: None,
+        })?;
+
+        return Ok(frame_text(&frame));
+    }
+
+    /// Wait for literal text to appear anywhere in the presented viewport.
+    pub fn wait_for_text(
+        &self,
+        text: impl Into<String>,
+        timeout: Duration,
+    ) -> Result<ScreenWaitOutcome> {
+        return self.wait(
+            ScreenPredicate::Contains { text: text.into() },
+            Duration::ZERO,
+            timeout,
+        );
+    }
+
+    /// Wait for the presented screen to remain idle and unchanged.
+    pub fn wait_for_idle(&self, timeout: Duration) -> Result<StableScreenCapture> {
+        return self.capture_stable(StableCaptureOptions {
+            stable_for: Duration::from_millis(20),
+            timeout,
+            projection: ScreenProjectionRequest::default(),
+            allow_incomplete: false,
+        });
     }
 
     /// Atomically capture one exact rich frame under actor stability ordering.

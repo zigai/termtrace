@@ -21,7 +21,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub(super) fn open(path: PathBuf, helper: PathBuf, recorder: Option<Child>) -> Result<Self> {
+    pub(crate) fn open(path: PathBuf, helper: PathBuf, recorder: Option<Child>) -> Result<Self> {
         let manifest = read_manifest(&path)?;
         let recorded_process_group = if recorder.is_some() {
             match send_request(&path, &ControlRequest::new(ControlCommand::Status)) {
@@ -203,7 +203,7 @@ impl Session {
 
     /// Request graceful stop and optionally wait for immutable completion.
     pub fn stop(&mut self, timeout: Option<Duration>) -> Result<Option<SessionCompletion>> {
-        send_request(&self.path, &ControlRequest::new(ControlCommand::Stop))?;
+        let _ = send_request(&self.path, &ControlRequest::new(ControlCommand::Stop));
 
         if let Some(timeout) = timeout {
             return self.complete(timeout).map(Some);

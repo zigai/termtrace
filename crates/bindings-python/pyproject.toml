@@ -1,0 +1,47 @@
+[build-system]
+requires = ["maturin>=1.8,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "termtrace"
+version = "0.1.0"
+description = "Native Python bindings for Termtrace terminal recording and semantic debugging"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    { name = "Ziga Ivansek" }
+]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Terminals",
+]
+dependencies = []
+
+[project.optional-dependencies]
+pytest = ["pytest>=8.0.0"]
+
+[project.entry-points.pytest11]
+termtrace = "termtrace.pytest_plugin"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "termtrace._termtrace"
+python-source = "python"
+strip = true
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.9.0",
+    "mypy>=1.14.0",
+]

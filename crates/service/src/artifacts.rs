@@ -1,0 +1,91 @@
+//! Artifact planning, generation, save representations, bundles, and media export.
+
+use crate::{
+    error::{Error, Result},
+    types::ArtifactRef,
+};
+use std::{io::Write, path::Path};
+use termtrace_export::{
+    asciicast::{export as export_asciicast_file, export_to_writer as export_asciicast_writer},
+    bundle::{create as create_bundle_export, verify_profile as verify_bundle_profile},
+};
+use termtrace_media::save::save as save_representations;
+use termtrace_model::{
+    artifact::bundle::{BundleManifest, BundleProfile, BundleVerificationPolicy},
+    artifact::save::{SaveFormat, SaveOutcome},
+    terminal::observation::StatePoint,
+};
+
+/// High-level service orchestrating artifact export, bundles, and save formats.
+pub struct ArtifactService;
+
+impl ArtifactService {
+    /// Export a canonical session as a UTF-8 asciinema v2 asciicast file.
+    ///
+    /// # Errors
+    /// Returns an error if the session cannot be read or export fails.
+    pub fn export_asciicast(session: &Path, destination: &Path) -> Result<ArtifactRef> {
+        export_asciicast_file(session, destination).map_err(Error::from)?;
+
+        return Ok(ArtifactRef {
+            artifact_id: destination
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+            path: destination.to_path_buf(),
+            manifest_path: None,
+            source_session_id: session
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+            source_state_hash: None,
+            kind: "asciicast",
+        });
+    }
+
+    /// Stream an asciinema v2 cast directly to a caller-owned writer.
+    ///
+    /// # Errors
+    /// Returns an error if streaming fails.
+    pub fn export_asciicast_to_writer<W: Write>(session: &Path, writer: &mut W) -> Result<()> {
+        return export_asciicast_writer(session, writer, "<stream>").map_err(Error::from);
+    }
+
+    /// Atomically publish multiple save representations of one state point.
+    ///
+    /// # Errors
+    /// Returns an error if saving fails.
+    pub fn save(
+        session: &Path,
+        destination: &Path,
+        point: StatePoint,
+        formats: &[SaveFormat],
+        include_hidden: bool,
+    ) -> Result<SaveOutcome> {
+        return save_representations(session, destination, point, formats, include_hidden, None)
+            .map_err(Error::from);
+    }
+
+    /// Create an evidence bundle with the specified sensitivity profile.
+    ///
+    /// # Errors
+    /// Returns an error if bundle creation fails.
+    pub fn create_bundle(
+        session: &Path,
+        destination: &Path,
+        profile: BundleProfile,
+    ) -> Result<BundleManifest> {
+        return create_bundle_export(session, destination, profile, None).map_err(Error::from);
+    }
+
+    /// # Errors
+    /// Returns an error if bundle verification fails.
+    pub fn verify_bundle(
+        bundle_directory: &Path,
+        policy: BundleVerificationPolicy,
+    ) -> Result<BundleManifest> {
+        return verify_bundle_profile(bundle_directory, &policy).map_err(Error::from);
+    }
+}

@@ -16,19 +16,6 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
-#[cfg(feature = "in-process")]
-use termtrace_engine::{
-    inspection::wait_for_completion,
-    observation::{
-        project_screen_frame, resolved_screen_state_for_session, state_text, CaptureQuality,
-        StatePoint,
-    },
-    recording::control::{compile_screen_predicate, evaluate_screen_predicate},
-};
-#[cfg(feature = "in-process")]
-use termtrace_model::protocol::control::ScreenWaitQuality;
-#[cfg(feature = "in-process")]
-use termtrace_model::terminal::screen::ScreenFrameSource;
 use termtrace_model::{
     execution::session::SessionManifest,
     protocol::control::{
@@ -145,8 +132,6 @@ pub fn wait_for_screen(
     timeout: Duration,
 ) -> Result<ScreenWaitOutcome> {
     let session_directory = session_directory.as_ref();
-    #[cfg(feature = "in-process")]
-    let started_at = Instant::now();
     let stable_for_ns = u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX);
     let timeout_ns = u64::try_from(timeout.as_nanos()).unwrap_or(u64::MAX);
 
@@ -160,27 +145,6 @@ pub fn wait_for_screen(
         },
     ) {
         Ok(result) => result,
-        #[cfg(feature = "in-process")]
-        Err(error)
-            if matches!(
-                &error,
-                Error::ControlUnavailable { .. }
-                    | Error::ControlTimeout { .. }
-                    | Error::ControlTransport { .. }
-            ) =>
-        {
-            let remaining = timeout
-                .saturating_sub(started_at.elapsed())
-                .max(Duration::from_secs(5));
-
-            if let Err(completion_error) = wait_for_completion(session_directory, remaining) {
-                if session_directory.join("completion.json").is_file() {
-                    return Err(completion_error.into());
-                }
-                return Err(error);
-            }
-            return completed_screen_wait(session_directory, predicate, stable_for_ns);
-        }
         Err(error) => return Err(error),
     };
 
@@ -206,48 +170,6 @@ pub fn wait_for_screen(
         observed_monotonic_ns,
         stable_for_ns,
         quality,
-        frame,
-    });
-}
-
-#[cfg(feature = "in-process")]
-fn completed_screen_wait(
-    session: &Path,
-    predicate: ScreenPredicate,
-    stable_for_ns: u64,
-) -> Result<ScreenWaitOutcome> {
-    let compiled = compile_screen_predicate(&predicate)
-        .map_err(|reason| return Error::InvalidOperation { reason })?;
-
-    let (state, source, presented) =
-        resolved_screen_state_for_session(session, StatePoint::LatestPresented, false)?;
-
-    let frame = project_screen_frame(
-        &state,
-        &ScreenProjectionRequest::default(),
-        source,
-        presented,
-        CaptureQuality::Completed,
-    )
-    .map_err(Error::ScreenFrame)?;
-
-    let viewport_text = state_text(&state);
-    let matched = evaluate_screen_predicate(&compiled, &state, &viewport_text, &frame.state_hash);
-    let observed_monotonic_ns = match &frame.source {
-        ScreenFrameSource::Actor {
-            observed_monotonic_ns,
-            ..
-        } => *observed_monotonic_ns,
-        ScreenFrameSource::Resolved { monotonic_ns, .. } => monotonic_ns.unwrap_or_default(),
-    };
-
-    return Ok(ScreenWaitOutcome {
-        predicate,
-        matched,
-        first_match_monotonic_ns: None,
-        observed_monotonic_ns,
-        stable_for_ns,
-        quality: ScreenWaitQuality::ChildCompleted,
         frame,
     });
 }
