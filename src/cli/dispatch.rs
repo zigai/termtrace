@@ -12,7 +12,7 @@ use crate::cli::{
     registry,
     scenario::run_test,
     tmux::dispatch as dispatch_tmux,
-    tooling::{run_client, run_completions, run_doctor, run_driver, run_schemas, run_version},
+    tooling::{run_completions, run_doctor, run_driver, run_schemas, run_version},
 };
 use miette::Result;
 use std::process::ExitCode;
@@ -36,7 +36,6 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: Command) -> Resul
         Command::Completion(arguments) => run_completions(response, arguments),
         Command::Agent => run_driver(),
         Command::Schema(arguments) => run_schemas(response, arguments),
-        Command::Client(arguments) => run_client(response, arguments),
         Command::Version(arguments) => run_version(response, arguments),
         Command::Playback(arguments) => run_playback(arguments),
         Command::PlaybackWorker(arguments) => run_playback_worker(arguments),

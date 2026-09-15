@@ -11,7 +11,7 @@ use crate::cli::{
     registry::args::RegistryArgs,
     scenario::args::TestArgs,
     tmux::TmuxArgs,
-    tooling::args::{ClientArgs, CompletionsArgs, DoctorArgs, SchemaArgs, VersionArgs},
+    tooling::args::{CompletionsArgs, DoctorArgs, SchemaArgs, VersionArgs},
 };
 use clap::{error::ErrorKind as ClapErrorKind, CommandFactory as _, Parser, Subcommand};
 use std::env;
@@ -81,9 +81,6 @@ pub(super) enum Command {
     /// Generate JSON Schemas for public events, controls, and artifacts.
     #[command(name = "schema", hide = true)]
     Schema(SchemaArgs),
-    /// Run Python or TypeScript client code from managed SDK assets without project files.
-    #[command(name = "client", hide = true)]
-    Client(ClientArgs),
     /// Report build and runtime component versions.
     #[command(hide = true)]
     Version(VersionArgs),
