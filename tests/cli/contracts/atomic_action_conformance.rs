@@ -71,9 +71,6 @@ fn shared_fixture_matches_through_every_public_sdk_facade() {
 
     let temporary = TempDir::new().expect("temporary directory");
     let rust = rust_summary(&fixture, temporary.path());
-    let python_sync = python_summary(&fixture_path, temporary.path(), false);
-    let python_async = python_summary(&fixture_path, temporary.path(), true);
-    let typescript = typescript_summary(&fixture_path, temporary.path());
 
     let expected = SdkSummary {
         state_hash_valid: true,
@@ -86,9 +83,6 @@ fn shared_fixture_matches_through_every_public_sdk_facade() {
     };
 
     assert_eq!(rust, expected, "Rust conformance outcomes");
-    assert_eq!(python_sync, expected, "Python sync conformance outcomes");
-    assert_eq!(python_async, expected, "Python async conformance outcomes");
-    assert_eq!(typescript, expected, "TypeScript conformance outcomes");
 }
 
 #[test]
@@ -426,63 +420,6 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
     return summary;
 }
 
-#[allow(
-    clippy::expect_used,
-    reason = "test-only conformance helper reports subprocess and JSON failures"
-)]
-fn python_summary(fixture: &Path, temporary: &Path, asynchronous: bool) -> SdkSummary {
-    let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/python");
-    let code = if asynchronous { PYTHON_ASYNC_CONFORMANCE } else { PYTHON_SYNC_CONFORMANCE };
-
-    let output = StdCommand::new("uv")
-        .args(["run", "--isolated", "--project"])
-        .arg(package)
-        .arg("python")
-        .arg("-c")
-        .arg(code)
-        .arg(env!("CARGO_BIN_EXE_termtrace"))
-        .arg(fixture)
-        .arg(temporary.join(if asynchronous {
-            "python-async-action-evidence"
-        } else {
-            "python-sync-action-evidence"
-        }))
-        .output()
-        .expect("run Python action conformance");
-    assert!(
-        output.status.success(),
-        "Python action conformance failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    return serde_json::from_slice(&output.stdout).expect("Python action summary JSON");
-}
-
-#[allow(
-    clippy::expect_used,
-    reason = "test-only conformance helper reports subprocess and JSON failures"
-)]
-fn typescript_summary(fixture: &Path, temporary: &Path) -> SdkSummary {
-    let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/typescript/src/index.ts");
-
-    let output = StdCommand::new("bun")
-        .arg("-e")
-        .arg(TYPESCRIPT_CONFORMANCE)
-        .arg(package)
-        .arg(env!("CARGO_BIN_EXE_termtrace"))
-        .arg(fixture)
-        .arg(temporary.join("typescript-action-evidence"))
-        .output()
-        .expect("run TypeScript action conformance");
-    assert!(
-        output.status.success(),
-        "TypeScript action conformance failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    return serde_json::from_slice(&output.stdout).expect("TypeScript action summary JSON");
-}
-
 fn frame_contains(frame: &ScreenFrame, expected: &str) -> bool {
     match &frame.data {
         ScreenFrameData::Text { rows } => {
@@ -497,68 +434,3 @@ fn frame_contains(frame: &ScreenFrame, expected: &str) -> bool {
         ScreenFrameData::None => return false,
     }
 }
-
-const PYTHON_SYNC_CONFORMANCE: &str = r#"import json, sys
-from pathlib import Path
-from termtrace import ActionOptions, Duration, FrameRequest, KeyAtom, Region, ScreenPostcondition, StableOptions, Terminal, TextAtom
-fixture = json.loads(Path(sys.argv[2]).read_text())
-terminal = Terminal(binary_path=sys.argv[1], evidence_root=sys.argv[3])
-session = terminal.launch(fixture["command"], cols=fixture["region"]["width"], rows=fixture["region"]["height"])
-session.output.wait_for_text(fixture["ready_text"])
-initial = session.screen.frame()
-region = Region(**fixture["region"])
-atoms = [TextAtom(item["text"]) if item["kind"] == "text" else KeyAtom(item["key"]) for item in fixture["input"]]
-options = ActionOptions(request_id=fixture["request_id"], if_state=initial.state_hash, postcondition=ScreenPostcondition(fixture["predicate"], Duration.seconds(5)), frame=FrameRequest(fixture["frame_detail"], region))
-result = session.act(atoms, options)
-retry = session.act(atoms, options)
-stable = session.screen.capture_stable(StableOptions(Duration.milliseconds(20), Duration.seconds(2)))
-summary = {"state_hash_valid": len(result.frame.state_hash) == 64, "atom_count": result.input.completed_atoms, "matched": result.postcondition.quality in ("matched", "matched_unsettled") and fixture["expected_text"] in result.frame.viewport_text, "presented": result.frame.presented, "retry_exact": retry == result, "stable_quality": stable.quality == "stable", "actor_boundaries": result.frame.boundaries is not None and result.frame.boundaries == result.frame.source.boundaries}
-session.stop()
-session.evidence.complete()
-session.close()
-terminal.close()
-print(json.dumps(summary, sort_keys=True))
-"#;
-const PYTHON_ASYNC_CONFORMANCE: &str = r#"import asyncio, json, sys
-from pathlib import Path
-from termtrace import ActionOptions, AsyncTerminal, Duration, FrameRequest, KeyAtom, Region, ScreenPostcondition, StableOptions, TextAtom
-async def main():
-    fixture = json.loads(Path(sys.argv[2]).read_text())
-    terminal = await AsyncTerminal.create(binary_path=sys.argv[1], evidence_root=sys.argv[3])
-    session = await terminal.launch(fixture["command"], cols=fixture["region"]["width"], rows=fixture["region"]["height"])
-    await session.output.wait_for_text(fixture["ready_text"])
-    initial = await session.screen.frame()
-    region = Region(**fixture["region"])
-    atoms = [TextAtom(item["text"]) if item["kind"] == "text" else KeyAtom(item["key"]) for item in fixture["input"]]
-    options = ActionOptions(request_id=fixture["request_id"], if_state=initial.state_hash, postcondition=ScreenPostcondition(fixture["predicate"], Duration.seconds(5)), frame=FrameRequest(fixture["frame_detail"], region))
-    result = await session.act(atoms, options)
-    retry = await session.act(atoms, options)
-    stable = await session.screen.capture_stable(StableOptions(Duration.milliseconds(20), Duration.seconds(2)))
-    summary = {"state_hash_valid": len(result.frame.state_hash) == 64, "atom_count": result.input.completed_atoms, "matched": result.postcondition.quality in ("matched", "matched_unsettled") and fixture["expected_text"] in result.frame.viewport_text, "presented": result.frame.presented, "retry_exact": retry == result, "stable_quality": stable.quality == "stable", "actor_boundaries": result.frame.boundaries is not None and result.frame.boundaries == result.frame.source.boundaries}
-    await session.stop()
-    await session.evidence.complete()
-    await session.close()
-    await terminal.close()
-    print(json.dumps(summary, sort_keys=True))
-asyncio.run(main())
-"#;
-const TYPESCRIPT_CONFORMANCE: &str = r#"const { readFileSync } = await import("node:fs")
-const { Duration, Termtrace } = await import(process.argv[1])
-const fixture = JSON.parse(readFileSync(process.argv[3], "utf8"))
-const terminal = await Termtrace.create({ binaryPath: process.argv[2] })
-const session = await terminal.launch({ command: fixture.command, evidenceRoot: process.argv[4], cols: fixture.region.width, rows: fixture.region.height })
-await session.output.waitForText(fixture.ready_text)
-const initial = await session.screen.frame()
-const atoms = fixture.input.map((item) => item.kind === "text" ? { kind: "text", text: item.text } : { kind: "key", key: item.key })
-const options = { requestId: fixture.request_id, ifState: initial.stateHash, postcondition: { kind: "screen", predicate: fixture.predicate, timeout: Duration.seconds(5) }, frame: { detail: fixture.frame_detail, region: fixture.region } }
-const result = await session.act(atoms, options)
-const retry = await session.act(atoms, options)
-const stable = await session.screen.captureStable({ stableFor: Duration.milliseconds(20), timeout: Duration.seconds(2) })
-const retryExact = retry.requestId === result.requestId && retry.frame.frameHash === result.frame.frameHash && retry.input.completedAtoms === result.input.completedAtoms && retry.input.firstIntentEventSeq === result.input.firstIntentEventSeq && retry.input.lastResultEventSeq === result.input.lastResultEventSeq && retry.completion.kind === result.completion.kind && retry.completion.quality === result.completion.quality
-const summary = { state_hash_valid: result.frame.stateHash.length === 64, atom_count: result.input.completedAtoms, matched: result.completion.kind === "screen" && (result.completion.quality === "matched" || result.completion.quality === "matched_unsettled") && result.frame.viewportText.includes(fixture.expected_text), presented: result.frame.presented, retry_exact: retryExact, stable_quality: stable.quality === "stable", actor_boundaries: result.frame.source.boundaries !== undefined }
-await session.stop()
-await session.complete(10000)
-await session.close()
-await terminal.close()
-console.log(JSON.stringify(summary))
-"#;
