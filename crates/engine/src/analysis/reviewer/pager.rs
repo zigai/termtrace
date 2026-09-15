@@ -2,8 +2,11 @@
 
 use super::review_error;
 use crate::{
-    observation::{semantic_state_with_hash_for_session_cancellable, state_text},
-    replay::{trust::SourceIdentity, visit_session_states_while},
+    observation::state_text,
+    replay::{
+        trust::{check_cancelled, SourceIdentity},
+        visit_session_states_while,
+    },
     Result,
 };
 use std::{
@@ -12,9 +15,10 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 use termtrace_evidence::event_log::EventLogCursor;
+use termtrace_evidence::session::validate_completed_session;
 use termtrace_model::{
     execution::event::Event,
-    terminal::{observation::StatePoint, replay::StateRecord, state::SemanticState},
+    terminal::{replay::StateRecord, state::SemanticState},
 };
 
 /// Maximum distinct semantic entries retained by a reviewer page.
@@ -142,12 +146,9 @@ pub fn load_review_page(
     cancelled: &AtomicBool,
 ) -> Result<Option<ReviewPage>> {
     let source = SourceIdentity::capture(session)?;
-    semantic_state_with_hash_for_session_cancellable(
-        session,
-        &StatePoint::LatestPresented,
-        false,
-        cancelled,
-    )?;
+    check_cancelled(Some(cancelled))?;
+
+    validate_completed_session(session)?;
 
     let target = match query {
         ReviewQuery::Final => None,
