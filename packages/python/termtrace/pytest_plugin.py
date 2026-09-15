@@ -127,7 +127,7 @@ def pytest_runtest_makereport(item: Any, call: Any) -> Generator[None, Result[Te
         reports = {}
         item._termtrace_reports = reports
     reports[report.when] = report
-    if report.when == "call" and call.excinfo is not None:
+    if report.when == "call" and call.excinfo is not None and not report.skipped:
         item._termtrace_call_outcome = classify_outcome(call.excinfo.value)
     if report.when == "teardown" and report.failed:
         finalized: list[FinalizationReport] = getattr(item, "_termtrace_finalization_reports", [])
@@ -322,14 +322,17 @@ def _pytest_item_outcome(item: Any) -> TestOutcome:
         return "error"
     call_report = reports.get("call")
     if call_report is not None:
-        if call_report.passed or getattr(call_report, "wasxfail", False):
+        if call_report.passed or getattr(call_report, "wasxfail", False) or call_report.skipped:
             return "passed"
         if call_report.failed:
             return getattr(item, "_termtrace_call_outcome", "error")
         return "error"
     setup_report = reports.get("setup")
-    if setup_report is not None and setup_report.failed:
-        return "error"
+    if setup_report is not None:
+        if setup_report.skipped:
+            return "passed"
+        if setup_report.failed:
+            return "error"
     return "error"
 
 

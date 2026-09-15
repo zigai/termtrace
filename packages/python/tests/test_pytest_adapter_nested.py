@@ -51,6 +51,21 @@ def test_skipped(termtrace_test):
     assert not (tmp_path / ".termtrace-evidence").exists()
 
 
+def test_dynamically_skipped_test_treated_as_passed(tmp_path: Path) -> None:
+    (tmp_path / "test_dyn_skipped.py").write_text(
+        """
+import pytest
+
+def test_dynamic_skip(termtrace_test_factory):
+    pytest.skip("skipping dynamically")
+""",
+        encoding="utf-8",
+    )
+    result = run_nested_pytest(tmp_path, "-q")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 skipped" in result.stdout
+
+
 def test_filtered_test_does_not_launch(tmp_path: Path) -> None:
     (tmp_path / "test_filtered.py").write_text(
         """
