@@ -8,7 +8,6 @@ use std::{
     fmt::Write as _,
     iter::from_fn,
     path::Path,
-    slice,
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
@@ -387,17 +386,40 @@ fn inspect_latest_presented_records<'record>(
                 budget.charge_output(data.as_bytes().len())?;
 
                 let mut immediate_start = None;
-                for (offset, byte) in data.as_bytes().iter().enumerate() {
-                    if offset % 4096 == 0 {
-                        super::trust::check_cancelled(cancelled)?;
+                let data_bytes = data.as_bytes();
+
+                let mut offset = 0;
+                while offset < data_bytes.len() {
+                    let remaining = data_bytes.get(offset..).unwrap_or(&[]);
+                    let (immediate, action) = tracker.push_slice(remaining);
+
+                    if !immediate.is_empty() {
+                        immediate_start.get_or_insert(offset);
+                        unsnapshotted_changes = true;
+                        offset += immediate.len();
+                        last_applied_source = (
+                            Some(record.seq),
+                            Some(u64::try_from(offset.saturating_sub(1)).unwrap_or(u64::MAX)),
+                            Some(record.monotonic_ns),
+                        );
+                        continue;
                     }
 
-                    let action = tracker.push(*byte);
+                    let Some(action) = action else {
+                        break;
+                    };
+
+                    let current_offset = offset;
+                    offset += 1;
+
+                    if current_offset % 4096 == 0 {
+                        super::trust::check_cancelled(cancelled)?;
+                    }
 
                     if !matches!(action, PresentationAction::Immediate)
                         && let Some(start) = immediate_start.take()
                     {
-                        engine.write(data.as_bytes().get(start..offset).ok_or_else(|| {
+                        engine.write(data_bytes.get(start..current_offset).ok_or_else(|| {
                             return invalid_replay("invalid immediate output span");
                         })?);
                         drop(engine.take_responses());
@@ -405,18 +427,18 @@ fn inspect_latest_presented_records<'record>(
 
                     match action {
                         PresentationAction::Immediate => {
-                            immediate_start.get_or_insert(offset);
+                            immediate_start.get_or_insert(current_offset);
                             unsnapshotted_changes = true;
                             last_applied_source = (
                                 Some(record.seq),
-                                Some(u64::try_from(offset).unwrap_or(u64::MAX)),
+                                Some(u64::try_from(current_offset).unwrap_or(u64::MAX)),
                                 Some(record.monotonic_ns),
                             );
                         }
                         PresentationAction::Buffered => {
                             last_buffered_source = (
                                 Some(record.seq),
-                                Some(u64::try_from(offset).unwrap_or(u64::MAX)),
+                                Some(u64::try_from(current_offset).unwrap_or(u64::MAX)),
                                 Some(record.monotonic_ns),
                             );
                         }
@@ -443,7 +465,7 @@ fn inspect_latest_presented_records<'record>(
                             unsnapshotted_changes = true;
                             last_applied_source = (
                                 Some(record.seq),
-                                Some(u64::try_from(offset).unwrap_or(u64::MAX)),
+                                Some(u64::try_from(current_offset).unwrap_or(u64::MAX)),
                                 Some(record.monotonic_ns),
                             );
 
@@ -622,6 +644,22 @@ pub fn inspect_completed_many(
     }
 
     let mut selected = vec![None; selectors.len()];
+    let max_target_state_id = if selectors
+        .iter()
+        .all(|s| return matches!(s, StateSelector::StateId(_)))
+    {
+        selectors
+            .iter()
+            .filter_map(|s| {
+                if let StateSelector::StateId(id) = s {
+                    return Some(*id);
+                }
+                return None;
+            })
+            .max()
+    } else {
+        None
+    };
 
     visit_session_states_while(session, &AtomicBool::new(false), |record, state| {
         for (selector, slot) in selectors.iter().zip(&mut selected) {
@@ -633,6 +671,11 @@ pub fn inspect_completed_many(
             }
         }
 
+        if let Some(max_id) = max_target_state_id
+            && record.state_id >= max_id
+        {
+            return Ok(false);
+        }
         return Ok(true);
     })?;
 
@@ -1131,6 +1174,47 @@ fn visit_recording_states_with_engine(
     return Ok(());
 }
 
+fn find_escape_sequence_end(bytes: &[u8]) -> Option<usize> {
+    if bytes.is_empty() || bytes.first() != Some(&0x1b) {
+        return None;
+    }
+
+    if bytes.len() == 1 {
+        return None;
+    }
+
+    match bytes.get(1) {
+        Some(b'[') => {
+            for (idx, &b) in bytes.get(2..)?.iter().enumerate() {
+                if (0x40..=0x7e).contains(&b) || matches!(b, 0x18 | 0x1a) {
+                    return Some(idx + 2);
+                }
+            }
+
+            return None;
+        }
+        Some(b']') => {
+            for (idx, &b) in bytes.get(2..)?.iter().enumerate() {
+                if b == 0x07 || b == 0x9c {
+                    return Some(idx + 2);
+                }
+
+                if b == b'\\' && idx > 0 && bytes.get(idx + 1) == Some(&0x1b) {
+                    return Some(idx + 2);
+                }
+            }
+
+            return None;
+        }
+        Some(_) => {
+            return Some(1);
+        }
+        None => {
+            return None;
+        }
+    }
+}
+
 fn replay_records<'record>(
     mut builder: ReplayBuilder,
     records: impl Iterator<Item = Result<Cow<'record, EventRecord>>>,
@@ -1188,11 +1272,13 @@ fn replay_records<'record>(
                             break 'events;
                         }
                     }
+
                     current_stride_end_ns = Some(record.monotonic_ns.saturating_add(stride_ns));
                 }
                 Some(_) => {}
             }
         }
+
         let seed_byte_start = source_byte_start(&record, seed_record, &mut resize_intents)?;
         let Some(seed_byte_start) = seed_byte_start else {
             continue;
@@ -1227,6 +1313,20 @@ fn replay_records<'record>(
                     return invalid_replay("replay checkpoint output cursor is outside its event");
                 })?;
                 builder.budget.charge_output(bytes.len())?;
+                if !emit {
+                    for chunk in bytes.chunks(4_096) {
+                        if cancelled.is_some_and(|flag| return flag.load(Ordering::Relaxed)) {
+                            break 'events;
+                        }
+
+                        builder.budget.check_elapsed()?;
+                        builder.engine.write(chunk);
+                        drop(builder.engine.take_responses());
+                    }
+
+                    continue;
+                }
+
                 if sampling_stride_ns.is_some() {
                     for chunk in bytes.chunks(4_096) {
                         if cancelled.is_some_and(|flag| return flag.load(Ordering::Relaxed)) {
@@ -1238,37 +1338,43 @@ fn replay_records<'record>(
                         drop(builder.engine.take_responses());
                     }
 
-                    if emit {
-                        let last_offset = seed_byte_start
-                            .checked_add(bytes.len().saturating_sub(1))
-                            .ok_or_else(|| return invalid_replay("output byte offset overflow"))?;
-
-                        pending_sampled_capture = Some((
-                            record.seq,
-                            u64::try_from(last_offset).unwrap_or(u64::MAX),
-                            record.monotonic_ns,
-                        ));
-                    }
+                    let last_offset = seed_byte_start
+                        .checked_add(bytes.len().saturating_sub(1))
+                        .ok_or_else(|| return invalid_replay("output byte offset overflow"))?;
+                    pending_sampled_capture = Some((
+                        record.seq,
+                        u64::try_from(last_offset).unwrap_or(u64::MAX),
+                        record.monotonic_ns,
+                    ));
                 } else {
-                    for (relative_offset, byte) in bytes.iter().enumerate() {
+                    let mut relative_offset = 0;
+
+                    while relative_offset < bytes.len() {
                         if relative_offset % 4_096 == 0 {
-                            if cancelled.is_some_and(|flag| {
-                                return flag.load(Ordering::Relaxed);
-                            }) {
+                            if cancelled.is_some_and(|flag| return flag.load(Ordering::Relaxed)) {
                                 break 'events;
                             }
 
                             builder.budget.check_elapsed()?;
                         }
 
-                        let offset = seed_byte_start
-                            .checked_add(relative_offset)
-                            .ok_or_else(|| return invalid_replay("output byte offset overflow"))?;
+                        let slice_remaining = bytes.get(relative_offset..).unwrap_or(&[]);
+                        if let Some(&first_byte) = slice_remaining.first()
+                            && first_byte == 0x1b
+                            && let Some(esc_end) = find_escape_sequence_end(slice_remaining)
+                        {
+                            let chunk_len = esc_end.saturating_add(1);
+                            let chunk = slice_remaining.get(..chunk_len).unwrap_or(&[]);
+                            let offset = seed_byte_start
+                                .checked_add(
+                                    relative_offset.saturating_add(chunk_len).saturating_sub(1),
+                                )
+                                .ok_or_else(|| {
+                                    return invalid_replay("output byte offset overflow");
+                                })?;
 
-                        builder.engine.write(slice::from_ref(byte));
-                        drop(builder.engine.take_responses());
-
-                        if emit {
+                            builder.engine.write(chunk);
+                            drop(builder.engine.take_responses());
                             continue_replay = builder.capture(
                                 Some(record.seq),
                                 Some(u64::try_from(offset).unwrap_or(u64::MAX)),
@@ -1276,9 +1382,35 @@ fn replay_records<'record>(
                                 &mut state_sink,
                             )?;
 
+                            relative_offset += chunk_len;
+
                             if !continue_replay {
                                 break 'events;
                             }
+
+                            continue;
+                        }
+
+                        let offset = seed_byte_start
+                            .checked_add(relative_offset)
+                            .ok_or_else(|| return invalid_replay("output byte offset overflow"))?;
+
+                        let byte_slice = bytes
+                            .get(relative_offset..relative_offset + 1)
+                            .unwrap_or(&[]);
+                        builder.engine.write(byte_slice);
+                        drop(builder.engine.take_responses());
+                        continue_replay = builder.capture(
+                            Some(record.seq),
+                            Some(u64::try_from(offset).unwrap_or(u64::MAX)),
+                            record.monotonic_ns,
+                            &mut state_sink,
+                        )?;
+
+                        relative_offset += 1;
+
+                        if !continue_replay {
+                            break 'events;
                         }
                     }
                 }
@@ -1312,10 +1444,10 @@ fn replay_records<'record>(
                         break 'events;
                     }
                 }
+
                 let geometry = resize_intents.remove(operation_id).ok_or_else(|| {
                     return invalid_replay("resize result without corresponding intent");
                 })?;
-
                 builder.engine.resize(
                     geometry.cols,
                     geometry.rows,
