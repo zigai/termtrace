@@ -267,6 +267,7 @@ fn probe_staged(
     } else {
         None
     };
+
     let mut xvfb = spawn_xvfb(
         Some(helper),
         &lease,

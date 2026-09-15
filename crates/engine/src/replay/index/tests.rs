@@ -178,6 +178,7 @@ fn video_stride_samples_intermediate_flutter_into_compact_index() {
     let full_dir = session.join("full");
     let video_dir = session.join("video");
     create_private_directory(&full_dir).expect("full directory");
+
     create_private_directory(&video_dir).expect("video directory");
 
     let (full_artifacts, full_retained) = write_source_index(
@@ -213,6 +214,7 @@ fn video_stride_samples_intermediate_flutter_into_compact_index() {
 
     let video_index_content =
         fs_err::read_to_string(video_dir.join("state-index.jsonl")).expect("state index");
+
     let entries: Vec<StateIndexEntry> = video_index_content
         .lines()
         .map(|line| return serde_json::from_str(line).expect("entry"))
@@ -239,6 +241,7 @@ fn index_session_with_video_options_samples_cleanly() {
     create_private_directory(&session).expect("private directory");
 
     let event_path = session.join("events.jsonl");
+
     let mut writer = writer(&event_path);
     for i in 0..30 {
         writer
@@ -247,6 +250,7 @@ fn index_session_with_video_options_samples_cleanly() {
             })
             .expect("output");
     }
+
     drop(writer);
 
     let outcome = index_session_with_options(
@@ -257,7 +261,6 @@ fn index_session_with_video_options_samples_cleanly() {
         },
     )
     .expect("index session with video options");
-
     assert_eq!(outcome.state_selection, StateSelection::All);
     assert_eq!(outcome.state_count, 2);
 
@@ -295,6 +298,7 @@ fn high_resolution_canvas_video_stride_completes_in_seconds() {
         2160, // 2160px
         "xterm-ghostty",
     );
+
     let mut writer = EventLogWriter::create(&event_path, &header, clock).expect("writer");
 
     // Write 200 high-resolution lines of terminal flutter output
@@ -311,6 +315,7 @@ fn high_resolution_canvas_video_stride_completes_in_seconds() {
             })
             .expect("output");
     }
+
     drop(writer);
 
     let start = Instant::now();
@@ -322,6 +327,7 @@ fn high_resolution_canvas_video_stride_completes_in_seconds() {
         },
     )
     .expect("index high resolution canvas with video stride");
+
     let elapsed = start.elapsed();
 
     println!("4K high resolution 300x100 indexing completed in: {elapsed:?}");

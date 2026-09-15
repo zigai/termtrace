@@ -74,6 +74,7 @@ pub fn index_session_range(
         },
     );
 }
+
 /// Generate video-optimized replay artifacts sampled at 1/FPS increments.
 ///
 /// # Errors
@@ -102,6 +103,7 @@ pub fn index_session_with_stride(
         IndexOptions::default().with_sampling_stride(stride_ns),
     );
 }
+
 /// Generate replay artifacts under explicit completion and retention policy.
 ///
 /// # Errors
@@ -174,8 +176,10 @@ pub fn index_session_with_options(
     if destination.exists() {
         return Err(Error::ArtifactExists { path: destination });
     }
+
     let staging = session_directory.join(format!(".derived.{}.tmp", Uuid::now_v7()));
     create_private_directory(&staging)?;
+
     let sampling_stride_ns = options.sampling_stride_ns.or_else(|| {
         return env::var("TERMTRACE_INDEX_SAMPLING_STRIDE_NS")
             .ok()
@@ -189,6 +193,7 @@ pub fn index_session_with_options(
                     .map(|fps| return 1_000_000_000_u64 / u64::from(fps));
             });
     });
+
     let result = write_source_index(
         &staging,
         &IndexSource::File(&event_path, &summary),
@@ -533,6 +538,7 @@ fn write_source_index(
             control_index_offset,
             control_rank,
         };
+
         write_json_line(index, &entry, directory)?;
         *final_retained_state_hash = Some(record.state_hash);
         *retained_state_count = retained_state_count
@@ -594,6 +600,7 @@ fn write_source_index(
 
             if let Some(stride_ns) = sampling_stride_ns {
                 let bucket = record.monotonic_ns / stride_ns;
+
                 if retained_state_count == 0 && record.event_seq.is_none() {
                     commit_retained_state(
                         record,
@@ -607,7 +614,9 @@ fn write_source_index(
                         &mut previous_retained_state,
                         directory,
                     )?;
+
                     current_bucket = Some(bucket);
+
                     return Ok(());
                 }
 
@@ -628,6 +637,7 @@ fn write_source_index(
                             directory,
                         )?;
                     }
+
                     current_bucket = Some(bucket);
                     pending_state = Some((record, state.clone()));
                 }

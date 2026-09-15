@@ -110,6 +110,7 @@ impl IndexOptions {
     #[must_use]
     pub fn for_video(fps: u32) -> Self {
         let stride_ns = if fps > 0 { 1_000_000_000_u64 / u64::from(fps) } else { 0 };
+
         return Self {
             state_selection: StateSelection::All,
             sampling_stride_ns: (stride_ns > 0).then_some(stride_ns),
@@ -121,6 +122,7 @@ impl IndexOptions {
     #[must_use]
     pub fn with_sampling_stride(mut self, stride_ns: u64) -> Self {
         self.sampling_stride_ns = (stride_ns > 0).then_some(stride_ns);
+
         return self;
     }
 }

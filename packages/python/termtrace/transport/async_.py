@@ -64,6 +64,7 @@ class AsyncTerminal:
             await terminal.close()
             raise
         return terminal
+
     async def launch(
         self,
         command: Sequence[str | Path],
@@ -234,6 +235,7 @@ class AsyncTerminal:
                     await self._process.wait()
             except TimeoutError:
                 pass
+
     @property
     def closed(self) -> bool:
         return self._closed

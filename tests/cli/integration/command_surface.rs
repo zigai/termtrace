@@ -266,12 +266,14 @@ fn top_level_video_never_falls_back_from_native_to_semantic() {
         .stderr(predicate::str::contains(
             "required capability `native-video` is blocked",
         ));
+
     assert!(!output.exists(), "native failure must not publish a video");
     assert!(
         !temporary.path().join("native.mp4.termtrace").exists(),
         "native failure must not publish a semantic sidecar"
     );
 }
+
 #[test]
 fn top_level_video_auto_captures_native_and_overwrites_output() {
     let temporary = TempDir::new().expect("temporary directory");

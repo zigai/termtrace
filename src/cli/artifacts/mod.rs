@@ -432,6 +432,7 @@ pub(super) fn run_video_facade(
     );
 
     let outcome = export_presentation(&plan, &sidecar).into_diagnostic()?;
+
     if output.exists() || output.symlink_metadata().is_ok() {
         if output.is_dir() {
             fs_err::remove_dir_all(&output)

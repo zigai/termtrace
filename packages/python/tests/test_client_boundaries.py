@@ -169,6 +169,7 @@ def test_atomic_input_sequence_builder_is_typed_bounded_and_correlated() -> None
             verbose=False,
         )
 
+
 def test_sync_request_timeout_during_blocking_write(tmp_path: Path) -> None:
     driver = tmp_path / "blocking_driver"
     driver.write_text(

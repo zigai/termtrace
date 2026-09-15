@@ -142,7 +142,6 @@ fn control_server_loop(
 
         const MAX_ACCEPT_BATCH: usize = 32;
         let mut accepted_count = 0;
-
         loop {
             if accepted_count >= MAX_ACCEPT_BATCH {
                 break;
@@ -199,7 +198,6 @@ fn handle_control_connection(
     let Some(request) = read_control_request(&mut stream, cancel, request_timeout)? else {
         return Ok(());
     };
-
     if request.version != CONTROL_PROTOCOL_VERSION {
         return write_control_response(
             &mut stream,
@@ -219,7 +217,6 @@ fn handle_control_connection(
 
     let request_id = request.request_id;
     let response_timeout = control_response_timeout(&request.command, Duration::from_secs(2));
-
     let (response_sender, response_receiver) = mpsc::sync_channel(1);
     let mut message = RuntimeMessage::Control {
         request,
@@ -381,6 +378,7 @@ fn read_control_request(
         let remaining = deadline
             .saturating_duration_since(now)
             .max(Duration::from_millis(1));
+
         let poll_timeout = PollTimeout::try_from(remaining).unwrap_or(PollTimeout::NONE);
 
         let mut descriptors = [
@@ -421,9 +419,11 @@ fn read_control_request(
                             ),
                         });
                     }
+
                     if let Some(sub) = slice.get(..=newline_index) {
                         encoded.extend_from_slice(sub);
                     }
+
                     break;
                 }
 
@@ -435,6 +435,7 @@ fn read_control_request(
                         ),
                     });
                 }
+
                 encoded.extend_from_slice(slice);
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {}
@@ -498,8 +499,8 @@ fn write_control_response(
         encoded
     };
     payload.push(b'\n');
-
     write_all_with_cancellation(stream, cancel, &payload, timeout)?;
+
     return Ok(());
 }
 
@@ -527,6 +528,7 @@ fn write_all_with_cancellation(
         let remaining = deadline
             .saturating_duration_since(now)
             .max(Duration::from_millis(1));
+
         let poll_timeout = PollTimeout::try_from(remaining).unwrap_or(PollTimeout::NONE);
 
         let mut descriptors = [
@@ -818,8 +820,11 @@ mod tests {
         assert_eq!(code, "screen_frame_resource_limit");
 
         let details = details.expect("action response details");
+
         assert_eq!(details.scope, "action_response");
+
         let screen = details.screen_frame.expect("screen-frame details");
+
         assert_eq!(screen.limit_kind.as_deref(), Some("response_bytes"));
         assert_eq!(screen.requested, Some(MAX_CONTROL_MESSAGE_BYTES + 42));
         assert_eq!(screen.maximum, Some(MAX_CONTROL_MESSAGE_BYTES));
@@ -844,6 +849,7 @@ mod tests {
             CaptureQuality::Live,
         )
         .expect("spans frame");
+
         let spans_response = ControlResponse {
             version: CONTROL_PROTOCOL_VERSION,
             request_id: Uuid::nil(),
@@ -888,6 +894,7 @@ mod tests {
             CaptureQuality::Live,
         )
         .expect("text frame");
+
         let text_response = ControlResponse {
             version: CONTROL_PROTOCOL_VERSION,
             request_id: Uuid::nil(),
@@ -960,7 +967,6 @@ mod tests {
         let start = Instant::now();
         worker.stop().expect("stop control server");
         let elapsed = start.elapsed();
-
         assert!(
             elapsed < Duration::from_secs(1),
             "shutdown took {elapsed:?}, expected < 1s"

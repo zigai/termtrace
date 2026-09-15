@@ -426,6 +426,7 @@ pub fn assert_no_wrapped_rows(frame: &ScreenFrame) -> Result<(), ExpectationMism
             .collect(),
         ScreenFrameData::None => Vec::new(),
     };
+
     if wrapped.is_empty() {
         return Ok(());
     }
@@ -613,6 +614,7 @@ fn frame_excerpt(frame: &ScreenFrame) -> String {
             .collect(),
         ScreenFrameData::None => Vec::new(),
     };
+
     return rows
         .iter()
         .map(|(row, text)| format!("{row}: {text}"))
