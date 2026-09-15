@@ -669,7 +669,6 @@ impl DisplayScaling {
         };
 
         let gdk_scale = if effective_scale >= 2.0 { effective_scale.floor() as u32 } else { 1 };
-
         let gdk_dpi_scale = effective_scale / (gdk_scale as f64);
 
         return Self {
@@ -684,6 +683,7 @@ impl DisplayScaling {
     #[must_use]
     pub fn from_dpi(dpi: u32) -> Self {
         let scale = dpi as f64 / 96.0;
+
         return Self::new(scale, Some(dpi));
     }
 
@@ -704,6 +704,7 @@ pub fn resolve_display_scaling(
     if let Some(dpi) = options.dpi {
         return DisplayScaling::from_dpi(dpi);
     }
+
     if let Some(scale) = options.scale {
         return DisplayScaling::from_scale(scale);
     }
@@ -715,6 +716,7 @@ pub fn resolve_display_scaling(
     {
         return DisplayScaling::from_dpi(dpi);
     }
+
     if let Ok(scale_str) =
         env::var("TERMTRACE_DISPLAY_SCALE").or_else(|_| return env::var("TERMTRACE_SCALE"))
         && let Ok(scale) = scale_str.parse::<f64>()
@@ -722,6 +724,7 @@ pub fn resolve_display_scaling(
     {
         return DisplayScaling::from_scale(scale);
     }
+
     if let Ok(gdk_scale_str) = env::var("GDK_SCALE")
         && let Ok(gdk_scale) = gdk_scale_str.parse::<u32>()
     {
@@ -729,7 +732,9 @@ pub fn resolve_display_scaling(
             .ok()
             .and_then(|s| return s.parse::<f64>().ok())
             .unwrap_or(1.0);
+
         let total_scale = (gdk_scale as f64) * dpi_scale;
+
         return DisplayScaling::new(total_scale, None);
     }
 
@@ -750,26 +755,33 @@ pub fn resolve_display_scaling(
                 .and_then(|b| return str::from_utf8(b.as_bytes()).ok())
                 .and_then(|s| return s.parse::<f64>().ok())
                 .unwrap_or(1.0);
+
             let total_scale = (gdk_scale as f64) * dpi_scale;
+
             return DisplayScaling::new(total_scale, None);
         }
+
         // 4. Geometry-based high-DPI detection from recorded cell dimensions
         if manifest.geometry.cols > 0 && manifest.geometry.rows > 0 {
             let cell_w = manifest.geometry.pixel_width as f64 / manifest.geometry.cols as f64;
             let cell_h = manifest.geometry.pixel_height as f64 / manifest.geometry.rows as f64;
+
             if cell_w >= 18.0 && cell_h >= 36.0 {
                 return DisplayScaling::from_scale(2.0);
             }
+
             if cell_w >= 14.0 && cell_h >= 28.0 {
                 return DisplayScaling::from_scale(1.5);
             }
         }
+
         if manifest.geometry_provenance.source == GeometrySource::GhosttyFit
             && let Some(target) = manifest.geometry_provenance.capture_target
         {
             if target.width >= 3840 || target.height >= 2160 {
                 return DisplayScaling::from_scale(2.0);
             }
+
             if target.width >= 2560 || target.height >= 1440 {
                 return DisplayScaling::from_scale(1.5);
             }
@@ -780,6 +792,7 @@ pub fn resolve_display_scaling(
     if options.width >= 2880 || options.height >= 1800 {
         return DisplayScaling::from_scale(2.0);
     }
+
     if options.width >= 2560 || options.height >= 1440 {
         return DisplayScaling::from_scale(1.5);
     }
@@ -808,6 +821,7 @@ mod tests {
             dpi: None,
         };
     }
+
     #[test]
     fn native_capture_accepts_public_video_frame_rates_only() {
         for fps in [24, 30, 60] {
@@ -868,6 +882,7 @@ mod tests {
         let mut opt_2k = options(24);
         opt_2k.width = 2560;
         opt_2k.height = 1440;
+
         assert_eq!(
             resolve_display_scaling(&opt_2k, None),
             DisplayScaling::from_scale(1.5)
@@ -876,6 +891,7 @@ mod tests {
         let mut opt_4k = options(24);
         opt_4k.width = 3840;
         opt_4k.height = 2160;
+
         assert_eq!(
             resolve_display_scaling(&opt_4k, None),
             DisplayScaling::from_scale(2.0)

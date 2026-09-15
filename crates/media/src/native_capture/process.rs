@@ -183,7 +183,6 @@ pub(super) fn spawn_xvfb(
         "-extension".to_owned(),
         "GLX".to_owned(),
     ]);
-
     let mut process = ManagedChild::spawn_group(
         "Xvfb",
         command
@@ -211,7 +210,6 @@ pub(super) fn spawn_geometry_probe(
 ) -> Result<ManagedChild> {
     let stdout = secure_file(&staging.join(format!("{stem}.stdout.log")))?;
     let stderr = secure_file(&staging.join(format!("{stem}.stderr.log")))?;
-
     let mut command = owned_command(helper, "dbus-run-session")?;
     command
         .arg("--")
@@ -235,6 +233,7 @@ pub(super) fn spawn_geometry_probe(
         if let Ok(scale) = env::var("GDK_SCALE") {
             command.env("GDK_SCALE", scale);
         }
+
         if let Ok(dpi_scale) = env::var("GDK_DPI_SCALE") {
             command.env("GDK_DPI_SCALE", dpi_scale);
         }
@@ -330,6 +329,7 @@ pub(super) fn spawn_ghostty(
         if let Ok(scale) = env::var("GDK_SCALE") {
             command.env("GDK_SCALE", scale);
         }
+
         if let Ok(dpi_scale) = env::var("GDK_DPI_SCALE") {
             command.env("GDK_DPI_SCALE", dpi_scale);
         }
@@ -343,6 +343,7 @@ pub(super) fn spawn_ghostty(
     if let Some(profile) = profile {
         command.env("XDG_CONFIG_HOME", profile);
     }
+
     return ManagedChild::spawn_logged("ghostty", &mut command);
 }
 
