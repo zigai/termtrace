@@ -593,7 +593,6 @@ pub(super) fn action_projection(arguments: &SendArgs) -> ScreenProjectionRequest
     if arguments.verbose {
         return ScreenProjectionRequest::default();
     }
-
     return ScreenProjectionRequest {
         detail: FrameDetail::None,
         region: None,
@@ -604,6 +603,8 @@ pub(super) fn action_projection(arguments: &SendArgs) -> ScreenProjectionRequest
 pub(super) struct ActionObservation<'data> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) state: Option<&'data str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) state_hash: Option<&'data str>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub(super) frame: Option<&'data ScreenFrame>,
 }
@@ -612,6 +613,7 @@ pub(super) struct ActionObservation<'data> {
 pub(super) fn action_observation(frame: &ScreenFrame) -> Result<serde_json::Value> {
     return serde_json::to_value(ActionObservation {
         state: Some(&frame.state_hash),
+        state_hash: Some(&frame.state_hash),
         frame: Some(frame),
     })
     .into_diagnostic();
@@ -757,6 +759,7 @@ pub(super) fn action_applied_response(
         postcondition: postcondition_summary,
         observation: ActionObservation {
             state: state_hash,
+            state_hash,
             frame,
         },
         ended,
@@ -1102,6 +1105,7 @@ mod action_response_tests {
         assert_eq!(value["state_hash"], frame.state_hash);
         assert_eq!(value["version"], 1);
     }
+
     #[test]
     fn action_projection_selects_lightweight_detail_by_default() {
         let args = SendArgs {

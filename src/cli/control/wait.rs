@@ -117,10 +117,11 @@ fn run_idle_wait(
     let payload = serde_json::json!({
         "kind": "stable_snapshot",
         "quality": quality,
+        "session_state": "unknown",
+        "state": frame.state_hash,
         "state_hash": frame.state_hash,
         "frame_hash": frame.frame_hash,
         "geometry": frame.geometry,
-        "frame": frame,
         "first_observed_monotonic_ns": first_observed_monotonic_ns,
         "observed_monotonic_ns": observed_monotonic_ns,
         "stable_for_ns": stable_for_ns,

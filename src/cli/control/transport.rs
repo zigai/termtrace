@@ -1,7 +1,7 @@
 use super::*;
 use std::{ffi::OsString, fmt::Write as _, os::unix::ffi::OsStringExt as _};
 use termtrace_engine::registry::SessionRegistry;
-use termtrace_model::protocol::control::{ActorBoundaries, ClockSample};
+use termtrace_model::protocol::control::ClockSample;
 
 pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Value> {
     let value = match data {
@@ -370,9 +370,9 @@ pub(in crate::cli) fn run_status(
             kind: "status",
             session: &session_label,
             lifecycle: "live",
+            session_state: "live",
             pid,
             boundary: compact_boundaries(&boundaries),
-            boundaries: boundaries.clone(),
             clock_sample,
         };
 
@@ -401,9 +401,9 @@ struct LiveStatusResponse<'session> {
     kind: &'static str,
     session: &'session str,
     lifecycle: &'static str,
+    session_state: &'static str,
     pid: Option<u32>,
     boundary: serde_json::Value,
-    boundaries: ActorBoundaries,
     clock_sample: ClockSample,
 }
 
