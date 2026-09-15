@@ -21,7 +21,7 @@ use uuid::Uuid;
 /// Returns an error when the path is unsafe, the destination exists, or the file cannot be
 /// created with owner-only permissions.
 pub fn secure_writer(path: &Path) -> Result<BufWriter<File>> {
-    return secure_file(path).map(BufWriter::new);
+    return secure_file(path).map(|f| return BufWriter::with_capacity(64 * 1024, f));
 }
 
 /// Create a new owner-only artifact file without following symlinks or replacing an existing file.

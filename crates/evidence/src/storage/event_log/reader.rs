@@ -985,7 +985,7 @@ fn recover_stream(source: &Path, recovered: &Path) -> Result<Option<RecoveryIssu
         .map_err(|error| return Error::filesystem(recovered, error))?;
     let storage = SegmentWriter::new(recovered, output)
         .map_err(|error| return Error::filesystem(recovered, error))?;
-    let mut writer = BufWriter::new(storage);
+    let mut writer = BufWriter::with_capacity(128 * 1024, storage);
     writer
         .write_all(&header_bytes)
         .and_then(|()| return writer.write_all(b"\n"))

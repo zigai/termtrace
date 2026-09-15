@@ -8,8 +8,6 @@ use super::{
 };
 use crate::storage::{artifact::sync_parent_directory, Error, Result};
 use blake3::Hash;
-use serde::Serialize;
-use serde_json::value::{to_raw_value, RawValue};
 use std::{
     collections::VecDeque,
     fs::OpenOptions,
@@ -24,29 +22,8 @@ use termtrace_model::{
     protocol::control::LiveEventCursor,
 };
 
-// Field order is the canonical model EventBody hash preimage.
-#[derive(Serialize)]
-struct EncodedEventBody<'event> {
-    seq: u64,
-    monotonic_ns: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    observed_monotonic_ns: Option<u64>,
-    event: &'event RawValue,
-}
-
-// Reuses the same encoded payload in model EventRecord field order.
-#[derive(Serialize)]
-struct EncodedEventRecord<'event> {
-    seq: u64,
-    monotonic_ns: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    observed_monotonic_ns: Option<u64>,
-    prev_hash: &'event str,
-    hash: &'event str,
-    event: &'event RawValue,
-}
-
 const RECENT_CURSOR_LIMIT: usize = 4096;
+const EVENT_LOG_BUFFER_BYTES: usize = 128 * 1024;
 
 #[derive(Clone, Copy, Debug)]
 struct WriterCursor {
@@ -64,24 +41,6 @@ impl WriterCursor {
             event_hash: self.hash.to_hex().to_string(),
             monotonic_ns: self.monotonic_ns,
         };
-    }
-}
-
-struct CountingWrite<'writer> {
-    writer: &'writer mut BufWriter<SegmentWriter>,
-    bytes: u64,
-}
-
-impl Write for CountingWrite<'_> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let written = self.writer.write(buf)?;
-        self.bytes += u64::try_from(written).unwrap_or(u64::MAX);
-
-        return Ok(written);
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        return self.writer.flush();
     }
 }
 
@@ -110,6 +69,7 @@ pub struct EventLogWriter {
     device: u64,
     inode: u64,
     header_hash: Hash,
+    event_scratch: Vec<u8>,
 }
 
 impl EventLogWriter {
@@ -262,7 +222,7 @@ impl EventLogWriter {
             };
         })?;
 
-        let mut writer = BufWriter::new(storage);
+        let mut writer = BufWriter::with_capacity(EVENT_LOG_BUFFER_BYTES, storage);
         writer
             .write_all(&header_bytes)
             .and_then(|()| return writer.write_all(b"\n"))
@@ -317,6 +277,7 @@ impl EventLogWriter {
             device: metadata.dev(),
             inode: metadata.ino(),
             header_hash: previous_hash,
+            event_scratch: Vec::with_capacity(64 * 1024),
         });
     }
 
@@ -441,7 +402,8 @@ impl EventLogWriter {
             return invalid_log(&self.path, seq.saturating_add(2), "event sequence overflow");
         })?;
 
-        let payload = to_raw_value(&event).map_err(|source| {
+        self.event_scratch.clear();
+        serde_json::to_writer(&mut self.event_scratch, &event).map_err(|source| {
             return Error::InvalidJson {
                 path: self.path.clone(),
                 json_path: "$".to_owned(),
@@ -449,22 +411,27 @@ impl EventLogWriter {
             };
         })?;
 
-        let body = EncodedEventBody {
-            seq,
-            monotonic_ns,
-            observed_monotonic_ns,
-            event: &payload,
-        };
-
+        let mut seq_buf = itoa::Buffer::new();
+        let seq_str = seq_buf.format(seq);
+        let mut mono_buf = itoa::Buffer::new();
+        let mono_str = mono_buf.format(monotonic_ns);
+        let mut obs_buf = itoa::Buffer::new();
+        let obs_str = observed_monotonic_ns.map(|obs| return obs_buf.format(obs));
         let mut hasher = blake3::Hasher::new();
         hasher.update(self.previous_hash.as_bytes());
-        serde_json::to_writer(&mut hasher, &body).map_err(|source| {
-            return Error::InvalidJson {
-                path: self.path.clone(),
-                json_path: "$".to_owned(),
-                source,
-            };
-        })?;
+        hasher.update(b"{\"seq\":");
+        hasher.update(seq_str.as_bytes());
+        hasher.update(b",\"monotonic_ns\":");
+        hasher.update(mono_str.as_bytes());
+
+        if let Some(obs) = obs_str {
+            hasher.update(b",\"observed_monotonic_ns\":");
+            hasher.update(obs.as_bytes());
+        }
+
+        hasher.update(b",\"event\":");
+        hasher.update(&self.event_scratch);
+        hasher.update(b"}");
         let hash = hasher.finalize();
 
         let output_bytes = match &event {
@@ -485,28 +452,47 @@ impl EventLogWriter {
 
         let previous_hash_text = self.previous_hash.to_hex();
         let hash_text = hash.to_hex();
-        let record = EncodedEventRecord {
-            seq,
-            monotonic_ns,
-            observed_monotonic_ns,
-            prev_hash: previous_hash_text.as_str(),
-            hash: hash_text.as_str(),
-            event: &payload,
-        };
 
-        let mut counted = CountingWrite {
-            writer: &mut self.writer,
-            bytes: 0,
-        };
-        let write_result = serde_json::to_writer(&mut counted, &record)
-            .map_err(|source| {
-                return io::Error::new(
-                    source.io_error_kind().unwrap_or(io::ErrorKind::Other),
-                    source,
-                );
-            })
-            .and_then(|()| return counted.write_all(b"\n"));
-        let encoded_bytes = counted.bytes;
+        let mut encoded_len = 7
+            + seq_str.len()
+            + 16
+            + mono_str.len()
+            + 14
+            + 64
+            + 10
+            + 64
+            + 10
+            + self.event_scratch.len()
+            + 2;
+
+        if let Some(obs) = obs_str {
+            encoded_len += 25 + obs.len();
+        }
+
+        let encoded_bytes = u64::try_from(encoded_len).unwrap_or(u64::MAX);
+
+        let write_result = (|| -> io::Result<()> {
+            self.writer.write_all(b"{\"seq\":")?;
+            self.writer.write_all(seq_str.as_bytes())?;
+            self.writer.write_all(b",\"monotonic_ns\":")?;
+            self.writer.write_all(mono_str.as_bytes())?;
+
+            if let Some(obs) = obs_str {
+                self.writer.write_all(b",\"observed_monotonic_ns\":")?;
+                self.writer.write_all(obs.as_bytes())?;
+            }
+
+            self.writer.write_all(b",\"prev_hash\":\"")?;
+            self.writer.write_all(previous_hash_text.as_bytes())?;
+            self.writer.write_all(b"\",\"hash\":\"")?;
+            self.writer.write_all(hash_text.as_bytes())?;
+            self.writer.write_all(b"\",\"event\":")?;
+            self.writer.write_all(&self.event_scratch)?;
+            self.writer.write_all(b"}\n")?;
+
+            return Ok(());
+        })();
+
         let write_result = if durable {
             write_result
                 .and_then(|()| return self.writer.flush())
