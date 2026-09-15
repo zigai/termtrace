@@ -90,15 +90,15 @@ EOF
 
 mkdir -p "$(dirname "$output")"
 : >"$output"
-measure stable-observe "$binary" wait "$session" --idle 10ms
+measure stable-observe "$binary" wait "$session" --idle=10ms --json
 jq -e '.kind == "stable_snapshot" and (has("semantic_state_zstd") | not) and .session_state == "unknown" and .state != null' "$work/stable-observe.stdout" >/dev/null
 
-measure atomic-input-sequence "$binary" --fields boundary act "$session" text:go enter
+measure atomic-input-sequence "$binary" send "$session" text:go enter --json
 jq -e '.type == "action" and .input.atoms == 2 and .boundaries != null' "$work/atomic-input-sequence.stdout" >/dev/null
 
 "$binary" wait "$session" --screen Done --timeout 5s >/dev/null
 "$binary" wait "$session" --screen 259 --timeout 5s >/dev/null
-measure live-status "$binary" status "$session"
+measure live-status "$binary" status "$session" --json
 jq -e '.kind == "status" and .lifecycle == "live" and .session_state == "live" and (has("boundaries") | not)' "$work/live-status.stdout" >/dev/null
 
 "$binary" stop "$session" --wait >/dev/null
@@ -115,7 +115,7 @@ mkdir -p "$client_worktree"
 printf '%s\n' 'from termtrace import ProtocolMismatchError' 'print(ProtocolMismatchError.__name__)' >"$client_script"
 
 pushd "$client_worktree" >/dev/null
-measure managed-client-python "$binary" tooling client python "$client_script"
+measure managed-client-python "$binary" client python "$client_script"
 popd >/dev/null
 
 test -z "$(find "$client_worktree" -mindepth 1 -print -quit)"
