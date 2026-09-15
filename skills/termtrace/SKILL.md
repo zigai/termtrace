@@ -22,7 +22,7 @@ and communicate strictly via exit code.
   - `screenshot`, `video`, or `bundle` to generate self-contained artifacts.
   - Pass `--json` when structured data is required.
 - For complex, stateful workflows (loops, retries, branching, multi-step agent drivers),
-  use the Python SDK (`import termtrace` / `from termtrace import Terminal`) rather than
+  use the Rust SDK (`termtrace_sdk`) or the agent driver rather than
   chaining dozens of subshell CLI calls. Read [client workflows](references/client-workflows.md).
 - Use `termtrace test` for repeatable assertion workflows or regressions. Start
   from [the tested scenario example](examples/ready.termtrace.json) and read
@@ -69,7 +69,7 @@ from an older command name.
 3. Use the returned presented-state hash with `screen --since STATE` to receive
    only a changed screen. Pass it through `--if-state` when an action is valid
    only for that exact presentation.
-4. For multi-action or interactive loops, use the Python SDK (`Terminal().launch` / `Terminal().attach`).
+4. For multi-action or interactive loops, use the Rust SDK or state-guarded send sequences.
 5. Mark meaningful workflow milestones only: `send my-app mark:checkpoint`.
 6. Check exit codes and `--json` error structures. Exit code 0 indicates success;
    non-zero indicates failure. Diagnostic logs go to stderr via `TERMTRACE_LOG`.
