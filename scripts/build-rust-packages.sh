@@ -4,7 +4,7 @@ set -euo pipefail
 readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 export TERMTRACE_GHOSTTY_PREFIX="${TERMTRACE_GHOSTTY_PREFIX:-$root/vendor/ghostty/zig-out}"
-readonly crates=(model terminal evidence engine render media export sdk)
+readonly crates=(model terminal evidence engine render media export service scenario sdk)
 mkdir -p "$root/target"
 readonly stage="$(mktemp -d "$root/target/rust-packages.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT

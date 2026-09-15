@@ -11,10 +11,9 @@ bootstrap:
 install: bootstrap
   cargo install --locked --path . --force
 
-# Regenerate public schemas and typed client protocol models
+# Regenerate public schemas
 generate:
   cargo run --locked --quiet -- tooling schemas --out schemas
-  scripts/generate-client-protocol.sh
 
 # Enforce the complete allowlist of direct internal Cargo dependencies
 architecture:
@@ -24,29 +23,38 @@ architecture:
 validate:
   cargo check --locked --workspace --all-targets --all-features
 
-# Run fast hermetic Rust, TypeScript, and Python tests for each change (requires bootstrap, Bun, and uv)
+# Run fast hermetic Rust tests for each change (requires bootstrap)
 test:
   cargo test --locked --workspace --lib --bins --test execution_lifecycle
-  bun run --cwd packages/typescript test
-  uv run --project packages/python --locked --group dev pytest -q packages/python/tests benchmarks/test_acceptance.py
+  PYTHONPATH=benchmarks uv run --project benchmarks python3 -m unittest benchmarks/test_acceptance.py
 
 # Run CLI/tmux integration on each pull request (requires bootstrap, tmux, and Ghostty on PATH)
 integration:
   cargo test --locked --test cli
 
-# Lint Rust and type-check and lint the language clients
+# Build native Python and Node.js language bindings
+bindings-build:
+  uv run --project crates/bindings-python --with maturin maturin develop --manifest-path crates/bindings-python/Cargo.toml
+  bunx @napi-rs/cli build --cwd crates/bindings-node
+
+# Test native Python language bindings and pytest consumer suite
+test-python:
+  uv run --project tests/consumers/python_native pytest -v tests/consumers/python_native
+
+# Test native Node.js/TypeScript bindings and consumer suite
+test-node:
+  npm --prefix tests/consumers/node_native test
+
+# Test all native language bindings
+bindings-test: bindings-build test-python test-node
+
+# Lint Rust
 lint:
   cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-  bun run --cwd packages/typescript lint
-  bun run --cwd packages/typescript typecheck
-  uv run --project packages/python --locked --group dev mypy packages/python/termtrace packages/python/tests
-  uv run --project packages/python --locked --group dev ruff check packages/python/termtrace packages/python/scripts packages/python/tests
 
-# Format Rust, language-client sources, and shell scripts
+# Format Rust and shell scripts
 format:
   cargo fmt --all
-  bun run --cwd packages/typescript format
-  uv run --project packages/python --locked --group dev ruff format packages/python/termtrace packages/python/scripts packages/python/tests
   shfmt -i 4 -ci -w benchmarks examples fixtures scripts tests install.sh
 
 # Run the complete native recording, replay, video, and screenshot verification test
@@ -67,8 +75,6 @@ sync-skill:
 fix: sync-skill
   cargo statement-spacing fix --format-first
   cargo clippy --locked --workspace --all-targets --all-features --fix --allow-dirty --allow-staged
-  bun run --cwd packages/typescript lint:fix
-  uv run --project packages/python --locked --group dev ruff check --fix packages/python/termtrace packages/python/scripts packages/python/tests
   @just format
 
 # Run tests and display coverage
@@ -85,18 +91,14 @@ fuzz-vt *args="-runs=0":
 test-race:
   RUSTFLAGS="-Zsanitizer=thread" cargo +nightly-2026-08-25 test --locked -Zbuild-std --target x86_64-unknown-linux-gnu -p termtrace-engine connection_limiter
 
-# Audit Rust, TypeScript, and Python dependencies for security advisories
+# Audit Rust dependencies for security advisories
 security:
   cargo audit --file Cargo.lock
   cargo audit --file fuzz/Cargo.lock
-  bun --cwd packages/typescript audit
-  uv run --project packages/python --locked --group dev --with pip-audit pip-audit
-# Run required local checks for each change (requires bootstrap, Bun, uv, and shfmt)
+# Run required local checks for each change (requires bootstrap and shfmt)
 check: architecture lint validate test
   cargo fmt --all -- --check
   cargo statement-spacing check
-  bun run --cwd packages/typescript format:check
-  uv run --project packages/python --locked --group dev ruff format --check packages/python/termtrace packages/python/scripts packages/python/tests
   shfmt -i 4 -ci -d benchmarks examples fixtures scripts tests install.sh
 
 # List available commands

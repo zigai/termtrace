@@ -38,6 +38,7 @@ EXPECTED_EDGES: dict[str, frozenset[str]] = {
             "termtrace-scenario",
             "termtrace-schema",
             "termtrace-sdk",
+            "termtrace-service",
             "termtrace-terminal",
         }
     ),
@@ -59,23 +60,35 @@ EXPECTED_EDGES: dict[str, frozenset[str]] = {
     ),
     "termtrace-model": frozenset(),
     "termtrace-render": frozenset({"termtrace-model", "termtrace-terminal"}),
+    "termtrace-node": frozenset({"termtrace-model", "termtrace-sdk"}),
     "termtrace-scenario": frozenset(
         {
             "termtrace-engine",
             "termtrace-evidence",
             "termtrace-model",
             "termtrace-render",
-            "termtrace-sdk",
+            "termtrace-service",
         }
     ),
+    "termtrace-python": frozenset({"termtrace-model", "termtrace-sdk"}),
     "termtrace-schema": frozenset({"termtrace-model"}),
     "termtrace-sdk": frozenset(
+        {
+            "termtrace-media",
+            "termtrace-model",
+            "termtrace-scenario",
+            "termtrace-service",
+        }
+    ),
+    "termtrace-service": frozenset(
         {
             "termtrace-engine",
             "termtrace-evidence",
             "termtrace-export",
             "termtrace-media",
             "termtrace-model",
+            "termtrace-render",
+            "termtrace-terminal",
         }
     ),
     "termtrace-terminal": frozenset({"termtrace-model"}),

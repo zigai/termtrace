@@ -17,34 +17,6 @@ repos:
         pass_filenames: false
         files: ^(?:build\.rs|(?:crates|src|tests)/.*\.rs)$
 
-      - id: ruff-check
-        name: ruff check
-        entry: >-
-          uv run --project packages/python --locked --group dev
-          ruff check --fix --force-exclude
-        language: system
-        types: [python]
-        files: ^packages/python/(?:termtrace|scripts|tests)/
-        exclude: ^packages/python/termtrace/(?:transport/)?generated/
-
-      - id: ruff-format
-        name: ruff format
-        entry: >-
-          uv run --project packages/python --locked --group dev
-          ruff format --force-exclude
-        language: system
-        types: [python]
-        files: ^packages/python/(?:termtrace|scripts|tests)/
-        exclude: ^packages/python/termtrace/(?:transport/)?generated/
-
-      - id: oxfmt
-        name: oxfmt
-        entry: bun run --cwd packages/typescript format
-        language: system
-        pass_filenames: false
-        files: ^packages/typescript/
-        exclude: ^packages/typescript/(?:lib|src/transport/generated)/
-
       - id: shfmt
         name: shfmt
         entry: shfmt -i 4 -ci -w

@@ -1,6 +1,10 @@
-# Rust build outputs
+# Rust and native FFI build outputs
 /target/
 *.rlib
+*.so
+*.dylib
+*.dll
+*.node
 
 # Repository-local bootstrap tools and dependency caches
 /.cache/
@@ -24,12 +28,9 @@ __pycache__/
 .venv/
 dist/
 *.egg-info/
-/packages/python/termtrace/bin/
 
 # JavaScript and TypeScript package outputs
 node_modules/
-/packages/typescript/lib/
-/packages/npm-staging/
 *.tsbuildinfo
 
 # Coverage, profiling, and crash outputs
