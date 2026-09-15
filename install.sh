@@ -4,7 +4,6 @@ set -euo pipefail
 repository=${TERMTRACE_REPOSITORY:-zigai/termtrace}
 version=${TERMTRACE_VERSION:-latest}
 download_base=${TERMTRACE_DOWNLOAD_BASE:-}
-client_dir=${TERMTRACE_CLIENT_DIR:-}
 
 if [[ -n "${TERMTRACE_INSTALL_DIR:-}" ]]; then
     install_dir=$TERMTRACE_INSTALL_DIR
@@ -19,13 +18,12 @@ usage() {
     cat <<'EOF'
 Install a prebuilt Termtrace release for the current Linux architecture.
 
-Usage: install.sh [--version VERSION] [--install-dir DIRECTORY] [--client-dir DIRECTORY]
+Usage: install.sh [--version VERSION] [--install-dir DIRECTORY]
 
 Environment:
   TERMTRACE_REPOSITORY     GitHub owner/repository (default: zigai/termtrace)
   TERMTRACE_VERSION        Release version or "latest"
   TERMTRACE_INSTALL_DIR    Destination directory (default: ~/.local/bin)
-  TERMTRACE_CLIENT_DIR     SDK asset directory (default: PREFIX/share/termtrace/clients)
   TERMTRACE_DOWNLOAD_BASE  Override release URL for mirrors and tests
 EOF
 }
@@ -48,14 +46,6 @@ while [[ $# -gt 0 ]]; do
             install_dir=$2
             shift 2
             ;;
-        --client-dir)
-            if [[ $# -lt 2 ]]; then
-                echo "--client-dir requires a value" >&2
-                exit 2
-            fi
-            client_dir=$2
-            shift 2
-            ;;
         -h | --help)
             usage
             exit 0
@@ -67,10 +57,6 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
-
-if [[ -z "$client_dir" ]]; then
-    client_dir="$(dirname "$install_dir")/share/termtrace/clients"
-fi
 
 if [[ "$(uname -s)" != Linux ]]; then
     echo "Termtrace currently supports Linux only" >&2
@@ -101,30 +87,14 @@ archive="termtrace-${target}.tar.gz"
 checksum="${archive}.sha256"
 work=$(mktemp -d)
 candidate=
-client_candidate=
-client_backup=
-client_published=false
 
 cleanup() {
     status=$?
-
-    if [[ $status -ne 0 && -n "$client_backup" ]]; then
-        if [[ "$client_published" == true ]]; then
-            rm -rf "$client_dir"
-        fi
-        if [[ -e "$client_backup" && ! -e "$client_dir" ]]; then
-            mv "$client_backup" "$client_dir"
-        fi
-    fi
 
     rm -rf "$work"
 
     if [[ -n "$candidate" ]]; then
         rm -f "$candidate"
-    fi
-
-    if [[ -n "$client_candidate" ]]; then
-        rm -rf "$client_candidate"
     fi
 
     return "$status"
@@ -209,18 +179,9 @@ download_release
 verify_checksum
 tar -xzf "${work}/${archive}" -C "$work"
 binary="${work}/termtrace-${target}/termtrace"
-clients="${work}/termtrace-${target}/clients"
 
 if [[ ! -x "$binary" ]]; then
     echo "release archive contains no executable termtrace binary" >&2
-    exit 1
-fi
-if [[ ! -f "$clients/python/pyproject.toml" ]]; then
-    echo "release archive contains no Python client assets" >&2
-    exit 1
-fi
-if [[ ! -f "$clients/typescript/lib/index.js" ]]; then
-    echo "release archive contains no TypeScript client assets" >&2
     exit 1
 fi
 
@@ -236,34 +197,10 @@ install -m 0555 "$binary" "$candidate"
 
 "$candidate" doctor --require core,semantic >/dev/null
 
-mkdir -p "$(dirname "$client_dir")"
-client_candidate=$(mktemp -d "$(dirname "$client_dir")/.termtrace-clients.XXXXXX")
-cp -R "$clients/." "$client_candidate/"
-TERMTRACE_CLIENT_ASSETS="$client_candidate" "$candidate" tooling client status >/dev/null
-
-client_backup="${client_dir}.old.$$"
-if [[ -e "$client_backup" ]]; then
-    echo "temporary client backup already exists: $client_backup" >&2
-    exit 1
-fi
-
-if [[ -e "$client_dir" ]]; then
-    mv "$client_dir" "$client_backup"
-fi
-
-mv "$client_candidate" "$client_dir"
-client_candidate=
-client_published=true
-
 mv -f "$candidate" "$destination"
 candidate=
 
-rm -rf "$client_backup"
-client_backup=
-client_published=false
-
 printf 'Termtrace installed at %s\n' "$destination"
-printf 'Termtrace client assets installed at %s\n' "$client_dir"
 
 case ":${PATH}:" in
     *:"$install_dir":*)
