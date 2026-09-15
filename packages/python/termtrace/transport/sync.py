@@ -162,6 +162,7 @@ class DriverTransport:
             if len(self._read_buffer) > DRIVER_RESPONSE_STREAM_LIMIT:
                 self._abort()
                 raise ProtocolMismatchError("driver response exceeded the bounded stream limit")
+
     def _abort(self) -> None:
         if self._closed:
             return
@@ -215,9 +216,16 @@ class DriverTransport:
         except Exception:
             pass
 
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
     @property
     def closed(self) -> bool:
         return self._closed
+
 
 class Terminal:
     """Context-managed synchronous client over one driver process."""
@@ -235,6 +243,7 @@ class Terminal:
         except BaseException:
             self._transport.close()
             raise
+
     def launch(
         self,
         command: Sequence[str | Path],
