@@ -358,6 +358,8 @@ struct SemanticFrameScheduler<'scheduler, W> {
     suppressed_state_count: u64,
     pixel_stream_hasher: blake3::Hasher,
     span_sink: &'scheduler mut dyn FnMut(&SemanticFrameSpan) -> Result<()>,
+    last_rendered_state_hash: Option<String>,
+    last_rendered_pixels: Option<Vec<u8>>,
 }
 
 impl<'scheduler, W: Write> SemanticFrameScheduler<'scheduler, W> {
@@ -377,6 +379,8 @@ impl<'scheduler, W: Write> SemanticFrameScheduler<'scheduler, W> {
             suppressed_state_count: 0,
             pixel_stream_hasher: blake3::Hasher::new(),
             span_sink,
+            last_rendered_state_hash: None,
+            last_rendered_pixels: None,
         };
     }
 
@@ -391,13 +395,26 @@ impl<'scheduler, W: Write> SemanticFrameScheduler<'scheduler, W> {
             return Ok(());
         }
 
-        let pixels = render_video_rgba(
-            state,
-            self.source.canvas.cols,
-            self.source.canvas.rows,
-            self.source.raster_profile,
-        )
-        .map_err(render_error)?;
+        let pixels = if self
+            .last_rendered_state_hash
+            .as_ref()
+            .is_some_and(|hash| return hash == &record.state_hash)
+            && let Some(cached) = &self.last_rendered_pixels
+        {
+            cached.clone()
+        } else {
+            let rendered = render_video_rgba(
+                state,
+                self.source.canvas.cols,
+                self.source.canvas.rows,
+                self.source.raster_profile,
+            )
+            .map_err(render_error)?;
+
+            self.last_rendered_state_hash = Some(record.state_hash.clone());
+            self.last_rendered_pixels = Some(rendered.clone());
+            rendered
+        };
 
         if pixels.len() != self.expected_bytes {
             return Err(video_error(
@@ -793,6 +810,7 @@ mod tests {
         assert_eq!(spans[0].state_id, 7);
         assert_eq!((spans[0].start_frame, spans[0].end_frame), (0, 2));
     }
+
     #[test]
     fn semantic_video_frame_rendering_uses_full_truecolor_and_ansi256_resolution() {
         let mut engine = GhosttyVt::new(4, 1, 0).expect("semantic engine");
@@ -813,6 +831,7 @@ mod tests {
         for y in 0..24 {
             for x in 0..12 {
                 let offset = (y * width + x) * 4;
+
                 assert_eq!(pixels[offset], 123);
                 assert_eq!(pixels[offset + 1], 45);
                 assert_eq!(pixels[offset + 2], 67);
@@ -824,6 +843,7 @@ mod tests {
         for y in 0..24 {
             for x in 12..24 {
                 let offset = (y * width + x) * 4;
+
                 assert_eq!(pixels[offset], 255);
                 assert_eq!(pixels[offset + 1], 0);
                 assert_eq!(pixels[offset + 2], 0);

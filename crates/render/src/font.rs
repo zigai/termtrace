@@ -82,12 +82,13 @@ impl SemanticFontFace {
         let Some(first) = meaningful.next() else {
             return false;
         };
+
         return self.coverage.contains(&u32::from(first))
             && meaningful.all(|character| return self.coverage.contains(&u32::from(character)));
     }
 }
 
-fn is_variation_selector(character: char) -> bool {
+pub(crate) fn is_variation_selector(character: char) -> bool {
     return matches!(
         character,
         '\u{fe00}'..='\u{fe0f}' | '\u{e0100}'..='\u{e01ef}'
