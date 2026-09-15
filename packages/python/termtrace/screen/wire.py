@@ -77,11 +77,22 @@ def normalize_frame(
 def _rows(
     value: response_wire.ScreenFrameData,
 ) -> tuple[FrameDetail, tuple[ScreenRow, ...]]:
-    if isinstance(value, response_wire.ScreenFrameData1):
+    if not hasattr(value, "rows"):
+        return "none", ()
+    first = value.rows[0] if value.rows else None
+    if first is not None:
+        if hasattr(first, "cells"):
+            return "cells", tuple(_row(item) for item in value.rows)
+        if hasattr(first, "spans"):
+            return "spans", tuple(_row(item) for item in value.rows)
         return "text", tuple(_row(item) for item in value.rows)
+    if isinstance(value, response_wire.ScreenFrameData4):
+        return "cells", ()
+    if isinstance(value, response_wire.ScreenFrameData3):
+        return "spans", ()
     if isinstance(value, response_wire.ScreenFrameData2):
-        return "spans", tuple(_row(item) for item in value.rows)
-    return "cells", tuple(_row(item) for item in value.rows)
+        return "text", ()
+    return "none", ()
 
 
 def _row(

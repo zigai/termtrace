@@ -15,7 +15,7 @@ import validateScreenFrame from "../transport/generated/validate-screen-frame.js
 import { evaluateQuery, type LocatorSpec, type ScreenMatch } from "./queries.js";
 import type { JsonValue } from "../transport/protocol.js";
 
-export type FrameDetail = "text" | "spans" | "cells";
+export type FrameDetail = "none" | "text" | "spans" | "cells";
 export type WideKind = "narrow" | "wide" | "spacer_tail" | "spacer_head";
 export type Rgb = { readonly r: number; readonly g: number; readonly b: number };
 
@@ -260,6 +260,8 @@ export function parseScreenFrame(input: unknown): ScreenFrame {
 
 function parseRows(data: WireScreenFrame["data"], region: Region): ReadonlyArray<ScreenRow> {
     switch (data.detail) {
+        case "none":
+            return [];
         case "text":
             return data.rows.map((row, index) => parseTextRow(row, region.top + index));
         case "spans":

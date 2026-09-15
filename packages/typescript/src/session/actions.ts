@@ -267,6 +267,9 @@ export function parseActionResult(
     const wirePostcondition = value.postcondition;
     const boundaries = parseActionBoundaries(value.boundaries);
 
+    if (!wirePostcondition.frame) {
+        throw new ProtocolMismatchError("action response missing terminating frame");
+    }
     if (wirePostcondition.frame.source.source !== "actor")
         throw new ProtocolMismatchError("action terminating frame is not actor-owned");
 

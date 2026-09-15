@@ -332,6 +332,7 @@ class FindingConfidence(StrEnum):
 
 
 class FrameDetail(StrEnum):
+    none = 'none'
     text = 'text'
     spans = 'spans'
     cells = 'cells'
@@ -683,6 +684,10 @@ class Rgb(Struct, forbid_unknown_fields=True):
     b: Annotated[int, Meta(description='Blue channel.', ge=0, le=255)]
     g: Annotated[int, Meta(description='Green channel.', ge=0, le=255)]
     r: Annotated[int, Meta(description='Red channel.', ge=0, le=255)]
+
+
+class ScreenFrameData1(Struct, forbid_unknown_fields=True, tag_field='detail', tag='none'):
+    pass
 
 
 class ScreenGeometry(Struct, forbid_unknown_fields=True):
@@ -1704,7 +1709,7 @@ class ObservationFrame(Struct, forbid_unknown_fields=True):
     ) = UNSET
 
 
-class ScreenFrameData1(Struct, forbid_unknown_fields=True, tag_field='detail', tag='text'):
+class ScreenFrameData2(Struct, forbid_unknown_fields=True, tag_field='detail', tag='text'):
     rows: Annotated[list[ScreenTextRow], Meta(description='Ordered projected rows.')]
 
 
@@ -2238,7 +2243,7 @@ class ScreenCellRow(Struct, forbid_unknown_fields=True):
     ]
 
 
-class ScreenFrameData3(Struct, forbid_unknown_fields=True, tag_field='detail', tag='cells'):
+class ScreenFrameData4(Struct, forbid_unknown_fields=True, tag_field='detail', tag='cells'):
     rows: Annotated[list[ScreenCellRow], Meta(description='Ordered projected rows.')]
 
 
@@ -2362,11 +2367,11 @@ class DriverData10(Struct, forbid_unknown_fields=True, tag_field='kind', tag='di
     report: Annotated[DiagnoseReport, Meta(description='Source-bound findings.')]
 
 
-class ScreenFrameData2(Struct, forbid_unknown_fields=True, tag_field='detail', tag='spans'):
+class ScreenFrameData3(Struct, forbid_unknown_fields=True, tag_field='detail', tag='spans'):
     rows: Annotated[list[ScreenSpanRow], Meta(description='Ordered projected rows.')]
 
 
-ScreenFrameData: TypeAlias = Annotated[ScreenFrameData1 | ScreenFrameData2 | ScreenFrameData3, Meta(description='Structurally discriminated rich row payload.')]
+ScreenFrameData: TypeAlias = Annotated[ScreenFrameData1 | ScreenFrameData2 | ScreenFrameData3 | ScreenFrameData4, Meta(description='Structurally discriminated rich row payload.')]
 
 
 class TimelineEntry(Struct, forbid_unknown_fields=True):
@@ -2524,14 +2529,22 @@ class SemanticDiff(Struct, forbid_unknown_fields=True):
 
 
 class ActionPostconditionResult1(Struct, forbid_unknown_fields=True, tag_field='kind', tag='none'):
-    frame: Annotated[ScreenFrame, Meta(description='Exact immediate post-input frame.')]
     matched: Annotated[
         bool, Meta(description='Always true after complete input application.')
     ]
+    frame: (
+        Annotated[ScreenFrame, Meta(description='Exact immediate post-input frame.')]
+        | None
+        | UnsetType
+    ) = UNSET
+    state_hash: (
+        Annotated[str, Meta(description='Exact terminating state hash when known.')]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
 class ActionPostconditionResult2(Struct, forbid_unknown_fields=True, tag_field='kind', tag='idle'):
-    frame: Annotated[ScreenFrame, Meta(description='Exact terminating frame.')]
     matched: Annotated[
         bool,
         Meta(
@@ -2541,10 +2554,19 @@ class ActionPostconditionResult2(Struct, forbid_unknown_fields=True, tag_field='
     quality: Annotated[
         StableCaptureQuality, Meta(description='Typed stability quality.')
     ]
+    frame: (
+        Annotated[ScreenFrame, Meta(description='Exact terminating frame.')]
+        | None
+        | UnsetType
+    ) = UNSET
+    state_hash: (
+        Annotated[str, Meta(description='Exact terminating state hash when known.')]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
 class ActionPostconditionResult3(Struct, forbid_unknown_fields=True, tag_field='kind', tag='screen'):
-    frame: Annotated[ScreenFrame, Meta(description='Exact terminating frame.')]
     matched: Annotated[
         bool, Meta(description='Whether the predicate matched before termination.')
     ]
@@ -2552,6 +2574,16 @@ class ActionPostconditionResult3(Struct, forbid_unknown_fields=True, tag_field='
         ScreenPostconditionQuality,
         Meta(description='Closed completion classification.'),
     ]
+    frame: (
+        Annotated[ScreenFrame, Meta(description='Exact terminating frame.')]
+        | None
+        | UnsetType
+    ) = UNSET
+    state_hash: (
+        Annotated[str, Meta(description='Exact terminating state hash when known.')]
+        | None
+        | UnsetType
+    ) = UNSET
 
 
 ActionPostconditionResult: TypeAlias = Annotated[ActionPostconditionResult1 | ActionPostconditionResult2 | ActionPostconditionResult3, Meta(description='Exact postcondition result returned without releasing actor ordering.')]

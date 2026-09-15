@@ -275,29 +275,30 @@ class ScreenFrame:
             or self.requested_region.bottom > self.geometry.rows
         ):
             raise ProtocolMismatchError("screen frame region exceeds its geometry")
-        if len(self.rows) != self.returned_region.height:
-            raise ProtocolMismatchError("screen frame row count does not cover its region")
-        for row_offset, row in enumerate(self.rows):
-            expected_row = self.returned_region.top + row_offset
-            if row.row != expected_row:
-                raise ProtocolMismatchError("screen rows are not contiguous")
-            if self.detail == "cells":
-                if len(row.cells) != self.returned_region.width:
-                    raise ProtocolMismatchError("screen cell coverage is inconsistent")
-                for column_offset, cell in enumerate(row.cells):
-                    if (
-                        cell.row != expected_row
-                        or cell.column != self.returned_region.left + column_offset
-                    ):
+        if self.detail != "none":
+            if len(self.rows) != self.returned_region.height:
+                raise ProtocolMismatchError("screen frame row count does not cover its region")
+            for row_offset, row in enumerate(self.rows):
+                expected_row = self.returned_region.top + row_offset
+                if row.row != expected_row:
+                    raise ProtocolMismatchError("screen rows are not contiguous")
+                if self.detail == "cells":
+                    if len(row.cells) != self.returned_region.width:
                         raise ProtocolMismatchError("screen cell coverage is inconsistent")
-            if self.detail == "spans":
-                expected_column = self.returned_region.left
-                for span in row.spans:
-                    if span.start_column != expected_column:
-                        raise ProtocolMismatchError("screen spans are not contiguous")
-                    expected_column = span.end_column
-                if expected_column != self.returned_region.right:
-                    raise ProtocolMismatchError("screen spans do not cover the returned region")
+                    for column_offset, cell in enumerate(row.cells):
+                        if (
+                            cell.row != expected_row
+                            or cell.column != self.returned_region.left + column_offset
+                        ):
+                            raise ProtocolMismatchError("screen cell coverage is inconsistent")
+                if self.detail == "spans":
+                    expected_column = self.returned_region.left
+                    for span in row.spans:
+                        if span.start_column != expected_column:
+                            raise ProtocolMismatchError("screen spans are not contiguous")
+                        expected_column = span.end_column
+                    if expected_column != self.returned_region.right:
+                        raise ProtocolMismatchError("screen spans do not cover the returned region")
 
     @property
     def frame_hash(self) -> str:

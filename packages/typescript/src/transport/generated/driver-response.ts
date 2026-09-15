@@ -540,7 +540,7 @@ export type Event =
 /**
  * Requested rich-screen representation.
  */
-export type FrameDetail = "text" | "spans" | "cells";
+export type FrameDetail = "none" | "text" | "spans" | "cells";
 /**
  * Region validation failure reason.
  */
@@ -711,15 +711,25 @@ export interface DriverResponse {
                      */
                     postcondition:
                       | {
-                          frame: ScreenFrame;
+                          /**
+                           * Exact immediate post-input frame.
+                           */
+                          frame?: ScreenFrame | null;
                           kind: "none";
                           /**
                            * Always true after complete input application.
                            */
                           matched: boolean;
+                          /**
+                           * Exact terminating state hash when known.
+                           */
+                          state_hash?: string | null;
                         }
                       | {
-                          frame: ScreenFrame1;
+                          /**
+                           * Exact terminating frame.
+                           */
+                          frame?: ScreenFrame | null;
                           kind: "idle";
                           /**
                            * Whether the state remained unchanged for the requested interval.
@@ -729,9 +739,16 @@ export interface DriverResponse {
                            * Typed stability quality.
                            */
                           quality: "stable" | "child_completed" | "output_closed" | "deadline";
+                          /**
+                           * Exact terminating state hash when known.
+                           */
+                          state_hash?: string | null;
                         }
                       | {
-                          frame: ScreenFrame2;
+                          /**
+                           * Exact terminating frame.
+                           */
+                          frame?: ScreenFrame | null;
                           kind: "screen";
                           /**
                            * Whether the predicate matched before termination.
@@ -741,6 +758,10 @@ export interface DriverResponse {
                            * Closed completion classification.
                            */
                           quality: "matched" | "matched_unsettled" | "child_completed" | "output_closed" | "deadline";
+                          /**
+                           * Exact terminating state hash when known.
+                           */
+                          state_hash?: string | null;
                         };
                   }
                 | {
@@ -862,7 +883,7 @@ export interface DriverResponse {
                     viewport_text: string;
                   }
                 | {
-                    frame: ScreenFrame3;
+                    frame: ScreenFrame1;
                     kind: "screen_frame";
                   }
                 | {
@@ -870,7 +891,7 @@ export interface DriverResponse {
                      * First actor timestamp at which this exact state was observed.
                      */
                     first_observed_monotonic_ns: number;
-                    frame: ScreenFrame4;
+                    frame: ScreenFrame2;
                     kind: "stable_snapshot";
                     /**
                      * Actor timestamp of the returned snapshot.
@@ -894,7 +915,7 @@ export interface DriverResponse {
                      * First matching timestamp for this unchanged state, when matched.
                      */
                     first_match_monotonic_ns?: number | null;
-                    frame: ScreenFrame5;
+                    frame: ScreenFrame3;
                     kind: "screen_wait";
                     /**
                      * Whether the predicate matched before termination.
@@ -1091,7 +1112,7 @@ export interface DriverResponse {
               observation: Observation;
             }
           | {
-              frame: ScreenFrame6;
+              frame: ScreenFrame4;
               kind: "screen_frame";
             }
           | {
@@ -1366,7 +1387,7 @@ export interface ActionInputResult {
   sequence_id: string;
 }
 /**
- * Exact immediate post-input frame.
+ * Versioned, bounded projection of one exact semantic state.
  */
 export interface ScreenFrame {
   /**
@@ -1379,6 +1400,9 @@ export interface ScreenFrame {
    * Structurally matched detail payload.
    */
   data:
+    | {
+        detail: "none";
+      }
     | {
         detail: "text";
         /**
@@ -2013,318 +2037,6 @@ export interface CanonicalBoundary2 {
   output_bytes: number;
 }
 /**
- * Exact terminating frame.
- */
-export interface ScreenFrame1 {
-  /**
-   * Settlement/provenance label.
-   */
-  capture_quality: "live" | "stable" | "completed" | "incomplete";
-  colors: ColorState;
-  cursor: CursorState;
-  /**
-   * Structurally matched detail payload.
-   */
-  data:
-    | {
-        detail: "text";
-        /**
-         * Ordered projected rows.
-         */
-        rows: ScreenTextRow[];
-      }
-    | {
-        detail: "spans";
-        /**
-         * Ordered projected rows.
-         */
-        rows: ScreenSpanRow[];
-      }
-    | {
-        detail: "cells";
-        /**
-         * Ordered projected rows.
-         */
-        rows: ScreenCellRow[];
-      };
-  /**
-   * Projection identity in the `termtrace-screen-frame-v1` hash domain.
-   */
-  frame_hash: string;
-  geometry: ScreenGeometry;
-  modes: ModeState;
-  /**
-   * Whether this state was presentation eligible.
-   */
-  presented: boolean;
-  requested_region: ScreenRegion;
-  returned_region: ScreenRegion1;
-  /**
-   * Exact source occurrence.
-   */
-  source:
-    | {
-        boundaries: ActorBoundaries4;
-        /**
-         * Actor observation time in session-monotonic nanoseconds.
-         */
-        observed_monotonic_ns: number;
-        /**
-         * Canonical session identity.
-         */
-        session_id: string;
-        source: "actor";
-      }
-    | {
-        boundary: CanonicalBoundary2;
-        /**
-         * Responsible canonical event sequence when known.
-         */
-        event_seq?: number | null;
-        /**
-         * Integrity relationship to canonical evidence.
-         */
-        integrity: "canonical_chained" | "unchained";
-        /**
-         * Session-monotonic timestamp when known.
-         */
-        monotonic_ns?: number | null;
-        /**
-         * Resolution path used to select the state.
-         */
-        resolution: "actor_snapshot" | "canonical_replay" | "validated_checkpoint" | "ansi_interpretation";
-        /**
-         * Canonical session identity when available.
-         */
-        session_id?: string | null;
-        source: "resolved";
-        /**
-         * Whether canonical evidence completed durably.
-         */
-        source_completed: boolean;
-        /**
-         * Source category.
-         */
-        source_kind:
-          | "live_session"
-          | "completed_session"
-          | "interrupted_session"
-          | "ansi_stream"
-          | "imported_ansi"
-          | "one_off_command";
-        /**
-         * Dense semantic state identity when assigned.
-         */
-        state_id?: number | null;
-        /**
-         * Requested state selector.
-         */
-        state_point:
-          | {
-              selector: "latest_presented";
-            }
-          | {
-              selector: "state_id";
-              /**
-               * Exact semantic state identifier.
-               */
-              state_id: number;
-            }
-          | {
-              selector: "state_hash";
-              /**
-               * BLAKE3 hash of the complete normalized semantic state.
-               */
-              state_hash: string;
-            }
-          | {
-              /**
-               * Canonical event sequence.
-               */
-              event_seq: number;
-              selector: "event_seq";
-            }
-          | {
-              /**
-               * Session-monotonic nanoseconds.
-               */
-              monotonic_ns: number;
-              selector: "monotonic_ns";
-            }
-          | {
-              /**
-               * Unique marker label.
-               */
-              label: string;
-              selector: "marker";
-            };
-      };
-  /**
-   * Complete semantic v5 state identity.
-   */
-  state_hash: string;
-  /**
-   * Projection format version.
-   */
-  version: number;
-}
-/**
- * Exact terminating frame.
- */
-export interface ScreenFrame2 {
-  /**
-   * Settlement/provenance label.
-   */
-  capture_quality: "live" | "stable" | "completed" | "incomplete";
-  colors: ColorState;
-  cursor: CursorState;
-  /**
-   * Structurally matched detail payload.
-   */
-  data:
-    | {
-        detail: "text";
-        /**
-         * Ordered projected rows.
-         */
-        rows: ScreenTextRow[];
-      }
-    | {
-        detail: "spans";
-        /**
-         * Ordered projected rows.
-         */
-        rows: ScreenSpanRow[];
-      }
-    | {
-        detail: "cells";
-        /**
-         * Ordered projected rows.
-         */
-        rows: ScreenCellRow[];
-      };
-  /**
-   * Projection identity in the `termtrace-screen-frame-v1` hash domain.
-   */
-  frame_hash: string;
-  geometry: ScreenGeometry;
-  modes: ModeState;
-  /**
-   * Whether this state was presentation eligible.
-   */
-  presented: boolean;
-  requested_region: ScreenRegion;
-  returned_region: ScreenRegion1;
-  /**
-   * Exact source occurrence.
-   */
-  source:
-    | {
-        boundaries: ActorBoundaries4;
-        /**
-         * Actor observation time in session-monotonic nanoseconds.
-         */
-        observed_monotonic_ns: number;
-        /**
-         * Canonical session identity.
-         */
-        session_id: string;
-        source: "actor";
-      }
-    | {
-        boundary: CanonicalBoundary2;
-        /**
-         * Responsible canonical event sequence when known.
-         */
-        event_seq?: number | null;
-        /**
-         * Integrity relationship to canonical evidence.
-         */
-        integrity: "canonical_chained" | "unchained";
-        /**
-         * Session-monotonic timestamp when known.
-         */
-        monotonic_ns?: number | null;
-        /**
-         * Resolution path used to select the state.
-         */
-        resolution: "actor_snapshot" | "canonical_replay" | "validated_checkpoint" | "ansi_interpretation";
-        /**
-         * Canonical session identity when available.
-         */
-        session_id?: string | null;
-        source: "resolved";
-        /**
-         * Whether canonical evidence completed durably.
-         */
-        source_completed: boolean;
-        /**
-         * Source category.
-         */
-        source_kind:
-          | "live_session"
-          | "completed_session"
-          | "interrupted_session"
-          | "ansi_stream"
-          | "imported_ansi"
-          | "one_off_command";
-        /**
-         * Dense semantic state identity when assigned.
-         */
-        state_id?: number | null;
-        /**
-         * Requested state selector.
-         */
-        state_point:
-          | {
-              selector: "latest_presented";
-            }
-          | {
-              selector: "state_id";
-              /**
-               * Exact semantic state identifier.
-               */
-              state_id: number;
-            }
-          | {
-              selector: "state_hash";
-              /**
-               * BLAKE3 hash of the complete normalized semantic state.
-               */
-              state_hash: string;
-            }
-          | {
-              /**
-               * Canonical event sequence.
-               */
-              event_seq: number;
-              selector: "event_seq";
-            }
-          | {
-              /**
-               * Session-monotonic nanoseconds.
-               */
-              monotonic_ns: number;
-              selector: "monotonic_ns";
-            }
-          | {
-              /**
-               * Unique marker label.
-               */
-              label: string;
-              selector: "marker";
-            };
-      };
-  /**
-   * Complete semantic v5 state identity.
-   */
-  state_hash: string;
-  /**
-   * Projection format version.
-   */
-  version: number;
-}
-/**
  * Durable and observed positions at evaluation.
  */
 export interface ActorBoundaries5 {
@@ -2396,7 +2108,325 @@ export interface ModeState1 {
   [k: string]: unknown;
 }
 /**
- * Exact owned projection produced before actor ordering was released.
+ * Versioned, bounded projection of one exact semantic state.
+ */
+export interface ScreenFrame1 {
+  /**
+   * Settlement/provenance label.
+   */
+  capture_quality: "live" | "stable" | "completed" | "incomplete";
+  colors: ColorState;
+  cursor: CursorState;
+  /**
+   * Structurally matched detail payload.
+   */
+  data:
+    | {
+        detail: "none";
+      }
+    | {
+        detail: "text";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenTextRow[];
+      }
+    | {
+        detail: "spans";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenSpanRow[];
+      }
+    | {
+        detail: "cells";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenCellRow[];
+      };
+  /**
+   * Projection identity in the `termtrace-screen-frame-v1` hash domain.
+   */
+  frame_hash: string;
+  geometry: ScreenGeometry;
+  modes: ModeState;
+  /**
+   * Whether this state was presentation eligible.
+   */
+  presented: boolean;
+  requested_region: ScreenRegion;
+  returned_region: ScreenRegion1;
+  /**
+   * Exact source occurrence.
+   */
+  source:
+    | {
+        boundaries: ActorBoundaries4;
+        /**
+         * Actor observation time in session-monotonic nanoseconds.
+         */
+        observed_monotonic_ns: number;
+        /**
+         * Canonical session identity.
+         */
+        session_id: string;
+        source: "actor";
+      }
+    | {
+        boundary: CanonicalBoundary2;
+        /**
+         * Responsible canonical event sequence when known.
+         */
+        event_seq?: number | null;
+        /**
+         * Integrity relationship to canonical evidence.
+         */
+        integrity: "canonical_chained" | "unchained";
+        /**
+         * Session-monotonic timestamp when known.
+         */
+        monotonic_ns?: number | null;
+        /**
+         * Resolution path used to select the state.
+         */
+        resolution: "actor_snapshot" | "canonical_replay" | "validated_checkpoint" | "ansi_interpretation";
+        /**
+         * Canonical session identity when available.
+         */
+        session_id?: string | null;
+        source: "resolved";
+        /**
+         * Whether canonical evidence completed durably.
+         */
+        source_completed: boolean;
+        /**
+         * Source category.
+         */
+        source_kind:
+          | "live_session"
+          | "completed_session"
+          | "interrupted_session"
+          | "ansi_stream"
+          | "imported_ansi"
+          | "one_off_command";
+        /**
+         * Dense semantic state identity when assigned.
+         */
+        state_id?: number | null;
+        /**
+         * Requested state selector.
+         */
+        state_point:
+          | {
+              selector: "latest_presented";
+            }
+          | {
+              selector: "state_id";
+              /**
+               * Exact semantic state identifier.
+               */
+              state_id: number;
+            }
+          | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of the complete normalized semantic state.
+               */
+              state_hash: string;
+            }
+          | {
+              /**
+               * Canonical event sequence.
+               */
+              event_seq: number;
+              selector: "event_seq";
+            }
+          | {
+              /**
+               * Session-monotonic nanoseconds.
+               */
+              monotonic_ns: number;
+              selector: "monotonic_ns";
+            }
+          | {
+              /**
+               * Unique marker label.
+               */
+              label: string;
+              selector: "marker";
+            };
+      };
+  /**
+   * Complete semantic v5 state identity.
+   */
+  state_hash: string;
+  /**
+   * Projection format version.
+   */
+  version: number;
+}
+/**
+ * Versioned, bounded projection of one exact semantic state.
+ */
+export interface ScreenFrame2 {
+  /**
+   * Settlement/provenance label.
+   */
+  capture_quality: "live" | "stable" | "completed" | "incomplete";
+  colors: ColorState;
+  cursor: CursorState;
+  /**
+   * Structurally matched detail payload.
+   */
+  data:
+    | {
+        detail: "none";
+      }
+    | {
+        detail: "text";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenTextRow[];
+      }
+    | {
+        detail: "spans";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenSpanRow[];
+      }
+    | {
+        detail: "cells";
+        /**
+         * Ordered projected rows.
+         */
+        rows: ScreenCellRow[];
+      };
+  /**
+   * Projection identity in the `termtrace-screen-frame-v1` hash domain.
+   */
+  frame_hash: string;
+  geometry: ScreenGeometry;
+  modes: ModeState;
+  /**
+   * Whether this state was presentation eligible.
+   */
+  presented: boolean;
+  requested_region: ScreenRegion;
+  returned_region: ScreenRegion1;
+  /**
+   * Exact source occurrence.
+   */
+  source:
+    | {
+        boundaries: ActorBoundaries4;
+        /**
+         * Actor observation time in session-monotonic nanoseconds.
+         */
+        observed_monotonic_ns: number;
+        /**
+         * Canonical session identity.
+         */
+        session_id: string;
+        source: "actor";
+      }
+    | {
+        boundary: CanonicalBoundary2;
+        /**
+         * Responsible canonical event sequence when known.
+         */
+        event_seq?: number | null;
+        /**
+         * Integrity relationship to canonical evidence.
+         */
+        integrity: "canonical_chained" | "unchained";
+        /**
+         * Session-monotonic timestamp when known.
+         */
+        monotonic_ns?: number | null;
+        /**
+         * Resolution path used to select the state.
+         */
+        resolution: "actor_snapshot" | "canonical_replay" | "validated_checkpoint" | "ansi_interpretation";
+        /**
+         * Canonical session identity when available.
+         */
+        session_id?: string | null;
+        source: "resolved";
+        /**
+         * Whether canonical evidence completed durably.
+         */
+        source_completed: boolean;
+        /**
+         * Source category.
+         */
+        source_kind:
+          | "live_session"
+          | "completed_session"
+          | "interrupted_session"
+          | "ansi_stream"
+          | "imported_ansi"
+          | "one_off_command";
+        /**
+         * Dense semantic state identity when assigned.
+         */
+        state_id?: number | null;
+        /**
+         * Requested state selector.
+         */
+        state_point:
+          | {
+              selector: "latest_presented";
+            }
+          | {
+              selector: "state_id";
+              /**
+               * Exact semantic state identifier.
+               */
+              state_id: number;
+            }
+          | {
+              selector: "state_hash";
+              /**
+               * BLAKE3 hash of the complete normalized semantic state.
+               */
+              state_hash: string;
+            }
+          | {
+              /**
+               * Canonical event sequence.
+               */
+              event_seq: number;
+              selector: "event_seq";
+            }
+          | {
+              /**
+               * Session-monotonic nanoseconds.
+               */
+              monotonic_ns: number;
+              selector: "monotonic_ns";
+            }
+          | {
+              /**
+               * Unique marker label.
+               */
+              label: string;
+              selector: "marker";
+            };
+      };
+  /**
+   * Complete semantic v5 state identity.
+   */
+  state_hash: string;
+  /**
+   * Projection format version.
+   */
+  version: number;
+}
+/**
+ * Versioned, bounded projection of one exact semantic state.
  */
 export interface ScreenFrame3 {
   /**
@@ -2410,317 +2440,8 @@ export interface ScreenFrame3 {
    */
   data:
     | {
-        detail: "text";
-        /**
-         * Ordered projected rows.
-         */
-        rows: ScreenTextRow[];
+        detail: "none";
       }
-    | {
-        detail: "spans";
-        /**
-         * Ordered projected rows.
-         */
-        rows: ScreenSpanRow[];
-      }
-    | {
-        detail: "cells";
-        /**
-         * Ordered projected rows.
-         */
-        rows: ScreenCellRow[];
-      };
-  /**
-   * Projection identity in the `termtrace-screen-frame-v1` hash domain.
-   */
-  frame_hash: string;
-  geometry: ScreenGeometry;
-  modes: ModeState;
-  /**
-   * Whether this state was presentation eligible.
-   */
-  presented: boolean;
-  requested_region: ScreenRegion;
-  returned_region: ScreenRegion1;
-  /**
-   * Exact source occurrence.
-   */
-  source:
-    | {
-        boundaries: ActorBoundaries4;
-        /**
-         * Actor observation time in session-monotonic nanoseconds.
-         */
-        observed_monotonic_ns: number;
-        /**
-         * Canonical session identity.
-         */
-        session_id: string;
-        source: "actor";
-      }
-    | {
-        boundary: CanonicalBoundary2;
-        /**
-         * Responsible canonical event sequence when known.
-         */
-        event_seq?: number | null;
-        /**
-         * Integrity relationship to canonical evidence.
-         */
-        integrity: "canonical_chained" | "unchained";
-        /**
-         * Session-monotonic timestamp when known.
-         */
-        monotonic_ns?: number | null;
-        /**
-         * Resolution path used to select the state.
-         */
-        resolution: "actor_snapshot" | "canonical_replay" | "validated_checkpoint" | "ansi_interpretation";
-        /**
-         * Canonical session identity when available.
-         */
-        session_id?: string | null;
-        source: "resolved";
-        /**
-         * Whether canonical evidence completed durably.
-         */
-        source_completed: boolean;
-        /**
-         * Source category.
-         */
-        source_kind:
-          | "live_session"
-          | "completed_session"
-          | "interrupted_session"
-          | "ansi_stream"
-          | "imported_ansi"
-          | "one_off_command";
-        /**
-         * Dense semantic state identity when assigned.
-         */
-        state_id?: number | null;
-        /**
-         * Requested state selector.
-         */
-        state_point:
-          | {
-              selector: "latest_presented";
-            }
-          | {
-              selector: "state_id";
-              /**
-               * Exact semantic state identifier.
-               */
-              state_id: number;
-            }
-          | {
-              selector: "state_hash";
-              /**
-               * BLAKE3 hash of the complete normalized semantic state.
-               */
-              state_hash: string;
-            }
-          | {
-              /**
-               * Canonical event sequence.
-               */
-              event_seq: number;
-              selector: "event_seq";
-            }
-          | {
-              /**
-               * Session-monotonic nanoseconds.
-               */
-              monotonic_ns: number;
-              selector: "monotonic_ns";
-            }
-          | {
-              /**
-               * Unique marker label.
-               */
-              label: string;
-              selector: "marker";
-            };
-      };
-  /**
-   * Complete semantic v5 state identity.
-   */
-  state_hash: string;
-  /**
-   * Projection format version.
-   */
-  version: number;
-}
-/**
- * Exact frame projected before waiter ordering was released.
- */
-export interface ScreenFrame4 {
-  /**
-   * Settlement/provenance label.
-   */
-  capture_quality: "live" | "stable" | "completed" | "incomplete";
-  colors: ColorState;
-  cursor: CursorState;
-  /**
-   * Structurally matched detail payload.
-   */
-  data:
-    | {
-        detail: "text";
-        /**
-         * Ordered projected rows.
-         */
-        rows: ScreenTextRow[];
-      }
-    | {
-        detail: "spans";
-        /**
-         * Ordered projected rows.
-         */
-        rows: ScreenSpanRow[];
-      }
-    | {
-        detail: "cells";
-        /**
-         * Ordered projected rows.
-         */
-        rows: ScreenCellRow[];
-      };
-  /**
-   * Projection identity in the `termtrace-screen-frame-v1` hash domain.
-   */
-  frame_hash: string;
-  geometry: ScreenGeometry;
-  modes: ModeState;
-  /**
-   * Whether this state was presentation eligible.
-   */
-  presented: boolean;
-  requested_region: ScreenRegion;
-  returned_region: ScreenRegion1;
-  /**
-   * Exact source occurrence.
-   */
-  source:
-    | {
-        boundaries: ActorBoundaries4;
-        /**
-         * Actor observation time in session-monotonic nanoseconds.
-         */
-        observed_monotonic_ns: number;
-        /**
-         * Canonical session identity.
-         */
-        session_id: string;
-        source: "actor";
-      }
-    | {
-        boundary: CanonicalBoundary2;
-        /**
-         * Responsible canonical event sequence when known.
-         */
-        event_seq?: number | null;
-        /**
-         * Integrity relationship to canonical evidence.
-         */
-        integrity: "canonical_chained" | "unchained";
-        /**
-         * Session-monotonic timestamp when known.
-         */
-        monotonic_ns?: number | null;
-        /**
-         * Resolution path used to select the state.
-         */
-        resolution: "actor_snapshot" | "canonical_replay" | "validated_checkpoint" | "ansi_interpretation";
-        /**
-         * Canonical session identity when available.
-         */
-        session_id?: string | null;
-        source: "resolved";
-        /**
-         * Whether canonical evidence completed durably.
-         */
-        source_completed: boolean;
-        /**
-         * Source category.
-         */
-        source_kind:
-          | "live_session"
-          | "completed_session"
-          | "interrupted_session"
-          | "ansi_stream"
-          | "imported_ansi"
-          | "one_off_command";
-        /**
-         * Dense semantic state identity when assigned.
-         */
-        state_id?: number | null;
-        /**
-         * Requested state selector.
-         */
-        state_point:
-          | {
-              selector: "latest_presented";
-            }
-          | {
-              selector: "state_id";
-              /**
-               * Exact semantic state identifier.
-               */
-              state_id: number;
-            }
-          | {
-              selector: "state_hash";
-              /**
-               * BLAKE3 hash of the complete normalized semantic state.
-               */
-              state_hash: string;
-            }
-          | {
-              /**
-               * Canonical event sequence.
-               */
-              event_seq: number;
-              selector: "event_seq";
-            }
-          | {
-              /**
-               * Session-monotonic nanoseconds.
-               */
-              monotonic_ns: number;
-              selector: "monotonic_ns";
-            }
-          | {
-              /**
-               * Unique marker label.
-               */
-              label: string;
-              selector: "marker";
-            };
-      };
-  /**
-   * Complete semantic v5 state identity.
-   */
-  state_hash: string;
-  /**
-   * Projection format version.
-   */
-  version: number;
-}
-/**
- * Exact satisfying or terminating frame.
- */
-export interface ScreenFrame5 {
-  /**
-   * Settlement/provenance label.
-   */
-  capture_quality: "live" | "stable" | "completed" | "incomplete";
-  colors: ColorState;
-  cursor: CursorState;
-  /**
-   * Structurally matched detail payload.
-   */
-  data:
     | {
         detail: "text";
         /**
@@ -3241,9 +2962,9 @@ export interface ModeState2 {
   [k: string]: unknown;
 }
 /**
- * Exact owned rich projection.
+ * Versioned, bounded projection of one exact semantic state.
  */
-export interface ScreenFrame6 {
+export interface ScreenFrame4 {
   /**
    * Settlement/provenance label.
    */
@@ -3254,6 +2975,9 @@ export interface ScreenFrame6 {
    * Structurally matched detail payload.
    */
   data:
+    | {
+        detail: "none";
+      }
     | {
         detail: "text";
         /**

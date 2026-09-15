@@ -287,6 +287,7 @@ class EnvironmentSpec(Struct, forbid_unknown_fields=True):
 
 
 class FrameDetail(StrEnum):
+    none = 'none'
     text = 'text'
     spans = 'spans'
     cells = 'cells'

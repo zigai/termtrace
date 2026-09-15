@@ -1331,7 +1331,7 @@ export interface ScreenProjectionRequest {
   /**
    * Requested representation.
    */
-  detail: "text" | "spans" | "cells";
+  detail: "none" | "text" | "spans" | "cells";
   /**
    * Exact absolute region, or the complete viewport for text/spans.
    */
@@ -1407,7 +1407,7 @@ export interface ScreenProjectionRequest1 {
   /**
    * Requested representation.
    */
-  detail: "text" | "spans" | "cells";
+  detail: "none" | "text" | "spans" | "cells";
   /**
    * Exact absolute region, or the complete viewport for text/spans.
    */
@@ -1420,7 +1420,7 @@ export interface ScreenProjectionRequest2 {
   /**
    * Requested representation.
    */
-  detail: "text" | "spans" | "cells";
+  detail: "none" | "text" | "spans" | "cells";
   /**
    * Exact absolute region, or the complete viewport for text/spans.
    */
@@ -1455,7 +1455,7 @@ export interface ScreenProjectionRequest3 {
   /**
    * Requested representation.
    */
-  detail: "text" | "spans" | "cells";
+  detail: "none" | "text" | "spans" | "cells";
   /**
    * Exact absolute region, or the complete viewport for text/spans.
    */
@@ -1529,7 +1529,7 @@ export interface ScreenProjectionRequest4 {
   /**
    * Requested representation.
    */
-  detail: "text" | "spans" | "cells";
+  detail: "none" | "text" | "spans" | "cells";
   /**
    * Exact absolute region, or the complete viewport for text/spans.
    */
