@@ -1102,3 +1102,120 @@ fn assert_no_entry_with_prefix(directory: &Path, prefix: &str) {
         directory.display()
     );
 }
+
+#[test]
+fn command_parity_ledger_covers_all_command_leaves() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ledger_path = root.join("docs/refactor/sdk-parity.md");
+    let content = fs_err::read_to_string(&ledger_path).expect("read sdk-parity.md");
+
+    let required_leaves = [
+        "record",
+        "screen",
+        "send",
+        "wait",
+        "status",
+        "stop",
+        "restart",
+        "last-action",
+        "analyze last-action",
+        "analyze index",
+        "analyze inspect",
+        "analyze timeline",
+        "analyze diff",
+        "analyze explain",
+        "analyze diagnose",
+        "analyze review",
+        "analyze output",
+        "analyze events",
+        "analyze markers",
+        "analyze cache status",
+        "analyze cache prune",
+        "analyze verify",
+        "analyze recover",
+        "screenshot",
+        "video",
+        "bundle",
+        "test",
+        "doctor",
+        "completion",
+        "agent",
+        "schema",
+        "version",
+        "playback",
+        "playback-worker",
+        "owned-process",
+        "geometry-probe",
+        "artifact import",
+        "artifact capture",
+        "artifact save",
+        "artifact asciicast",
+        "tmux record",
+        "tmux status",
+        "tmux events",
+        "tmux tracks",
+        "tmux gaps",
+        "tmux stop",
+        "tmux video",
+        "tmux bundle",
+        "tmux config",
+        "tmux enable",
+        "tmux disable",
+        "tmux scope",
+        "tmux run",
+        "tmux exec-pane",
+        "tmux guard",
+        "tmux supervise",
+        "tmux watchdog",
+        "session register",
+        "session resolve",
+        "session list",
+        "session remove",
+        "session gc",
+        "integrity verify",
+        "integrity verify-bundle",
+        "integrity sign",
+        "integrity recover",
+        "client",
+    ];
+
+    let valid_classifications = [
+        "Domain operation",
+        "CLI presentation",
+        "Internal bootstrap",
+        "Removed language SDK",
+    ];
+
+    for leaf in required_leaves {
+        let pattern = format!("| `{leaf}` |");
+
+        assert!(
+            content.contains(&pattern),
+            "command leaf `{leaf}` must be present in sdk-parity.md"
+        );
+    }
+
+    let mut table_rows = 0;
+    for line in content.lines() {
+        if line.starts_with("| `") {
+            table_rows += 1;
+            let parts: Vec<&str> = line.split('|').map(str::trim).collect();
+            assert!(parts.len() >= 6, "malformed table row: {line}");
+
+            let classification = parts[2];
+
+            assert!(
+                valid_classifications
+                    .iter()
+                    .any(|valid| return classification.contains(valid)),
+                "invalid classification `{classification}` in row: {line}"
+            );
+        }
+    }
+
+    assert!(
+        table_rows >= required_leaves.len(),
+        "expected at least {} rows, found {table_rows}",
+        required_leaves.len()
+    );
+}
