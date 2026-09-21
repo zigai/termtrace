@@ -358,16 +358,24 @@ pub(in crate::cli) fn run_tmux_stop(
     arguments: TmuxStopArgs,
 ) -> Result<ExitCode> {
     let manifest_path = recording_manifest_path(arguments.output_root.as_deref(), &arguments.name)?;
-    let initial_manifest = {
+    let (initial_manifest, server_validated) = {
         let _manifest_lock = lock_tmux_manifest(&manifest_path)?;
         let mut manifest = read_tmux_manifest(&manifest_path)?;
+
+        if matches!(manifest.lifecycle, TmuxRecordingLifecycle::Completed) {
+            return Ok(ExitCode::SUCCESS);
+        }
+
+        let client = client_from_manifest(&manifest);
+        let server_validated = validate_server_identity_for_stop(&manifest, &client)?;
+
         manifest.lifecycle = TmuxRecordingLifecycle::Stopping;
         manifest.composite_track.lifecycle = TmuxRecordingLifecycle::Stopping;
         manifest.updated_unix_ns = unix_time_ns()?;
         push_manifest_event(&mut manifest, "recording_stopping", None, None, None, None)?;
         write_tmux_manifest(&manifest_path, &mut manifest)?;
 
-        manifest
+        (manifest, server_validated)
     };
 
     let session_path = match &initial_manifest.composite_track.session {
@@ -405,7 +413,9 @@ pub(in crate::cli) fn run_tmux_stop(
     let client = client_from_manifest(&initial_manifest);
     // A wrapper can be running before its asynchronous track registration is
     // published. Include those panes in shutdown as well as the saved links.
-    if let Ok(report) = tmux_status_report(&client) {
+    if server_validated
+        && let Ok(report) = tmux_status_report(&client)
+    {
         for pane in report.panes {
             if pane.selected && pane.recorded {
                 let _ = client.run(["kill-pane", "-t", pane.pane_id.as_str()]);
@@ -414,7 +424,9 @@ pub(in crate::cli) fn run_tmux_stop(
     }
 
     for (pane_id, track) in &initial_manifest.pane_tracks {
-        let _ = client.run(["kill-pane", "-t", pane_id.as_str()]);
+        if server_validated {
+            let _ = client.run(["kill-pane", "-t", pane_id.as_str()]);
+        }
 
         if arguments.wait {
             let session = PathBuf::from(OsString::from_vec(track.as_bytes().to_vec()));
@@ -429,7 +441,7 @@ pub(in crate::cli) fn run_tmux_stop(
     if arguments.wait {
         let directory = manifest_path
             .parent()
-            .ok_or_else(|| miette::miette!("tmux manifest has no parent"))?;
+            .ok_or_else(|| return miette::miette!("tmux manifest has no parent"))?;
 
         let catalog = TmuxCatalog::read(directory, &initial_manifest).into_diagnostic()?;
         let deadline = Instant::now() + Duration::from_millis(arguments.timeout_ms);
@@ -445,7 +457,7 @@ pub(in crate::cli) fn run_tmux_stop(
                 next = entry
                     .sequence
                     .checked_add(1)
-                    .ok_or_else(|| miette::miette!("tmux track sequence overflow"))?;
+                    .ok_or_else(|| return miette::miette!("tmux track sequence overflow"))?;
 
                 let session = PathBuf::from(OsString::from_vec(entry.track.session.into_bytes()));
                 wait_for_completion(&session, deadline.saturating_duration_since(Instant::now()))
@@ -454,15 +466,17 @@ pub(in crate::cli) fn run_tmux_stop(
         }
     }
 
-    let mut quiet_response = ResponseWriter::quiet();
-    let _ = run_tmux_disable(
-        &mut quiet_response,
-        TmuxConnectionArgs {
-            tmux: client.executable.clone(),
-            socket_name: client.socket_name.clone(),
-            socket_path: client.socket_path,
-        },
-    );
+    if server_validated {
+        let mut quiet_response = ResponseWriter::quiet();
+        let _ = run_tmux_disable(
+            &mut quiet_response,
+            TmuxConnectionArgs {
+                tmux: client.executable.clone(),
+                socket_name: client.socket_name.clone(),
+                socket_path: client.socket_path,
+            },
+        );
+    }
 
     let deadline = Instant::now() + Duration::from_millis(arguments.timeout_ms);
     let manifest = loop {
@@ -781,6 +795,58 @@ fn bind_or_validate_server_identity(
             return Err(miette::miette!(
                 "aggregate {} contains an incomplete tmux server identity",
                 manifest.name
+            ));
+        }
+    }
+}
+
+fn validate_server_identity_for_stop(
+    manifest: &TmuxRecordingManifest,
+    client: &TmuxClient,
+) -> Result<bool> {
+    let Ok(observed) = observed_tmux_server_identity(client) else {
+        return Ok(false);
+    };
+
+    match (
+        manifest.server_pid,
+        manifest.server_socket_path.as_ref(),
+        manifest.server_socket_device,
+        manifest.server_socket_inode,
+    ) {
+        (Some(pid), Some(socket_path), Some(socket_device), Some(socket_inode))
+            if pid == observed.pid
+                && socket_path == &observed.socket_path
+                && socket_device == observed.socket_device
+                && socket_inode == observed.socket_inode =>
+        {
+            return Ok(true);
+        }
+        (Some(pid), Some(socket_path), Some(socket_device), Some(socket_inode)) => {
+            return Err(miette::miette!(
+                "tmux server identity changed for aggregate {}: expected pid {pid}, socket {:?} ({socket_device}:{socket_inode}); observed pid {}, socket {:?} ({}:{})",
+                manifest.name,
+                socket_path,
+                observed.pid,
+                observed.socket_path,
+                observed.socket_device,
+                observed.socket_inode,
+            ));
+        }
+        (None, None, None, None) => {
+            return Err(miette::miette!(
+                "tmux server identity changed for aggregate {}: manifest has no recorded server identity; observed pid {}, socket {:?} ({}:{})",
+                manifest.name,
+                observed.pid,
+                observed.socket_path,
+                observed.socket_device,
+                observed.socket_inode,
+            ));
+        }
+        _ => {
+            return Err(miette::miette!(
+                "tmux server identity changed for aggregate {}: aggregate contains an incomplete tmux server identity",
+                manifest.name,
             ));
         }
     }
