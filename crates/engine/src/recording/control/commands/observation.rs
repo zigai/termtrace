@@ -148,7 +148,7 @@ pub(super) fn evaluate_action_postcondition(
                 return since.elapsed() >= Duration::from_nanos(*stable_for_ns);
             });
 
-            let deadline = !child_exited && now >= started_at + Duration::from_nanos(*timeout_ns);
+            let deadline = now >= started_at + Duration::from_nanos(*timeout_ns);
             if !stable && !child_completed && !output_closed && !deadline {
                 return Ok(None);
             }
@@ -203,7 +203,7 @@ pub(super) fn evaluate_action_postcondition(
             let matched =
                 evaluate_screen_predicate(predicate, &live.presented, &viewport_text, &state_hash);
 
-            let deadline = !child_exited && now >= started_at + Duration::from_nanos(*timeout_ns);
+            let deadline = now >= started_at + Duration::from_nanos(*timeout_ns);
             if !matched && !child_completed && !output_closed && !deadline {
                 return Ok(None);
             }
@@ -361,5 +361,56 @@ impl SessionActor<'_> {
         };
 
         return Some(outcome);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_idle_matching_state_transitions() {
+        let mut matching_state: Option<(String, Instant)> = None;
+        let t0 = Instant::now();
+
+        let hash_a = "state_hash_a".to_owned();
+        match &matching_state {
+            Some((prior_hash, _)) if prior_hash == &hash_a => {}
+            _ => matching_state = Some((hash_a.clone(), t0)),
+        }
+        assert_eq!(
+            matching_state.as_ref().map(|(h, _)| return h.as_str()),
+            Some("state_hash_a")
+        );
+        assert_eq!(matching_state.as_ref().map(|(_, s)| return *s), Some(t0));
+
+        let t1 = t0 + Duration::from_millis(50);
+        match &matching_state {
+            Some((prior_hash, _)) if prior_hash == &hash_a => {}
+            _ => matching_state = Some((hash_a, t1)),
+        }
+        assert_eq!(matching_state.as_ref().map(|(_, s)| return *s), Some(t0));
+
+        let t2 = t0 + Duration::from_millis(100);
+        let hash_b = "state_hash_b".to_owned();
+        match &matching_state {
+            Some((prior_hash, _)) if prior_hash == &hash_b => {}
+            _ => matching_state = Some((hash_b, t2)),
+        }
+        assert_eq!(
+            matching_state.as_ref().map(|(h, _)| return h.as_str()),
+            Some("state_hash_b")
+        );
+        assert_eq!(matching_state.as_ref().map(|(_, s)| return *s), Some(t2));
+
+        let stable_for_ns = 200_000_000u64;
+        let since = matching_state.as_ref().map(|(_, s)| return *s).expect("present");
+        let is_stable_before = (t2 + Duration::from_millis(150)).duration_since(since)
+            >= Duration::from_nanos(stable_for_ns);
+        assert!(!is_stable_before);
+
+        let is_stable_after = (t2 + Duration::from_millis(250)).duration_since(since)
+            >= Duration::from_nanos(stable_for_ns);
+        assert!(is_stable_after);
     }
 }

@@ -41,16 +41,16 @@ impl PendingInputSequence {
                 } => {
                     let deadline = waiting.started_at + Duration::from_nanos(*timeout_ns);
 
-                    waiting
+                    return waiting
                         .matching_state
                         .as_ref()
-                        .map_or(deadline, |(_, since)| {
+                        .map_or(waiting.started_at, |(_, since)| {
                             return *since + Duration::from_nanos(*stable_for_ns);
                         })
-                        .min(deadline)
+                        .min(deadline);
                 }
                 AdmittedPostcondition::Screen { timeout_ns, .. } => {
-                    waiting.started_at + Duration::from_nanos(*timeout_ns)
+                    return waiting.started_at + Duration::from_nanos(*timeout_ns);
                 }
             },
         };
@@ -73,18 +73,8 @@ impl SessionActor<'_> {
         let Some(mut pending) = self.pending_input_sequence.take() else {
             return Ok(());
         };
-        let screen_postcondition_ready = matches!(
-            &pending.phase,
-            InputSequencePhase::Waiting(WaitingAction {
-                action: AdmittedAction {
-                    postcondition: AdmittedPostcondition::Screen { .. },
-                    ..
-                },
-                ..
-            })
-        );
-        if !screen_postcondition_ready && !output_closed && Instant::now() < pending.next_deadline()
-        {
+        let is_applying = matches!(&pending.phase, InputSequencePhase::Applying { .. });
+        if is_applying && !output_closed && Instant::now() < pending.next_deadline() {
             self.pending_input_sequence = Some(pending);
 
             return Ok(());
@@ -287,4 +277,147 @@ pub(super) fn input_sequence_error_response(
         },
         error => control_error_response(request_id, control_error_code(error), error.to_string()),
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::recording::control::compile_screen_predicate;
+    use std::sync::mpsc;
+    use termtrace_model::{
+        protocol::control::{ActionInputResult, ScreenPredicate},
+        terminal::screen::{FrameDetail, ScreenProjectionRequest},
+    };
+
+    fn test_waiting_action(
+        postcondition: AdmittedPostcondition,
+        started_at: Instant,
+        matching_state: Option<(String, Instant)>,
+    ) -> WaitingAction {
+        return WaitingAction {
+            input: ActionInputResult {
+                sequence_id: Uuid::nil(),
+                atom_count: 1,
+                bytes_written: 4,
+                first_intent_event_seq: 1,
+                last_result_event_seq: 2,
+                pace_ns: 0,
+                atoms: Vec::new(),
+            },
+            action: AdmittedAction {
+                postcondition,
+                projection: ScreenProjectionRequest {
+                    detail: FrameDetail::None,
+                    region: None,
+                },
+            },
+            started_at,
+            matching_state,
+        };
+    }
+
+    fn test_pending(phase: InputSequencePhase) -> PendingInputSequence {
+        let (sender, _) = mpsc::sync_channel(1);
+        return PendingInputSequence {
+            request: ControlRequest::new(ControlCommand::Snapshot),
+            response_sender: sender,
+            command_hash: "test".to_owned(),
+            event_start_seq: 1,
+            phase,
+        };
+    }
+
+    #[test]
+    fn test_waiting_idle_next_deadline_samples_immediately_when_unmatched() {
+        let started_at = Instant::now();
+        let pending = test_pending(InputSequencePhase::Waiting(test_waiting_action(
+            AdmittedPostcondition::Idle {
+                stable_for_ns: 100_000_000,
+                timeout_ns: 5_000_000_000,
+            },
+            started_at,
+            None,
+        )));
+
+        assert_eq!(pending.next_deadline(), started_at);
+    }
+
+    #[test]
+    fn test_waiting_idle_next_deadline_respects_stability_and_timeout() {
+        let started_at = Instant::now();
+        let since = started_at + Duration::from_millis(50);
+        let stable_for_ns = 200_000_000;
+        let timeout_ns = 1_000_000_000;
+
+        let pending = test_pending(InputSequencePhase::Waiting(test_waiting_action(
+            AdmittedPostcondition::Idle {
+                stable_for_ns,
+                timeout_ns,
+            },
+            started_at,
+            Some(("hash_a".to_owned(), since)),
+        )));
+
+        assert_eq!(
+            pending.next_deadline(),
+            since + Duration::from_nanos(stable_for_ns)
+        );
+
+        let late_since = started_at + Duration::from_millis(900);
+        let pending_capped = test_pending(InputSequencePhase::Waiting(test_waiting_action(
+            AdmittedPostcondition::Idle {
+                stable_for_ns,
+                timeout_ns,
+            },
+            started_at,
+            Some(("hash_b".to_owned(), late_since)),
+        )));
+
+        assert_eq!(
+            pending_capped.next_deadline(),
+            started_at + Duration::from_nanos(timeout_ns)
+        );
+    }
+
+    #[test]
+    fn test_waiting_screen_next_deadline_is_timeout() {
+        let started_at = Instant::now();
+        let timeout_ns = 3_000_000_000;
+        let predicate = compile_screen_predicate(&ScreenPredicate::Contains {
+            text: "done".to_owned(),
+        })
+        .expect("valid test predicate");
+        let pending = test_pending(InputSequencePhase::Waiting(test_waiting_action(
+            AdmittedPostcondition::Screen {
+                predicate,
+                timeout_ns,
+            },
+            started_at,
+            None,
+        )));
+
+        assert_eq!(
+            pending.next_deadline(),
+            started_at + Duration::from_nanos(timeout_ns)
+        );
+    }
+
+    #[test]
+    fn test_pacing_gate_does_not_block_waiting_phase() {
+        let started_at = Instant::now();
+        let pending = test_pending(InputSequencePhase::Waiting(test_waiting_action(
+            AdmittedPostcondition::Idle {
+                stable_for_ns: 100_000_000,
+                timeout_ns: 10_000_000_000,
+            },
+            started_at,
+            Some(("hash_1".to_owned(), started_at)),
+        )));
+
+        let is_applying = matches!(&pending.phase, InputSequencePhase::Applying { .. });
+        let output_closed = false;
+        let blocked = is_applying && !output_closed && Instant::now() < pending.next_deadline();
+
+        assert!(!blocked);
+    }
 }

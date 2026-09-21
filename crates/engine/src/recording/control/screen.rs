@@ -119,7 +119,7 @@ impl SessionActor<'_> {
                 .is_some_and(|(_, since, _)| return since.elapsed() >= waiter.stable_for);
 
             let child_completed = child_exited && output_closed;
-            let deadline = !child_exited && now >= waiter.deadline;
+            let deadline = now >= waiter.deadline;
             let finished = stable || child_completed || output_closed || deadline;
 
             if !finished {
