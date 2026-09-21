@@ -153,7 +153,7 @@ pub struct JsOutputPage {
     /// Raw bytes produced by the child process.
     pub bytes: Vec<u8>,
     /// Byte offset for fetching the subsequent page.
-    pub next_offset: u32,
+    pub next_offset: i64,
     /// Whether additional bytes remain beyond this page.
     pub has_more: bool,
 }
@@ -652,14 +652,21 @@ impl JsSession {
     #[napi]
     pub async fn read_output(
         &self,
-        offset: Option<u32>,
+        offset: Option<i64>,
         limit: Option<u32>,
     ) -> napi::Result<JsOutputPage> {
+        if let Some(off) = offset
+            && !(0..=9_007_199_254_740_991).contains(&off)
+        {
+            return Err(napi::Error::from_reason(
+                "offset must be a non-negative safe integer",
+            ));
+        }
         let session_path = PathBuf::from(&self.session_path);
         let cursor = offset.map(|off| {
             return OutputCursor {
                 session_path: session_path.clone(),
-                byte_offset: u64::from(off),
+                byte_offset: u64::try_from(off).unwrap_or(0),
                 event_seq: None,
             };
         });
@@ -668,7 +675,7 @@ impl JsSession {
         return tokio::task::spawn_blocking(move || {
             let page =
                 OutputService::read_page(&session_path, cursor, limit_val).map_err(to_napi_err)?;
-            let next_offset = u32::try_from(page.cursor.byte_offset).unwrap_or(u32::MAX);
+            let next_offset = i64::try_from(page.cursor.byte_offset).unwrap_or(i64::MAX);
 
             return Ok(JsOutputPage {
                 bytes: page.bytes,
@@ -705,14 +712,21 @@ impl JsSession {
     #[napi]
     pub async fn read_events(
         &self,
-        cursor: Option<u32>,
+        cursor: Option<i64>,
         limit: Option<u32>,
     ) -> napi::Result<String> {
+        if let Some(seq) = cursor
+            && !(0..=9_007_199_254_740_991).contains(&seq)
+        {
+            return Err(napi::Error::from_reason(
+                "cursor must be a non-negative safe integer",
+            ));
+        }
         let session_path = PathBuf::from(&self.session_path);
         let event_cursor = cursor.map(|seq| {
             return EventCursor {
                 session_path: session_path.clone(),
-                next_event_seq: u64::from(seq),
+                next_event_seq: u64::try_from(seq).unwrap_or(0),
             };
         });
         let limit_val = usize::try_from(limit.unwrap_or(100)).unwrap_or(100);
@@ -951,7 +965,7 @@ impl JsRecording {
     #[napi]
     pub async fn read_output(
         &self,
-        offset: Option<u32>,
+        offset: Option<i64>,
         limit: Option<u32>,
     ) -> napi::Result<JsOutputPage> {
         let sess = self.session()?;
@@ -975,7 +989,7 @@ impl JsRecording {
     #[napi]
     pub async fn read_events(
         &self,
-        cursor: Option<u32>,
+        cursor: Option<i64>,
         limit: Option<u32>,
     ) -> napi::Result<String> {
         let sess = self.session()?;
@@ -1022,13 +1036,43 @@ impl JsRecording {
             guard.take()
         };
 
-        if let Some(mut session) = session_opt.take() {
-            tokio::task::spawn_blocking(move || {
-                let _ = session.stop(Some(Duration::from_secs(5)));
-            })
-            .await
-            .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
+        let Some(mut session) = session_opt.take() else {
+            return Ok(());
+        };
+
+        let (session, stop_result) = tokio::task::spawn_blocking(move || {
+            let result = session.stop(Some(Duration::from_secs(5)));
+            return (session, result);
+        })
+        .await
+        .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
+
+        if let Err(error) = stop_result {
+            let mut guard = self
+                .session
+                .lock()
+                .unwrap_or_else(|e| return e.into_inner());
+            *guard = Some(session);
+            return Err(napi::Error::from_reason(error.to_string()));
         }
+
+        return Ok(());
+    }
+
+    /// Forcefully terminate and reap the recorded process group and owned recorder.
+    #[napi]
+    pub fn force_close(&self) -> napi::Result<()> {
+        let mut guard = self
+            .session
+            .lock()
+            .unwrap_or_else(|e| return e.into_inner());
+        let Some(mut session) = guard.take() else {
+            return Ok(());
+        };
+
+        session
+            .force_close()
+            .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
 
         return Ok(());
     }

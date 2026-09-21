@@ -2,7 +2,6 @@
 
 use crate::errors::to_py_err;
 use pyo3::prelude::*;
-use std::time::Duration;
 use termtrace_sdk::client::Terminal;
 use termtrace_sdk::screen::frame_text;
 use termtrace_sdk::screen::ScreenProjectionRequest;
@@ -28,13 +27,13 @@ pub struct PyResolvedState {
 #[pymethods]
 impl PyResolvedState {
     fn __repr__(&self) -> String {
-        format!(
+        return format!(
             "ResolvedState(hash='{}', cursor=({}, {}), text_len={})",
             self.hash,
             self.cursor_row,
             self.cursor_col,
             self.text.len()
-        )
+        );
     }
 }
 
@@ -55,12 +54,12 @@ pub struct PyFrame {
 #[pymethods]
 impl PyFrame {
     fn __repr__(&self) -> String {
-        format!(
+        return format!(
             "ScreenFrame({}x{}, text_len={})",
             self.cols,
             self.rows,
             self.text.len()
-        )
+        );
     }
 }
 
@@ -79,19 +78,19 @@ impl PyScreen {
         let terminal = self.terminal.clone();
         let path = self.session_path.clone();
 
-        py.detach(move || {
+        return py.detach(move || {
             let session = terminal.attach(path).map_err(to_py_err)?;
             let screen = session.screen();
             let frame = screen
                 .frame(ScreenProjectionRequest::default())
                 .map_err(to_py_err)?;
             let text = frame_text(&frame);
-            Ok(PyFrame {
+            return Ok(PyFrame {
                 rows: frame.geometry.rows,
                 cols: frame.geometry.cols,
                 text,
-            })
-        })
+            });
+        });
     }
 
     /// Return the normalized plain text of the latest presented frame.
@@ -99,14 +98,14 @@ impl PyScreen {
         let terminal = self.terminal.clone();
         let path = self.session_path.clone();
 
-        py.detach(move || {
+        return py.detach(move || {
             let session = terminal.attach(path).map_err(to_py_err)?;
             let screen = session.screen();
             let frame = screen
                 .frame(ScreenProjectionRequest::default())
                 .map_err(to_py_err)?;
-            Ok(frame_text(&frame))
-        })
+            return Ok(frame_text(&frame));
+        });
     }
 
     /// Wait until the presented screen contains the specified text pattern.
@@ -119,9 +118,9 @@ impl PyScreen {
     ) -> PyResult<PyResolvedState> {
         let terminal = self.terminal.clone();
         let path = self.session_path.clone();
-        let timeout = Duration::from_secs_f64(timeout_secs.unwrap_or(10.0));
+        let timeout = crate::parse_timeout(timeout_secs, 10.0)?;
 
-        py.detach(move || {
+        return py.detach(move || {
             let session = terminal.attach(path).map_err(to_py_err)?;
             let screen = session.screen();
             let outcome = screen.wait_for_text(&pattern, timeout).map_err(to_py_err)?;
@@ -131,13 +130,15 @@ impl PyScreen {
                 )));
             }
             let text = frame_text(&outcome.frame);
-            Ok(PyResolvedState {
-                hash: outcome.frame.state_hash.clone(),
+            let cursor_row = outcome.frame.cursor.row.unwrap_or_default();
+            let cursor_col = outcome.frame.cursor.column.unwrap_or_default();
+            return Ok(PyResolvedState {
+                hash: outcome.frame.state_hash,
                 text,
-                cursor_row: outcome.frame.cursor.row.unwrap_or(0),
-                cursor_col: outcome.frame.cursor.column.unwrap_or(0),
-            })
-        })
+                cursor_row,
+                cursor_col,
+            });
+        });
     }
 
     /// Wait until the presented screen remains unchanged for an idle window.
@@ -149,19 +150,21 @@ impl PyScreen {
     ) -> PyResult<PyResolvedState> {
         let terminal = self.terminal.clone();
         let path = self.session_path.clone();
-        let timeout = Duration::from_secs_f64(timeout_secs.unwrap_or(10.0));
+        let timeout = crate::parse_timeout(timeout_secs, 10.0)?;
 
-        py.detach(move || {
+        return py.detach(move || {
             let session = terminal.attach(path).map_err(to_py_err)?;
             let screen = session.screen();
             let capture = screen.wait_for_idle(timeout).map_err(to_py_err)?;
             let text = frame_text(&capture.frame);
-            Ok(PyResolvedState {
-                hash: capture.frame.state_hash.clone(),
+            let cursor_row = capture.frame.cursor.row.unwrap_or_default();
+            let cursor_col = capture.frame.cursor.column.unwrap_or_default();
+            return Ok(PyResolvedState {
+                hash: capture.frame.state_hash,
                 text,
-                cursor_row: capture.frame.cursor.row.unwrap_or(0),
-                cursor_col: capture.frame.cursor.column.unwrap_or(0),
-            })
-        })
+                cursor_row,
+                cursor_col,
+            });
+        });
     }
 }

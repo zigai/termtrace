@@ -19,11 +19,11 @@ pub fn wait_for_text_async<'py>(
     pattern: String,
     timeout_secs: Option<f64>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let timeout = crate::parse_timeout(timeout_secs, 10.0)?;
     let terminal = screen.terminal.clone();
     let path = screen.session_path;
-    let timeout = Duration::from_secs_f64(timeout_secs.unwrap_or(10.0));
 
-    future_into_py(py, async move {
+    return future_into_py(py, async move {
         let outcome = tokio::task::spawn_blocking(move || {
             let session = terminal.attach(path).map_err(to_py_err)?;
             let s = session.screen();
@@ -33,19 +33,21 @@ pub fn wait_for_text_async<'py>(
                     "timed out waiting for pattern: '{pattern}'"
                 )));
             }
-            Ok(outcome)
+            return Ok(outcome);
         })
         .await
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))??;
+        .map_err(|e| return PyRuntimeError::new_err(e.to_string()))??;
 
         let text = frame_text(&outcome.frame);
-        Ok(PyResolvedState {
+        let cursor_row = outcome.frame.cursor.row.unwrap_or_default();
+        let cursor_col = outcome.frame.cursor.column.unwrap_or_default();
+        return Ok(PyResolvedState {
             hash: outcome.frame.state_hash,
             text,
-            cursor_row: outcome.frame.cursor.row.unwrap_or(0),
-            cursor_col: outcome.frame.cursor.column.unwrap_or(0),
-        })
-    })
+            cursor_row,
+            cursor_col,
+        });
+    });
 }
 
 /// Asynchronously wait for screen to become idle.
@@ -56,27 +58,29 @@ pub fn wait_for_idle_async<'py>(
     screen: PyScreen,
     timeout_secs: Option<f64>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let timeout = crate::parse_timeout(timeout_secs, 10.0)?;
     let terminal = screen.terminal.clone();
     let path = screen.session_path;
-    let timeout = Duration::from_secs_f64(timeout_secs.unwrap_or(10.0));
 
-    future_into_py(py, async move {
+    return future_into_py(py, async move {
         let capture = tokio::task::spawn_blocking(move || {
             let session = terminal.attach(path).map_err(to_py_err)?;
             let s = session.screen();
-            s.wait_for_idle(timeout).map_err(to_py_err)
+            return s.wait_for_idle(timeout).map_err(to_py_err);
         })
         .await
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))??;
+        .map_err(|e| return PyRuntimeError::new_err(e.to_string()))??;
 
         let text = frame_text(&capture.frame);
-        Ok(PyResolvedState {
+        let cursor_row = capture.frame.cursor.row.unwrap_or_default();
+        let cursor_col = capture.frame.cursor.column.unwrap_or_default();
+        return Ok(PyResolvedState {
             hash: capture.frame.state_hash,
             text,
-            cursor_row: capture.frame.cursor.row.unwrap_or(0),
-            cursor_col: capture.frame.cursor.column.unwrap_or(0),
-        })
-    })
+            cursor_row,
+            cursor_col,
+        });
+    });
 }
 
 /// Asynchronously execute an action sequence.
@@ -90,26 +94,27 @@ pub fn execute_action_async<'py>(
     let atoms = std::mem::take(&mut action.atoms);
     let options = action.options.clone();
 
-    future_into_py(py, async move {
+    return future_into_py(py, async move {
         let result = tokio::task::spawn_blocking(move || {
             let session = terminal.attach(path).map_err(to_py_err)?;
-            session.act(&atoms, options).map_err(to_py_err)
+            return session.act(&atoms, options).map_err(to_py_err);
         })
         .await
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))??;
+        .map_err(|e| return PyRuntimeError::new_err(e.to_string()))??;
 
         if let Some(frame) = result.frame {
             let text = frame_text(&frame);
-            Ok(Some(PyResolvedState {
+            let cursor_row = frame.cursor.row.unwrap_or_default();
+            let cursor_col = frame.cursor.column.unwrap_or_default();
+            return Ok(Some(PyResolvedState {
                 hash: frame.state_hash,
                 text,
-                cursor_row: frame.cursor.row.unwrap_or(0),
-                cursor_col: frame.cursor.column.unwrap_or(0),
-            }))
-        } else {
-            Ok(None)
+                cursor_row,
+                cursor_col,
+            }));
         }
-    })
+        return Ok(None);
+    });
 }
 
 /// Asynchronously stop and finalize a recording.
@@ -118,21 +123,35 @@ pub fn stop_recording_async<'py>(
     py: Python<'py>,
     recording: PyRecording,
 ) -> PyResult<Bound<'py, PyAny>> {
-    future_into_py(py, async move {
+    return future_into_py(py, async move {
         let mut session_opt = {
-            let mut guard = recording.session.lock().unwrap_or_else(|e| e.into_inner());
+            let mut guard = recording
+                .session
+                .lock()
+                .unwrap_or_else(|e| return e.into_inner());
             guard.take()
         };
 
-        if let Some(mut session) = session_opt.take() {
-            tokio::task::spawn_blocking(move || {
-                let _ = session.stop(Some(Duration::from_secs(5)));
-                Ok(())
-            })
-            .await
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
-        } else {
-            Ok(())
+        let Some(mut session) = session_opt.take() else {
+            return Ok(());
+        };
+
+        let (session, stop_result) = tokio::task::spawn_blocking(move || {
+            let result = session.stop(Some(Duration::from_secs(5)));
+            return (session, result);
+        })
+        .await
+        .map_err(|e| return PyRuntimeError::new_err(e.to_string()))?;
+
+        if let Err(error) = stop_result {
+            let mut guard = recording
+                .session
+                .lock()
+                .unwrap_or_else(|e| return e.into_inner());
+            *guard = Some(session);
+            return Err(PyRuntimeError::new_err(error.to_string()));
         }
-    })
+
+        return Ok(());
+    });
 }

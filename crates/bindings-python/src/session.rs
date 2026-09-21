@@ -5,7 +5,6 @@ use crate::errors::to_py_err;
 use crate::screen::PyScreen;
 use pyo3::prelude::*;
 use std::path::PathBuf;
-use std::time::Duration;
 use termtrace_model::artifact::bundle::BundleProfile;
 use termtrace_model::artifact::save::SaveFormat;
 use termtrace_model::terminal::observation::StatePoint;
@@ -286,15 +285,15 @@ impl PySession {
         timeout_secs: Option<f64>,
     ) -> PyResult<bool> {
         let session_path = PathBuf::from(&self.session_path);
-        let timeout = Duration::from_secs_f64(timeout_secs.unwrap_or(10.0));
+        let timeout = crate::parse_timeout(timeout_secs, 10.0)?;
 
-        py.detach(move || {
+        return py.detach(move || {
             let _outcome =
                 OutputService::wait_for_bytes(&session_path, pattern.as_bytes(), timeout)
                     .map_err(to_py_err)?;
 
             return Ok(true);
-        })
+        });
     }
 
     /// Read canonical event records as pretty JSON starting at an optional event sequence.

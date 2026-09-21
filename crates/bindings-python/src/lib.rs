@@ -18,11 +18,27 @@ pub mod screen;
 pub mod session;
 
 use pyo3::prelude::*;
+use std::time::Duration;
+
+/// Parse and validate an optional timeout in seconds.
+pub fn parse_timeout(timeout_secs: Option<f64>, default_secs: f64) -> PyResult<Duration> {
+    let secs = timeout_secs.unwrap_or(default_secs);
+    if !secs.is_finite() || secs < 0.0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "timeout must be a non-negative finite number",
+        ));
+    }
+    return Duration::try_from_secs_f64(secs).map_err(|_| {
+        return pyo3::exceptions::PyValueError::new_err(
+            "timeout must be a non-negative finite number",
+        );
+    });
+}
 
 /// Returns the Termtrace core version.
 #[pyfunction]
 fn version() -> &'static str {
-    "0.1.0"
+    return "0.1.0";
 }
 
 /// The `_termtrace` native C-extension module.
@@ -63,5 +79,5 @@ fn _termtrace(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.py().get_type::<errors::IntegrityError>(),
     )?;
 
-    Ok(())
+    return Ok(());
 }

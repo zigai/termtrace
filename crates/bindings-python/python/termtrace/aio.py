@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from typing import Any, Self
 
@@ -20,6 +21,15 @@ from termtrace._termtrace import (
     Termtrace as _SyncTermtrace,
 )
 
+def _cleanup_recording(rec: Any) -> None:
+    try:
+        rec.force_close()
+    except Exception:
+        try:
+            rec.stop()
+        except Exception:
+            pass
+
 
 class AsyncScreen:
     """Asynchronous screen inspection handle."""
@@ -29,11 +39,11 @@ class AsyncScreen:
 
     async def frame(self) -> ScreenFrame:
         """Capture and return the current screen frame."""
-        return self._screen.frame()
+        return await asyncio.to_thread(self._screen.frame)
 
     async def text(self) -> str:
         """Return the current screen plain text."""
-        return self._screen.text()
+        return await asyncio.to_thread(self._screen.text)
 
     async def wait_for_text(self, pattern: str, timeout: float | None = None) -> ResolvedState:
         """Asynchronously wait until the screen text contains pattern."""
@@ -165,8 +175,33 @@ class AsyncTermtrace:
     ) -> AsyncRecording:
         """Launch a recorded session asynchronously."""
         env_dict = dict(env) if env is not None else None
-        rec = self._sync.record(list(command), rows, cols, env_dict, cwd)
-        return AsyncRecording(rec)
+        cmd_list = list(command)
+
+        def _launch() -> _SyncRecording:
+            return self._sync.record(cmd_list, rows, cols, env_dict, cwd)
+
+        launch_task = asyncio.ensure_future(asyncio.to_thread(_launch))
+        try:
+            rec = await asyncio.shield(launch_task)
+            return AsyncRecording(rec)
+        except asyncio.CancelledError:
+            if launch_task.done() and not launch_task.cancelled():
+                try:
+                    rec = launch_task.result()
+                    _cleanup_recording(rec)
+                except Exception:
+                    pass
+            else:
+                def _on_done(fut: asyncio.Future[Any]) -> None:
+                    try:
+                        if not fut.cancelled():
+                            rec = fut.result()
+                            _cleanup_recording(rec)
+                    except Exception:
+                        pass
+                launch_task.add_done_callback(_on_done)
+            raise
+
     def verify_bundle(self, bundle_path: str, source_session: str | None = None) -> bool:
         """Verify an evidence bundle (.tar.zst or directory) offline."""
         return self._sync.verify_bundle(bundle_path, source_session)

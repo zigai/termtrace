@@ -231,34 +231,67 @@ impl PyRecording {
     /// Stop the recording session and finalize evidence.
     pub fn stop(&self, py: Python<'_>) -> PyResult<()> {
         let mut session_opt = {
-            let mut guard = self.session.lock().unwrap_or_else(|e| e.into_inner());
+            let mut guard = self
+                .session
+                .lock()
+                .unwrap_or_else(|e| return e.into_inner());
             guard.take()
         };
 
-        session_opt.take().map_or_else(
-            || Ok(()),
-            |mut session| {
-                py.detach(move || {
-                    let _ = session.stop(Some(Duration::from_secs(5)));
-                    Ok(())
-                })
-            },
-        )
+        let Some(mut session) = session_opt.take() else {
+            return Ok(());
+        };
+
+        let (session, stop_result) = py.detach(move || {
+            let result = session.stop(Some(Duration::from_secs(5)));
+            return (session, result);
+        });
+
+        if let Err(error) = stop_result {
+            let mut guard = self
+                .session
+                .lock()
+                .unwrap_or_else(|e| return e.into_inner());
+            *guard = Some(session);
+            return Err(PyRuntimeError::new_err(error.to_string()));
+        }
+
+        return Ok(());
+    }
+
+    /// Forcefully terminate and reap the recorded process group and owned recorder.
+    pub fn force_close(&self) -> PyResult<()> {
+        let mut guard = self
+            .session
+            .lock()
+            .unwrap_or_else(|e| return e.into_inner());
+        let Some(mut session) = guard.take() else {
+            return Ok(());
+        };
+
+        session
+            .force_close()
+            .map_err(|e| return PyRuntimeError::new_err(e.to_string()))?;
+
+        return Ok(());
     }
 
     /// Detach the recording so it continues running in the background.
     pub fn detach(&self) -> PyResult<()> {
-        let mut guard = self.session.lock().unwrap_or_else(|e| e.into_inner());
-        guard.take().map_or_else(
+        let mut guard = self
+            .session
+            .lock()
+            .unwrap_or_else(|e| return e.into_inner());
+        return guard.take().map_or_else(
             || {
-                Err(PyRuntimeError::new_err(
+                return Err(PyRuntimeError::new_err(
                     "recording has already been stopped or detached",
-                ))
+                ));
             },
             |session| {
                 let _ = session.detach();
-                Ok(())
+                return Ok(());
             },
-        )
+        );
     }
 }

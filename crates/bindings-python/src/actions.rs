@@ -73,13 +73,13 @@ impl PyActionBuilder {
     /// Enforce that the terminal must be at the specified state hash before executing.
     pub fn if_state(mut slf: PyRefMut<'_, Self>, state_hash: String) -> PyRefMut<'_, Self> {
         slf.options.if_state = Some(state_hash);
-        slf
+        return slf;
     }
 
     /// Append UTF-8 text to send to the terminal.
     pub fn send_text(mut slf: PyRefMut<'_, Self>, text: String) -> PyRefMut<'_, Self> {
         slf.atoms.push(InputAtom::Text(text));
-        slf
+        return slf;
     }
 
     /// Append a symbolic named key (e.g. 'Enter', 'Ctrl-C', 'Tab').
@@ -89,19 +89,19 @@ impl PyActionBuilder {
             key: named,
             modifiers,
         });
-        Ok(slf)
+        return Ok(slf);
     }
 
     /// Append exact raw bytes to send to the terminal.
     pub fn send_bytes(mut slf: PyRefMut<'_, Self>, bytes: Vec<u8>) -> PyRefMut<'_, Self> {
         slf.atoms.push(InputAtom::Bytes(bytes));
-        slf
+        return slf;
     }
 
     /// Send bracketed paste text.
     pub fn paste(mut slf: PyRefMut<'_, Self>, text: String) -> PyRefMut<'_, Self> {
         slf.atoms.push(InputAtom::Paste(text));
-        slf
+        return slf;
     }
 
     /// Set delay pacing between consecutive action atoms in milliseconds.
@@ -117,13 +117,13 @@ impl PyActionBuilder {
         mut slf: PyRefMut<'_, Self>,
         pattern: String,
         timeout_secs: Option<f64>,
-    ) -> PyRefMut<'_, Self> {
-        let timeout = Duration::from_secs_f64(timeout_secs.unwrap_or(10.0));
+    ) -> PyResult<PyRefMut<'_, Self>> {
+        let timeout = crate::parse_timeout(timeout_secs, 10.0)?;
         slf.options.postcondition = ActionCondition::Screen {
             predicate: ScreenPredicate::Contains { text: pattern },
             timeout,
         };
-        slf
+        return Ok(slf);
     }
 
     /// Wait until the screen is idle and unchanged after applying input.
@@ -132,14 +132,14 @@ impl PyActionBuilder {
         mut slf: PyRefMut<'_, Self>,
         stable_for_ms: Option<u64>,
         timeout_secs: Option<f64>,
-    ) -> PyRefMut<'_, Self> {
+    ) -> PyResult<PyRefMut<'_, Self>> {
         let stable_for = Duration::from_millis(stable_for_ms.unwrap_or(20));
-        let timeout = Duration::from_secs_f64(timeout_secs.unwrap_or(10.0));
+        let timeout = crate::parse_timeout(timeout_secs, 10.0)?;
         slf.options.postcondition = ActionCondition::Idle {
             stable_for,
             timeout,
         };
-        slf
+        return Ok(slf);
     }
 
     /// Execute the action sequence and return the terminating screen frame.
@@ -149,20 +149,21 @@ impl PyActionBuilder {
         let atoms = std::mem::take(&mut self.atoms);
         let options = self.options.clone();
 
-        py.detach(move || {
+        return py.detach(move || {
             let session = terminal.attach(path).map_err(to_py_err)?;
             let result = session.act(&atoms, options).map_err(to_py_err)?;
             if let Some(frame) = result.frame {
                 let text = frame_text(&frame);
-                Ok(Some(PyResolvedState {
+                let cursor_row = frame.cursor.row.unwrap_or_default();
+                let cursor_col = frame.cursor.column.unwrap_or_default();
+                return Ok(Some(PyResolvedState {
                     hash: frame.state_hash,
                     text,
-                    cursor_row: frame.cursor.row.unwrap_or(0),
-                    cursor_col: frame.cursor.column.unwrap_or(0),
-                }))
-            } else {
-                Ok(None)
+                    cursor_row,
+                    cursor_col,
+                }));
             }
-        })
-    }
+            return Ok(None);
+        });
+}
 }
