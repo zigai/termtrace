@@ -4,12 +4,32 @@ use nix::{
     sys::signal::{kill, Signal},
     unistd::Pid,
 };
-use std::{process::Command, thread, time::Duration};
+use std::{
+    collections::BTreeMap,
+    ffi::OsString,
+    path::Path,
+    process::Command,
+    thread,
+    time::Duration,
+};
 use tempfile::TempDir;
+use termtrace_evidence::{
+    provenance::{collect_execution_provenance, RecorderBuildIdentity},
+    session::canonical_manifest_bytes,
+};
 use termtrace_model::{
-    execution::event_log::CanonicalBoundary,
+    execution::{
+        environment::ChildEnvironmentPolicy,
+        event_log::{CanonicalBoundary, DurabilityPolicy},
+        provenance::ProvenancePolicy,
+        session::{
+            GeometryProvenance, ResourceLimits, SessionGeometry, SessionManifest,
+            SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
+        },
+    },
     protocol::control::InputSequenceFailureDetails,
     terminal::observation::{ActorBoundaries, StatePoint},
+    value::ByteString,
 };
 use termtrace_service::{
     context::OperationContext,
@@ -19,6 +39,57 @@ use termtrace_service::{
     types::{Operation, OperationStatus, SessionId, StateSelector},
 };
 use tokio::runtime::Builder as TokioBuilder;
+use uuid::Uuid;
+
+#[allow(clippy::expect_used, reason = "test setup helper")]
+fn setup_session(dir: &Path) -> Session {
+    let session_id = Uuid::now_v7();
+    let manifest = SessionManifest {
+        failure_policy: Default::default(),
+        format: SESSION_MANIFEST_FORMAT.to_owned(),
+        version: SESSION_MANIFEST_VERSION,
+        session_id,
+        creation_alias: None,
+        lineage: None,
+        import_provenance: None,
+        tmux_pane: None,
+        started_unix_ns: 1_000_000,
+        command: vec![ByteString::from(&b"true"[..])],
+        working_directory: Some(ByteString::from(&b"/tmp"[..])),
+        geometry: SessionGeometry {
+            cols: 80,
+            rows: 24,
+            pixel_width: 720,
+            pixel_height: 432,
+        },
+        geometry_provenance: GeometryProvenance::default(),
+        ghostty_visual: None,
+        child_environment: ChildEnvironmentPolicy::default(),
+        execution_provenance: collect_execution_provenance(
+            &ProvenancePolicy::default(),
+            &BTreeMap::new(),
+            &[OsString::from("/bin/true")],
+            Path::new("/"),
+            RecorderBuildIdentity {
+                version: env!("CARGO_PKG_VERSION"),
+                source_revision: "test",
+                semantic_engine_revision: "test",
+            },
+        ),
+        termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
+        operating_system: "linux".to_owned(),
+        architecture: "test".to_owned(),
+        event_log: "events.jsonl".to_owned(),
+        control_socket: format!("termtrace-control-{session_id}"),
+        request_journal: "requests.jsonl".to_owned(),
+        contains_sensitive_terminal_data: true,
+        durability_policy: DurabilityPolicy::default(),
+        resource_limits: ResourceLimits::default(),
+    };
+    let bytes = canonical_manifest_bytes(&manifest).expect("bytes");
+    fs_err::write(dir.join("session.json"), bytes).expect("write manifest");
+    return Session::from_directory(dir).expect("session");
+}
 
 #[test]
 fn test_operation_context_deadlines_and_intent() {
@@ -143,7 +214,7 @@ fn test_recording_ownership_child_drop_and_detach() {
     let session_dir = temporary.path().join("mock-session");
     fs_err::create_dir_all(&session_dir).expect("session dir");
 
-    let session = Session::from_directory(&session_dir).expect("session");
+    let session = setup_session(&session_dir);
     assert_eq!(session.path(), session_dir);
 
     // Spawn a sleep process
@@ -181,7 +252,7 @@ fn test_recording_detach_disowns_child() {
     let session_dir = temporary.path().join("detached-session");
     fs_err::create_dir_all(&session_dir).expect("session dir");
 
-    let session = Session::from_directory(&session_dir).expect("session");
+    let session = setup_session(&session_dir);
     let child = Command::new("sleep")
         .arg("30")
         .spawn()

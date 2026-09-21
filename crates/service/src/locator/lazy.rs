@@ -187,7 +187,10 @@ impl<'session> Locator<'session> {
             let observed_at = Instant::now();
             let capture = match capture {
                 Ok(capture) => capture,
-                Err(_) if observed_at >= deadline => {
+                Err(error)
+                    if observed_at >= deadline
+                        || matches!(&error, crate::Error::ControlTimeout { .. }) =>
+                {
                     return Err(LocatorError::Timeout {
                         timeout,
                         frame: last_frame,

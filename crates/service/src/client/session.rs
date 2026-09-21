@@ -203,11 +203,33 @@ impl Session {
 
     /// Request graceful stop and optionally wait for immutable completion.
     pub fn stop(&mut self, timeout: Option<Duration>) -> Result<Option<SessionCompletion>> {
-        let _ = send_request(&self.path, &ControlRequest::new(ControlCommand::Stop));
+        if self.path.join("completion.json").is_file() {
+            return self.complete(timeout.unwrap_or(Duration::ZERO)).map(Some);
+        }
+
+        let send_result = send_request(&self.path, &ControlRequest::new(ControlCommand::Stop));
 
         if let Some(timeout) = timeout {
-            return self.complete(timeout).map(Some);
+            match self.complete(timeout) {
+                Ok(completion) => return Ok(Some(completion)),
+                Err(complete_error) => {
+                    if let Err(send_error) = send_result
+                        && !self.path.join("completion.json").is_file()
+                    {
+                        return Err(send_error);
+                    }
+                    return Err(complete_error);
+                }
+            }
         }
+
+        if let Err(send_error) = send_result {
+            if self.path.join("completion.json").is_file() {
+                return self.complete(Duration::ZERO).map(Some);
+            }
+            return Err(send_error);
+        }
+
         return Ok(None);
     }
 
@@ -351,5 +373,21 @@ mod tests {
             !process_path.exists(),
             "detached recorder remained as an unreaped process"
         );
+    }
+
+    #[test]
+    fn stop_propagates_error_when_send_request_fails_and_completion_missing() {
+        let mut session = Session {
+            path: PathBuf::from("/nonexistent/termtrace/test/path"),
+            helper: PathBuf::from("/unused-termtrace"),
+            session_id: Uuid::now_v7(),
+            recorder: None,
+            recorded_process_group: None,
+        };
+        let result_with_timeout = session.stop(Some(Duration::from_millis(50)));
+        assert!(result_with_timeout.is_err());
+
+        let result_without_timeout = session.stop(None);
+        assert!(result_without_timeout.is_err());
     }
 }
