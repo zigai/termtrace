@@ -94,11 +94,15 @@ pub(super) fn mouse_button_name(button: MouseButton) -> &'static str {
 }
 
 pub(super) fn interpolate_cell(start: u16, end: u16, step: u32, steps: u32) -> u16 {
-    let start = i64::from(start);
-    let delta = i64::from(end) - start;
-    let rounded = start + (delta * i64::from(step) + i64::from(steps) / 2) / i64::from(steps);
-
-    return u16::try_from(rounded).unwrap_or(end);
+    if steps == 0 || step >= steps {
+        return end;
+    }
+    let start = u64::from(start);
+    let end_val = u64::from(end);
+    let step = u64::from(step);
+    let steps = u64::from(steps);
+    let interpolated = (start * (steps - step) + end_val * step + steps / 2) / steps;
+    return u16::try_from(interpolated).unwrap_or(end);
 }
 
 pub(super) fn encode_paste(data: &[u8], bracketed: bool) -> Result<Vec<u8>> {
@@ -566,17 +570,20 @@ pub(super) fn apply_resize(
     );
 }
 
+const WRITE_CHUNK_BYTES: usize = 4096;
+
 fn write_input(writer: &mut dyn Write, data: &[u8]) -> (u64, Option<IoError>) {
     let mut offset = 0_usize;
     while offset < data.len() {
-        let Some(remaining) = data.get(offset..) else {
+        let chunk_len = (data.len().saturating_sub(offset)).min(WRITE_CHUNK_BYTES);
+        let Some(chunk) = data.get(offset..offset.saturating_add(chunk_len)) else {
             return (
                 u64::try_from(offset).unwrap_or(u64::MAX),
                 Some(IoError::other("PTY writer reported an invalid byte count")),
             );
         };
 
-        match writer.write(remaining) {
+        match writer.write(chunk) {
             Ok(0) => {
                 return (
                     u64::try_from(offset).unwrap_or(u64::MAX),
@@ -600,4 +607,159 @@ fn io_error_code(error: &IoError) -> String {
         || return format!("io_{:?}", error.kind()).to_ascii_lowercase(),
         |errno| format!("os_errno_{errno}"),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{ErrorKind, Result as IoResult};
+
+    struct ChunkTrackingWriter {
+        chunks: Vec<usize>,
+        max_writes_before_timeout: Option<usize>,
+    }
+
+    impl Write for ChunkTrackingWriter {
+        fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+            if self
+                .max_writes_before_timeout
+                .is_some_and(|max| return self.chunks.len() >= max)
+            {
+                return Err(IoError::new(
+                    ErrorKind::TimedOut,
+                    "mock timeout",
+                ));
+            }
+
+            self.chunks.push(buf.len());
+            return Ok(buf.len());
+        }
+
+        fn flush(&mut self) -> IoResult<()> {
+            return Ok(());
+        }
+    }
+
+    #[test]
+    fn write_input_chunks_large_input() {
+        let mut writer = ChunkTrackingWriter {
+            chunks: Vec::new(),
+            max_writes_before_timeout: None,
+        };
+
+        let large_data = vec![b'a'; 16 * 1024];
+        let (bytes_written, error) = write_input(&mut writer, &large_data);
+
+        assert!(error.is_none());
+        assert_eq!(bytes_written, 16 * 1024);
+        assert_eq!(writer.chunks.len(), 4);
+        for chunk_size in writer.chunks {
+            assert!(chunk_size <= WRITE_CHUNK_BYTES);
+        }
+    }
+
+    #[test]
+    fn write_input_reports_exact_bytes_written_on_timeout() {
+        let mut writer = ChunkTrackingWriter {
+            chunks: Vec::new(),
+            max_writes_before_timeout: Some(1),
+        };
+
+        let large_data = vec![b'b'; 16 * 1024];
+        let (bytes_written, error) = write_input(&mut writer, &large_data);
+
+        assert!(error.is_some());
+        assert_eq!(error.expect("timeout error").kind(), ErrorKind::TimedOut);
+        assert_eq!(bytes_written, u64::try_from(WRITE_CHUNK_BYTES).expect("chunk size fits"));
+        assert_eq!(writer.chunks.len(), 1);
+    }
+
+    #[test]
+    fn interpolate_cell_forward() {
+        let values: Vec<u16> = (0..=10)
+            .map(|step| return interpolate_cell(0, 10, step, 10))
+            .collect();
+        assert_eq!(values, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+        assert_eq!(interpolate_cell(10, 20, 0, 4), 10);
+        assert_eq!(interpolate_cell(10, 20, 1, 4), 13);
+        assert_eq!(interpolate_cell(10, 20, 2, 4), 15);
+        assert_eq!(interpolate_cell(10, 20, 3, 4), 18);
+        assert_eq!(interpolate_cell(10, 20, 4, 4), 20);
+        assert_eq!(interpolate_cell(10, 20, 99, 4), 20);
+    }
+
+    #[test]
+    fn interpolate_cell_reverse() {
+        let values: Vec<u16> = (0..=10)
+            .map(|step| return interpolate_cell(10, 0, step, 10))
+            .collect();
+        assert_eq!(values, vec![10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
+
+        // Explicit check for TT-13: reverse drag from 10 to 0 on final step is 0, not 1
+        assert_eq!(interpolate_cell(10, 0, 10, 10), 0);
+        assert_eq!(interpolate_cell(10, 0, 11, 10), 0);
+
+        assert_eq!(interpolate_cell(20, 10, 0, 4), 20);
+        assert_eq!(interpolate_cell(20, 10, 1, 4), 18);
+        assert_eq!(interpolate_cell(20, 10, 2, 4), 15);
+        assert_eq!(interpolate_cell(20, 10, 3, 4), 13);
+        assert_eq!(interpolate_cell(20, 10, 4, 4), 10);
+    }
+
+    #[test]
+    fn interpolate_cell_diagonal() {
+        // Drag from (0, 10) to (10, 0) in 10 steps
+        for step in 0..=10 {
+            let col = interpolate_cell(0, 10, step, 10);
+            let row = interpolate_cell(10, 0, step, 10);
+            assert_eq!(col + row, 10);
+        }
+
+        // Drag from (0, 0) to (20, 10) in 10 steps
+        assert_eq!(interpolate_cell(0, 20, 0, 10), 0);
+        assert_eq!(interpolate_cell(0, 10, 0, 10), 0);
+        assert_eq!(interpolate_cell(0, 20, 5, 10), 10);
+        assert_eq!(interpolate_cell(0, 10, 5, 10), 5);
+        assert_eq!(interpolate_cell(0, 20, 10, 10), 20);
+        assert_eq!(interpolate_cell(0, 10, 10, 10), 10);
+    }
+
+    #[test]
+    fn interpolate_cell_single_step() {
+        assert_eq!(interpolate_cell(5, 20, 0, 1), 5);
+        assert_eq!(interpolate_cell(5, 20, 1, 1), 20);
+        assert_eq!(interpolate_cell(5, 20, 2, 1), 20);
+
+        assert_eq!(interpolate_cell(20, 5, 0, 1), 20);
+        assert_eq!(interpolate_cell(20, 5, 1, 1), 5);
+        assert_eq!(interpolate_cell(20, 5, 2, 1), 5);
+    }
+
+    #[test]
+    fn interpolate_cell_identical_start_end() {
+        for step in 0..=12 {
+            assert_eq!(interpolate_cell(42, 42, step, 8), 42);
+        }
+    }
+
+    #[test]
+    fn interpolate_cell_boundary_coordinates() {
+        // Zero steps returns end
+        assert_eq!(interpolate_cell(10, 20, 0, 0), 20);
+        assert_eq!(interpolate_cell(20, 10, 0, 0), 10);
+        assert_eq!(interpolate_cell(0, u16::MAX, 5, 0), u16::MAX);
+
+        // Boundary values with u16::MAX
+        assert_eq!(interpolate_cell(0, u16::MAX, 0, 5), 0);
+        assert_eq!(interpolate_cell(0, u16::MAX, 5, 5), u16::MAX);
+        assert_eq!(interpolate_cell(0, u16::MAX, 6, 5), u16::MAX);
+
+        assert_eq!(interpolate_cell(u16::MAX, 0, 0, 5), u16::MAX);
+        assert_eq!(interpolate_cell(u16::MAX, 0, 5, 5), 0);
+        assert_eq!(interpolate_cell(u16::MAX, 0, 10, 5), 0);
+
+        // Step much larger than steps
+        assert_eq!(interpolate_cell(10, 20, u32::MAX, 10), 20);
+    }
 }

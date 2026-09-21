@@ -22,7 +22,7 @@ use signal_hook::{
 use std::{
     env,
     fs::{DirBuilder, File, Permissions},
-    io::{self, ErrorKind, Read},
+    io::{self, ErrorKind, Read, Write},
     os::fd::{AsFd as _, OwnedFd},
     os::unix::fs::{DirBuilderExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
@@ -38,6 +38,8 @@ const READ_BUFFER_BYTES: usize = 16 * 1024;
 
 fn spawn_reader(
     mut reader: Box<dyn Read + Send>,
+    master_raw_fd: Option<i32>,
+    cancel_read: OwnedFd,
     sender: mpsc::SyncSender<RuntimeMessage>,
 ) -> Result<thread::JoinHandle<()>> {
     let thread = thread::Builder::new()
@@ -46,6 +48,51 @@ fn spawn_reader(
             let mut buffer = [0_u8; READ_BUFFER_BYTES];
 
             loop {
+                if let Some(raw_fd) = master_raw_fd {
+                    #[allow(
+                        unsafe_code,
+                        reason = "master PTY raw file descriptor remains valid for the recording session"
+                    )]
+                    let borrowed = unsafe { std::os::fd::BorrowedFd::borrow_raw(raw_fd) };
+                    let mut descriptors = [
+                        PollFd::new(borrowed, PollFlags::POLLIN),
+                        PollFd::new(cancel_read.as_fd(), PollFlags::POLLIN),
+                    ];
+
+                    match poll(&mut descriptors, PollTimeout::NONE) {
+                        Ok(_) => {}
+                        Err(Errno::EINTR) => continue,
+                        Err(error) => {
+                            let _ = sender.send(RuntimeMessage::ReadFailed(error.to_string()));
+
+                            return;
+                        }
+                    }
+
+                    if descriptors
+                        .get(1)
+                        .is_some_and(|cancel_fd| return poll_ready(cancel_fd))
+                    {
+                        return;
+                    }
+
+                    if descriptors
+                        .first()
+                        .is_some_and(|master_fd| return !poll_ready(master_fd))
+                    {
+                        continue;
+                    }
+                } else {
+                    let mut descriptors = [PollFd::new(cancel_read.as_fd(), PollFlags::POLLIN)];
+                    if poll(&mut descriptors, PollTimeout::from(0_u16)).is_ok()
+                        && descriptors
+                            .first()
+                            .is_some_and(|cancel_fd| return poll_ready(cancel_fd))
+                    {
+                        return;
+                    }
+                }
+
                 match reader.read(&mut buffer) {
                     Ok(0) => {
                         let _ = sender.send(RuntimeMessage::OutputClosed);
@@ -237,11 +284,17 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
             }
         }
 
-        if poll_ready(&descriptors[1]) {
+        if descriptors
+            .get(1)
+            .is_some_and(|cancel_fd| return poll_ready(cancel_fd))
+        {
             return;
         }
 
-        if !poll_ready(&descriptors[0]) {
+        if descriptors
+            .first()
+            .is_some_and(|stdin_fd| return !poll_ready(stdin_fd))
+        {
             continue;
         }
 
@@ -293,10 +346,76 @@ struct SignalWorker {
 
 pub(super) struct RuntimeWorkers {
     reader: thread::JoinHandle<()>,
+    reader_cancel: OwnedFd,
     input: Option<InputWorker>,
     resize: Option<ResizeWorker>,
     signals: SignalWorker,
     control: ControlWorker,
+}
+
+pub(in crate::recording) struct PtyWriter {
+    inner: Box<dyn Write + Send>,
+    master_raw_fd: Option<i32>,
+}
+
+impl PtyWriter {
+    pub(in crate::recording) fn new(
+        inner: Box<dyn Write + Send>,
+        master_raw_fd: Option<i32>,
+    ) -> Self {
+        return Self { inner, master_raw_fd };
+    }
+}
+
+impl Write for PtyWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Some(raw_fd) = self.master_raw_fd {
+            #[allow(
+                unsafe_code,
+                reason = "master PTY raw file descriptor remains valid for the recording session"
+            )]
+            let borrowed = unsafe { std::os::fd::BorrowedFd::borrow_raw(raw_fd) };
+            let mut descriptors = [PollFd::new(borrowed, PollFlags::POLLOUT)];
+            let timeout = PollTimeout::try_from(250).unwrap_or(PollTimeout::NONE);
+            match poll(&mut descriptors, timeout) {
+                Ok(0) => {
+                    return Err(io::Error::new(
+                        ErrorKind::TimedOut,
+                        "PTY input write poll timed out waiting for writability",
+                    ));
+                }
+                Ok(_) => {
+                    if let Some(poll_fd) = descriptors.first() {
+                        let revents = poll_fd.revents().unwrap_or(PollFlags::empty());
+                        if !revents.contains(PollFlags::POLLOUT)
+                            && revents.intersects(PollFlags::POLLERR | PollFlags::POLLNVAL)
+                        {
+                            return Err(io::Error::new(
+                                ErrorKind::BrokenPipe,
+                                "PTY input write poll reported error",
+                            ));
+                        }
+                    }
+                }
+                Err(Errno::EINTR) => {
+                    return Err(io::Error::from(ErrorKind::Interrupted));
+                }
+                Err(err) => {
+                    return Err(io::Error::new(
+                        ErrorKind::TimedOut,
+                        format!("PTY input write poll failed: {err}"),
+                    ));
+                }
+            }
+        }
+
+        let to_write = buf.get(..buf.len().min(READ_BUFFER_BYTES)).unwrap_or(buf);
+        return self.inner.write(to_write);
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        return self.inner.flush();
+    }
 }
 
 pub(super) fn spawn_command(
@@ -323,6 +442,7 @@ pub(super) fn spawn_command(
 
     command.cwd(working_directory);
 
+    let raw_fd = pair.master.as_raw_fd();
     let reader = pair
         .master
         .try_clone_reader()
@@ -331,6 +451,7 @@ pub(super) fn spawn_command(
         .master
         .take_writer()
         .map_err(|error| return terminal_error("take PTY writer", error.to_string()))?;
+    let pty_writer = PtyWriter::new(writer, raw_fd);
 
     let child = pair
         .slave
@@ -344,12 +465,11 @@ pub(super) fn spawn_command(
     return Ok(SpawnedCommand {
         master: pair.master,
         reader,
-        writer,
+        writer: Box::new(pty_writer),
         child,
         pid,
     });
 }
-
 pub(super) fn resolve_working_directory(requested: Option<&Path>) -> Result<PathBuf> {
     let candidate = match requested {
         Some(path) if path.is_absolute() => path.to_path_buf(),
@@ -425,6 +545,7 @@ impl SignalWorker {
 impl RuntimeWorkers {
     pub(super) fn start(
         reader: Box<dyn Read + Send>,
+        master_fd: Option<i32>,
         sender: &mpsc::SyncSender<RuntimeMessage>,
         receiver: mpsc::Receiver<RuntimeMessage>,
         forward_stdin: bool,
@@ -469,7 +590,11 @@ impl RuntimeWorkers {
             }
         };
 
-        let reader = match spawn_reader(reader, sender.clone()) {
+        let (cancel_read, reader_cancel) = pipe().map_err(|error| {
+            return terminal_error("create PTY reader cancellation pipe", error.to_string());
+        })?;
+
+        let reader = match spawn_reader(reader, master_fd, cancel_read, sender.clone()) {
             Ok(worker) => worker,
             Err(error) => {
                 drop(receiver);
@@ -489,6 +614,7 @@ impl RuntimeWorkers {
         return Ok((
             Self {
                 reader,
+                reader_cancel,
                 input,
                 resize,
                 signals,
@@ -517,6 +643,13 @@ impl RuntimeWorkers {
         let input_stop = self.input.map_or(Ok(()), InputWorker::stop);
         let resize_stop = self.resize.map_or(Ok(()), ResizeWorker::stop);
         let signals_stop = self.signals.stop();
+        let reader_cancel = match fd_write(&self.reader_cancel, b"x") {
+            Ok(_) | Err(Errno::EPIPE) => Ok(()),
+            Err(error) => Err(terminal_error(
+                "cancel PTY reader",
+                error.to_string(),
+            )),
+        };
         let reader_join = self
             .reader
             .join()
@@ -526,6 +659,7 @@ impl RuntimeWorkers {
         let result = finish_with_cleanup(result, input_stop);
         let result = finish_with_cleanup(result, resize_stop);
         let result = finish_with_cleanup(result, signals_stop);
+        let result = finish_with_cleanup(result, reader_cancel);
 
         return finish_with_cleanup(result, reader_join);
     }
@@ -638,6 +772,7 @@ mod tests {
             let (reading_sender, reading) = mpsc::sync_channel(1);
             let (workers, receiver) = RuntimeWorkers::start(
                 Box::new(NotifyingReader(reading_sender)),
+                None,
                 &sender,
                 receiver,
                 false,
@@ -700,6 +835,7 @@ mod tests {
 
         let started = RuntimeWorkers::start(
             Box::new(io::empty()),
+            None,
             &sender,
             receiver,
             false,
@@ -719,5 +855,57 @@ mod tests {
             .expect("partial startup must release the blocked producer");
 
         producer.join().expect("producer thread");
+    }
+
+    #[test]
+    fn pty_writer_times_out_when_blocked() {
+        use std::os::fd::AsRawFd as _;
+
+        let (read_pipe, write_pipe) = pipe().expect("create pipe");
+        let write_fd = write_pipe.as_raw_fd();
+
+        let fill_data = [b'x'; 4096];
+        loop {
+            let mut descriptors = [PollFd::new(write_pipe.as_fd(), PollFlags::POLLOUT)];
+            if let Ok(1) = poll(&mut descriptors, PollTimeout::from(0_u16)) {
+                let _ = fd_write(&write_pipe, &fill_data);
+            } else {
+                break;
+            }
+        }
+
+        let write_file = File::from(write_pipe);
+        let mut pty_writer = PtyWriter::new(Box::new(write_file), Some(write_fd));
+
+        let write_result = pty_writer.write(b"blocked data");
+        assert!(write_result.is_err());
+        assert_eq!(
+            write_result.unwrap_err().kind(),
+            ErrorKind::TimedOut,
+        );
+
+        drop(read_pipe);
+    }
+
+    #[test]
+    fn pty_reader_cancellation_exits_thread_promptly() {
+        let (read_pipe, _write_pipe) = pipe().expect("create pipe");
+        let (cancel_read, cancel_write) = pipe().expect("create cancel pipe");
+        let (sender, receiver) = mpsc::sync_channel(16);
+
+        let thread = spawn_reader(
+            Box::new(File::from(read_pipe)),
+            None,
+            cancel_read,
+            sender,
+        )
+        .expect("spawn reader");
+
+        let _ = fd_write(&cancel_write, b"x");
+
+        let join_result = thread.join();
+        assert!(join_result.is_ok());
+        drop(cancel_write);
+        drop(receiver);
     }
 }

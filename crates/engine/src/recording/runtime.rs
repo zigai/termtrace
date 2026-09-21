@@ -56,8 +56,10 @@ pub(super) fn consume_runtime(
 ) -> Result<RuntimeOutcome> {
     let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
     let reader = replace(&mut actor.spawned.reader, Box::new(io::empty()));
+    let master_fd = actor.spawned.master.as_raw_fd();
     let started = RuntimeWorkers::start(
         reader,
+        master_fd,
         &sender,
         receiver,
         forward_stdin,
@@ -86,7 +88,7 @@ pub(super) fn consume_runtime(
         let mut control_shutdown_started = false;
         let started_at = Instant::now();
         let mut last_activity_at = Instant::now();
-
+        let mut hard_drain_deadline: Option<Instant> = None;
         loop {
             let receive_timeout = actor.pending_input_sequence.as_ref().map_or(
                 Duration::from_millis(10),
@@ -131,8 +133,15 @@ pub(super) fn consume_runtime(
                     .try_wait()
                     .map_err(|error| return terminal_error("poll child", error.to_string()))?;
 
-                if actor.exit_status.is_some() && !actor.progress.output_closed {
-                    actor.drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
+                if actor.exit_status.is_some() {
+                    actor.host_signal_kill_deadline = None;
+                    if !actor.progress.output_closed {
+                        let now = Instant::now();
+                        actor.drain_deadline = Some(now + DESCENDANT_GRACE_PERIOD);
+                        if hard_drain_deadline.is_none() {
+                            hard_drain_deadline = Some(now + DESCENDANT_DRAIN_TIMEOUT);
+                        }
+                    }
                 }
             }
 
@@ -148,7 +157,11 @@ pub(super) fn consume_runtime(
             actor.enforce_resource_limits(started_at, last_activity_at)?;
 
             if received_output && actor.exit_status.is_some() && !actor.progress.output_closed {
-                actor.drain_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
+                let candidate = Instant::now() + DESCENDANT_GRACE_PERIOD;
+                actor.drain_deadline = Some(
+                    hard_drain_deadline
+                        .map_or(candidate, |ceiling| return candidate.min(ceiling)),
+                );
             }
 
             let runaway_output = actor.progress.resource_limit.as_ref().is_some_and(|r| {
@@ -159,11 +172,10 @@ pub(super) fn consume_runtime(
                             .max(r.limit.saturating_add(8 * 1024));
             });
 
-            if actor.exit_status.is_none()
-                && (runaway_output
-                    || actor
-                        .resource_kill_deadline
-                        .is_some_and(|deadline| return Instant::now() >= deadline))
+            if (runaway_output
+                || actor
+                    .resource_kill_deadline
+                    .is_some_and(|deadline| return Instant::now() >= deadline))
                 && !actor.process_group_killed
             {
                 let (code, message) = match actor
@@ -194,10 +206,9 @@ pub(super) fn consume_runtime(
                 actor.process_group_killed = true;
             }
 
-            if actor.exit_status.is_none()
-                && actor
-                    .host_signal_kill_deadline
-                    .is_some_and(|deadline| return Instant::now() >= deadline)
+            if actor
+                .host_signal_kill_deadline
+                .is_some_and(|deadline| return Instant::now() >= deadline)
                 && !actor.process_group_killed
             {
                 actor.event_log.append(Event::HostError {
@@ -224,9 +235,10 @@ pub(super) fn consume_runtime(
 
                 terminate_process_group(actor.spawned.pid);
                 actor.process_group_killed = true;
-                actor.drain_deadline = Some(Instant::now() + DESCENDANT_DRAIN_TIMEOUT);
+                let post_kill_deadline = Instant::now() + DESCENDANT_DRAIN_TIMEOUT;
+                actor.drain_deadline = Some(post_kill_deadline);
+                hard_drain_deadline = Some(post_kill_deadline);
             }
-
             if actor.progress.output_closed
                 && actor.exit_status.is_some()
                 && actor.pending_input_sequence.is_none()
