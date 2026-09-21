@@ -297,8 +297,9 @@ pub(super) fn report_record_outcome(outcome: RecordOutcome) -> Result<ExitCode> 
     if let Some(signal) = outcome.signal_name.as_deref() {
         return match signal {
             "Interrupt" | "SIGINT" | "INT" => Ok(ExitCode::from(130)),
-            "Terminate" | "SIGTERM" | "TERM" => Ok(ExitCode::from(143)),
-            "Pipe" | "BrokenPipe" | "SIGPIPE" | "PIPE" => Ok(ExitCode::from(141)),
+            "Terminate" | "Terminated" | "SIGTERM" | "TERM" => Ok(ExitCode::from(143)),
+            "Kill" | "Killed" | "SIGKILL" | "KILL" => Ok(ExitCode::from(137)),
+            "Pipe" | "BrokenPipe" | "Broken pipe" | "SIGPIPE" | "PIPE" => Ok(ExitCode::from(141)),
             "Hangup" | "SIGHUP" | "HUP" => Ok(ExitCode::from(129)),
             "Quit" | "SIGQUIT" | "QUIT" => Ok(ExitCode::from(131)),
             _ => Ok(ExitCode::FAILURE),
