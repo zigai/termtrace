@@ -6,6 +6,7 @@ use crate::storage::{
 use rusqlite::{params, Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashSet,
     fs::{File, OpenOptions},
     io::{
         BufRead as _, BufReader, BufWriter, ErrorKind, Read as _, Seek as _, SeekFrom, Write as _,
@@ -18,7 +19,7 @@ pub use termtrace_model::execution::request_journal::{
     MUTATION_JOURNAL_FORMAT, MUTATION_JOURNAL_NAME, MUTATION_JOURNAL_VERSION,
 };
 use termtrace_model::{
-    execution::event::Event,
+    execution::event::{Event, InputSource},
     execution::request_journal::MutationJournalRecord,
     protocol::control::{
         ControlCommand, ControlData, ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES,
@@ -435,7 +436,7 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
         .execute_batch(
             "PRAGMA cache_size=-1024; PRAGMA journal_mode=OFF; PRAGMA temp_store=FILE;
         CREATE TABLE boundaries (seq INTEGER PRIMARY KEY, hash TEXT);
-        CREATE TABLE operations (seq INTEGER PRIMARY KEY, id BLOB NOT NULL);",
+        CREATE TABLE operations (seq INTEGER PRIMARY KEY, id BLOB NOT NULL, is_host INTEGER NOT NULL);",
         )
         .map_err(index_error)?;
 
@@ -484,17 +485,22 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
             .prepare("UPDATE boundaries SET hash=?1 WHERE seq=?2")
             .map_err(index_error)?;
         let mut operation = database
-            .prepare("INSERT INTO operations VALUES (?1, ?2)")
+            .prepare("INSERT INTO operations VALUES (?1, ?2, ?3)")
             .map_err(index_error)?;
+        let mut host_operations = HashSet::new();
 
         while let Some(event) = cursor.next_record()? {
             boundary
                 .execute(params![event.hash, event.seq + 1])
                 .map_err(index_error)?;
 
-            if let Some(id) = event_operation_id(&event.event) {
+            if let Some((id, is_host)) = event_operation(&event.event, &mut host_operations) {
                 operation
-                    .execute(params![event.seq, id.as_bytes().as_slice()])
+                    .execute(params![
+                        event.seq,
+                        id.as_bytes().as_slice(),
+                        if is_host { 1 } else { 0 },
+                    ])
                     .map_err(index_error)?;
             }
         }
@@ -523,15 +529,17 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
 
         if record.event_end_seq > record.event_start_seq {
             let mut statement = database
-                .prepare("SELECT id FROM operations WHERE seq>=?1 AND seq<?2 ORDER BY seq")
+                .prepare(
+                    "SELECT id FROM operations WHERE seq>=?1 AND seq<?2 AND is_host=0 ORDER BY seq",
+                )
                 .map_err(index_error)?;
             let mut rows = statement
                 .query([record.event_start_seq, record.event_end_seq])
                 .map_err(index_error)?;
 
             let mut previous = None;
+            let mut matched_count = 0;
 
-            let mut actual_count = 0;
             while let Some(row) = rows.next().map_err(index_error)? {
                 let bytes: Vec<u8> = row.get(0).map_err(index_error)?;
                 let id = Uuid::from_slice(&bytes).map_err(|_| {
@@ -540,18 +548,14 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
                 if previous == Some(id) {
                     continue;
                 }
-
-                if record.operation_ids.get(actual_count) != Some(&id) {
-                    return Err(Error::invalid(
-                        "mutation journal operation IDs do not match its canonical range",
-                    ));
-                }
-
                 previous = Some(id);
-                actual_count += 1;
+
+                if record.operation_ids.get(matched_count) == Some(&id) {
+                    matched_count += 1;
+                }
             }
 
-            if actual_count == 0 || actual_count != record.operation_ids.len() {
+            if matched_count != record.operation_ids.len() {
                 return Err(Error::invalid(
                     "mutation journal operation IDs do not match its canonical range",
                 ));
@@ -608,16 +612,32 @@ fn response_boundaries(response: &ControlResponse) -> Option<&ActorBoundaries> {
     };
 }
 
-fn event_operation_id(event: &Event) -> Option<Uuid> {
+fn event_operation(
+    event: &Event,
+    host_operations: &mut HashSet<Uuid>,
+) -> Option<(Uuid, bool)> {
     return match event {
-        Event::InputIntent { operation_id, .. }
-        | Event::InputResult { operation_id, .. }
-        | Event::ResizeIntent { operation_id, .. }
+        Event::InputIntent {
+            operation_id,
+            source,
+            ..
+        } => {
+            let is_host = *source == InputSource::Host;
+            if is_host {
+                host_operations.insert(*operation_id);
+            }
+            Some((*operation_id, is_host))
+        }
+        Event::InputResult { operation_id, .. } => {
+            let is_host = host_operations.contains(operation_id);
+            Some((*operation_id, is_host))
+        }
+        Event::ResizeIntent { operation_id, .. }
         | Event::ResizeResult { operation_id, .. }
         | Event::SignalIntent { operation_id, .. }
         | Event::SignalResult { operation_id, .. }
         | Event::Marker { operation_id, .. }
-        | Event::Application { operation_id, .. } => Some(*operation_id),
+        | Event::Application { operation_id, .. } => Some((*operation_id, false)),
         _ => None,
     };
 }
@@ -711,8 +731,16 @@ fn sync_parent_directory(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use termtrace_model::protocol::control::CONTROL_PROTOCOL_VERSION;
+    use crate::storage::event_log::{EventLogWriter, SessionClock};
+    use std::fs::{self, Permissions};
+    use std::os::unix::fs::PermissionsExt as _;
+    use termtrace_model::{
+        execution::event::{
+            Event, EventLogHeader, InputDescriptor, InputKind, InputSource, OperationStatus,
+        },
+        protocol::control::CONTROL_PROTOCOL_VERSION,
+        value::ByteString,
+    };
 
     fn error_response(request_id: Uuid, message: String) -> ControlResponse {
         return ControlResponse {
@@ -812,5 +840,338 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    fn secure_directory(path: &Path) {
+        fs::create_dir_all(path).expect("create secure directory");
+        fs::set_permissions(path, Permissions::from_mode(0o700))
+            .expect("secure directory permissions");
+    }
+
+    fn input_intent_event(operation_id: Uuid, source: InputSource) -> Event {
+        return Event::InputIntent {
+            operation_id,
+            source,
+            input_kind: InputKind::Text,
+            descriptor: InputDescriptor::Text,
+            data: ByteString::new(vec![b'a']),
+            terminal_modes_hash: None,
+            semantic_input: None,
+            caller_intent: None,
+        };
+    }
+
+    fn input_result_event(operation_id: Uuid) -> Event {
+        return Event::InputResult {
+            operation_id,
+            status: OperationStatus::Applied,
+            bytes_written: 1,
+            error_code: None,
+        };
+    }
+
+    #[test]
+    fn validate_mutation_journal_succeeds_with_interleaved_host_query_response() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let session = temporary.path().join("session");
+        secure_directory(&session);
+        let session = session.as_path();
+        let clock = SessionClock::now().expect("clock");
+        let header = EventLogHeader::new(
+            Uuid::now_v7(),
+            "0".repeat(64).as_str(),
+            clock.started_unix_ns(),
+            80,
+            24,
+            720,
+            432,
+            "xterm",
+        );
+        let mut writer =
+            EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
+
+        let client_op1 = Uuid::now_v7();
+        let host_op = Uuid::now_v7();
+        let client_op2 = Uuid::now_v7();
+
+        writer
+            .append(input_intent_event(client_op1, InputSource::Agent))
+            .expect("append");
+        writer
+            .append(input_result_event(client_op1))
+            .expect("append");
+        // Interleaved host query response
+        writer
+            .append(input_intent_event(host_op, InputSource::Host))
+            .expect("append");
+        writer.append(input_result_event(host_op)).expect("append");
+        writer
+            .append(input_intent_event(client_op2, InputSource::Agent))
+            .expect("append");
+        writer
+            .append(input_result_event(client_op2))
+            .expect("append");
+
+        let final_event_hash = writer.current_hash();
+        let end_seq = writer.next_seq();
+        drop(writer);
+
+        let mut journal = MutationJournal::create(session).expect("journal");
+        let request_id = Uuid::now_v7();
+        journal
+            .append(
+                request_id,
+                "command_hash".to_owned(),
+                vec![client_op1, client_op2],
+                0,
+                end_seq,
+                final_event_hash,
+                error_response(request_id, "ok".to_owned()),
+            )
+            .expect("append journal");
+        drop(journal);
+
+        let verified = validate_mutation_journal(session).expect("validation should succeed");
+        assert_eq!(verified, 1);
+    }
+
+    #[test]
+    fn validate_mutation_journal_rejects_host_query_response_attributed_to_client() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let session = temporary.path().join("session");
+        secure_directory(&session);
+        let session = session.as_path();
+        let clock = SessionClock::now().expect("clock");
+        let header = EventLogHeader::new(
+            Uuid::now_v7(),
+            "0".repeat(64).as_str(),
+            clock.started_unix_ns(),
+            80,
+            24,
+            720,
+            432,
+            "xterm",
+        );
+        let mut writer =
+            EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
+
+        let host_op = Uuid::now_v7();
+        writer
+            .append(input_intent_event(host_op, InputSource::Host))
+            .expect("append");
+        writer.append(input_result_event(host_op)).expect("append");
+
+        let final_event_hash = writer.current_hash();
+        let end_seq = writer.next_seq();
+        drop(writer);
+
+        let mut journal = MutationJournal::create(session).expect("journal");
+        let request_id = Uuid::now_v7();
+        // Client tries to claim the host operation ID
+        journal
+            .append(
+                request_id,
+                "command_hash".to_owned(),
+                vec![host_op],
+                0,
+                end_seq,
+                final_event_hash,
+                error_response(request_id, "ok".to_owned()),
+            )
+            .expect("append journal");
+        drop(journal);
+
+        let error = validate_mutation_journal(session).expect_err("host op must be rejected");
+        assert!(matches!(
+            error,
+            Error::InvalidEvidence { reason }
+                if reason == "mutation journal operation IDs do not match its canonical range"
+        ));
+    }
+
+    #[test]
+    fn validate_mutation_journal_succeeds_when_operation_ids_is_empty_and_host_operations_interleaved()
+    {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let session = temporary.path().join("session");
+        secure_directory(&session);
+        let session = session.as_path();
+        let clock = SessionClock::now().expect("clock");
+        let header = EventLogHeader::new(
+            Uuid::now_v7(),
+            "0".repeat(64).as_str(),
+            clock.started_unix_ns(),
+            80,
+            24,
+            720,
+            432,
+            "xterm",
+        );
+        let mut writer =
+            EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
+
+        let host_op = Uuid::now_v7();
+        writer
+            .append(input_intent_event(host_op, InputSource::Host))
+            .expect("append");
+        writer.append(input_result_event(host_op)).expect("append");
+
+        let final_event_hash = writer.current_hash();
+        let end_seq = writer.next_seq();
+        drop(writer);
+
+        let mut journal = MutationJournal::create(session).expect("journal");
+        let request_id = Uuid::now_v7();
+        // Empty operation_ids with end_seq > start_seq
+        journal
+            .append(
+                request_id,
+                "command_hash".to_owned(),
+                Vec::new(),
+                0,
+                end_seq,
+                final_event_hash,
+                error_response(request_id, "ok".to_owned()),
+            )
+            .expect("append journal");
+        drop(journal);
+
+        let verified = validate_mutation_journal(session).expect("validation should succeed");
+        assert_eq!(verified, 1);
+    }
+
+    #[test]
+    fn validate_mutation_journal_rejects_out_of_order_operations() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let session = temporary.path().join("session");
+        secure_directory(&session);
+        let session = session.as_path();
+        let clock = SessionClock::now().expect("clock");
+        let header = EventLogHeader::new(
+            Uuid::now_v7(),
+            "0".repeat(64).as_str(),
+            clock.started_unix_ns(),
+            80,
+            24,
+            720,
+            432,
+            "xterm",
+        );
+        let mut writer =
+            EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
+
+        let client_op1 = Uuid::now_v7();
+        let client_op2 = Uuid::now_v7();
+
+        writer
+            .append(input_intent_event(client_op1, InputSource::Agent))
+            .expect("append");
+        writer
+            .append(input_result_event(client_op1))
+            .expect("append");
+        writer
+            .append(input_intent_event(client_op2, InputSource::Agent))
+            .expect("append");
+        writer
+            .append(input_result_event(client_op2))
+            .expect("append");
+
+        let final_event_hash = writer.current_hash();
+        let end_seq = writer.next_seq();
+        drop(writer);
+
+        let mut journal = MutationJournal::create(session).expect("journal");
+        let request_id = Uuid::now_v7();
+        // Reversed order
+        journal
+            .append(
+                request_id,
+                "command_hash".to_owned(),
+                vec![client_op2, client_op1],
+                0,
+                end_seq,
+                final_event_hash,
+                error_response(request_id, "ok".to_owned()),
+            )
+            .expect("append journal");
+        drop(journal);
+
+        let error = validate_mutation_journal(session).expect_err("out of order must fail");
+        assert!(matches!(
+            error,
+            Error::InvalidEvidence { reason }
+                if reason == "mutation journal operation IDs do not match its canonical range"
+        ));
+    }
+
+    #[test]
+    fn validate_mutation_journal_succeeds_with_partial_input_sequence_and_interleaving() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let session = temporary.path().join("session");
+        secure_directory(&session);
+        let session = session.as_path();
+        let clock = SessionClock::now().expect("clock");
+        let header = EventLogHeader::new(
+            Uuid::now_v7(),
+            "0".repeat(64).as_str(),
+            clock.started_unix_ns(),
+            80,
+            24,
+            720,
+            432,
+            "xterm",
+        );
+        let mut writer =
+            EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
+
+        let atom1 = Uuid::now_v7();
+        let host_op = Uuid::now_v7();
+        let atom2 = Uuid::now_v7();
+
+        // Atom 1 applied
+        writer
+            .append(input_intent_event(atom1, InputSource::Agent))
+            .expect("append");
+        writer.append(input_result_event(atom1)).expect("append");
+        // Host query response interleaved
+        writer
+            .append(input_intent_event(host_op, InputSource::Host))
+            .expect("append");
+        writer.append(input_result_event(host_op)).expect("append");
+        // Atom 2 attempted and failed during write
+        writer
+            .append(input_intent_event(atom2, InputSource::Agent))
+            .expect("append");
+        writer
+            .append(Event::InputResult {
+                operation_id: atom2,
+                status: OperationStatus::Failed,
+                bytes_written: 0,
+                error_code: Some("io_broken_pipe".to_owned()),
+            })
+            .expect("append");
+
+        let final_event_hash = writer.current_hash();
+        let end_seq = writer.next_seq();
+        drop(writer);
+
+        let mut journal = MutationJournal::create(session).expect("journal");
+        let request_id = Uuid::now_v7();
+        // Only atom1 was applied, so operation_ids has [atom1]
+        journal
+            .append(
+                request_id,
+                "command_hash".to_owned(),
+                vec![atom1],
+                0,
+                end_seq,
+                final_event_hash,
+                error_response(request_id, "partial failure".to_owned()),
+            )
+            .expect("append journal");
+        drop(journal);
+
+        let verified = validate_mutation_journal(session).expect("validation should succeed");
+        assert_eq!(verified, 1);
     }
 }

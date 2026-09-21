@@ -7,7 +7,9 @@ use super::super::{
 use crate::Result;
 use std::collections::{HashMap, VecDeque};
 use termtrace_evidence::request_journal::{guarded_command_hash, MutationJournal};
-use termtrace_model::protocol::control::{ControlCommand, ControlResponse};
+use termtrace_model::protocol::control::{
+    ControlCommand, ControlData, ControlResponse, ControlResult,
+};
 use uuid::Uuid;
 
 struct CachedMutation {
@@ -110,8 +112,27 @@ impl MutationHistory {
         } else if let ControlCommand::InputSequence { atoms, .. }
         | ControlCommand::Act { atoms, .. } = command
         {
-            let attempted = usize::try_from(event_end_seq.saturating_sub(event_start_seq) / 2)
-                .unwrap_or(usize::MAX);
+            let attempted = match &response.result {
+                ControlResult::Ok { data } => match data {
+                    ControlData::InputSequenceApplied { atom_count, .. } => {
+                        usize::try_from(*atom_count).unwrap_or(usize::MAX)
+                    }
+                    ControlData::ActionApplied { input, .. } => {
+                        usize::try_from(input.atom_count).unwrap_or(usize::MAX)
+                    }
+                    _ => 0,
+                },
+                ControlResult::Error { details, .. } => {
+                    let mut atoms_applied = 0;
+                    if let Some(details) = details
+                        && let Some(sequence) = &details.input_sequence
+                    {
+                        atoms_applied =
+                            usize::try_from(sequence.atoms_applied).unwrap_or(usize::MAX);
+                    }
+                    atoms_applied
+                }
+            };
 
             atoms
                 .iter()
@@ -174,10 +195,16 @@ fn mutation_retry_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use termtrace_evidence::request_journal::{MutationJournalCursor, MUTATION_JOURNAL_NAME};
     use termtrace_model::{
-        execution::event::InputKind, protocol::control::InputSequenceAtom, value::ByteString,
+        execution::{event::InputKind, event_log::CanonicalBoundary},
+        protocol::control::{
+            ActionInputResult, ActionPostcondition, ActionPostconditionResult, ControlErrorDetails,
+            InputSequenceAtom, InputSequenceFailureDetails, CONTROL_PROTOCOL_VERSION,
+        },
+        terminal::{observation::ActorBoundaries, screen::ScreenProjectionRequest},
+        value::ByteString,
     };
-
     #[test]
     fn duplicate_operation_rejects_whole_batch_without_reserving_new_ids() {
         let temporary = tempfile::TempDir::new().expect("temporary directory");
@@ -222,5 +249,284 @@ mod tests {
             history.reserve_operation(Uuid::nil()),
             Err(crate::Error::ControlRejected { code, .. }) if code == "operation_id_collision"
         ));
+    }
+
+    fn dummy_boundaries() -> ActorBoundaries {
+        let boundary = CanonicalBoundary {
+            next_event_seq: 10,
+            output_bytes: 0,
+            event_hash: "a".repeat(64),
+        };
+        return ActorBoundaries {
+            durable: boundary.clone(),
+            observed: boundary,
+        };
+    }
+
+    #[test]
+    fn remember_input_sequence_applied_derives_exact_atom_count_from_response() {
+        let temporary = tempfile::TempDir::new().expect("temporary directory");
+        let journal = MutationJournal::create(temporary.path()).expect("journal");
+        let mut history = MutationHistory::new(journal, 1);
+
+        let op1 = Uuid::from_u128(1);
+        let op2 = Uuid::from_u128(2);
+        let op3 = Uuid::from_u128(3);
+        let command = ControlCommand::InputSequence {
+            atoms: [op1, op2, op3]
+                .into_iter()
+                .map(|operation_id| {
+                    return InputSequenceAtom::Bytes {
+                        operation_id,
+                        data: ByteString::new(vec![b'x']),
+                        input_kind: InputKind::Text,
+                        caller_intent: None,
+                    };
+                })
+                .collect(),
+            pace_ns: 0,
+            include_atom_outcomes: false,
+        };
+        let request_id = Uuid::now_v7();
+        let response = ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id,
+            result: ControlResult::Ok {
+                data: ControlData::InputSequenceApplied {
+                    sequence_id: request_id,
+                    atom_count: 2,
+                    bytes_written: 2,
+                    first_intent_event_seq: 1,
+                    last_result_event_seq: 4,
+                    pace_ns: 0,
+                    atoms: Vec::new(),
+                    boundaries: dummy_boundaries(),
+                },
+            },
+        };
+
+        // Even if event_start_seq=0 and event_end_seq=10 (which would have been (10-0)/2 = 5 atoms under the old formula),
+        // it must take exactly 2 atoms as reported by atom_count.
+        history
+            .remember(
+                request_id,
+                &command,
+                "cmd_hash".to_owned(),
+                0,
+                10,
+                "evt_hash".to_owned(),
+                response,
+            )
+            .expect("remember succeeds");
+
+        let mut cursor =
+            MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
+                .expect("cursor");
+        let record = cursor
+            .next_record()
+            .expect("read")
+            .expect("record must exist");
+        assert_eq!(record.operation_ids, vec![op1, op2]);
+    }
+
+    #[test]
+    fn remember_action_applied_derives_exact_atom_count_from_response() {
+        let temporary = tempfile::TempDir::new().expect("temporary directory");
+        let journal = MutationJournal::create(temporary.path()).expect("journal");
+        let mut history = MutationHistory::new(journal, 1);
+
+        let op1 = Uuid::from_u128(1);
+        let op2 = Uuid::from_u128(2);
+        let command = ControlCommand::Act {
+            atoms: [op1, op2]
+                .into_iter()
+                .map(|operation_id| {
+                    return InputSequenceAtom::Bytes {
+                        operation_id,
+                        data: ByteString::new(vec![b'x']),
+                        input_kind: InputKind::Text,
+                        caller_intent: None,
+                    };
+                })
+                .collect(),
+            postcondition: ActionPostcondition::None,
+            projection: ScreenProjectionRequest::default(),
+            pace_ns: 0,
+            include_atom_outcomes: false,
+        };
+        let request_id = Uuid::now_v7();
+        let response = ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id,
+            result: ControlResult::Ok {
+                data: ControlData::ActionApplied {
+                    input: ActionInputResult {
+                        sequence_id: request_id,
+                        atom_count: 1,
+                        bytes_written: 1,
+                        first_intent_event_seq: 1,
+                        last_result_event_seq: 2,
+                        pace_ns: 0,
+                        atoms: Vec::new(),
+                    },
+                    postcondition: ActionPostconditionResult::None {
+                        matched: true,
+                        state_hash: None,
+                        frame: None,
+                    },
+                    boundaries: dummy_boundaries(),
+                },
+            },
+        };
+
+        history
+            .remember(
+                request_id,
+                &command,
+                "cmd_hash".to_owned(),
+                0,
+                8,
+                "evt_hash".to_owned(),
+                response,
+            )
+            .expect("remember succeeds");
+
+        let mut cursor =
+            MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
+                .expect("cursor");
+        let record = cursor
+            .next_record()
+            .expect("read")
+            .expect("record must exist");
+        assert_eq!(record.operation_ids, vec![op1]);
+    }
+
+    #[test]
+    fn remember_error_derives_atoms_applied_from_input_sequence_details() {
+        let temporary = tempfile::TempDir::new().expect("temporary directory");
+        let journal = MutationJournal::create(temporary.path()).expect("journal");
+        let mut history = MutationHistory::new(journal, 1);
+
+        let op1 = Uuid::from_u128(1);
+        let op2 = Uuid::from_u128(2);
+        let command = ControlCommand::InputSequence {
+            atoms: [op1, op2]
+                .into_iter()
+                .map(|operation_id| {
+                    return InputSequenceAtom::Bytes {
+                        operation_id,
+                        data: ByteString::new(vec![b'x']),
+                        input_kind: InputKind::Text,
+                        caller_intent: None,
+                    };
+                })
+                .collect(),
+            pace_ns: 0,
+            include_atom_outcomes: false,
+        };
+        let request_id = Uuid::now_v7();
+        let response = ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id,
+            result: ControlResult::Error {
+                code: "input_sequence_failed".to_owned(),
+                message: "write failed".to_owned(),
+                details: Some(ControlErrorDetails {
+                    current_presented_state_hash: "hash".to_owned(),
+                    boundaries: dummy_boundaries(),
+                    scope: "input".to_owned(),
+                    input_sequence: Some(InputSequenceFailureDetails {
+                        sequence_id: request_id,
+                        atom_count: 2,
+                        atoms_applied: 1,
+                        failed_atom_index: 1,
+                        failed_operation_id: op2,
+                        bytes_written: 1,
+                        failed_atom_bytes_written: 0,
+                        first_intent_event_seq: 1,
+                        last_result_event_seq: 2,
+                        resume_from_atom_index: 1,
+                    }),
+                    screen_frame: None,
+                }),
+            },
+        };
+
+        history
+            .remember(
+                request_id,
+                &command,
+                "cmd_hash".to_owned(),
+                0,
+                4,
+                "evt_hash".to_owned(),
+                response,
+            )
+            .expect("remember succeeds");
+
+        let mut cursor =
+            MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
+                .expect("cursor");
+        let record = cursor
+            .next_record()
+            .expect("read")
+            .expect("record must exist");
+        assert_eq!(record.operation_ids, vec![op1]);
+    }
+
+    #[test]
+    fn remember_error_defaults_to_zero_atoms_when_no_input_sequence_details() {
+        let temporary = tempfile::TempDir::new().expect("temporary directory");
+        let journal = MutationJournal::create(temporary.path()).expect("journal");
+        let mut history = MutationHistory::new(journal, 1);
+
+        let op1 = Uuid::from_u128(1);
+        let op2 = Uuid::from_u128(2);
+        let command = ControlCommand::InputSequence {
+            atoms: [op1, op2]
+                .into_iter()
+                .map(|operation_id| {
+                    return InputSequenceAtom::Bytes {
+                        operation_id,
+                        data: ByteString::new(vec![b'x']),
+                        input_kind: InputKind::Text,
+                        caller_intent: None,
+                    };
+                })
+                .collect(),
+            pace_ns: 0,
+            include_atom_outcomes: false,
+        };
+        let request_id = Uuid::now_v7();
+        let response = ControlResponse {
+            version: CONTROL_PROTOCOL_VERSION,
+            request_id,
+            result: ControlResult::Error {
+                code: "rejected".to_owned(),
+                message: "rejected".to_owned(),
+                details: None,
+            },
+        };
+
+        history
+            .remember(
+                request_id,
+                &command,
+                "cmd_hash".to_owned(),
+                0,
+                4,
+                "evt_hash".to_owned(),
+                response,
+            )
+            .expect("remember succeeds");
+
+        let mut cursor =
+            MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
+                .expect("cursor");
+        let record = cursor
+            .next_record()
+            .expect("read")
+            .expect("record must exist");
+        assert!(record.operation_ids.is_empty());
     }
 }
