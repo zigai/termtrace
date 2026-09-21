@@ -2,14 +2,21 @@
 
 use crate::{Error, Result};
 use nix::{
-    sys::socket::{getsockopt, sockopt::PeerCredentials},
+    errno::Errno,
+    poll::{poll, PollFd, PollFlags, PollTimeout},
+    sys::socket::{
+        connect, getsockopt, socket,
+        sockopt::{PeerCredentials, SocketError},
+        AddressFamily, SockFlag, SockType, UnixAddr,
+    },
     unistd::getuid,
 };
 use std::{
     fs::File,
-    io::{BufRead as _, BufReader, Error as IoError, ErrorKind, Read as _, Write as _},
+    io::{Error as IoError, ErrorKind, Read as _, Write as _},
     net::Shutdown,
     os::{
+        fd::{AsFd as _, AsRawFd as _},
         linux::net::SocketAddrExt as _,
         unix::net::{SocketAddr, UnixStream},
     },
@@ -78,6 +85,16 @@ pub(crate) fn control_socket_address(name: &str) -> Result<SocketAddr> {
 }
 
 pub(crate) fn connect_session_control(session_directory: &Path) -> Result<UnixStream> {
+    return connect_session_control_timing(
+        session_directory,
+        &ExchangeTiming::Timeout(DEFAULT_CONTROL_TIMEOUT),
+    );
+}
+
+pub(crate) fn connect_session_control_timing(
+    session_directory: &Path,
+    timing: &ExchangeTiming,
+) -> Result<UnixStream> {
     if !session_directory.join("session.json").is_file() {
         return Err(Error::ControlUnavailable {
             session: session_directory.to_path_buf(),
@@ -87,14 +104,88 @@ pub(crate) fn connect_session_control(session_directory: &Path) -> Result<UnixSt
     }
 
     let manifest = read_control_manifest(session_directory)?;
-    let address = control_socket_address(&manifest.control_socket)?;
-    let stream = UnixStream::connect_addr(&address).map_err(|source| {
+    let _ = control_socket_address(&manifest.control_socket)?;
+    let _ = timing.remaining(session_directory, "connect", false)?;
+
+    let fd = socket(
+        AddressFamily::Unix,
+        SockType::Stream,
+        SockFlag::SOCK_NONBLOCK | SockFlag::SOCK_CLOEXEC,
+        None,
+    )
+    .map_err(|source| {
         return Error::ControlUnavailable {
             session: session_directory.to_path_buf(),
             lifecycle: control_lifecycle_hint(session_directory),
-            source,
+            source: IoError::from_raw_os_error(source as i32),
         };
     })?;
+
+    let unix_addr = UnixAddr::new_abstract(manifest.control_socket.as_bytes()).map_err(|error| {
+        return Error::InvalidControlProtocol {
+            reason: format!("invalid abstract control socket name: {error}"),
+        };
+    })?;
+
+    match connect(fd.as_raw_fd(), &unix_addr) {
+        Ok(()) => {}
+        Err(Errno::EINPROGRESS) => {
+            let mut descriptors = [PollFd::new(fd.as_fd(), PollFlags::POLLOUT)];
+            loop {
+                let remaining = timing.remaining(session_directory, "connect", false)?;
+                let poll_timeout = PollTimeout::try_from(remaining.min(Duration::from_secs(60)))
+                    .unwrap_or(PollTimeout::NONE);
+
+                match poll(&mut descriptors, poll_timeout) {
+                    Ok(0) => {
+                        return Err(control_transport_error(
+                            session_directory,
+                            "connect",
+                            remaining,
+                            false,
+                            IoError::new(ErrorKind::TimedOut, "control connect timed out"),
+                        ));
+                    }
+                    Ok(_) => {
+                        let so_error = getsockopt(&fd, SocketError).map_err(|error| {
+                            return Error::ControlUnavailable {
+                                session: session_directory.to_path_buf(),
+                                lifecycle: control_lifecycle_hint(session_directory),
+                                source: IoError::from_raw_os_error(error as i32),
+                            };
+                        })?;
+                        if so_error == 0 {
+                            break;
+                        }
+                        return Err(Error::ControlUnavailable {
+                            session: session_directory.to_path_buf(),
+                            lifecycle: control_lifecycle_hint(session_directory),
+                            source: IoError::from_raw_os_error(so_error),
+                        });
+                    }
+                    Err(Errno::EINTR) => {}
+                    Err(error) => {
+                        return Err(control_transport_error(
+                            session_directory,
+                            "connect",
+                            remaining,
+                            false,
+                            IoError::from_raw_os_error(error as i32),
+                        ));
+                    }
+                }
+            }
+        }
+        Err(error) => {
+            return Err(Error::ControlUnavailable {
+                session: session_directory.to_path_buf(),
+                lifecycle: control_lifecycle_hint(session_directory),
+                source: IoError::from_raw_os_error(error as i32),
+            });
+        }
+    }
+
+    let stream = UnixStream::from(fd);
     let credentials = getsockopt(&stream, PeerCredentials).map_err(|error| {
         return Error::ControlUnavailable {
             session: session_directory.to_path_buf(),
@@ -115,6 +206,7 @@ pub(crate) fn connect_session_control(session_directory: &Path) -> Result<UnixSt
     }
     return Ok(stream);
 }
+
 
 /// Return whether the live recorder's abstract control endpoint accepts a connection.
 pub fn control_endpoint_is_reachable(session_directory: impl AsRef<Path>) -> bool {
@@ -310,6 +402,19 @@ impl ExchangeTiming {
             });
     }
 
+    /// Resolve this timing configuration into an absolute monotonic deadline.
+    pub fn into_deadline(self) -> Result<Instant> {
+        return match self {
+            Self::Timeout(timeout) => Instant::now().checked_add(timeout).ok_or_else(|| {
+                return Error::InvalidDuration {
+                    field: "request_timeout",
+                    reason: "request timeout exceeds the monotonic clock range".to_owned(),
+                };
+            }),
+            Self::Deadline(deadline) => Ok(deadline),
+        };
+    }
+
     fn remaining(
         &self,
         session: &Path,
@@ -340,7 +445,8 @@ pub fn exchange(
     request: &ControlRequest,
     timing: ExchangeTiming,
 ) -> Result<ControlResponse> {
-    let stream = connect_session_control(session_directory)?;
+    let timing = ExchangeTiming::Deadline(timing.into_deadline()?);
+    let stream = connect_session_control_timing(session_directory, &timing)?;
 
     return exchange_stream(session_directory, stream, request, timing);
 }
@@ -351,6 +457,7 @@ fn exchange_stream(
     request: &ControlRequest,
     timing: ExchangeTiming,
 ) -> Result<ControlResponse> {
+    let timing = ExchangeTiming::Deadline(timing.into_deadline()?);
     let socket = PathBuf::from("<abstract-control-socket>");
     let mut request_frame = serde_json::to_vec(request).map_err(|source| {
         return Error::InvalidJson {
@@ -371,9 +478,17 @@ fn exchange_stream(
     request_frame.push(b'\n');
 
     let timeout = timing.remaining(session_directory, "write request", false)?;
+    stream.set_nonblocking(false).map_err(|source| {
+        return control_transport_error(
+            session_directory,
+            "configure deadlines",
+            timeout,
+            false,
+            source,
+        );
+    })?;
     stream
-        .set_read_timeout(Some(timeout))
-        .and_then(|()| return stream.set_write_timeout(Some(timeout)))
+        .set_write_timeout(Some(timeout))
         .map_err(|source| {
             return control_transport_error(
                 session_directory,
@@ -390,8 +505,7 @@ fn exchange_stream(
         return control_transport_error(session_directory, "finish request", timeout, true, source);
     })?;
 
-    let timeout = timing.remaining(session_directory, "read response", true)?;
-    stream.set_read_timeout(Some(timeout)).map_err(|source| {
+    stream.set_nonblocking(true).map_err(|source| {
         return control_transport_error(
             session_directory,
             "configure response deadline",
@@ -401,19 +515,80 @@ fn exchange_stream(
         );
     })?;
 
+    let timeout = timing.remaining(session_directory, "read response", true)?;
     let mut encoded = Vec::new();
-    BufReader::new(stream)
-        .take(MAX_CONTROL_MESSAGE_BYTES + 1)
-        .read_until(b'\n', &mut encoded)
-        .map_err(|source| {
-            return control_transport_error(
-                session_directory,
-                "read response",
-                timeout,
-                true,
-                source,
-            );
-        })?;
+    let mut chunk = [0_u8; 8192];
+
+    loop {
+        let remaining = timing.remaining(session_directory, "read response", true)?;
+        let poll_timeout = PollTimeout::try_from(remaining.min(Duration::from_secs(60)))
+            .unwrap_or(PollTimeout::NONE);
+        let mut descriptors = [PollFd::new(stream.as_fd(), PollFlags::POLLIN)];
+
+        match poll(&mut descriptors, poll_timeout) {
+            Ok(0) => {
+                return Err(control_transport_error(
+                    session_directory,
+                    "read response",
+                    remaining,
+                    true,
+                    IoError::new(ErrorKind::TimedOut, "control read timed out"),
+                ));
+            }
+            Ok(_) => {
+                match stream.read(&mut chunk) {
+                    Ok(0) => {
+                        break;
+                    }
+                    Ok(count) => {
+                        let bytes = chunk.get(..count).ok_or_else(|| {
+                            return Error::InvalidControlProtocol {
+                                reason: "invalid response slice".to_owned(),
+                            };
+                        })?;
+                        if let Some(position) = bytes.iter().position(|&byte| return byte == b'\n') {
+                            let line = bytes.get(..=position).ok_or_else(|| {
+                                return Error::InvalidControlProtocol {
+                                    reason: "invalid response slice".to_owned(),
+                                };
+                            })?;
+                            encoded.extend_from_slice(line);
+                            break;
+                        }
+                        encoded.extend_from_slice(bytes);
+                        if u64::try_from(encoded.len()).unwrap_or(u64::MAX)
+                            > MAX_CONTROL_MESSAGE_BYTES
+                        {
+                            break;
+                        }
+                    }
+                    Err(source)
+                        if source.kind() == ErrorKind::Interrupted
+                            || source.kind() == ErrorKind::WouldBlock => {}
+                    Err(source) => {
+                        return Err(control_transport_error(
+                            session_directory,
+                            "read response",
+                            remaining,
+                            true,
+                            source,
+                        ));
+                    }
+                }
+            }
+            Err(Errno::EINTR) => {}
+            Err(error) => {
+                return Err(control_transport_error(
+                    session_directory,
+                    "read response",
+                    remaining,
+                    true,
+                    IoError::from_raw_os_error(error as i32),
+                ));
+            }
+        }
+    }
+
     validate_response_frame(session_directory, timeout, &encoded)?;
 
     let response: ControlResponse = serde_json::from_slice(&encoded).map_err(|source| {
@@ -537,6 +712,7 @@ fn validate_frame(encoded: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
     use tempfile::TempDir;
     use termtrace_model::protocol::control::ControlCommand;
 
@@ -560,6 +736,63 @@ mod tests {
             }
         ));
 
+        drop(server);
+    }
+
+    #[test]
+    fn slow_peer_sending_chunks_obeys_the_total_deadline() {
+        let (client, mut server) = UnixStream::pair().expect("socket pair");
+        let request = ControlRequest::new(ControlCommand::Stop);
+        let total_timeout = Duration::from_millis(50);
+
+        let sender = thread::spawn(move || {
+            let mut buf = [0_u8; 1024];
+            let _ = server.read(&mut buf);
+            for byte in b"{\"version\":1" {
+                thread::sleep(Duration::from_millis(30));
+                if server.write_all(&[*byte]).is_err() {
+                    break;
+                }
+            }
+        });
+
+        let error = exchange_stream(
+            Path::new("/session"),
+            client,
+            &request,
+            ExchangeTiming::deadline(total_timeout).expect("deadline"),
+        )
+        .expect_err("slow peer must time out");
+
+        assert!(matches!(
+            error,
+            Error::ControlTimeout {
+                phase: "read response",
+                request_dispatched: true,
+                ..
+            }
+        ));
+
+        let _ = sender.join();
+    }
+
+    #[test]
+    fn exchange_times_out_when_deadline_is_already_expired() {
+        let (client, server) = UnixStream::pair().expect("socket pair");
+        let request = ControlRequest::new(ControlCommand::Stop);
+        let expired_timing = ExchangeTiming::Deadline(
+            Instant::now().checked_sub(Duration::from_millis(10)).expect("instant"),
+        );
+        let error = exchange_stream(Path::new("/session"), client, &request, expired_timing)
+            .expect_err("expired deadline must time out");
+        assert!(matches!(
+            error,
+            Error::ControlTimeout {
+                phase: "write request",
+                request_dispatched: false,
+                ..
+            }
+        ));
         drop(server);
     }
 

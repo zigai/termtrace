@@ -63,7 +63,7 @@ impl Client {
         return protocol::send_request_response(&self.session, request);
     }
 
-    /// Send with one total deadline shared by request and response I/O.
+    /// Send with one total deadline shared across connect, request, and response I/O.
     pub fn send_with_timeout(
         &self,
         request: &ControlRequest,
