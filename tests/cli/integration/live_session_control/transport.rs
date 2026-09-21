@@ -249,6 +249,15 @@ fn live_control_uses_a_bounded_endpoint_for_long_evidence_paths() {
 
     wait_for_control(&session);
 
+    let ready_deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < ready_deadline {
+        let events = fs_err::read_to_string(session.join("events.jsonl")).unwrap_or_default();
+        if events.contains("READY") {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
     assert!(matches!(
         send_request(&session, &ControlRequest::new(ControlCommand::Ping)),
         Ok(ControlData::Acknowledged { .. })
