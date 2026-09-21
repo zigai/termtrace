@@ -125,6 +125,7 @@ fn run_idle_wait(
         "first_observed_monotonic_ns": first_observed_monotonic_ns,
         "observed_monotonic_ns": observed_monotonic_ns,
         "stable_for_ns": stable_for_ns,
+        "frame": frame,
     });
 
     if arguments.json {
