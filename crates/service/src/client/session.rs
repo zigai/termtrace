@@ -3,14 +3,15 @@ use super::control::{
     wire_postcondition,
 };
 use super::{
-    derive_input_operation_id, killpg, read_manifest, send_request, send_request_response,
-    sync_directory, thread, validate_completed_session, wait_for_completion, ActionCompletion,
-    ActionOptions, ActionPostconditionResult, ActionResult, Child, ControlCommand, ControlData,
-    ControlRequest, ControlResult, Duration, Errno, Error, Events, Evidence, InputAtom, IoError,
-    Keyboard, Native, Output, Path, PathBuf, Pid, Pointer, Result, Screen, Semantic,
-    SessionCompletion, Signal, StableCaptureQuality, Uuid,
+    derive_input_operation_id, read_manifest, send_request, send_request_response, sync_directory,
+    thread, validate_completed_session, wait_for_completion, ActionCompletion, ActionOptions,
+    ActionPostconditionResult, ActionResult, Child, ControlCommand, ControlData, ControlRequest,
+    ControlResult, Duration, Error, Events, Evidence, InputAtom, Keyboard, Native, Output, Path,
+    PathBuf, Pointer, Result, Screen, Semantic, SessionCompletion, StableCaptureQuality, Uuid,
 };
+use std::io;
 use termtrace_control::{request_or_completed, Reached};
+use termtrace_process::ProcessGroup;
 
 /// High-level live/completed session handle.
 pub struct Session {
@@ -18,7 +19,7 @@ pub struct Session {
     pub(super) helper: PathBuf,
     pub(super) session_id: Uuid,
     pub(super) recorder: Option<Child>,
-    pub(super) recorded_process_group: Option<u32>,
+    pub(super) recorded_process_group: Option<ProcessGroup>,
 }
 
 impl Session {
@@ -26,7 +27,7 @@ impl Session {
         let manifest = read_manifest(&path)?;
         let recorded_process_group = if recorder.is_some() {
             match send_request(&path, &ControlRequest::new(ControlCommand::Status)) {
-                Ok(ControlData::Status { pid, .. }) => pid,
+                Ok(ControlData::Status { pid, .. }) => pid.and_then(ProcessGroup::from_leader),
                 _ => None,
             }
         } else {
@@ -250,17 +251,13 @@ impl Session {
         let process_group_result = self
             .recorded_process_group
             .take()
-            .and_then(|pid| return i32::try_from(pid).ok())
-            .map_or(Ok(()), |pid| {
-                return match killpg(Pid::from_raw(pid), Signal::SIGKILL) {
-                    Ok(()) | Err(Errno::ESRCH) => Ok(()),
-                    Err(error) => Err(Error::Filesystem {
-                        path: self.path.clone(),
-                        source: IoError::from_raw_os_error(error as i32),
-                    }),
+            .map_or(Ok(()), |group| return group.kill())
+            .map_err(|error| {
+                return Error::Filesystem {
+                    path: self.path.clone(),
+                    source: io::Error::from(error),
                 };
             });
-
         let recorder_kill_result = child.kill().map_err(|source| {
             return Error::Filesystem {
                 path: self.path.clone(),

@@ -1,31 +1,21 @@
 use clap::Args;
 use miette::{IntoDiagnostic as _, Result};
-use nix::{
-    sys::signal::{killpg, Signal},
-    unistd::Pid,
-};
 use signal_hook::{
     consts::{SIGHUP, SIGINT, SIGTERM},
     flag, low_level,
 };
 use std::{
     ffi::OsString,
-    fs,
-    os::unix::process::CommandExt as _,
-    process::{Child, Command, ExitCode},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    thread,
-    time::{Duration, Instant},
+    process::{Command, ExitCode},
+    sync::{atomic::AtomicBool, Arc},
 };
+use termtrace_process::{owned, ProcessIdentity};
 
 #[derive(Debug, Args)]
 pub(super) struct OwnedProcessArgs {
-    #[arg(long)]
+    #[arg(long = owned::PARENT_PID)]
     parent_pid: u32,
-    #[arg(long)]
+    #[arg(long = owned::PARENT_START_TICKS)]
     parent_start_ticks: u64,
     #[arg(last = true, required = true)]
     command: Vec<OsString>,
@@ -41,33 +31,6 @@ impl Drop for Signals {
     }
 }
 
-struct OwnedGroup {
-    child: Child,
-    group: Pid,
-}
-
-impl Drop for OwnedGroup {
-    fn drop(&mut self) {
-        let _ = killpg(self.group, Signal::SIGTERM);
-        let deadline = Instant::now() + Duration::from_millis(100);
-
-        while Instant::now() < deadline {
-            let _ = self.child.try_wait();
-
-            if killpg(self.group, None).is_err() {
-                break;
-            }
-
-            thread::sleep(Duration::from_millis(5));
-        }
-
-        let _ = killpg(self.group, Signal::SIGKILL);
-        let _ = self.child.wait();
-    }
-}
-
-/// A separate process watches the owner's process identity, including zombie state.
-/// This survives abrupt owner death without tying children to an owner's worker thread.
 pub(super) fn run(arguments: OwnedProcessArgs) -> Result<ExitCode> {
     let cancelled = Arc::new(AtomicBool::new(false));
     let mut signals = Signals(Vec::new());
@@ -78,64 +41,28 @@ pub(super) fn run(arguments: OwnedProcessArgs) -> Result<ExitCode> {
             .push(flag::register(signal, Arc::clone(&cancelled)).into_diagnostic()?);
     }
 
-    if !parent_alive(arguments.parent_pid, arguments.parent_start_ticks) {
-        return Ok(ExitCode::FAILURE);
-    }
-
     let (program, arguments_tail) = arguments
         .command
         .split_first()
         .ok_or_else(|| miette::miette!("owned process requires a command"))?;
 
-    let mut child = Command::new(program)
-        .args(arguments_tail)
-        .process_group(0)
-        .spawn()
-        .into_diagnostic()?;
-    let group = match i32::try_from(child.id()) {
-        Ok(pid) => Pid::from_raw(pid),
-        Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
-
-            return Err(error).into_diagnostic();
-        }
+    let owner = ProcessIdentity {
+        pid: arguments.parent_pid,
+        start_ticks: arguments.parent_start_ticks,
     };
-    let mut owned = OwnedGroup { child, group };
+    let status = owned::supervise(
+        owner,
+        Command::new(program).args(arguments_tail),
+        &cancelled,
+    )
+    .into_diagnostic()?;
 
-    loop {
-        if let Some(status) = owned.child.try_wait().into_diagnostic()? {
-            return Ok(ExitCode::from(
-                status
-                    .code()
-                    .and_then(|code| return u8::try_from(code).ok())
-                    .unwrap_or(1),
-            ));
-        }
-
-        if cancelled.load(Ordering::Relaxed)
-            || !parent_alive(arguments.parent_pid, arguments.parent_start_ticks)
-        {
-            return Ok(ExitCode::FAILURE);
-        }
-
-        thread::sleep(Duration::from_millis(20));
-    }
-}
-
-fn parent_alive(pid: u32, start_ticks: u64) -> bool {
-    let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
-        return false;
-    };
-    let Some((_, suffix)) = stat.rsplit_once(')') else {
-        return false;
-    };
-    let mut fields = suffix.split_whitespace();
-    if matches!(fields.next(), None | Some("Z" | "X")) {
-        return false;
-    }
-    return fields
-        .nth(18)
-        .and_then(|ticks| return ticks.parse::<u64>().ok())
-        == Some(start_ticks);
+    return Ok(status.map_or(ExitCode::FAILURE, |status| {
+        return ExitCode::from(
+            status
+                .code()
+                .and_then(|code| return u8::try_from(code).ok())
+                .unwrap_or(1),
+        );
+    }));
 }

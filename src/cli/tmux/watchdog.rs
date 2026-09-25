@@ -4,28 +4,23 @@ use super::{
     TMUX_INTEGRATION_VERSION,
 };
 use miette::{IntoDiagnostic as _, Result};
-use nix::{
-    errno::Errno,
-    fcntl::{Flock, FlockArg},
-    libc::{O_NOFOLLOW, O_NONBLOCK, S_IFMT, S_IFREG},
-    unistd::geteuid,
-};
+use nix::unistd::geteuid;
 use std::{
     ffi::{OsStr, OsString},
-    fs::{File, OpenOptions},
     os::unix::{
         ffi::OsStringExt as _,
-        fs::{FileTypeExt as _, MetadataExt as _, OpenOptionsExt as _},
+        fs::{FileTypeExt as _, MetadataExt as _},
     },
     path::PathBuf,
     process::{self, Command, ExitCode},
     thread,
 };
 use termtrace_engine::registry::SessionRegistry;
+use termtrace_process::ExclusiveLock;
 
 /// The guard lives for the whole observer lifetime. Kernel release on process
 /// death prevents a killed observer from permanently blocking its replacement.
-pub(super) fn claim(client: &TmuxClient, role: &str) -> Result<Option<Flock<File>>> {
+pub(super) fn claim(client: &TmuxClient, role: &str) -> Result<Option<ExclusiveLock>> {
     let socket = PathBuf::from(OsString::from_vec(client.output([
         "display-message",
         "-p",
@@ -53,26 +48,8 @@ pub(super) fn claim(client: &TmuxClient, role: &str) -> Result<Option<Flock<File
         metadata.ino(),
     ));
 
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .mode(0o600)
-        .custom_flags(O_NOFOLLOW | O_NONBLOCK)
-        .open(path)
-        .into_diagnostic()?;
-
-    let metadata = file.metadata().into_diagnostic()?;
-    if metadata.mode() & S_IFMT != S_IFREG || metadata.uid() != geteuid().as_raw() {
-        return Err(miette::miette!(
-            "observer lock must be a regular file owned by the current user"
-        ));
-    }
-    return match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
-        Ok(lock) => Ok(Some(lock)),
-        Err((_, Errno::EWOULDBLOCK)) => Ok(None),
-        Err((_, error)) => Err(miette::miette!("could not lock tmux observer: {error}")),
-    };
+    return ExclusiveLock::try_acquire(&path)
+        .map_err(|error| return miette::miette!("could not lock tmux observer: {error}"));
 }
 
 pub(super) fn run() -> Result<ExitCode> {

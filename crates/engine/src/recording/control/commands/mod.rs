@@ -19,11 +19,7 @@ use super::screen::{
     CompiledScreenPredicate, ScreenWaiter, MAX_SCREEN_WAITERS,
 };
 use crate::{Error, Result};
-use nix::{
-    errno::Errno,
-    sys::signal::{killpg, Signal},
-    unistd::Pid,
-};
+use nix::errno::Errno;
 use std::{
     sync::mpsc,
     time::{Duration, Instant},

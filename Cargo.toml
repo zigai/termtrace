@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/model",
     "crates/control",
+    "crates/process",
     "crates/terminal",
     "crates/evidence",
     "crates/engine",
@@ -62,6 +63,7 @@ termtrace-evidence = { path = "crates/evidence" }
 termtrace-export = { path = "crates/export" }
 termtrace-media = { path = "crates/media" }
 termtrace-model = { path = "crates/model" }
+termtrace-process = { path = "crates/process" }
 termtrace-render = { path = "crates/render" }
 termtrace-scenario = { path = "crates/scenario" }
 termtrace-schema = { path = "crates/schema" }

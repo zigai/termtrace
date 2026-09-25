@@ -16,15 +16,10 @@ use crate::cli::{
     output::ResponseWriter,
 };
 use miette::{IntoDiagnostic as _, Result};
-use nix::{
-    fcntl::{Flock, FlockArg},
-    libc::{O_NOFOLLOW, S_IFMT, S_IFREG},
-    unistd::geteuid,
-};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::OsString,
-    fs::{File, OpenOptions, Permissions},
+    fs::{OpenOptions, Permissions},
     io::{self, Write as _},
     os::unix::{
         ffi::{OsStrExt as _, OsStringExt as _},
@@ -50,6 +45,7 @@ use termtrace_model::{
     },
     value::ByteString,
 };
+use termtrace_process::ExclusiveLock;
 
 const TMUX_RECORDINGS_DIRECTORY: &str = "tmux-recordings";
 
@@ -1417,7 +1413,7 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     return Ok(());
 }
 
-fn lock_tmux_manifest(path: &Path) -> Result<Flock<File>> {
+fn lock_tmux_manifest(path: &Path) -> Result<ExclusiveLock> {
     let directory = path
         .parent()
         .ok_or_else(|| return miette::miette!("tmux manifest has no parent directory"))?;
@@ -1430,26 +1426,8 @@ fn lock_tmux_manifest(path: &Path) -> Result<Flock<File>> {
 
         return Err(miette::miette!("tmux recording `{name}` was not found"));
     }
-
-    let lock_path = directory.join(".manifest.lock");
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .mode(0o600)
-        .custom_flags(O_NOFOLLOW)
-        .open(&lock_path)
-        .into_diagnostic()?;
-
-    let metadata = file.metadata().into_diagnostic()?;
-    if metadata.mode() & S_IFMT != S_IFREG || metadata.uid() != geteuid().as_raw() {
-        return Err(miette::miette!(
-            "tmux manifest lock must be a regular file owned by the current user"
-        ));
-    }
-    return Flock::lock(file, FlockArg::LockExclusive).map_err(|(_, error)| {
-        return miette::miette!("could not lock tmux manifest: {error}");
-    });
+    return ExclusiveLock::acquire(&directory.join(".manifest.lock"))
+        .map_err(|error| return miette::miette!("could not lock tmux manifest: {error}"));
 }
 
 fn write_tmux_manifest(path: &Path, manifest: &mut TmuxRecordingManifest) -> Result<()> {

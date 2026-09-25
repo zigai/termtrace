@@ -6,8 +6,8 @@ use super::{
     },
     profile::materialize_profile,
     util::{
-        command_output, command_output_in_profile, external_error, read_json, secure_permissions,
-        unix_now_ns,
+        check_cancelled, command_output, command_output_in_profile, external_error, read_json,
+        secure_permissions, unix_now_ns,
     },
     validate_visual_manifest, Error, Result,
 };
@@ -22,11 +22,7 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     result::Result as StdResult,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    thread,
+    sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant},
 };
 use termtrace_engine::observation::{replay_endpoint_for_prefix, replay_endpoint_for_session};
@@ -50,6 +46,10 @@ use termtrace_model::{
     },
     value::geometry::TerminalGeometryReport,
 };
+use termtrace_process::poll_until;
+
+const WORKER: &str = "native replay worker";
+const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 struct WorkDirectory(PathBuf);
 
@@ -100,7 +100,7 @@ impl NativeReplayWorker {
             return Err(failure("invalid replay worker timeout or viewport"));
         }
 
-        check_cancelled(&cancelled)?;
+        check_cancelled(&cancelled, WORKER)?;
 
         let session =
             fs::canonicalize(session).map_err(|source| return filesystem(session, source))?;
@@ -191,25 +191,16 @@ impl NativeReplayWorker {
         }
 
         let mut ghostty = ManagedChild::spawn_logged("ghostty replay worker", &mut command)?;
-        let deadline = Instant::now() + timeout;
-        let report: TerminalGeometryReport = loop {
-            check_cancelled(&cancelled)?;
+        let report: TerminalGeometryReport =
+            poll_until(Instant::now() + timeout, STARTUP_POLL_INTERVAL, || {
+                check_cancelled(&cancelled, WORKER)?;
 
-            ghostty.check_running()?;
-            xvfb.check_running()?;
+                ghostty.check_running()?;
+                xvfb.check_running()?;
 
-            if geometry.is_file()
-                && let Ok(report) = read_json(&geometry)
-            {
-                break report;
-            }
-
-            if Instant::now() >= deadline {
-                return Err(failure("worker startup timed out"));
-            }
-
-            thread::sleep(Duration::from_millis(20));
-        };
+                return Ok::<_, Error>(read_json(&geometry).ok());
+            })?
+            .ok_or_else(|| return failure("worker startup timed out"))?;
 
         super::geometry::validate_capture_geometry(
             manifest.geometry,
@@ -399,7 +390,7 @@ impl NativeReplayWorker {
             return Err(failure("worker is closed"));
         }
 
-        check_cancelled(&self.cancelled)?;
+        check_cancelled(&self.cancelled, WORKER)?;
 
         let mut request = serde_json::to_vec(&WorkerRequest::Advance {
             endpoint: endpoint.clone(),
@@ -410,15 +401,11 @@ impl NativeReplayWorker {
             .write_all(&request)
             .map_err(|error| return failure(&error.to_string()))?;
 
-        let deadline = Instant::now() + self.timeout;
         let mut response = Vec::new();
 
-        loop {
-            check_cancelled(&self.cancelled)?;
-
-            if Instant::now() >= deadline {
-                return Err(failure("worker request timed out"));
-            }
+        // Each attempt waits in the socket read timeout, so attempts need no extra sleep.
+        poll_until(Instant::now() + self.timeout, Duration::ZERO, || {
+            check_cancelled(&self.cancelled, WORKER)?;
 
             self.ghostty.check_running()?;
             self.xvfb.check_running()?;
@@ -437,7 +424,7 @@ impl NativeReplayWorker {
                             | io::ErrorKind::Interrupted
                     ) =>
                 {
-                    continue;
+                    return Ok(None);
                 }
                 Err(error) => return Err(failure(&error.to_string())),
             }
@@ -445,11 +432,9 @@ impl NativeReplayWorker {
             if response.len() > 65536 {
                 return Err(failure("worker response exceeds framing limit"));
             }
-
-            if response.contains(&b'\n') {
-                break;
-            }
-        }
+            return Ok(response.contains(&b'\n').then_some(()));
+        })?
+        .ok_or_else(|| return failure("worker request timed out"))?;
 
         match serde_json::from_slice(&response)
             .map_err(|error| return failure(&error.to_string()))?
@@ -535,10 +520,10 @@ impl NativeReplayWorker {
             &format!(":{}", self.lease.number),
             &screenshot,
             self.timeout,
-            || return check_cancelled(&self.cancelled),
+            || return check_cancelled(&self.cancelled, WORKER),
         )?;
 
-        check_cancelled(&self.cancelled)?;
+        check_cancelled(&self.cancelled, WORKER)?;
 
         secure_permissions(&screenshot)?;
 
@@ -611,7 +596,7 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
 }
 
 fn failure(reason: &str) -> Error {
-    return external_error("native replay worker", reason);
+    return external_error(WORKER, reason);
 }
 
 fn filesystem(path: &Path, source: io::Error) -> Error {
@@ -619,11 +604,4 @@ fn filesystem(path: &Path, source: io::Error) -> Error {
         path: path.to_path_buf(),
         source,
     };
-}
-
-fn check_cancelled(cancelled: &AtomicBool) -> Result<()> {
-    if cancelled.load(Ordering::Relaxed) {
-        return Err(failure("capture cancelled"));
-    }
-    return Ok(());
 }

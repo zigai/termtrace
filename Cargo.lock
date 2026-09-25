@@ -2396,6 +2396,7 @@ dependencies = [
  "termtrace-export",
  "termtrace-media",
  "termtrace-model",
+ "termtrace-process",
  "termtrace-render",
  "termtrace-scenario",
  "termtrace-schema",
@@ -2418,6 +2419,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "termtrace-model",
+ "termtrace-process",
  "thiserror 2.0.18",
 ]
 
@@ -2441,6 +2443,7 @@ dependencies = [
  "termtrace-control",
  "termtrace-evidence",
  "termtrace-model",
+ "termtrace-process",
  "termtrace-terminal",
  "tracing",
  "uuid",
@@ -2499,6 +2502,7 @@ dependencies = [
  "termtrace-engine",
  "termtrace-evidence",
  "termtrace-model",
+ "termtrace-process",
  "termtrace-render",
  "termtrace-terminal",
  "thiserror 2.0.18",
@@ -2529,6 +2533,14 @@ dependencies = [
  "termtrace-model",
  "termtrace-sdk",
  "tokio",
+]
+
+[[package]]
+name = "termtrace-process"
+version = "0.1.0"
+dependencies = [
+ "nix 0.30.1",
+ "tempfile",
 ]
 
 [[package]]
@@ -2603,6 +2615,7 @@ dependencies = [
  "termtrace-control",
  "termtrace-media",
  "termtrace-model",
+ "termtrace-process",
  "termtrace-scenario",
  "termtrace-service",
  "thiserror 2.0.18",
@@ -2627,6 +2640,7 @@ dependencies = [
  "termtrace-export",
  "termtrace-media",
  "termtrace-model",
+ "termtrace-process",
  "termtrace-render",
  "termtrace-terminal",
  "thiserror 2.0.18",

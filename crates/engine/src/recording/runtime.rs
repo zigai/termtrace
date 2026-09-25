@@ -6,7 +6,7 @@ use super::{
     input::{apply_input, apply_resize},
     model::{RuntimeMessage, TerminalGeometry},
     presentation::{process_semantic_bytes, process_semantic_output, resize_semantic},
-    process::{terminate_process_group, RuntimeWorkers},
+    process::RuntimeWorkers,
     support::terminal_error,
     termination::{Effect, Fact, Tick},
 };
@@ -67,7 +67,7 @@ pub(super) fn consume_runtime(
     let (workers, receiver) = match started {
         Ok(started) => started,
         Err(error) => {
-            terminate_process_group(actor.spawned.pid);
+            actor.spawned.kill_process_group();
             let _ = actor.spawned.child.kill();
             let _ = actor.spawned.child.wait();
 
@@ -158,7 +158,7 @@ pub(super) fn consume_runtime(
                             message: message.to_owned(),
                         })?;
                     }
-                    Effect::KillProcessGroup => terminate_process_group(actor.spawned.pid),
+                    Effect::KillProcessGroup => actor.spawned.kill_process_group(),
                     Effect::Fail { operation, reason } => {
                         return Err(terminal_error(operation, reason));
                     }
@@ -193,7 +193,7 @@ pub(super) fn consume_runtime(
     {
         super::degraded::preserve_terminal(actor, &receiver, error);
     } else if result.is_err() {
-        terminate_process_group(actor.spawned.pid);
+        actor.spawned.kill_process_group();
         let _ = actor.spawned.child.kill();
         let _ = actor.spawned.child.wait();
     }

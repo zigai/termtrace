@@ -3,13 +3,10 @@
 use super::{
     actor::SessionActor,
     model::RuntimeMessage,
+    process::host_signal,
     termination::{DESCENDANT_DRAIN_TIMEOUT, HOST_SIGNAL_GRACE_PERIOD},
 };
 use crate::Error;
-use nix::{
-    sys::signal::{killpg, Signal},
-    unistd::Pid,
-};
 use std::{
     io::Write as _,
     mem::take,
@@ -139,20 +136,8 @@ pub(super) fn preserve_terminal(
                     .get_or_insert_with(|| return Instant::now() + HOST_SIGNAL_GRACE_PERIOD);
 
                 // This is an external user/lifecycle signal, not recorder-error cleanup.
-                if let Some(pid) = actor
-                    .spawned
-                    .pid
-                    .and_then(|pid| return i32::try_from(pid).ok())
-                {
-                    let signal = match signal {
-                        ProcessSignal::Interrupt => Signal::SIGINT,
-                        ProcessSignal::Terminate => Signal::SIGTERM,
-                        ProcessSignal::Hangup => Signal::SIGHUP,
-                        ProcessSignal::User1 => Signal::SIGUSR1,
-                        ProcessSignal::User2 => Signal::SIGUSR2,
-                    };
-
-                    let _signal = killpg(Pid::from_raw(pid), signal);
+                if let Some(group) = actor.spawned.process_group() {
+                    let _signal = group.signal(host_signal(signal).0);
                 }
             }
             Ok(RuntimeMessage::Control { request, response }) => {
@@ -187,7 +172,7 @@ pub(super) fn preserve_terminal(
         if !child_exited
             && signal_deadline.is_some_and(|deadline| return Instant::now() >= deadline)
         {
-            super::process::terminate_process_group(actor.spawned.pid);
+            actor.spawned.kill_process_group();
 
             signal_deadline = None;
         }
@@ -198,7 +183,7 @@ pub(super) fn preserve_terminal(
             if output_closed || exited.elapsed() >= DESCENDANT_DRAIN_TIMEOUT {
                 // Descendants retaining the PTY after the root exits follow normal lifecycle cleanup.
                 if !output_closed {
-                    super::process::terminate_process_group(actor.spawned.pid);
+                    actor.spawned.kill_process_group();
                 }
 
                 health.unrecorded_output_bytes = unrecorded_output_bytes;

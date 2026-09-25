@@ -20,6 +20,7 @@ use termtrace_model::{
     },
     protocol::control::{ControlRequest, ControlResponse, ProcessSignal},
 };
+use termtrace_process::ProcessGroup;
 
 pub(in crate::recording) struct SpawnedCommand {
     pub(in crate::recording) master: Box<dyn MasterPty + Send>,
@@ -27,6 +28,20 @@ pub(in crate::recording) struct SpawnedCommand {
     pub(in crate::recording) writer: Box<dyn Write + Send>,
     pub(in crate::recording) child: Box<dyn Child + Send + Sync>,
     pub(in crate::recording) pid: Option<u32>,
+}
+
+impl SpawnedCommand {
+    /// The session and process group the PTY child leads.
+    pub(in crate::recording) fn process_group(&self) -> Option<ProcessGroup> {
+        return self.pid.and_then(ProcessGroup::from_leader);
+    }
+
+    /// `SIGKILL` the recorded process group; one that is already gone needs nothing.
+    pub(in crate::recording) fn kill_process_group(&self) {
+        if let Some(group) = self.process_group() {
+            let _kill = group.kill();
+        }
+    }
 }
 
 /// Configuration for one recorded command.

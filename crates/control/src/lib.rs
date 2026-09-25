@@ -10,7 +10,7 @@ mod transport;
 pub use error::{Error, Result};
 pub use phase::{
     is_completed, observe_phase, read_completed, recorder_identity, request_or_completed,
-    send_or_completed, PhaseObservation, Reached, RecorderIdentity,
+    send_or_completed, PhaseObservation, Reached,
 };
 pub use transport::{
     control_endpoint_is_reachable, exchange, request, send_request, send_request_response,

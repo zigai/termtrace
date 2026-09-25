@@ -1,11 +1,7 @@
 //! Secure owner-only named-session registry and managed-session retention.
 
 use crate::{Error, Result};
-use nix::{
-    fcntl::{Flock, FlockArg},
-    libc::O_NOFOLLOW,
-    unistd::getuid,
-};
+use nix::{libc::O_NOFOLLOW, unistd::getuid};
 use serde::de::{self, Deserialize, Deserializer};
 use std::{
     collections::HashSet,
@@ -34,6 +30,7 @@ use termtrace_model::{
     },
     value::ByteString,
 };
+use termtrace_process::ExclusiveLock;
 use uuid::Uuid;
 
 const REGISTRY_DIRECTORY: &str = "registry";

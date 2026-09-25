@@ -1,18 +1,18 @@
 use super::{
     process::{owned_command, probe_output, ManagedChild},
-    util::external_error,
+    util::{check_cancelled, external_error},
     Error, Result,
 };
 use std::{
     env, fs,
     path::Path,
     process::{Command, Stdio},
-    sync::atomic::{AtomicBool, Ordering},
-    thread,
+    sync::atomic::AtomicBool,
     time::{Duration, Instant},
 };
 use termtrace_evidence::artifact::{secure_file, write_secure};
 use termtrace_model::artifact::visual::CaptureOptions;
+use termtrace_process::poll_until;
 
 pub(super) fn require_tools() -> Result<()> {
     if env::var_os("WAYLAND_DISPLAY").is_none() {
@@ -62,27 +62,30 @@ pub(super) fn wait_for_acquisition(
     staging: &Path,
     cancelled: &AtomicBool,
 ) -> Result<()> {
-    let deadline = Instant::now() + Duration::from_secs(130);
+    let ready = staging.join("acquisition-ready.json");
 
-    while !staging.join("acquisition-ready.json").is_file() {
-        if cancelled.load(Ordering::Relaxed) {
-            return Err(external_error("Wayland capture", "capture cancelled"));
-        }
+    return poll_until(
+        Instant::now() + Duration::from_secs(130),
+        Duration::from_millis(20),
+        || {
+            if ready.is_file() {
+                return Ok::<_, Error>(Some(()));
+            }
 
-        capture.check_running()?;
-        ghostty.check_running()?;
+            check_cancelled(cancelled, "Wayland capture")?;
 
-        if Instant::now() >= deadline {
-            return Err(external_error(
-                "Wayland capture",
-                "timed out waiting for portal selection and first frame",
-            ));
-        }
+            capture.check_running()?;
+            ghostty.check_running()?;
 
-        thread::sleep(Duration::from_millis(20));
-    }
-
-    return Ok(());
+            return Ok(None);
+        },
+    )?
+    .ok_or_else(|| {
+        return external_error(
+            "Wayland capture",
+            "timed out waiting for portal selection and first frame",
+        );
+    });
 }
 
 #[derive(serde::Deserialize)]

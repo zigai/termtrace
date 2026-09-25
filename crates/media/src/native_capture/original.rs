@@ -12,7 +12,8 @@ use super::{
     profile::materialize_profile,
     resources::capture_resources,
     util::{
-        command_output, command_output_in_profile, external_error, outcome, secure_permissions,
+        check_cancelled, command_output, command_output_in_profile, external_error, outcome,
+        secure_permissions,
     },
     validate_visual_manifest, Error, Result,
 };
@@ -43,6 +44,9 @@ use termtrace_model::{
     execution::session::SessionCompletion,
     value::geometry::TerminalGeometryReport,
 };
+use termtrace_process::poll_until;
+
+const ACQUISITION_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 /// Pixel acquisition backend for a managed original execution.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -345,7 +349,7 @@ fn capture_staged(
     })?;
 
     while !finished.is_file() {
-        check_cancelled(cancelled)?;
+        check_cancelled(cancelled, "original capture")?;
 
         ghostty.check_running()?;
         ffmpeg.check_running()?;
@@ -354,7 +358,7 @@ fn capture_staged(
             xvfb.check_running()?;
         }
 
-        thread::sleep(Duration::from_millis(20));
+        thread::sleep(ACQUISITION_POLL_INTERVAL);
     }
 
     let completion = read_completion(&options.session_directory)?;
@@ -551,42 +555,42 @@ fn capture_staged(
     return Ok((bytes, completion));
 }
 
-fn check_cancelled(cancelled: &AtomicBool) -> Result<()> {
-    if cancelled.load(Ordering::Relaxed) {
-        return Err(external_error("original capture", "capture cancelled"));
-    }
-    return Ok(());
-}
-
 fn wait_for_acquisition(
     ffmpeg: &mut ManagedChild,
     staging: &Path,
     cancelled: &AtomicBool,
 ) -> Result<()> {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let path = staging.join("ffmpeg-video.log");
 
-    loop {
-        check_cancelled(cancelled)?;
+    return poll_until(
+        Instant::now() + Duration::from_secs(10),
+        ACQUISITION_POLL_INTERVAL,
+        || {
+            check_cancelled(cancelled, "original capture")?;
 
-        ffmpeg.check_running()?;
+            ffmpeg.check_running()?;
 
-        let path = staging.join("ffmpeg-video.log");
-        let mut bytes = Vec::new();
-        fs::File::open(&path)
-            .and_then(|file| return file.take(65536).read_to_end(&mut bytes))
-            .map_err(|source| return Error::Filesystem { path, source })?;
+            let mut bytes = Vec::new();
+            fs::File::open(&path)
+                .and_then(|file| return file.take(65536).read_to_end(&mut bytes))
+                .map_err(|source| {
+                    return Error::Filesystem {
+                        path: path.clone(),
+                        source,
+                    };
+                })?;
 
-        if String::from_utf8_lossy(&bytes).contains(" pts_time:") {
-            return Ok(());
-        }
-
-        if Instant::now() >= deadline {
-            return Err(external_error(
-                "original capture",
-                "timed out waiting for first acquired video frame",
-            ));
-        }
-
-        thread::sleep(Duration::from_millis(20));
-    }
+            return Ok::<_, Error>(
+                String::from_utf8_lossy(&bytes)
+                    .contains(" pts_time:")
+                    .then_some(()),
+            );
+        },
+    )?
+    .ok_or_else(|| {
+        return external_error(
+            "original capture",
+            "timed out waiting for first acquired video frame",
+        );
+    });
 }

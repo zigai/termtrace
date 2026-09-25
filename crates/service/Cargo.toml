@@ -9,6 +9,7 @@ rust-version = "1.97.1"
 
 [dependencies]
 termtrace-model = { version = "=0.1.0", path = "../model" }
+termtrace-process = { version = "=0.1.0", path = "../process" }
 termtrace-control = { version = "=0.1.0", path = "../control" }
 termtrace-terminal = { version = "=0.1.0", path = "../terminal" }
 termtrace-evidence = { version = "=0.1.0", path = "../evidence" }

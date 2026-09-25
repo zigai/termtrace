@@ -1,12 +1,14 @@
 use super::{
     actor_boundaries, apply_input, apply_resize, control_rejected, encode_focus, find_text_regions,
-    finish_with_cleanup, interpolate_cell, killpg, mode_hash, mouse_button_name, prepare_bytes,
+    finish_with_cleanup, interpolate_cell, mode_hash, mouse_button_name, prepare_bytes,
     prepare_key, prepare_paste, presented_state_hash, resize_semantic,
     supported_geometry_cell_count, terminal_error, validate_control_input, ByteString,
     ControlCommand, ControlData, Errno, Error, Event, EventLogWriter, Fact, FocusEvent,
     InputDescriptor, InputKind, InputSource, Instant, MouseAction, MouseButton, OperationStatus,
-    Pid, PointerOperation, ProcessSignal, Result, SessionActor, Signal, TerminalGeometry, Uuid,
+    PointerOperation, ProcessSignal, Result, SessionActor, TerminalGeometry, Uuid,
 };
+use crate::recording::process::host_signal;
+use termtrace_process::ProcessGroup;
 
 impl SessionActor<'_> {
     pub(super) fn execute_control_command(
@@ -722,7 +724,7 @@ pub(in crate::recording) fn apply_signal(
     signal: ProcessSignal,
     missing_is_ok: bool,
 ) -> Result<()> {
-    let (signal, name) = nix_signal(signal);
+    let (signal, name) = host_signal(signal);
     event_log.append(Event::SignalIntent {
         operation_id,
         number: signal as i32,
@@ -730,9 +732,9 @@ pub(in crate::recording) fn apply_signal(
     })?;
 
     let signal_result = pid
-        .and_then(|value| return i32::try_from(value).ok())
+        .and_then(ProcessGroup::from_leader)
         .ok_or(Errno::ESRCH)
-        .and_then(|value| return killpg(Pid::from_raw(value), signal));
+        .and_then(|group| return group.signal(signal));
 
     let status = if signal_result.is_ok() {
         OperationStatus::Applied
@@ -765,14 +767,4 @@ pub(in crate::recording) fn apply_signal(
         )),
         result_write,
     );
-}
-
-fn nix_signal(signal: ProcessSignal) -> (Signal, &'static str) {
-    match signal {
-        ProcessSignal::Interrupt => return (Signal::SIGINT, "SIGINT"),
-        ProcessSignal::Terminate => return (Signal::SIGTERM, "SIGTERM"),
-        ProcessSignal::Hangup => return (Signal::SIGHUP, "SIGHUP"),
-        ProcessSignal::User1 => return (Signal::SIGUSR1, "SIGUSR1"),
-        ProcessSignal::User2 => return (Signal::SIGUSR2, "SIGUSR2"),
-    }
 }

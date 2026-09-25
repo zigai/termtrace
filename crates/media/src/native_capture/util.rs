@@ -6,6 +6,7 @@ use std::{
     os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use termtrace_model::artifact::visual::{CaptureKind, CaptureOutcome};
@@ -32,6 +33,13 @@ pub(super) fn external_error(program: &str, error: impl ToString) -> Error {
         operation: program.to_owned(),
         reason: error.to_string(),
     };
+}
+
+pub(super) fn check_cancelled(cancelled: &AtomicBool, operation: &str) -> Result<()> {
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(external_error(operation, "capture cancelled"));
+    }
+    return Ok(());
 }
 
 pub(super) fn status_error_with_logs(program: &str, status: ExitStatus, staging: &Path) -> Error {

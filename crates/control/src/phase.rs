@@ -6,10 +6,9 @@ use crate::{
 };
 use serde::de::DeserializeOwned;
 use std::{
-    fs::{self, File},
+    fs::File,
     io::{ErrorKind, Read as _},
     path::{Path, PathBuf},
-    thread,
     time::{Duration, Instant},
 };
 use termtrace_model::{
@@ -22,17 +21,9 @@ use termtrace_model::{
         MAX_CONTROL_MESSAGE_BYTES,
     },
 };
+use termtrace_process::{poll_until, ProcessIdentity};
 
 const COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(10);
-
-/// Process identity of the recorder answering a session's control socket.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RecorderIdentity {
-    /// Recorder process ID reported by socket peer credentials.
-    pub pid: u32,
-    /// Kernel start time of that process, distinguishing reused PIDs.
-    pub start_ticks: u64,
-}
 
 /// A session's phase with the evidence that decided it.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -42,7 +33,7 @@ pub struct PhaseObservation {
     /// Why the session is not simply live or completed, when known.
     pub diagnostic: Option<String>,
     /// Identity of the recorder that answered, when the session is live.
-    pub recorder: Option<RecorderIdentity>,
+    pub recorder: Option<ProcessIdentity>,
 }
 
 /// A request's outcome against a session that may have completed.
@@ -91,20 +82,9 @@ pub fn is_completed(session: &Path) -> bool {
 ///
 /// Returns the first evidence error reported by [`read_completed`].
 fn wait_completed(session: &Path, grace: Duration) -> Result<Option<SessionCompletion>> {
-    let started = Instant::now();
-
-    loop {
-        if let Some(completion) = read_completed(session)? {
-            return Ok(Some(completion));
-        }
-
-        let elapsed = started.elapsed();
-        if elapsed >= grace {
-            return Ok(None);
-        }
-
-        thread::sleep(COMPLETION_POLL_INTERVAL.min(grace.saturating_sub(elapsed)));
-    }
+    return poll_until(Instant::now() + grace, COMPLETION_POLL_INTERVAL, || {
+        return read_completed(session);
+    });
 }
 
 /// Observe a session's phase from its evidence and the recorder answering its control socket.
@@ -120,10 +100,9 @@ pub fn observe_phase(session: &Path) -> PhaseObservation {
         return PhaseObservation {
             phase: SessionPhase::Live,
             diagnostic: None,
-            recorder: u32::try_from(credentials.pid()).ok().and_then(|pid| {
-                return process_start_ticks(pid)
-                    .map(|start_ticks| return RecorderIdentity { pid, start_ticks });
-            }),
+            recorder: u32::try_from(credentials.pid())
+                .ok()
+                .and_then(|pid| return ProcessIdentity::of(pid).ok()),
         };
     }
     return observed(
@@ -133,7 +112,7 @@ pub fn observe_phase(session: &Path) -> PhaseObservation {
 }
 
 /// Return the identity of the recorder answering a session's control socket.
-pub fn recorder_identity(session: &Path) -> Option<RecorderIdentity> {
+pub fn recorder_identity(session: &Path) -> Option<ProcessIdentity> {
     return observe_phase(session).recorder;
 }
 
@@ -268,21 +247,10 @@ where
     });
 }
 
-fn process_start_ticks(pid: u32) -> Option<u64> {
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let close = stat.rfind(')')?;
-
-    return stat
-        .get(close + 1..)?
-        .split_whitespace()
-        .nth(19)?
-        .parse()
-        .ok();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::TempDir;
 
     #[test]

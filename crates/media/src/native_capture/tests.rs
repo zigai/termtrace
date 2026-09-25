@@ -116,12 +116,9 @@ fn playback_failure_handshake_preempts_timeout() {
     )
     .expect("failure handshake");
 
-    let child = Command::new("/bin/sleep")
-        .arg("5")
-        .spawn()
-        .expect("sleep process");
-
-    let mut child = ManagedChild::new("playback-test", child);
+    let mut child =
+        ManagedChild::spawn_logged("playback-test", Command::new("/bin/sleep").arg("5"))
+            .expect("sleep process");
     let error = wait_for_playback_handshake(
         &timing_path,
         &error_path,

@@ -2,22 +2,13 @@ use super::{
     util::{external_error, read_json, status_error_with_logs},
     Error, Result,
 };
-use nix::{
-    errno::Errno,
-    fcntl::{fcntl, FcntlArg, Flock, FlockArg, OFlag},
-    sys::signal::{killpg, Signal},
-    unistd::Pid,
-};
+use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use serde::de::DeserializeOwned;
 use std::{
-    env,
-    fs::{self, OpenOptions},
+    env, fs,
     io::{ErrorKind, Read, Write as _},
-    os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
-    os::unix::process::CommandExt as _,
     path::{Path, PathBuf},
-    process::{self, Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio},
-    thread,
+    process::{self, ChildStderr, ChildStdout, Command, ExitStatus, Stdio},
     time::{Duration, Instant},
 };
 use termtrace_evidence::artifact::secure_file;
@@ -25,18 +16,24 @@ use termtrace_model::{
     artifact::playback::{PlaybackFailure, PlaybackTiming},
     artifact::visual::{CaptureKind, CaptureOptions},
 };
+use termtrace_process::{owned, poll_until, ExclusiveLock, SupervisedChild};
+
+/// Grace for a managed group after `SIGTERM`. It exceeds [`owned::GROUP_GRACE`] plus one
+/// owner poll so a helper-led group can stop its inner group before being killed.
+const TERMINATION_GRACE: Duration = Duration::from_millis(250);
+const PROBE_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const HANDSHAKE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 pub(super) struct ManagedChild {
     name: &'static str,
-    child: Option<Child>,
-    group: Option<Pid>,
+    child: Option<SupervisedChild>,
     output: Option<ProbeOutput>,
 }
 
 pub(super) struct DisplayLease {
     pub(super) number: u16,
     // Persistent inode with a kernel lock; owner death releases the lease.
-    _lock: Flock<fs::File>,
+    _lock: ExclusiveLock,
 }
 
 struct ProbeOutput {
@@ -99,33 +96,23 @@ pub(super) fn probe_output_with_check(
 ) -> Result<Vec<u8>> {
     command.stdin(Stdio::null());
     let mut process = ManagedChild::spawn_group(name, command)?;
-    let deadline = Instant::now() + timeout;
-
-    loop {
+    let status = poll_until(Instant::now() + timeout, PROBE_POLL_INTERVAL, || {
         check()?;
 
-        if let Some(status) = process.try_wait()? {
-            if !status.success() {
-                return Err(process.failure(status));
-            }
+        return process.try_wait();
+    })?
+    .ok_or_else(|| return external_error(name, "timed out while waiting for probe exit"))?;
 
-            let output = process
-                .output
-                .take()
-                .ok_or_else(|| return external_error(name, "probe output pipes are unavailable"))?;
-
-            return Ok(output.stdout_bytes);
-        }
-
-        if Instant::now() >= deadline {
-            return Err(external_error(
-                name,
-                "timed out while waiting for probe exit",
-            ));
-        }
-
-        thread::sleep(Duration::from_millis(10));
+    if !status.success() {
+        return Err(process.failure(status));
     }
+
+    let output = process
+        .output
+        .take()
+        .ok_or_else(|| return external_error(name, "probe output pipes are unavailable"))?;
+
+    return Ok(output.stdout_bytes);
 }
 
 pub(super) fn ghostty_overrides() -> Vec<String> {
@@ -349,104 +336,45 @@ pub(super) fn spawn_ghostty(
 
 /// Launch the explicit helper supervisor without interpolating executable arguments.
 pub(super) fn owned_command(helper: &Path, program: &str) -> Result<Command> {
-    let parent = process::id();
-    let identity = fs::read_to_string(format!("/proc/{parent}/stat"))
-        .map_err(|error| return external_error("native process identity", error))?;
-    let ticks = identity
-        .rsplit_once(')')
-        .and_then(|(_, fields)| return fields.split_whitespace().nth(19))
-        .ok_or_else(|| {
-            return external_error("native process identity", "missing process start ticks");
-        })?;
-
-    let mut command = Command::new(helper);
-    command.args([
-        "owned-process",
-        "--parent-pid",
-        &parent.to_string(),
-        "--parent-start-ticks",
-        ticks,
-        "--",
-        program,
-    ]);
-
-    return Ok(command);
+    return owned::command(helper, program)
+        .map_err(|error| return external_error("native process identity", error));
 }
 
 impl DisplayLease {
     pub(super) fn acquire() -> Result<Self> {
+        let in_use = |number: u16| {
+            return Path::new(&format!("/tmp/.X{number}-lock")).exists()
+                || Path::new(&format!("/tmp/.X11-unix/X{number}")).exists();
+        };
+
         for number in 200_u16..400 {
-            if Path::new(&format!("/tmp/.X{number}-lock")).exists()
-                || Path::new(&format!("/tmp/.X11-unix/X{number}")).exists()
-            {
+            if in_use(number) {
                 continue;
             }
 
-            let lock_path = PathBuf::from(format!("/tmp/termtrace-X{number}.lock"));
+            let path = PathBuf::from(format!("/tmp/termtrace-X{number}.lock"));
+            let filesystem = |source| {
+                return Error::Filesystem {
+                    path: path.clone(),
+                    source,
+                };
+            };
+            let Some(lock) = ExclusiveLock::try_acquire(&path).map_err(filesystem)? else {
+                continue;
+            };
 
-            match OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .custom_flags(OFlag::O_NOFOLLOW.bits())
-                .mode(0o600)
-                .open(&lock_path)
-            {
-                Ok(file) => {
-                    let metadata = file.metadata().map_err(|source| {
-                        return Error::Filesystem {
-                            path: lock_path.clone(),
-                            source,
-                        };
-                    })?;
-
-                    if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 {
-                        return Err(external_error(
-                            "native display lease",
-                            "lease must be a private regular file",
-                        ));
-                    }
-
-                    let mut file = match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
-                        Ok(lock) => lock,
-                        Err((_, Errno::EWOULDBLOCK)) => continue,
-                        Err((_, error)) => {
-                            return Err(external_error("native display lease", error));
-                        }
-                    };
-
-                    if Path::new(&format!("/tmp/.X{number}-lock")).exists()
-                        || Path::new(&format!("/tmp/.X11-unix/X{number}")).exists()
-                    {
-                        continue;
-                    }
-
-                    file.set_len(0).map_err(|source| {
-                        return Error::Filesystem {
-                            path: lock_path.clone(),
-                            source,
-                        };
-                    })?;
-                    writeln!(file, "{}", process::id()).map_err(|source| {
-                        return Error::Filesystem {
-                            path: lock_path.clone(),
-                            source,
-                        };
-                    })?;
-
-                    return Ok(Self {
-                        number,
-                        _lock: file,
-                    });
-                }
-                Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
-                Err(source) => {
-                    return Err(Error::Filesystem {
-                        path: lock_path,
-                        source,
-                    });
-                }
+            if in_use(number) {
+                continue;
             }
+
+            let mut file = lock.file();
+            file.set_len(0).map_err(filesystem)?;
+            writeln!(file, "{}", process::id()).map_err(filesystem)?;
+
+            return Ok(Self {
+                number,
+                _lock: lock,
+            });
         }
 
         return Err(Error::ExternalCommand {
@@ -458,64 +386,29 @@ impl DisplayLease {
 
 impl ManagedChild {
     pub(super) fn id(&self) -> Option<u32> {
-        return self.child.as_ref().map(Child::id);
+        return self.child.as_ref().map(SupervisedChild::id);
     }
 
     /// Own a process group while preserving the caller's file-backed output streams.
     pub(super) fn spawn_logged(name: &'static str, command: &mut Command) -> Result<Self> {
-        let child = command
-            .process_group(0)
-            .spawn()
-            .map_err(|error| return external_error(name, error))?;
+        let child =
+            SupervisedChild::spawn(command).map_err(|error| return external_error(name, error))?;
 
-        let mut managed = Self::new(name, child);
-        let child = managed
-            .child
-            .as_ref()
-            .ok_or_else(|| return external_error(name, "managed child is unavailable"))?;
-        managed.group = Some(Pid::from_raw(
-            i32::try_from(child.id()).map_err(|error| return external_error(name, error))?,
-        ));
-
-        return Ok(managed);
-    }
-
-    pub(super) fn new(name: &'static str, child: Child) -> Self {
-        return Self {
+        return Ok(Self {
             name,
             child: Some(child),
-            group: None,
             output: None,
-        };
+        });
     }
 
     pub(super) fn spawn_group(name: &'static str, command: &mut Command) -> Result<Self> {
-        let mut child = command
-            .process_group(0)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| return external_error(name, error))?;
-        let group = match i32::try_from(child.id()) {
-            Ok(pid) => Pid::from_raw(pid),
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-
-                return Err(external_error(name, error));
-            }
-        };
-
-        let mut managed = Self {
-            name,
-            child: Some(child),
-            group: Some(group),
-            output: None,
-        };
+        let mut managed =
+            Self::spawn_logged(name, command.stdout(Stdio::piped()).stderr(Stdio::piped()))?;
         let child = managed
             .child
             .as_mut()
-            .ok_or_else(|| return external_error(name, "managed child is unavailable"))?;
+            .ok_or_else(|| return external_error(name, "managed child is unavailable"))?
+            .child_mut();
         let stdout = child
             .stdout
             .take()
@@ -574,10 +467,11 @@ impl ManagedChild {
                 .collect();
         });
 
-        return external_error(
-            self.name,
-            format!("exited with {status}: {}", detail.trim()),
-        );
+        let detail = detail.trim();
+        if detail.is_empty() {
+            return external_error(self.name, format!("exited with {status}"));
+        }
+        return external_error(self.name, format!("exited with {status}: {detail}"));
     }
 
     pub(super) fn check_running(&mut self) -> Result<()> {
@@ -588,28 +482,8 @@ impl ManagedChild {
     }
 
     pub(super) fn terminate(&mut self) {
-        if let Some(group) = self.group.take() {
-            let _ = killpg(group, Signal::SIGTERM);
-            let deadline = Instant::now() + Duration::from_millis(250);
-
-            while Instant::now() < deadline {
-                if killpg(group, None).is_err() {
-                    break;
-                }
-
-                if let Some(child) = self.child.as_mut() {
-                    let _ = child.try_wait();
-                }
-
-                thread::sleep(Duration::from_millis(10));
-            }
-
-            let _ = killpg(group, Signal::SIGKILL);
-        }
-
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(child) = self.child.take() {
+            let _termination = child.terminate(TERMINATION_GRACE);
         }
 
         if let Some(output) = self.output.as_mut() {
@@ -634,8 +508,10 @@ pub(super) fn wait_for_x_socket(
     process: &mut ManagedChild,
     timeout: Duration,
 ) -> Result<()> {
-    return wait_until(process, timeout, || {
-        return Path::new(&format!("/tmp/.X11-unix/X{}", lease.number)).exists();
+    let socket = PathBuf::from(format!("/tmp/.X11-unix/X{}", lease.number));
+
+    return wait_while_running(process, timeout, &timed_out_after(timeout), || {
+        return Ok(socket.exists().then_some(()));
     });
 }
 
@@ -644,7 +520,9 @@ pub(super) fn wait_for_file(
     process: &mut ManagedChild,
     timeout: Duration,
 ) -> Result<()> {
-    return wait_until(process, timeout, || return path.is_file());
+    return wait_while_running(process, timeout, &timed_out_after(timeout), || {
+        return Ok(path.is_file().then_some(()));
+    });
 }
 
 pub(super) fn wait_for_json<T: DeserializeOwned>(
@@ -652,28 +530,12 @@ pub(super) fn wait_for_json<T: DeserializeOwned>(
     process: &mut ManagedChild,
     timeout: Duration,
 ) -> Result<T> {
-    let deadline = Instant::now() + timeout;
-
-    loop {
-        if path.is_file()
-            && let Ok(value) = read_json(path)
-        {
-            return Ok(value);
-        }
-
-        if let Some(status) = process.try_wait()? {
-            return Err(status_error(process.name, status));
-        }
-
-        if Instant::now() >= deadline {
-            return Err(Error::ExternalCommand {
-                operation: process.name.to_owned(),
-                reason: format!("timed out waiting for JSON handshake `{}`", path.display()),
-            });
-        }
-
-        thread::sleep(Duration::from_millis(20));
-    }
+    return wait_while_running(
+        process,
+        timeout,
+        &format!("timed out waiting for JSON handshake `{}`", path.display()),
+        || return Ok(read_json(path).ok()),
+    );
 }
 
 pub(super) fn wait_for_playback_handshake(
@@ -682,63 +544,44 @@ pub(super) fn wait_for_playback_handshake(
     process: &mut ManagedChild,
     timeout: Duration,
 ) -> Result<PlaybackTiming> {
-    let deadline = Instant::now() + timeout;
-
-    loop {
-        if failure.is_file()
-            && let Ok(value) = read_json::<PlaybackFailure>(failure)
-        {
-            return Err(Error::InvalidReplay {
-                reason: format!("playback child failed before capture: {}", value.message),
-            });
-        }
-
-        if timing.is_file()
-            && let Ok(value) = read_json(timing)
-        {
-            return Ok(value);
-        }
-
-        if let Some(status) = process.try_wait()? {
-            return Err(status_error(process.name, status));
-        }
-
-        if Instant::now() >= deadline {
-            return Err(Error::ExternalCommand {
-                operation: process.name.to_owned(),
-                reason: "timed out waiting for playback handshake".to_owned(),
-            });
-        }
-
-        thread::sleep(Duration::from_millis(20));
-    }
+    return wait_while_running(
+        process,
+        timeout,
+        "timed out waiting for playback handshake",
+        || {
+            if let Ok(value) = read_json::<PlaybackFailure>(failure) {
+                return Err(Error::InvalidReplay {
+                    reason: format!("playback child failed before capture: {}", value.message),
+                });
+            }
+            return Ok(read_json(timing).ok());
+        },
+    );
 }
 
-fn wait_until(
+/// Poll `ready` until it yields a value; the process exiting first or the deadline fails.
+fn wait_while_running<T>(
     process: &mut ManagedChild,
     timeout: Duration,
-    mut condition: impl FnMut() -> bool,
-) -> Result<()> {
-    let deadline = Instant::now() + timeout;
-
-    loop {
-        if condition() {
-            return Ok(());
+    timed_out: &str,
+    mut ready: impl FnMut() -> Result<Option<T>>,
+) -> Result<T> {
+    let value = poll_until(Instant::now() + timeout, HANDSHAKE_POLL_INTERVAL, || {
+        if let Some(value) = ready()? {
+            return Ok(Some(value));
         }
 
         if let Some(status) = process.try_wait()? {
             return Err(process.failure(status));
         }
+        return Ok(None);
+    })?;
 
-        if Instant::now() >= deadline {
-            return Err(Error::ExternalCommand {
-                operation: process.name.to_owned(),
-                reason: format!("timed out after {} ms", timeout.as_millis()),
-            });
-        }
+    return value.ok_or_else(|| return external_error(process.name, timed_out));
+}
 
-        thread::sleep(Duration::from_millis(20));
-    }
+fn timed_out_after(timeout: Duration) -> String {
+    return format!("timed out after {} ms", timeout.as_millis());
 }
 
 pub(super) fn wait_for_success(
@@ -746,28 +589,17 @@ pub(super) fn wait_for_success(
     timeout: Duration,
     staging: &Path,
 ) -> Result<()> {
-    let deadline = Instant::now() + timeout;
+    let status = poll_until(Instant::now() + timeout, HANDSHAKE_POLL_INTERVAL, || {
+        return process.try_wait();
+    })?
+    .ok_or_else(|| return external_error(process.name, "timed out while waiting for clean exit"))?;
 
-    loop {
-        if let Some(status) = process.try_wait()? {
-            process.terminate();
+    process.terminate();
 
-            return if status.success() {
-                Ok(())
-            } else {
-                Err(status_error_with_logs(process.name, status, staging))
-            };
-        }
-
-        if Instant::now() >= deadline {
-            return Err(Error::ExternalCommand {
-                operation: process.name.to_owned(),
-                reason: "timed out while waiting for clean exit".to_owned(),
-            });
-        }
-
-        thread::sleep(Duration::from_millis(20));
+    if !status.success() {
+        return Err(status_error_with_logs(process.name, status, staging));
     }
+    return Ok(());
 }
 
 pub(super) fn stop_ffmpeg(
@@ -781,7 +613,7 @@ pub(super) fn stop_ffmpeg(
             reason: "managed child is unavailable".to_owned(),
         };
     })?;
-    let stdin = child.stdin.as_mut().ok_or_else(|| {
+    let stdin = child.child_mut().stdin.as_mut().ok_or_else(|| {
         return Error::ExternalCommand {
             operation: process.name.to_owned(),
             reason: "standard-input control pipe is unavailable".to_owned(),
@@ -795,16 +627,10 @@ pub(super) fn stop_ffmpeg(
     return wait_for_success(process, timeout, staging);
 }
 
-fn status_error(program: &str, status: ExitStatus) -> Error {
-    return Error::ExternalCommand {
-        operation: program.to_owned(),
-        reason: format!("exited with {status}"),
-    };
-}
-
 #[cfg(test)]
 mod ownership_tests {
     use super::*;
+    use std::thread;
 
     #[test]
     fn completed_launcher_cannot_leave_a_background_writer() {
@@ -855,7 +681,6 @@ mod ownership_tests {
         child.terminate();
 
         assert!(child.child.is_none());
-        assert!(child.group.is_none());
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 

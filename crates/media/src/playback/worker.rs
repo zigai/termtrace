@@ -13,7 +13,6 @@ use std::{
         net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
-    thread,
     time::{Duration, Instant},
 };
 use termtrace_evidence::{
@@ -25,6 +24,7 @@ use termtrace_model::{
     execution::event::Event, terminal::replay::ReplayEndpoint,
     value::geometry::TerminalGeometryReport,
 };
+use termtrace_process::poll_until;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
@@ -97,18 +97,18 @@ fn run_worker(
             .map_err(|source| return json_error(geometry_file, source))?,
     )?;
 
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let stream = loop {
-        match listener.accept() {
-            Ok((stream, _)) => break stream,
-            Err(error)
-                if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline =>
-            {
-                thread::sleep(Duration::from_millis(10))
-            }
-            Err(error) => return Err(filesystem(socket, error)),
-        }
-    };
+    let stream = poll_until(
+        Instant::now() + Duration::from_secs(20),
+        Duration::from_millis(10),
+        || {
+            return match listener.accept() {
+                Ok((stream, _)) => Ok(Some(stream)),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
+                Err(error) => Err(filesystem(socket, error)),
+            };
+        },
+    )?
+    .ok_or_else(|| return filesystem(socket, io::Error::from(io::ErrorKind::TimedOut)))?;
 
     drop(listener);
 

@@ -10,8 +10,8 @@ use crate::{Error, Result};
 use nix::{
     errno::Errno,
     poll::{poll, PollFd, PollFlags, PollTimeout},
-    sys::signal::{killpg, Signal},
-    unistd::{isatty, pipe, read as fd_read, write as fd_write, Pid},
+    sys::signal::Signal,
+    unistd::{isatty, pipe, read as fd_read, write as fd_write},
 };
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use rustix::termios::{tcgetwinsize, Winsize};
@@ -363,7 +363,10 @@ impl PtyWriter {
         inner: Box<dyn Write + Send>,
         master_raw_fd: Option<i32>,
     ) -> Self {
-        return Self { inner, master_raw_fd };
+        return Self {
+            inner,
+            master_raw_fd,
+        };
     }
 }
 
@@ -645,10 +648,7 @@ impl RuntimeWorkers {
         let signals_stop = self.signals.stop();
         let reader_cancel = match fd_write(&self.reader_cancel, b"x") {
             Ok(_) | Err(Errno::EPIPE) => Ok(()),
-            Err(error) => Err(terminal_error(
-                "cancel PTY reader",
-                error.to_string(),
-            )),
+            Err(error) => Err(terminal_error("cancel PTY reader", error.to_string())),
         };
         let reader_join = self
             .reader
@@ -724,11 +724,15 @@ fn sync_parent_directory(path: &Path) -> Result<()> {
     });
 }
 
-pub(crate) fn terminate_process_group(pid: Option<u32>) {
-    let Some(pid) = pid.and_then(|value| return i32::try_from(value).ok()) else {
-        return;
-    };
-    let _ = killpg(Pid::from_raw(pid), Signal::SIGKILL);
+/// The host signal and its conventional name for a requested process signal.
+pub(in crate::recording) const fn host_signal(signal: ProcessSignal) -> (Signal, &'static str) {
+    match signal {
+        ProcessSignal::Interrupt => return (Signal::SIGINT, "SIGINT"),
+        ProcessSignal::Terminate => return (Signal::SIGTERM, "SIGTERM"),
+        ProcessSignal::Hangup => return (Signal::SIGHUP, "SIGHUP"),
+        ProcessSignal::User1 => return (Signal::SIGUSR1, "SIGUSR1"),
+        ProcessSignal::User2 => return (Signal::SIGUSR2, "SIGUSR2"),
+    }
 }
 
 pub(super) fn invalid_geometry(options: &RecordOptions) -> Error {
@@ -879,10 +883,7 @@ mod tests {
 
         let write_result = pty_writer.write(b"blocked data");
         assert!(write_result.is_err());
-        assert_eq!(
-            write_result.unwrap_err().kind(),
-            ErrorKind::TimedOut,
-        );
+        assert_eq!(write_result.unwrap_err().kind(), ErrorKind::TimedOut,);
 
         drop(read_pipe);
     }
@@ -893,13 +894,8 @@ mod tests {
         let (cancel_read, cancel_write) = pipe().expect("create cancel pipe");
         let (sender, receiver) = mpsc::sync_channel(16);
 
-        let thread = spawn_reader(
-            Box::new(File::from(read_pipe)),
-            None,
-            cancel_read,
-            sender,
-        )
-        .expect("spawn reader");
+        let thread = spawn_reader(Box::new(File::from(read_pipe)), None, cancel_read, sender)
+            .expect("spawn reader");
 
         let _ = fd_write(&cancel_write, b"x");
 

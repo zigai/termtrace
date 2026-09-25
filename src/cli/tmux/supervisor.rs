@@ -20,7 +20,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::{OsStr, OsString},
     fmt::Write as _,
-    io,
     os::unix::ffi::{OsStrExt as _, OsStringExt as _},
     path::{Path, PathBuf},
     process::{self, ExitCode},
@@ -28,6 +27,7 @@ use std::{
     time::{Duration, Instant},
 };
 use termtrace_model::value::ByteString;
+use termtrace_process::ProcessImage;
 
 #[derive(serde::Serialize)]
 pub(super) struct TmuxPaneStatus {
@@ -453,47 +453,24 @@ pub(super) fn process_id_has_role(
     expected_executable: &Path,
     role: &[u8],
 ) -> Result<Option<bool>> {
-    let process = PathBuf::from(format!("/proc/{pid}"));
-    let actual_executable = match fs_err::read_link(process.join("exe")) {
-        Ok(path) => path,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => {
-            return Err(miette::miette!(
-                "could not inspect process executable {}: {source}",
-                process.join("exe").display()
-            ));
-        }
+    let Some(image) = ProcessImage::of(pid)
+        .map_err(|source| return miette::miette!("could not inspect process {pid}: {source}"))?
+    else {
+        return Ok(None);
     };
-
-    if !same_executable(&actual_executable, expected_executable) {
+    if !same_executable(&image.executable, expected_executable) {
         return Ok(Some(false));
     }
 
-    let command_line = match fs_err::read(process.join("cmdline")) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => {
-            return Err(miette::miette!(
-                "could not inspect process command line {}: {source}",
-                process.join("cmdline").display()
-            ));
-        }
-    };
-
-    let mut arguments = command_line.split(|byte| return *byte == 0);
-    let _program = arguments.next();
-    let mut group = arguments.next();
-    while let Some(arg) = group {
-        if arg == b"tmux" {
-            break;
-        }
-
-        group = arguments.next();
-    }
-
+    let mut arguments = image
+        .arguments
+        .iter()
+        .skip(1)
+        .map(|arg| return arg.as_bytes());
+    let found_group = arguments.any(|arg| return arg == b"tmux");
     let action = arguments.next();
 
-    return Ok(Some(group == Some(b"tmux") && action == Some(role)));
+    return Ok(Some(found_group && action == Some(role)));
 }
 
 pub(super) fn pane_process_rows(client: &TmuxClient) -> Result<Vec<PaneProcessRow>> {

@@ -341,26 +341,11 @@ impl SessionRegistry {
         return self.encode_record(&reservation.alias, reservation);
     }
 
-    pub(super) fn lock(&self) -> Result<Flock<File>> {
+    pub(super) fn lock(&self) -> Result<ExclusiveLock> {
         let path = self.directory.join(".registry.lock");
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .mode(0o600)
-            .custom_flags(O_NOFOLLOW)
-            .open(&path)
-            .map_err(|source| {
-                return Error::Filesystem {
-                    path: path.clone(),
-                    source,
-                };
-            })?;
 
-        validate_entry_file(&path, &file)?;
-
-        return Flock::lock(file, FlockArg::LockExclusive).map_err(|(_, error)| {
-            return registry_error("lock session registry", error.to_string());
+        return ExclusiveLock::acquire(&path).map_err(|source| {
+            return Error::Filesystem { path, source };
         });
     }
 }

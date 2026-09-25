@@ -4,16 +4,13 @@ use nix::{
     errno::Errno,
     fcntl::{fcntl, FcntlArg, OFlag},
     poll::{poll, PollFd, PollFlags, PollTimeout},
-    sys::signal::{killpg, Signal},
-    unistd::Pid,
 };
 use std::{
     io::{self, Read as _, Write as _},
-    os::{fd::AsFd, unix::process::CommandExt as _},
+    os::fd::AsFd,
     path::Path,
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    process::{ChildStdin, ChildStdout, Command, Stdio},
     result::Result as StdResult,
-    thread,
     time::{Duration, Instant},
 };
 use termtrace_model::protocol::{
@@ -23,8 +20,11 @@ use termtrace_model::protocol::{
         DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
     },
 };
+use termtrace_process::{poll_until, SupervisedChild};
 use thiserror::Error;
 use uuid::Uuid;
+
+const CLOSE_POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 /// Failure of the installed process driver's framing or transport.
 #[derive(Debug, Error)]
@@ -56,32 +56,30 @@ type Result<T, E = DriverError> = StdResult<T, E>;
 /// closes its input and lets it finalize sessions it owns; attached sessions keep
 /// their independent recorder ownership. Use `close` to observe cleanup errors.
 pub struct Driver {
-    child: Child,
+    /// The driver's process group, until the driver is closed and reaped.
+    child: Option<SupervisedChild>,
     input: Option<ChildStdin>,
     output: Option<ChildStdout>,
-    closed: bool,
 }
 
 impl Driver {
     /// Start the installed executable and validate its protocol handshake.
     pub fn spawn(binary: impl AsRef<Path>) -> Result<Self> {
-        let child = Command::new(binary.as_ref())
-            .arg("agent")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .process_group(0)
-            .spawn()
-            .map_err(|source| return transport("spawn", false, source))?;
-
+        let mut child = SupervisedChild::spawn(
+            Command::new(binary.as_ref())
+                .arg("agent")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit()),
+        )
+        .map_err(|source| return transport("spawn", false, source))?;
+        let input = child.child_mut().stdin.take();
+        let output = child.child_mut().stdout.take();
         let mut driver = Self {
-            child,
-            input: None,
-            output: None,
-            closed: false,
+            child: Some(child),
+            input,
+            output,
         };
-        driver.input = driver.child.stdin.take();
-        driver.output = driver.child.stdout.take();
 
         nonblocking(
             driver
@@ -130,7 +128,7 @@ impl Driver {
     /// After uncertain delivery, retry only according to the returned driver or
     /// actor evidence; never generate a new ID merely because a timeout occurred.
     pub fn send(&mut self, request: &DriverRequest, timeout: Duration) -> Result<DriverResponse> {
-        if self.closed || request.version != DRIVER_PROTOCOL_VERSION {
+        if self.child.is_none() || request.version != DRIVER_PROTOCOL_VERSION {
             return Err(protocol(
                 "driver is closed or request version is incompatible",
             ));
@@ -253,48 +251,38 @@ impl Driver {
 
     /// Close input, allow owned-session finalization, and reap the process.
     pub fn close(&mut self, timeout: Duration) -> Result<()> {
-        if self.closed {
+        let Some(mut child) = self.child.take() else {
             return Ok(());
-        }
+        };
 
         self.input.take();
 
-        let started = Instant::now();
+        let exited = match poll_until(Instant::now() + timeout, CLOSE_POLL_INTERVAL, || {
+            return child.try_wait();
+        }) {
+            Ok(exited) => exited,
+            Err(source) => {
+                self.child = Some(child);
 
-        loop {
-            if let Some(status) = self
-                .child
-                .try_wait()
-                .map_err(|source| return transport("close", false, source))?
-            {
-                self.closed = true;
-                self.output.take();
-
-                if !status.success() {
-                    return Err(protocol("driver exited unsuccessfully during cleanup"));
-                }
-                return Ok(());
+                return Err(transport("close", false, source));
             }
+        };
 
-            if started.elapsed() >= timeout {
-                if let Ok(pid) = i32::try_from(self.child.id()) {
-                    let _signal = killpg(Pid::from_raw(pid), Signal::SIGKILL);
-                }
+        self.output.take();
 
-                let _kill = self.child.kill();
-                let _wait = self.child.wait();
-                self.closed = true;
-                self.output.take();
+        let Some(status) = exited else {
+            let _status = child.kill();
 
-                return Err(transport(
-                    "close",
-                    false,
-                    io::Error::from(io::ErrorKind::TimedOut),
-                ));
-            }
-
-            thread::sleep(Duration::from_millis(5));
+            return Err(transport(
+                "close",
+                false,
+                io::Error::from(io::ErrorKind::TimedOut),
+            ));
+        };
+        if !status.success() {
+            return Err(protocol("driver exited unsuccessfully during cleanup"));
         }
+        return Ok(());
     }
 }
 

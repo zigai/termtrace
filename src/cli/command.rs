@@ -15,6 +15,7 @@ use crate::cli::{
 };
 use clap::{error::ErrorKind as ClapErrorKind, CommandFactory as _, Parser, Subcommand};
 use std::env;
+use termtrace_process::owned;
 #[derive(Debug, Parser)]
 #[command(
     name = "termtrace",
@@ -92,7 +93,7 @@ pub(super) enum Command {
     #[command(hide = true)]
     PlaybackWorker(PlaybackWorkerArgs),
     /// Supervise one private native process group against parent process identity.
-    #[command(hide = true)]
+    #[command(hide = true, name = owned::SUBCOMMAND)]
     OwnedProcess(OwnedProcessArgs),
     /// Internal live terminal geometry probe.
     #[command(hide = true)]

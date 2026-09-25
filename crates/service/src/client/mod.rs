@@ -6,15 +6,10 @@ use crate::{
     screen::StableCaptureOptions,
     Error, Result,
 };
-use nix::{
-    errno::Errno,
-    sys::signal::{killpg, Signal},
-    unistd::Pid,
-};
 use std::{
     ffi::OsString,
     fs::OpenOptions,
-    io::{Error as IoError, Write as _},
+    io::Write as _,
     os::unix::fs::OpenOptionsExt as _,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
