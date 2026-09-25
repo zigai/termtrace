@@ -141,7 +141,7 @@ impl Driver {
                         Err(error) => Err(driver_control_failure_from_error(
                             error,
                             path.clone(),
-                            control_command_mutates(command),
+                            command.is_mutation(),
                         )),
                     }
                 }
@@ -819,19 +819,6 @@ pub(super) fn actor_failure_retry(
         return ("safe_same_request_id", true);
     }
     return ("safe_new_request", false);
-}
-
-pub(super) fn control_command_mutates(command: &ControlCommand) -> bool {
-    return !matches!(
-        command,
-        ControlCommand::Ping
-            | ControlCommand::Status
-            | ControlCommand::EventCursor { .. }
-            | ControlCommand::ScreenFrame { .. }
-            | ControlCommand::Snapshot
-            | ControlCommand::WaitScreen { .. }
-            | ControlCommand::CaptureStable { .. }
-    );
 }
 
 pub(super) fn driver_response_is_cacheable(response: &DriverResponse) -> bool {

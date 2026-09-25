@@ -14,9 +14,8 @@ use termtrace_model::{
         SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
         TMUX_PANE_PROVENANCE_VERSION,
     },
+    protocol::control::control_socket_name,
 };
-
-const CONTROL_SOCKET_PREFIX: &str = "termtrace-control-";
 
 /// Load and validate the durable completion record for an event log.
 ///
@@ -366,7 +365,7 @@ pub(super) fn validate_manifest(manifest: &SessionManifest) -> Result<()> {
         )));
     }
 
-    if manifest.control_socket != format!("{CONTROL_SOCKET_PREFIX}{}", manifest.session_id) {
+    if manifest.control_socket != control_socket_name(manifest.session_id) {
         return Err(Error::invalid(
             "session manifest control endpoint does not match its session ID",
         ));

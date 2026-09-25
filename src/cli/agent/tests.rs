@@ -1,7 +1,7 @@
 use super::{
     operations::{
-        actor_failure_retry, control_command_mutates, driver_error, driver_failure_from_error,
-        driver_failure_with_retry, driver_response_is_cacheable,
+        actor_failure_retry, driver_error, driver_failure_from_error, driver_failure_with_retry,
+        driver_response_is_cacheable,
     },
     runtime::{bounded_response, serialized_size, DRIVER_RESPONSE_CACHE_BYTES},
     serve,
@@ -352,12 +352,13 @@ fn retryable_transport_failures_are_not_cached_by_request_id() {
 
 #[test]
 fn retry_classification_distinguishes_observation_from_mutation() {
-    assert!(!control_command_mutates(&ControlCommand::Snapshot));
-    assert!(control_command_mutates(&ControlCommand::InputSequence {
+    assert!(!ControlCommand::Snapshot.is_mutation());
+    assert!(ControlCommand::InputSequence {
         atoms: Vec::new(),
         pace_ns: 0,
         include_atom_outcomes: false,
-    }));
+    }
+    .is_mutation());
     assert_eq!(
         actor_failure_retry("input_sequence_incomplete", None),
         ("safe_same_request_id", false)

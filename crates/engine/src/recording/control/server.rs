@@ -4,7 +4,7 @@ use super::super::{
     model::RuntimeMessage,
     support::{finish_with_cleanup, poll_ready, terminal_error},
 };
-use super::transport::{control_response_timeout, control_socket_address, validate_frame};
+use super::transport::{control_socket_address, validate_frame};
 use crate::{Error, Result};
 use nix::{
     errno::Errno,
@@ -216,7 +216,7 @@ fn handle_control_connection(
     }
 
     let request_id = request.request_id;
-    let response_timeout = control_response_timeout(&request.command, Duration::from_secs(2));
+    let response_timeout = request.command.actor_response_timeout();
     let (response_sender, response_receiver) = mpsc::sync_channel(1);
     let mut message = RuntimeMessage::Control {
         request,

@@ -13,18 +13,9 @@ impl SessionActor<'_> {
         request: ControlRequest,
         response_sender: mpsc::SyncSender<ControlResponse>,
     ) -> Result<()> {
-        if request.expected_presented_state_hash.is_some()
-            && matches!(
-                request.command,
-                ControlCommand::Ping
-                    | ControlCommand::Status
-                    | ControlCommand::EventCursor { .. }
-                    | ControlCommand::Snapshot
-                    | ControlCommand::ScreenFrame { .. }
-                    | ControlCommand::WaitScreen { .. }
-                    | ControlCommand::CaptureStable { .. }
-            )
-        {
+        let read_only = !request.command.is_mutation();
+
+        if request.expected_presented_state_hash.is_some() && read_only {
             let response = control_error_response(
                 request.request_id,
                 "invalid_observation_guard",
@@ -36,16 +27,6 @@ impl SessionActor<'_> {
             return Ok(());
         }
 
-        let read_only = matches!(
-            request.command,
-            ControlCommand::Ping
-                | ControlCommand::Status
-                | ControlCommand::EventCursor { .. }
-                | ControlCommand::Snapshot
-                | ControlCommand::ScreenFrame { .. }
-                | ControlCommand::WaitScreen { .. }
-                | ControlCommand::CaptureStable { .. }
-        );
         let command_hash = if read_only {
             None
         } else {

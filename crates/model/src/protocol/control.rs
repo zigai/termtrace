@@ -13,6 +13,7 @@ use crate::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use uuid::Uuid;
 
 /// A system monotonic clock bracket around a session-relative clock sample.
@@ -31,6 +32,29 @@ pub struct ClockSample {
 pub const CONTROL_PROTOCOL_VERSION: u32 = 17;
 /// Maximum encoded request or response size.
 pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 16 * 1024 * 1024;
+/// Response deadline for commands that do not wait or pace input.
+pub const DEFAULT_CONTROL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Upper bound on inter-atom pacing counted toward a response deadline.
+const MAX_INPUT_SEQUENCE_PACING: Duration = Duration::from_secs(60);
+/// Slack the actor adds after a waiting command's own timeout.
+const ACTOR_WAIT_SLACK: Duration = Duration::from_secs(2);
+/// Slack a client adds after a waiting command's own timeout.
+///
+/// It exceeds [`ACTOR_WAIT_SLACK`] so the actor always answers before a
+/// client abandons the exchange and reports delivery as unknown.
+const CLIENT_WAIT_SLACK: Duration = Duration::from_secs(3);
+const CONTROL_SOCKET_PREFIX: &str = "termtrace-control-";
+
+/// Derive the Linux abstract control-socket name for a recording session.
+pub fn control_socket_name(session_id: Uuid) -> String {
+    return format!("{CONTROL_SOCKET_PREFIX}{session_id}");
+}
+
+/// Whether bytes form one newline-terminated control message within the size limit.
+pub fn is_control_frame(encoded: &[u8]) -> bool {
+    return encoded.last() == Some(&b'\n')
+        && u64::try_from(encoded.len()).unwrap_or(u64::MAX) <= MAX_CONTROL_MESSAGE_BYTES;
+}
 
 /// Derive an input atom's operation identity from its request and zero-based index.
 pub fn derive_input_operation_id(request_id: Uuid, index: usize) -> Uuid {
@@ -410,6 +434,99 @@ pub enum ControlCommand {
     },
     /// Request graceful child termination.
     Stop,
+}
+
+impl ControlCommand {
+    /// Whether the command may change the child, its PTY, or canonical evidence.
+    ///
+    /// Mutations are journaled for idempotent replay, accept presented-state
+    /// guards, and have uncertain effects when delivery fails after dispatch.
+    pub const fn is_mutation(&self) -> bool {
+        return match self {
+            Self::Ping
+            | Self::Status
+            | Self::EventCursor { .. }
+            | Self::Snapshot
+            | Self::ScreenFrame { .. }
+            | Self::WaitScreen { .. }
+            | Self::CaptureStable { .. } => false,
+            Self::Input { .. }
+            | Self::InputSequence { .. }
+            | Self::Act { .. }
+            | Self::Key { .. }
+            | Self::Paste { .. }
+            | Self::Focus { .. }
+            | Self::Pointer { .. }
+            | Self::Activate { .. }
+            | Self::Resize { .. }
+            | Self::Signal { .. }
+            | Self::Mark { .. }
+            | Self::Application { .. }
+            | Self::Stop => true,
+        };
+    }
+
+    /// How long the actor may take to answer before it abandons the request.
+    pub fn actor_response_timeout(&self) -> Duration {
+        return self.response_timeout(ACTOR_WAIT_SLACK);
+    }
+
+    /// How long a client waits for the answer; never shorter than the actor's deadline.
+    pub fn client_response_timeout(&self) -> Duration {
+        return self.response_timeout(CLIENT_WAIT_SLACK);
+    }
+
+    fn response_timeout(&self, wait_slack: Duration) -> Duration {
+        return match self {
+            Self::WaitScreen { timeout_ns, .. } | Self::CaptureStable { timeout_ns, .. } => {
+                Duration::from_nanos(*timeout_ns).saturating_add(wait_slack)
+            }
+            Self::InputSequence { atoms, pace_ns, .. } => {
+                input_sequence_response_timeout(atoms, *pace_ns)
+            }
+            Self::Act {
+                atoms,
+                pace_ns,
+                postcondition,
+                ..
+            } => {
+                let postcondition_timeout = match postcondition {
+                    ActionPostcondition::None => Duration::ZERO,
+                    ActionPostcondition::Idle { timeout_ns, .. }
+                    | ActionPostcondition::Screen { timeout_ns, .. } => {
+                        Duration::from_nanos(*timeout_ns)
+                    }
+                };
+
+                input_sequence_response_timeout(atoms, *pace_ns)
+                    .saturating_add(postcondition_timeout)
+                    .saturating_add(wait_slack)
+            }
+            Self::Ping
+            | Self::Status
+            | Self::EventCursor { .. }
+            | Self::Snapshot
+            | Self::ScreenFrame { .. }
+            | Self::Input { .. }
+            | Self::Key { .. }
+            | Self::Paste { .. }
+            | Self::Focus { .. }
+            | Self::Pointer { .. }
+            | Self::Activate { .. }
+            | Self::Resize { .. }
+            | Self::Signal { .. }
+            | Self::Mark { .. }
+            | Self::Application { .. }
+            | Self::Stop => DEFAULT_CONTROL_RESPONSE_TIMEOUT,
+        };
+    }
+}
+
+fn input_sequence_response_timeout(atoms: &[InputSequenceAtom], pace_ns: u64) -> Duration {
+    let gaps = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
+    let pacing = Duration::from_nanos(pace_ns.saturating_mul(gaps)).min(MAX_INPUT_SEQUENCE_PACING);
+
+    return DEFAULT_CONTROL_RESPONSE_TIMEOUT.saturating_add(pacing);
 }
 
 /// Request envelope carried as one JSON line.
@@ -911,5 +1028,81 @@ mod tests {
             .insert("extra".to_owned(), serde_json::Value::Bool(true));
 
         assert!(serde_json::from_value::<ControlRequest>(encoded).is_err());
+    }
+
+    #[test]
+    fn rejects_unterminated_and_oversized_frames() {
+        assert!(is_control_frame(b"{}\n"));
+        assert!(!is_control_frame(b""));
+        assert!(!is_control_frame(br#"{"version":1}"#));
+
+        let mut oversized = vec![b'x'; usize::try_from(MAX_CONTROL_MESSAGE_BYTES).unwrap()];
+        oversized.push(b'\n');
+
+        assert!(!is_control_frame(&oversized));
+    }
+
+    fn two_text_atoms() -> Vec<InputSequenceAtom> {
+        return (0..2)
+            .map(|index| {
+                return InputSequenceAtom::Bytes {
+                    operation_id: derive_input_operation_id(Uuid::nil(), index),
+                    data: ByteString::new(vec![b'a']),
+                    input_kind: InputKind::Text,
+                    caller_intent: None,
+                };
+            })
+            .collect();
+    }
+
+    #[test]
+    fn paced_sequences_extend_both_sides_of_the_control_deadline() {
+        let command = ControlCommand::InputSequence {
+            atoms: two_text_atoms(),
+            pace_ns: 11_000_000_000,
+            include_atom_outcomes: false,
+        };
+
+        assert_eq!(command.actor_response_timeout(), Duration::from_secs(21));
+        assert_eq!(command.client_response_timeout(), Duration::from_secs(21));
+    }
+
+    #[test]
+    fn clients_outwait_the_actor_for_waiting_commands() {
+        let wait = ControlCommand::WaitScreen {
+            predicate: ScreenPredicate::Contains {
+                text: "ready".to_owned(),
+            },
+            stable_for_ns: 0,
+            timeout_ns: 5_000_000_000,
+            projection: ScreenProjectionRequest::default(),
+        };
+        let act = ControlCommand::Act {
+            atoms: two_text_atoms(),
+            pace_ns: 0,
+            include_atom_outcomes: false,
+            postcondition: ActionPostcondition::None,
+            projection: ScreenProjectionRequest::default(),
+        };
+
+        for command in [wait, act] {
+            assert!(command.client_response_timeout() > command.actor_response_timeout());
+        }
+
+        assert_eq!(
+            ControlCommand::Ping.client_response_timeout(),
+            DEFAULT_CONTROL_RESPONSE_TIMEOUT
+        );
+    }
+
+    #[test]
+    fn only_observations_are_not_mutations() {
+        assert!(!ControlCommand::Snapshot.is_mutation());
+        assert!(!ControlCommand::Status.is_mutation());
+        assert!(ControlCommand::Stop.is_mutation());
+        assert!(ControlCommand::Mark {
+            label: "checkpoint".to_owned()
+        }
+        .is_mutation());
     }
 }

@@ -26,15 +26,12 @@ use std::{
 use termtrace_model::{
     execution::session::SessionManifest,
     protocol::control::{
-        ActionPostcondition, ControlCommand, ControlData, ControlRequest, ControlResponse,
-        ControlResult, InputSequenceAtom, ScreenPredicate, CONTROL_PROTOCOL_VERSION,
-        MAX_CONTROL_MESSAGE_BYTES,
+        is_control_frame, ControlCommand, ControlData, ControlRequest, ControlResponse,
+        ControlResult, ScreenPredicate, CONTROL_PROTOCOL_VERSION,
+        DEFAULT_CONTROL_RESPONSE_TIMEOUT, MAX_CONTROL_MESSAGE_BYTES,
     },
     terminal::{inspection::ScreenWaitOutcome, screen::ScreenProjectionRequest},
 };
-
-const DEFAULT_CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_INPUT_SEQUENCE_PACING: Duration = Duration::from_secs(60);
 
 fn read_control_manifest(session_directory: &Path) -> Result<SessionManifest> {
     let path = session_directory.join("session.json");
@@ -77,7 +74,7 @@ pub(crate) fn control_socket_address(name: &str) -> Result<SocketAddr> {
 pub(crate) fn connect_session_control(session_directory: &Path) -> Result<UnixStream> {
     return connect_session_control_timing(
         session_directory,
-        &ExchangeTiming::Timeout(DEFAULT_CONTROL_TIMEOUT),
+        &ExchangeTiming::Timeout(DEFAULT_CONTROL_RESPONSE_TIMEOUT),
     );
 }
 
@@ -298,10 +295,7 @@ pub fn send_request_response(
     return exchange(
         session_directory.as_ref(),
         request,
-        ExchangeTiming::Timeout(control_response_timeout(
-            &request.command,
-            Duration::from_secs(3),
-        )),
+        ExchangeTiming::Timeout(request.command.client_response_timeout()),
     );
 }
 
@@ -529,44 +523,6 @@ fn exchange_stream(
 }
 
 
-pub(crate) fn control_response_timeout(command: &ControlCommand, wait_slack: Duration) -> Duration {
-    return match command {
-        ControlCommand::WaitScreen { timeout_ns, .. }
-        | ControlCommand::CaptureStable { timeout_ns, .. } => {
-            Duration::from_nanos(*timeout_ns).saturating_add(wait_slack)
-        }
-        ControlCommand::InputSequence { atoms, pace_ns, .. } => {
-            input_sequence_response_timeout(atoms, *pace_ns)
-        }
-        ControlCommand::Act {
-            atoms,
-            pace_ns,
-            postcondition,
-            ..
-        } => {
-            let postcondition_timeout = match postcondition {
-                ActionPostcondition::None => Duration::ZERO,
-                ActionPostcondition::Idle { timeout_ns, .. }
-                | ActionPostcondition::Screen { timeout_ns, .. } => {
-                    Duration::from_nanos(*timeout_ns)
-                }
-            };
-
-            input_sequence_response_timeout(atoms, *pace_ns)
-                .saturating_add(postcondition_timeout)
-                .saturating_add(wait_slack)
-        }
-        _ => DEFAULT_CONTROL_TIMEOUT,
-    };
-}
-
-fn input_sequence_response_timeout(atoms: &[InputSequenceAtom], pace_ns: u64) -> Duration {
-    let gaps = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
-    let pacing = Duration::from_nanos(pace_ns.saturating_mul(gaps)).min(MAX_INPUT_SEQUENCE_PACING);
-
-    return DEFAULT_CONTROL_TIMEOUT.saturating_add(pacing);
-}
-
 fn control_lifecycle_hint(session: &Path) -> String {
     if session.join("completion.json").is_file() {
         return "completed".to_owned();
@@ -619,10 +575,7 @@ fn validate_response_frame(session: &Path, timeout: Duration, encoded: &[u8]) ->
 }
 
 fn validate_frame(encoded: &[u8]) -> Result<()> {
-    if encoded.is_empty()
-        || encoded.last() != Some(&b'\n')
-        || u64::try_from(encoded.len()).unwrap_or(u64::MAX) > MAX_CONTROL_MESSAGE_BYTES
-    {
+    if !is_control_frame(encoded) {
         return Err(Error::InvalidControlProtocol {
             reason: "message must be one newline-terminated JSON object no larger than 16 MiB"
                 .to_owned(),
