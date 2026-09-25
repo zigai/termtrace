@@ -9,8 +9,9 @@ use crate::cli::{
         run_recover as execute_recover, run_verify as execute_verify,
     },
     output::{
-        human_summary, id_list, optional_display, paginate, quoted_text, stable_enum_label,
-        write_json_line, write_json_pretty, write_progress, write_stdout,
+        human_diagnostics_summary, human_last_action_summary, id_list, optional_display, paginate,
+        quoted_text, stable_enum_label, write_json_line, write_json_pretty, write_progress,
+        write_stdout,
     },
     session_helpers::{
         resolve_session, resolve_session_path, resolve_state_point, write_session_lifecycle,
@@ -395,13 +396,7 @@ pub(in crate::cli) fn run_last_action_facade(
     if arguments.json {
         return write_json_pretty(response, &analysis.inspection);
     }
-    return write_stdout(
-        response,
-        human_summary(
-            &serde_json::to_value(&analysis.inspection).into_diagnostic()?,
-            "last_action",
-        ),
-    );
+    return write_stdout(response, human_last_action_summary(&analysis.inspection)?);
 }
 
 pub(in crate::cli) fn run_diagnose_last_action_facade(
@@ -432,13 +427,7 @@ pub(in crate::cli) fn run_diagnose_last_action_facade(
     if arguments.json {
         return write_json_pretty(response, &analysis.diagnostics);
     }
-    return write_stdout(
-        response,
-        human_summary(
-            &serde_json::to_value(&analysis.diagnostics).into_diagnostic()?,
-            "diagnose",
-        ),
-    );
+    return write_stdout(response, human_diagnostics_summary(&analysis.diagnostics));
 }
 
 pub(in crate::cli) fn run_verify(

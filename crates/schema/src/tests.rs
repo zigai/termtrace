@@ -49,7 +49,7 @@ fn checked_in_schemas_match_catalog() {
                 panic!("read checked-in schema {}: {error}", path.display())
             }),
             generated.json,
-            "regenerate schemas with `termtrace tooling schemas --out schemas`"
+            "regenerate schemas with `termtrace schema --out schemas`"
         );
     }
 }

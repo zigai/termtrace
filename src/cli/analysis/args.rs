@@ -1,13 +1,10 @@
 use crate::cli::{
     control::args::SessionArgs,
     integrity::args::{RecoverArgs, VerifyArgs},
-    parsers::{
-        parse_diagnostic_check, parse_event_type, parse_page_limit, parse_stability_duration,
-        parse_state_hash,
-    },
+    parsers::{parse_diagnostic_check, parse_event_type, parse_page_limit, parse_state_hash},
 };
 use clap::{ArgGroup, Args, Subcommand, ValueEnum};
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 use termtrace_engine::timeline::parse_time_offset_ns;
 use termtrace_model::terminal::analysis::DiagnosticCheck;
 
@@ -155,50 +152,6 @@ pub(in crate::cli) enum ShowRenderer {
     Semantic,
     /// Pixel-exact rendering using the native Ghostty VT engine.
     Native,
-}
-
-#[derive(Debug, Args)]
-#[command(group(
-    ArgGroup::new("show_selector")
-        .multiple(false)
-        .args(["state", "state_hash", "event_seq", "at", "at_marker"])
-))]
-pub(in crate::cli) struct ShowArgs {
-    /// Live session name or canonical completed session path.
-    pub(in crate::cli) session: PathBuf,
-    /// Exact semantic state identifier.
-    #[arg(long)]
-    pub(in crate::cli) state: Option<u64>,
-    /// Exact content-addressed semantic state hash.
-    #[arg(long, value_parser = parse_state_hash)]
-    pub(in crate::cli) state_hash: Option<String>,
-    /// Latest state at or before this event sequence.
-    #[arg(long)]
-    pub(in crate::cli) event_seq: Option<u64>,
-    /// Latest state at or before this session offset.
-    #[arg(long, value_parser = parse_time_offset_ns)]
-    pub(in crate::cli) at: Option<u64>,
-    /// State at a unique marker label.
-    #[arg(long)]
-    pub(in crate::cli) at_marker: Option<String>,
-    /// Permit an explicitly selected synchronized-output hidden state.
-    #[arg(long)]
-    pub(in crate::cli) include_hidden: bool,
-    /// Require an unchanged live presented state for this duration.
-    #[arg(long, value_parser = parse_stability_duration, default_value = "0ms")]
-    pub(in crate::cli) stable_for: Duration,
-    /// Maximum live stability wait.
-    #[arg(long, value_parser = crate::cli::parsers::parse_wait_deadline_duration, default_value = "30s")]
-    pub(in crate::cli) timeout: Duration,
-    /// Write a concise provenance header to standard error.
-    #[arg(long)]
-    pub(in crate::cli) metadata: bool,
-    /// Explicitly observe an integrity-checked incomplete event prefix offline.
-    #[arg(long)]
-    pub(in crate::cli) recover_prefix: bool,
-    /// Output representation.
-    #[arg(long, value_enum, default_value_t = ShowFormat::Text)]
-    pub(in crate::cli) format: ShowFormat,
 }
 
 #[derive(Debug, Args)]

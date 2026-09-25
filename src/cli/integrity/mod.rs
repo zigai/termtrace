@@ -1,8 +1,3 @@
-#![expect(
-    dead_code,
-    reason = "Integrity functions preserved for analysis verification and tests"
-)]
-
 use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;

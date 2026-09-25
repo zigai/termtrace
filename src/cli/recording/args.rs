@@ -129,41 +129,6 @@ impl From<RecordingFailurePolicyArg> for RecordingFailurePolicy {
 }
 
 #[derive(Debug, Args)]
-#[expect(dead_code, reason = "Transitional until root CLI cutover")]
-pub(in crate::cli) struct StartArgs {
-    /// New friendly session name.
-    pub(in crate::cli) name: String,
-
-    /// Maximum time to wait for manifest and control readiness in milliseconds (1+).
-    #[arg(long, default_value_t = 10_000, value_parser = clap::value_parser!(u64).range(1..))]
-    pub(in crate::cli) startup_timeout_ms: u64,
-    /// Wait until the first presented screen remains unchanged for this duration.
-    #[arg(
-        long,
-        value_parser = parse_stability_duration,
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "100ms",
-        conflicts_with_all = ["until_screen", "until_screen_regex"]
-    )]
-    pub(in crate::cli) until_idle: Option<Duration>,
-    /// Wait until the first presented screen contains this text.
-    #[arg(long, conflicts_with_all = ["until_idle", "until_screen_regex"])]
-    pub(in crate::cli) until_screen: Option<String>,
-    /// Wait until the first presented screen matches this bounded regular expression.
-    #[arg(long, conflicts_with_all = ["until_idle", "until_screen"], value_parser = parse_bounded_screen_regex)]
-    pub(in crate::cli) until_screen_regex: Option<String>,
-    #[arg(long, value_parser = parse_wait_deadline_duration, default_value = "30s")]
-    pub(in crate::cli) timeout: Duration,
-    /// Emit stable structured output as JSON.
-    #[arg(long)]
-    pub(in crate::cli) json: bool,
-
-    #[command(flatten)]
-    pub(in crate::cli) recording: RecordingArgs,
-}
-
-#[derive(Debug, Args)]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "Environment-change permission and clearing each resource limit are independent CLI options"

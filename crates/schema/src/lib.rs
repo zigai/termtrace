@@ -15,7 +15,7 @@ use termtrace_model::{
         tmux, visual,
     },
     execution::{environment, event, event_log, provenance, receipt, request_journal, session},
-    protocol::{capability, cli_response, control, driver, output_projection},
+    protocol::{capability, control, driver, output_projection},
     registry as model_registry, scenario,
     terminal::{analysis, diff, inspection, observation, replay, reviewer, screen, timeline, vt},
 };
@@ -337,9 +337,6 @@ registry!(
     ),
     ("acceptance-benchmark.schema.json",
         manual generate_acceptance_benchmark_schema
-    ),
-    ("cli-response.schema.json",
-        cli_response::CliResponseEnvelope
     ),
 );
 

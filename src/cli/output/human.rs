@@ -80,61 +80,14 @@ pub(crate) fn human_screen_summary(value: &serde_json::Value) -> String {
     return output;
 }
 
-pub(super) fn human_failure_summary(
-    state: &ResponseState,
-    error: Option<&miette::Report>,
-) -> String {
-    let last = state.values.last();
-    let code = failure_string(last, "code").unwrap_or_else(|| return "operation_failed".to_owned());
-    let message = error.map_or_else(
-        || {
-            return failure_string(last, "message")
-                .or_else(|| return failure_string(last, "error"))
-                .or_else(|| return failure_string(last, "diagnostic"))
-                .unwrap_or_else(|| return "command failed".to_owned());
-        },
-        report_message,
-    );
-
-    let mut summary = format!("[{code}] {message}");
-
-    if state.mutating {
-        let applied = nested_string(last, "applied").unwrap_or_else(|| {
-            return if last.is_some() { "unknown" } else { "none" }.to_owned();
-        });
-
-        let retry = nested_string(last, "retry")
-            .unwrap_or_else(|| return retry_for_applied(&applied).to_owned());
-
-        let current_state = session_state(last, &state.command_type, false);
-        let _ = write!(
-            summary,
-            "\nmutation: applied={applied}, retry={retry}, session_state={current_state}"
-        );
-    }
-
-    if let Some(postcondition) = last.and_then(|value| return value.get("postcondition")) {
-        let matched = postcondition
-            .get("matched")
-            .and_then(serde_json::Value::as_bool)
-            .map_or_else(
-                || return "unknown".to_owned(),
-                |matched| return matched.to_string(),
-            );
-
-        let status = value_string(postcondition, "state")
-            .or_else(|| return value_string(postcondition, "quality"))
-            .unwrap_or_else(|| return "unknown".to_owned());
-        let _ = write!(
-            summary,
-            "\npostcondition: matched={matched}, status={status}"
-        );
-    }
-
-    return summary;
+fn value_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    return value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
 }
 
-pub(super) fn value_u64(value: &serde_json::Value, key: &str) -> u64 {
+fn value_u64(value: &serde_json::Value, key: &str) -> u64 {
     return value
         .get(key)
         .and_then(serde_json::Value::as_u64)
@@ -177,198 +130,32 @@ pub(crate) fn human_action_summary(value: &serde_json::Value) -> String {
     );
 }
 
-pub(super) fn human_inspect_summary(value: &serde_json::Value) -> String {
-    let action = value.get("action").unwrap_or(&serde_json::Value::Null);
-    let status = value_string(action, "status").unwrap_or_else(|| return "unknown".to_owned());
-    let bytes = value_u64(action, "bytes_written");
-    let cells = value_u64(value, "cells_changed");
-    let rows = value
-        .get("rows_changed")
-        .and_then(serde_json::Value::as_array)
-        .map_or(0, Vec::len);
-    let warnings = value
-        .get("warnings")
-        .and_then(serde_json::Value::as_array)
-        .map_or(0, Vec::len);
+pub(crate) fn human_last_action_summary(report: &LastActionReport) -> Result<String> {
+    let status = stable_enum_label(&report.action.status)?;
 
-    return format!(
-        "Last action: status={status}, bytes={bytes}, changed={cells} cells across {rows} rows, warnings={warnings}\n"
-    );
+    return Ok(format!(
+        "Last action: status={status}, bytes={}, changed={} cells across {} rows, warnings={}\n",
+        report.action.bytes_written,
+        report.cells_changed,
+        report.rows_changed.len(),
+        report.warnings.len()
+    ));
 }
 
-pub(super) fn human_diagnose_summary(value: &serde_json::Value) -> String {
-    let findings = value
-        .get("findings")
-        .and_then(serde_json::Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-
-    if findings.is_empty() {
+pub(crate) fn human_diagnostics_summary(report: &LastActionDiagnosticsReport) -> String {
+    if report.findings.is_empty() {
         return "Diagnostics: no findings for the last action\n".to_owned();
     }
 
-    let codes = findings
+    let codes = report
+        .findings
         .iter()
-        .filter_map(|finding| return value_string(finding, "code"))
+        .map(|finding| return finding.code.as_str())
         .collect::<Vec<_>>()
         .join(", ");
 
-    return format!("Diagnostics: {} finding(s): {codes}\n", findings.len());
-}
-
-pub(super) fn artifact_path(value: &serde_json::Value) -> String {
-    for key in [
-        "output_display",
-        "file",
-        "archive",
-        "directory",
-        "artifact_directory",
-        "manifest",
-    ] {
-        if let Some(path) = value_string(value, key) {
-            return path;
-        }
-    }
-
-    return "unknown path".to_owned();
-}
-
-pub(super) fn human_artifact_summary(
-    value: &serde_json::Value,
-    command_type: &str,
-    kind: &str,
-) -> Option<String> {
-    return match command_type {
-        "screenshot" => {
-            let state =
-                value_string(value, "state_hash").unwrap_or_else(|| return "unknown".to_owned());
-
-            Some(format!(
-                "Screenshot written to {} (state {state})\n",
-                artifact_path(value)
-            ))
-        }
-        "bundle" => Some(format!("Bundle written to {}\n", artifact_path(value))),
-        "bug-report" | "bug_report" => {
-            Some(format!("Bug report written to {}\n", artifact_path(value)))
-        }
-        "video" => {
-            let renderer =
-                value_string(value, "renderer").unwrap_or_else(|| return "unknown".to_owned());
-
-            let fps = value_u64(value, "fps");
-            let width = value_u64(value, "width");
-            let height = value_u64(value, "height");
-
-            Some(format!(
-                "Video written to {} ({width}×{height}, {fps} FPS, {renderer})\n",
-                artifact_path(value)
-            ))
-        }
-        _ if matches!(
-            kind,
-            "semantic_screenshot"
-                | "native_screenshot"
-                | "semantic_screenshot_batch"
-                | "bundle"
-                | "bundle_archive"
-                | "bug_report"
-                | "video"
-        ) =>
-        {
-            Some(format!(
-                "{} written to {}\n",
-                kind.replace('_', " "),
-                artifact_path(value)
-            ))
-        }
-        _ => None,
-    };
-}
-
-pub(crate) fn human_summary(value: &serde_json::Value, command_type: &str) -> String {
-    let kind = response_type(Some(value), command_type);
-    if kind == "screen" {
-        return human_screen_summary(value);
-    }
-
-    if command_type == "status" || kind == "status" {
-        let lifecycle = if kind == "completed" {
-            "ended".to_owned()
-        } else {
-            value_string(value, "lifecycle").unwrap_or_else(|| return "live".to_owned())
-        };
-
-        let exit = value
-            .get("completion")
-            .and_then(|completion| return completion.get("exit_code"))
-            .and_then(serde_json::Value::as_i64)
-            .map_or(String::new(), |exit| return format!(", exit={exit}"));
-
-        let diagnostic = value_string(value, "diagnostic")
-            .or_else(|| return value_string(value, "message"))
-            .map_or(String::new(), |message| return format!(" — {message}"));
-
-        return format!("Status: session={lifecycle}{exit}{diagnostic}\n");
-    }
-
-    if command_type == "act" || kind == "action" {
-        return human_action_summary(value);
-    }
-
-    if command_type == "inspect" || command_type == "last_action" || command_type == "last-action" {
-        return human_inspect_summary(value);
-    }
-
-    if command_type == "diagnose" {
-        return human_diagnose_summary(value);
-    }
-
-    if let Some(summary) = human_artifact_summary(value, command_type, &kind) {
-        return summary;
-    }
-
-    if kind == "started" {
-        let name = value_string(value, "alias").unwrap_or_else(|| return "session".to_owned());
-        let path = value_string(value, "canonical_session_display")
-            .or_else(|| return value_string(value, "path"))
-            .unwrap_or_default();
-
-        return format!("Started {name} — {path}\n");
-    }
-
-    if kind == "stable_snapshot" {
-        let state =
-            value_string(value, "state_hash").unwrap_or_else(|| return "unknown".to_owned());
-
-        let geometry = value.get("geometry");
-        let cols = geometry
-            .and_then(|geometry| return geometry.get("cols"))
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default();
-        let rows = geometry
-            .and_then(|geometry| return geometry.get("rows"))
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default();
-
-        return format!("Stable at state {state} ({cols}×{rows})\n");
-    }
-
-    if kind == "input_sequence_applied" {
-        let atoms = value
-            .get("atom_count")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default();
-        let bytes = value
-            .get("bytes_written")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_default();
-
-        return format!("Sent {atoms} inputs, {bytes} bytes\n");
-    }
-
-    if kind == "completed" {
-        return "Session completed\n".to_owned();
-    }
-    return format!("{} succeeded\n", kind.replace('_', " "));
+    return format!(
+        "Diagnostics: {} finding(s): {codes}\n",
+        report.findings.len()
+    );
 }

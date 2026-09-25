@@ -179,39 +179,6 @@ pub(super) fn send_cli_control(
     }
 }
 
-#[expect(dead_code, reason = "Control execution helper preserved for tests")]
-pub(in crate::cli) fn run_control_guarded(
-    response: &mut ResponseWriter,
-    session: PathBuf,
-    command: ControlCommand,
-    expected_presented_state_hash: Option<String>,
-    request_id: Option<uuid::Uuid>,
-    json: bool,
-) -> Result<ExitCode> {
-    let resolved = resolve_session(session)?;
-    if resolved.lifecycle != SessionPhase::Live {
-        return write_session_lifecycle(response, &resolved, "control", ExitCode::FAILURE);
-    }
-
-    let mut control_request = ControlRequest::new(command);
-
-    if let Some(request_id) = request_id {
-        control_request.request_id = request_id;
-    }
-
-    control_request.expected_presented_state_hash = expected_presented_state_hash;
-    let data = match send_cli_control(response, &resolved.path, &control_request, "control")? {
-        CliControlOutcome::Applied(data) => *data,
-        CliControlOutcome::Rejected(exit_code) => return Ok(exit_code),
-    };
-
-    let compacted = compact_control_data(&data)?;
-    if json {
-        return write_json_pretty(response, &compacted);
-    }
-    return write_stdout(response, "Control command applied\n");
-}
-
 pub(in crate::cli) fn run_status(
     response: &mut ResponseWriter,
     arguments: StatusArgs,

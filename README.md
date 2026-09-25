@@ -29,7 +29,7 @@ verify the evidence:
 termtrace record --out ./app.termtrace --geometry inherit -- my-terminal-app
 termtrace screen ./app.termtrace
 termtrace analyze timeline ./app.termtrace
-termtrace integrity verify ./app.termtrace
+termtrace analyze verify ./app.termtrace
 ```
 
 Recordings are owner-only directories and existing output paths are never
@@ -38,18 +38,19 @@ replaced.
 ## Live sessions
 
 ```sh
-termtrace --response agent start app --cols 120 --rows 36 --until-screen Ready -- my-terminal-app
-termtrace --response agent act app text:help enter --until-idle 250ms
-termtrace --response agent screen app --since STATE
-termtrace --response agent stop app --wait
+termtrace record -d app --cols 120 --rows 36 --until-screen Ready -- my-terminal-app
+termtrace send app text:help enter --until-idle=250ms
+termtrace screen app --since STATE
+termtrace stop app --wait
 ```
 
-`start --until-*` synchronizes the initial screen. `act` applies input and checks
-its postcondition atomically; its `applied`, `retry`, and `session_state` fields
-remain authoritative even if the postcondition fails. Pass the state returned by
-one observation to `screen --since` to avoid retransmitting an unchanged screen.
-Keep a persistent `termtrace agent` driver when more than two or three actions
-are expected.
+`record -d NAME --until-*` starts a named background session and synchronizes
+its initial screen. `send` applies input and checks its postcondition in one
+request; the reported input application remains authoritative even if the
+postcondition fails. Pass the state returned by one observation to
+`screen --since` to avoid retransmitting an unchanged screen. Use a
+[language client](skills/termtrace/references/client-workflows.md) when more
+than two or three actions are expected.
 
 ## Record a complete tmux session
 
@@ -71,36 +72,30 @@ uncovered pane.
 
 For automatic pane recording outside an aggregate workflow, generate and source
 `termtrace tmux config`, or use `termtrace tmux enable` for future panes in an
-already-running server. See [Full tmux recording](docs/tmux.md) for setup,
-scope selection, storage, and exact fidelity boundaries.
+already-running server. Run `termtrace tmux --help` for scope selection and
+aggregate inspection commands.
 
 ## Debugging, artifacts, and tests
 
 ```sh
-termtrace inspect ./app.termtrace
-termtrace diagnose ./app.termtrace
+termtrace analyze ./app.termtrace
+termtrace analyze diagnose ./app.termtrace
 termtrace screenshot ./app.termtrace -o ./app-screenshot
-termtrace bundle ./app.termtrace -o ./app-bundle
-termtrace bug-report ./app.termtrace -o ./bug-report --screenshot
+termtrace bundle ./app.termtrace -o ./bug-report --profile debug --screenshot
 termtrace video ./app.termtrace -o ./app.mp4 --preset docs --renderer semantic
 termtrace test SCENARIO.json
 ```
 
-The top-level debugging and handoff commands are the normal task interface.
-Use `analyze` for explicit forensic selectors and `artifact` for ANSI import,
-native capture, saved representations, or asciicast export. Use
+`termtrace analyze` summarizes the last input action; its subcommands cover
+timelines, diffs, state inspection, exact output, and offline verification. Use
 `termtrace doctor --explain` to check optional native dependencies.
 
 ## Documentation
 
-- [Installation](docs/installation.md)
-- [Recording](docs/recording.md)
-- [Full tmux recording](docs/tmux.md)
-- [Live workflows](docs/agent-workflows.md)
-- [Semantic replay](docs/semantic-replay.md)
-- [Artifacts and verification](docs/formats.md)
-- [Language clients](docs/language-clients.md)
-- [Troubleshooting](docs/troubleshooting.md)
+- [Live control](skills/termtrace/references/live-control.md)
+- [Language clients](skills/termtrace/references/client-workflows.md)
+- [Artifacts](skills/termtrace/references/artifacts.md)
+- [Repeatable testing](skills/termtrace/references/testing.md)
 
 Run `termtrace --help` for the normal workflow and direct command help for exact
 options. Avoid recursively traversing deep help or shell-filtering it.

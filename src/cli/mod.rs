@@ -23,7 +23,7 @@ mod session_helpers;
 mod tmux;
 mod tooling;
 
-use command::{command_contract, requested_quiet_mode, root_command, Cli};
+use command::{requested_quiet_mode, root_command, Cli};
 use output::{finish_response, write_clap_error, ResponseMode, ResponseWriter};
 
 fn init_diagnostics(level: tracing::Level) {
@@ -50,7 +50,6 @@ pub(crate) fn run() -> ExitCode {
         Err(error) => return write_clap_error(error, quiet),
     };
 
-    let (command_type, mutating) = command_contract(&matches);
     let cli = match Cli::from_arg_matches(&matches) {
         Ok(cli) => cli,
         Err(error) => return write_clap_error(error, quiet),
@@ -61,7 +60,7 @@ pub(crate) fn run() -> ExitCode {
     }
 
     let response_mode = if cli.is_quiet() { ResponseMode::Quiet } else { ResponseMode::Human };
-    let mut response = ResponseWriter::new(response_mode, command_type, mutating);
+    let mut response = ResponseWriter::new(response_mode);
 
     if !cli.is_quiet() {
         init_diagnostics(cli.log);

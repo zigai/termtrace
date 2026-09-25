@@ -4,48 +4,16 @@ pub(in crate::cli) fn finish_response(
     response: ResponseWriter,
     result: Result<ExitCode>,
 ) -> ExitCode {
-    let state = response.state;
-    let (code, error) = match result {
-        Ok(code) => (code, None),
-        Err(error) => (ExitCode::FAILURE, Some(error)),
-    };
-    let success = code == ExitCode::SUCCESS && error.is_none();
-
-    let write_result = match state.mode {
-        ResponseMode::Quiet => Ok(ExitCode::SUCCESS),
-        ResponseMode::Human => {
-            if success {
-                if !state.raw.is_empty() {
-                    direct_stdout(&state.raw)
-                } else {
-                    let summary = state
-                        .values
-                        .iter()
-                        .map(|value| return human_summary(value, &state.command_type))
-                        .collect::<String>();
-
-                    direct_stdout(summary.as_bytes())
-                }
-            } else {
-                direct_stderr(&human_failure_summary(&state, error.as_ref()));
-
-                Ok(ExitCode::SUCCESS)
+    return match result {
+        Ok(code) => code,
+        Err(error) => {
+            if response.mode() != ResponseMode::Quiet {
+                direct_stderr(&report_message(&error));
             }
+
+            ExitCode::FAILURE
         }
     };
-
-    if let Some(error) = error
-        && state.mode != ResponseMode::Quiet
-    {
-        direct_stderr(&report_message(&error));
-    }
-
-    if let Err(error) = write_result {
-        direct_stderr(&error.to_string());
-
-        return ExitCode::FAILURE;
-    }
-    return code;
 }
 
 pub(in crate::cli) fn write_clap_error(error: clap::Error, quiet: bool) -> ExitCode {

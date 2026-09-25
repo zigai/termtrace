@@ -901,17 +901,6 @@ pub(super) fn input_retry(applied: &str) -> &'static str {
     };
 }
 
-#[expect(dead_code, reason = "Input failure categorization helper")]
-pub(super) fn input_failure_application(details: Option<&ControlErrorDetails>) -> &'static str {
-    let Some(sequence) = details.and_then(|details| return details.input_sequence.as_ref()) else {
-        return "none";
-    };
-    if sequence.atoms_applied == 0 && sequence.failed_atom_bytes_written == 0 {
-        return "none";
-    }
-    return "partial";
-}
-
 #[cfg(test)]
 mod action_response_tests {
     use super::{

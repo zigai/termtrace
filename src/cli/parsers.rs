@@ -189,23 +189,6 @@ pub(super) fn parse_page_limit(value: &str) -> StdResult<usize, String> {
     return Ok(limit);
 }
 
-#[expect(dead_code, reason = "Cell coordinate parser")]
-pub(super) fn parse_cell(value: &str) -> StdResult<(u16, u16), String> {
-    let (column, row) = value
-        .split_once(',')
-        .ok_or_else(|| return "cell must use zero-based COLUMN,ROW syntax".to_owned())?;
-
-    let column = column
-        .parse::<u16>()
-        .map_err(|_| return "cell column must be an unsigned 16-bit integer".to_owned())?;
-
-    let row = row
-        .parse::<u16>()
-        .map_err(|_| return "cell row must be an unsigned 16-bit integer".to_owned())?;
-
-    return Ok((column, row));
-}
-
 pub(super) fn parse_provenance_rule(value: &str) -> StdResult<(String, ProvenanceCapture), String> {
     let Some((name, capture)) = value.split_once('=') else {
         return Err("expected NAME=value|hash|name|not-captured".to_owned());

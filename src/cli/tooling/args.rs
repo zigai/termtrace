@@ -1,22 +1,7 @@
 use crate::cli::parsers::parse_capability_id;
-use clap::{Args, Subcommand};
+use clap::Args;
 use clap_complete::Shell;
 use std::path::PathBuf;
-
-#[derive(Debug, Args)]
-#[command(disable_help_subcommand = true)]
-pub(in crate::cli) struct ToolingArgs {
-    #[command(subcommand)]
-    pub(in crate::cli) command: ToolingSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub(in crate::cli) enum ToolingSubcommand {
-    /// Generate JSON Schemas for public events, controls, and artifacts.
-    Schemas(SchemaArgs),
-    /// Generate a shell completion script from the current command graph.
-    Completions(CompletionsArgs),
-}
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct VersionArgs {

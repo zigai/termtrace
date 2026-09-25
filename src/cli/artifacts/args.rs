@@ -34,18 +34,6 @@ pub(in crate::cli) enum ArtifactSubcommand {
     Asciicast(ExportArgs),
 }
 
-#[derive(Debug, Args)]
-pub(in crate::cli) struct BugReportFacadeArgs {
-    /// Completed session name or canonical path.
-    pub(in crate::cli) session: PathBuf,
-    /// New owner-only bug-report directory.
-    #[arg(short = 'o', long)]
-    pub(in crate::cli) out: PathBuf,
-    /// Include a semantic PNG screenshot of the last presented screen.
-    #[arg(long)]
-    pub(in crate::cli) screenshot: bool,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(in crate::cli) enum BundleProfileArg {
     /// Bundle only viewport screen presentation evidence.

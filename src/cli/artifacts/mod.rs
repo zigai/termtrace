@@ -1,8 +1,3 @@
-#![expect(
-    dead_code,
-    reason = "Legacy artifact subcommands preserved for test fixtures"
-)]
-
 use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;

@@ -255,34 +255,3 @@ pub(super) fn requested_quiet_mode() -> bool {
 
     return false;
 }
-
-pub(super) fn command_contract(matches: &clap::ArgMatches) -> (String, bool) {
-    let mut command_type = "termtrace";
-    let mut current = matches;
-
-    while let Some((name, subcommand)) = current.subcommand() {
-        command_type = name;
-        current = subcommand;
-    }
-
-    let mutating = matches!(
-        command_type,
-        "act"
-            | "send"
-            | "start"
-            | "restart"
-            | "stop"
-            | "key"
-            | "paste"
-            | "pointer"
-            | "resize"
-            | "signal"
-            | "mark"
-            | "enable"
-            | "disable"
-            | "set-scope"
-            | "remove"
-    );
-
-    return (command_type.to_owned(), mutating);
-}

@@ -1,8 +1,3 @@
-#![expect(
-    dead_code,
-    reason = "Registry management functions preserved for status command and tests"
-)]
-
 use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
