@@ -57,7 +57,8 @@ pub(in crate::cli) fn run_screen(
                     observe_validated_prefix(&session, point, arguments.include_hidden)
                         .into_diagnostic()?
                 } else {
-                    observe_session_with_options(&session, point, arguments.include_hidden)
+                    attach_session(&session)?
+                        .observe(point, arguments.include_hidden)
                         .into_diagnostic()?
                 };
                 (obs, None)
@@ -90,61 +91,63 @@ pub(in crate::cli) fn run_screen(
         };
     }
 
-    let mut resolved = resolve_session(arguments.session)?;
-    if matches!(
-        resolved.lifecycle,
-        SessionPhase::Incomplete | SessionPhase::Stale
-    ) && wait_for_completion(&resolved.path, Duration::from_millis(500)).is_ok()
-    {
-        resolved.lifecycle = SessionPhase::Completed;
-        resolved.diagnostic = None;
-    }
-
-    if !arguments.recover_prefix
-        && !matches!(
-            resolved.lifecycle,
-            SessionPhase::Live | SessionPhase::Completed
-        )
-    {
-        return write_session_lifecycle(response, &resolved, "screen", ExitCode::FAILURE);
-    }
-
-    let lifecycle = resolved.lifecycle;
-    let session = resolved.path;
-    let mut stable_hash: Option<String> = None;
-    if !arguments.stable_for.is_zero() && lifecycle == SessionPhase::Live {
-        let stable_wait = wait_for_screen(
-            &session,
-            ScreenPredicate::StateHash {
-                hash: "0".repeat(64),
-                comparison: StateHashComparison::Changed,
-            },
-            arguments.stable_for,
-            arguments.timeout,
-        )
-        .into_diagnostic()?;
-
-        if !stable_wait.matched || stable_wait.quality != ScreenWaitQuality::Matched {
-            return Err(miette::miette!(
-                "live stability was not established before {:?}",
-                stable_wait.quality
-            ));
-        }
-
-        stable_hash = Some(stable_wait.frame.state_hash);
-    }
-
-    let mut observation = if arguments.recover_prefix {
-        observe_validated_prefix(
+    let resolved = resolve_session(arguments.session)?;
+    let session = resolved.path.clone();
+    let (mut observation, stable_hash) = if arguments.recover_prefix {
+        let observation = observe_validated_prefix(
             &session,
             StatePoint::LatestPresented,
             arguments.include_hidden,
         )
-        .into_diagnostic()?
+        .into_diagnostic()?;
+
+        (observation, None)
     } else {
-        observe_session_with_options(&session, StatePoint::LatestPresented, false)
-            .into_diagnostic()?
+        if !matches!(
+            resolved.phase,
+            SessionPhase::Live
+                | SessionPhase::Completed
+                | SessionPhase::Incomplete
+                | SessionPhase::Stale
+        ) {
+            return write_session_lifecycle(response, &resolved, "screen", ExitCode::FAILURE);
+        }
+
+        let attached = attach_session(&session)?;
+        let stable_hash = if arguments.stable_for.is_zero() {
+            None
+        } else {
+            let capture = attached
+                .capture_stable(StableCaptureOptions {
+                    stable_for: arguments.stable_for,
+                    timeout: arguments.timeout.unwrap_or(defaults::WAIT_TIMEOUT),
+                    projection: hash_only_projection(),
+                    allow_incomplete: false,
+                })
+                .map_err(|error| {
+                    let SessionError::StableCaptureIncomplete { result } = &error else {
+                        return miette::miette!("live stability was not established: {error}");
+                    };
+
+                    return miette::miette!(
+                        "live stability was not established before {:?}",
+                        result.quality
+                    );
+                })?;
+
+            (capture.quality == StableCaptureQuality::Stable).then_some(capture.frame.state_hash)
+        };
+
+        match attached.observe(StatePoint::LatestPresented, false) {
+            Ok(observation) => (observation, stable_hash),
+            Err(_) if resolved.phase != SessionPhase::Live => {
+                return write_session_lifecycle(response, &resolved, "screen", ExitCode::FAILURE);
+            }
+            Err(error) => return Err(error).into_diagnostic(),
+        }
     };
+    let lifecycle =
+        if observation.source_completed { SessionPhase::Completed } else { resolved.phase };
 
     if let Some(state_hash) = &stable_hash {
         if observation.state_hash != *state_hash {
@@ -185,7 +188,7 @@ pub(in crate::cli) fn run_screen(
     }
 
     if let Some(format) = arguments.format {
-        if matches!(format, ShowFormat::Vt | ShowFormat::Html) && !is_completed(&session) {
+        if matches!(format, ShowFormat::Vt | ShowFormat::Html) && !observation.source_completed {
             return Err(miette::miette!(
                 "--format vt and --format html are supported only on completed sessions"
             ));
@@ -260,15 +263,12 @@ pub(in crate::cli) fn run_screen(
             let point = StatePoint::StateHash {
                 state_hash: since.clone(),
             };
-            let prior = match request_or_completed(&session, ControlCommand::Status, Duration::ZERO)
-                .into_diagnostic()?
-            {
-                Reached::Completed(_) => {
-                    observe_session_with_options(&session, point, false).into_diagnostic()?
-                }
-                Reached::Live(_) => {
-                    observe_validated_prefix(&session, point, false).into_diagnostic()?
-                }
+            let prior = if observation.source_completed {
+                attach_session(&session)?
+                    .observe(point, false)
+                    .into_diagnostic()?
+            } else {
+                observe_validated_prefix(&session, point, false).into_diagnostic()?
             };
 
             Some(diff_screen(

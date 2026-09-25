@@ -381,7 +381,7 @@ pub(in crate::cli) fn run_last_action_facade(
     arguments: InspectFacadeArgs,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle != SessionPhase::Completed {
+    if resolved.phase != SessionPhase::Completed {
         return write_session_lifecycle(response, &resolved, "last_action", ExitCode::FAILURE);
     }
 
@@ -404,7 +404,7 @@ pub(in crate::cli) fn run_diagnose_last_action_facade(
     arguments: DiagnoseFacadeArgs,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle != SessionPhase::Completed {
+    if resolved.phase != SessionPhase::Completed {
         return write_session_lifecycle(
             response,
             &resolved,

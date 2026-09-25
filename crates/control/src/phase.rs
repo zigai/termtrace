@@ -1,7 +1,7 @@
 //! The one observation of a session's phase from its evidence and recorder.
 
 use crate::{
-    transport::{connect_recorder, send_request, ExchangeTiming},
+    transport::{accepted, connect_recorder, exchange, ExchangeTiming},
     Error, Result,
 };
 use serde::de::DeserializeOwned;
@@ -116,8 +116,8 @@ pub fn recorder_identity(session: &Path) -> Option<ProcessIdentity> {
     return observe_phase(session).recorder;
 }
 
-/// Send a request unless the session has completed; a connection failure that coincides
-/// with completion published within `grace` also reports completion.
+/// Send a request within `timing` unless the session has completed; a connection failure
+/// that coincides with completion published within `grace` also reports completion.
 ///
 /// # Errors
 ///
@@ -125,12 +125,13 @@ pub fn recorder_identity(session: &Path) -> Option<ProcessIdentity> {
 pub fn send_or_completed(
     session: &Path,
     request: &ControlRequest,
+    timing: ExchangeTiming,
     grace: Duration,
 ) -> Result<Reached> {
     if let Some(completion) = read_completed(session)? {
         return Ok(Reached::Completed(Box::new(completion)));
     }
-    return match send_request(session, request) {
+    return match exchange(session, request, timing).and_then(accepted) {
         Ok(data) => Ok(Reached::Live(Box::new(data))),
         Err(error) if error.is_connection_failure() => {
             wait_completed(session, grace)?.map_or(Err(error), |completion| {
@@ -151,7 +152,9 @@ pub fn request_or_completed(
     command: ControlCommand,
     grace: Duration,
 ) -> Result<Reached> {
-    return send_or_completed(session, &ControlRequest::new(command), grace);
+    let timing = ExchangeTiming::Timeout(command.client_response_timeout());
+
+    return send_or_completed(session, &ControlRequest::new(command), timing, grace);
 }
 
 /// Phase decided by evidence alone; a published session without completion is `Incomplete`.

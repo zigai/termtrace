@@ -19,11 +19,12 @@ create_exception!(termtrace, IntegrityError, TermtraceError);
 
 /// Translate a `termtrace_sdk::Error` into an appropriate `PyErr`.
 ///
-/// Every exception carries `effect`, the model's mutation effect as a dict,
-/// and `retry`, the retry rule the model derives from it.
+/// Every exception carries `kind` and `code`, `effect` (the model's mutation effect as a
+/// dict), and `retry` (the retry rule the model derives from it).
 pub fn to_py_err(err: termtrace_sdk::Error) -> PyErr {
     let msg = err.to_string();
-    let error = match err.kind() {
+    let kind = err.kind();
+    let error = match kind {
         ErrorKind::StaleState => StateGuardFailedError::new_err(msg),
         ErrorKind::ControlTimeout => TimeoutError::new_err(msg),
         ErrorKind::ControlUnavailable => SessionNotFoundError::new_err(msg),
@@ -31,11 +32,21 @@ pub fn to_py_err(err: termtrace_sdk::Error) -> PyErr {
         _ => TermtraceError::new_err(msg),
     };
 
-    return with_effect(error, err.effect());
+    return typed(error, kind.as_str(), err.code(), err.effect());
 }
 
-/// Attach the model's `effect` and derived `retry` to a Termtrace exception.
-pub fn with_effect(error: PyErr, effect: MutationEffect) -> PyErr {
+/// A wait that ended without its condition holding; nothing was applied.
+pub fn unsatisfied_wait(message: String) -> PyErr {
+    return typed(
+        TimeoutError::new_err(message),
+        "wait_unsatisfied",
+        "wait_unsatisfied",
+        MutationEffect::NotApplied,
+    );
+}
+
+/// Attach `kind`, `code`, the model's `effect`, and its derived `retry` to an exception.
+fn typed(error: PyErr, kind: &str, code: &str, effect: MutationEffect) -> PyErr {
     return Python::attach(|py| {
         let value = error.value(py);
         let attached = serde_json::to_string(&effect)
@@ -49,7 +60,9 @@ pub fn with_effect(error: PyErr, effect: MutationEffect) -> PyErr {
                     .map_err(|source| return PyValueError::new_err(source.to_string()))?;
 
                 return value.setattr("retry", retry.as_str());
-            });
+            })
+            .and_then(|()| return value.setattr("kind", kind))
+            .and_then(|()| return value.setattr("code", code));
 
         return match attached {
             Ok(()) => error,

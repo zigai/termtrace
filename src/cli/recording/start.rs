@@ -43,14 +43,9 @@ pub(super) fn run_detached_record(
         until_idle,
         until_screen,
         until_screen_regex,
-        timeout,
+        timeout: timeout.unwrap_or(defaults::WAIT_TIMEOUT),
     };
-
-    if startup_timeout_ms == 0 {
-        return Err(miette::miette!(
-            "--startup-timeout-ms must be greater than zero"
-        ));
-    }
+    let startup_timeout = millis_or(startup_timeout_ms, defaults::STARTUP_TIMEOUT);
 
     let _durability_policy = durability_policy_for(&recording)?;
     let registry = SessionRegistry::open_default().into_diagnostic()?;
@@ -72,7 +67,7 @@ pub(super) fn run_detached_record(
         paths.session = out;
     }
 
-    let lease = Duration::from_millis(startup_timeout_ms).saturating_add(Duration::from_secs(5));
+    let lease = startup_timeout.saturating_add(Duration::from_secs(5));
     let reservation = registry
         .reserve(&name, &paths.session, lease)
         .into_diagnostic()?;
@@ -122,77 +117,48 @@ pub(super) fn run_detached_record(
         drop(stdin);
     }
 
-    let deadline = Instant::now() + Duration::from_millis(startup_timeout_ms);
-    let mut ready_since: Option<Instant> = None;
+    let deadline = Instant::now() + startup_timeout;
 
-    loop {
-        if is_completed(&paths.session) {
-            return promote_completed_start(
-                response,
-                &registry,
-                &reservation,
-                &paths,
-                &synchronization,
-                json,
-            );
-        }
-
-        if recorder_identity(&paths.session).is_some() {
-            let ready_at = ready_since.get_or_insert_with(Instant::now);
-            if ready_at.elapsed() >= Duration::from_millis(30) {
-                let entry = registry.promote(&reservation).map_err(|error| {
-                    return miette::miette!(
-                        "recorder became ready but owned alias promotion failed; reservation remains for {}; stdout log: {}; stderr log: {}; {error}",
-                        paths.session.display(),
-                        paths.stdout_log.display(),
-                        paths.stderr_log.display(),
-                    );
-                })?;
-
-                return report_start_outcome(
-                    response,
-                    &entry,
-                    &paths,
-                    None,
-                    &synchronization,
-                    json,
+    return match await_ready(&paths.session, &mut recorder, deadline).into_diagnostic()? {
+        Readiness::Live => {
+            let entry = registry.promote(&reservation).map_err(|error| {
+                return miette::miette!(
+                    "recorder became ready but owned alias promotion failed; reservation remains for {}; stdout log: {}; stderr log: {}; {error}",
+                    paths.session.display(),
+                    paths.stdout_log.display(),
+                    paths.stderr_log.display(),
                 );
-            }
+            })?;
+
+            report_start_outcome(response, &entry, &paths, None, &synchronization, json)
         }
-
-        if let Some(status) = recorder.try_wait().into_diagnostic()? {
-            if is_completed(&paths.session) {
-                return promote_completed_start(
-                    response,
-                    &registry,
-                    &reservation,
-                    &paths,
-                    &synchronization,
-                    json,
-                );
-            }
-
+        Readiness::Completed(completion) => promote_completed_start(
+            response,
+            &registry,
+            &reservation,
+            &paths,
+            &completion,
+            &synchronization,
+            json,
+        ),
+        Readiness::Exited(status) => {
             release_start_reservation(&registry, &reservation);
 
-            return Err(miette::miette!(
+            Err(miette::miette!(
                 "detached recorder exited before publishing valid completion evidence with {status}; session candidate: {}; stdout log: {}; stderr log: {}",
                 paths.session.display(),
                 paths.stdout_log.display(),
                 paths.stderr_log.display(),
-            ));
+            ))
         }
-
-        if Instant::now() >= deadline {
-            return Err(miette::miette!(
-                "detached recorder did not become ready within {startup_timeout_ms} ms; its owned alias reservation and pending session remain recoverable: {}; stdout log: {}; stderr log: {}",
-                paths.session.display(),
-                paths.stdout_log.display(),
-                paths.stderr_log.display(),
-            ));
-        }
-
-        thread::sleep(Duration::from_millis(10));
-    }
+        Readiness::TimedOut => Err(miette::miette!(
+            "detached recorder did not become ready within {} ms; its owned alias reservation and pending session remain recoverable: {}; stdout log: {}; stderr log: {}",
+            startup_timeout.as_millis(),
+            paths.session.display(),
+            paths.stdout_log.display(),
+            paths.stderr_log.display(),
+        )),
+    };
 }
 
 pub(super) fn release_start_reservation(
@@ -225,10 +191,10 @@ fn promote_completed_start(
     registry: &SessionRegistry,
     reservation: &AliasReservation,
     paths: &DetachedSessionPaths,
+    completion: &SessionCompletion,
     synchronization: &StartSynchronization,
     json: bool,
 ) -> Result<ExitCode> {
-    let completion = wait_for_completion(&paths.session, Duration::ZERO).into_diagnostic()?;
     let entry = registry.promote(reservation).map_err(|error| {
         return miette::miette!(
             "recorder completed but owned alias promotion failed; reservation remains for {}; stdout log: {}; stderr log: {}; {error}",
@@ -242,7 +208,7 @@ fn promote_completed_start(
         response,
         &entry,
         paths,
-        Some(&completion),
+        Some(completion),
         synchronization,
         json,
     );
@@ -343,33 +309,28 @@ fn start_postcondition(
     session: &Path,
     synchronization: &StartSynchronization,
 ) -> Result<(bool, serde_json::Value)> {
-    if let Some(stable_for) = synchronization.until_idle {
-        let data = send_request(
-            session,
-            &ControlRequest::new(ControlCommand::CaptureStable {
-                stable_for_ns: u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX),
-                timeout_ns: u64::try_from(synchronization.timeout.as_nanos()).unwrap_or(u64::MAX),
-                projection: ScreenProjectionRequest::default(),
-            }),
-        )
-        .into_diagnostic()?;
+    let session = attach_session(session)?;
 
-        let ControlData::StableSnapshot { frame, quality, .. } = data else {
-            return Err(miette::miette!(
-                "actor returned the wrong stable-capture payload"
-            ));
-        };
-        let matched_ok = quality == StableCaptureQuality::Stable;
+    if let Some(stable_for) = synchronization.until_idle {
+        let capture = session
+            .capture_stable(StableCaptureOptions {
+                stable_for,
+                timeout: synchronization.timeout,
+                projection: ScreenProjectionRequest::default(),
+                allow_incomplete: true,
+            })
+            .into_diagnostic()?;
+        let matched = capture.quality.is_settled();
 
         return Ok((
-            matched_ok,
+            matched,
             serde_json::json!({
-                "matched": quality == StableCaptureQuality::Stable,
+                "matched": matched,
                 "kind": "idle",
-                "quality": quality,
-                "state_hash": frame.state_hash,
-                "frame_hash": frame.frame_hash,
-                "frame": frame,
+                "quality": capture.quality,
+                "state_hash": capture.frame.state_hash,
+                "frame_hash": capture.frame.frame_hash,
+                "frame": capture.frame,
             }),
         ));
     }
@@ -392,24 +353,27 @@ fn start_postcondition(
         }
     };
 
-    let matched = wait_for_screen(session, predicate, Duration::ZERO, synchronization.timeout)
+    let waited = session
+        .wait_screen(predicate, Duration::ZERO, synchronization.timeout)
         .into_diagnostic()?;
-    let matched_ok = matched.matched;
+    let matched = waited.satisfied();
 
     return Ok((
-        matched_ok,
+        matched,
         serde_json::json!({
-            "matched": matched.matched,
+            "matched": matched,
             "kind": kind,
-            "state": matched.frame.state_hash,
-            "frame_hash": matched.frame.frame_hash,
-            "quality": matched.quality,
-            "size": [matched.frame.geometry.cols, matched.frame.geometry.rows],
+            "state": waited.frame.state_hash,
+            "frame_hash": waited.frame.frame_hash,
+            "quality": waited.quality,
+            "size": [waited.frame.geometry.cols, waited.frame.geometry.rows],
             "ended": matches!(
-                matched.quality,
-                ScreenWaitQuality::ChildCompleted | ScreenWaitQuality::OutputClosed
+                waited.quality,
+                ScreenWaitQuality::ChildCompleted
+                    | ScreenWaitQuality::OutputClosed
+                    | ScreenWaitQuality::Completed
             ),
-            "frame": matched.frame,
+            "frame": waited.frame,
         }),
     ));
 }

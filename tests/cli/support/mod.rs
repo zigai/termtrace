@@ -116,6 +116,7 @@ pub(crate) use termtrace_evidence::{
     request_journal::read_mutation_journal,
     session::{read_manifest, validate_completed_session},
 };
+pub(crate) use termtrace_model::terminal::state::KeyChord;
 pub(crate) use termtrace_model::{
     execution::environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},
     execution::event::{
@@ -142,8 +143,20 @@ pub(crate) use termtrace_model::{
     value::ByteString,
 };
 pub(crate) use termtrace_sdk::{
-    control_endpoint_is_reachable, send_request, send_request_response, wait_for_screen,
-    StableCaptureOptions, Terminal as ClientTerminal,
+    control_endpoint_is_reachable, send_request, send_request_response, ActRequest,
+    ActionCondition, InputAtom, LaunchSpec, StableCaptureOptions, StopRequest,
+    Terminal as ClientTerminal,
+};
+
+/// The Enter key with no modifiers.
+pub(crate) const ENTER: KeyChord = KeyChord {
+    key: NamedKey::Enter,
+    modifiers: KeyModifiers {
+        shift: false,
+        control: false,
+        alt: false,
+        super_key: false,
+    },
 };
 pub(crate) use zstd::stream::read::Decoder;
 

@@ -63,15 +63,14 @@ fn rust_test_helper_discards_styled_stable_attempt_after_snapshot() {
                 .expect("open test session")
                 .output()
                 .wait_for(b"READY", Duration::from_secs(5))?;
-            let capture =
-                test.screen()
-                    .expect("open test screen")
-                    .capture_stable(StableCaptureOptions {
-                        stable_for: Duration::from_millis(20),
-                        timeout: Duration::from_secs(5),
-                        projection: ScreenProjectionRequest::default(),
-                        allow_incomplete: false,
-                    })?;
+            let capture = test.session().expect("open test session").capture_stable(
+                StableCaptureOptions {
+                    stable_for: Duration::from_millis(20),
+                    timeout: Duration::from_secs(5),
+                    projection: ScreenProjectionRequest::default(),
+                    allow_incomplete: false,
+                },
+            )?;
 
             let ScreenFrameData::Spans { rows } = &capture.frame.data else {
                 panic!("stable frame did not return span detail");
@@ -183,8 +182,8 @@ fn rust_test_helper_creates_and_reports_snapshot_mismatches() {
                 .output()
                 .wait_for(b"READY", Duration::from_secs(5))?;
             let frame = test
-                .screen()
-                .expect("open test screen")
+                .session()
+                .expect("open test session")
                 .frame(Default::default())?;
             test.assert_snapshot("ready", &frame, SnapshotProfile::Spans, Default::default())?;
 
@@ -209,8 +208,8 @@ fn rust_test_helper_creates_and_reports_snapshot_mismatches() {
                 .output()
                 .wait_for(b"READY", Duration::from_secs(5))?;
             let frame = test
-                .screen()
-                .expect("open test screen")
+                .session()
+                .expect("open test session")
                 .frame(Default::default())?;
             test.assert_snapshot("ready", &frame, SnapshotProfile::Spans, Default::default())?;
 

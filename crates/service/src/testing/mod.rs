@@ -5,7 +5,8 @@ use crate::{
         assert_cursor, assert_screen_text, normalized_snapshot, AssertionError,
         AssertionFrameIdentity, ExpectationMismatch, SnapshotProfile,
     },
-    client::{Screen, Session, Terminal},
+    client::{LaunchSpec, Session, StopRequest, Terminal},
+    defaults,
     locator::{Locator, LocatorSpec},
     Error, Result,
 };
@@ -25,12 +26,10 @@ use std::{
     thread::panicking,
     time::{Duration, Instant},
 };
-use termtrace_control::{exchange, ExchangeTiming};
 use termtrace_evidence::artifact::{create_private_directory, sync_directory, write_secure};
 use termtrace_model::{
     artifact::bundle::BundleProfile,
     execution::session::VerificationLevel,
-    protocol::control::{ControlCommand, ControlRequest, ControlResult},
     terminal::observation::StatePoint,
     terminal::screen::{ScreenFrame, ScreenSnapshotOptions},
     terminal::state::CursorState,

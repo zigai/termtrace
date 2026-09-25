@@ -13,7 +13,7 @@ use std::{
     path::Path,
     process::ExitCode,
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use termtrace_control::{request_or_completed, Reached};
 use termtrace_engine::timeline::resolve_session_source_selection;
@@ -28,6 +28,7 @@ use termtrace_model::{
     protocol::control::{ControlCommand, ControlData},
     protocol::output_projection::{OutputProjectionQuality, OutputProjectionReport},
 };
+use termtrace_sdk::defaults;
 use termtrace_terminal::ControlStripper;
 
 pub(in crate::cli) fn run_output(
@@ -383,31 +384,16 @@ fn follow_records(
     let mut cursor =
         EventLogCursor::open(SessionLayout::new(session).event_log()).into_diagnostic()?;
     let mut initialized = false;
-    let mut control_failure_since = None;
     let mut staged = tempfile::tempfile().into_diagnostic()?;
     let mut line = Vec::new();
 
     loop {
-        let reached = match request_or_completed(
+        let reached = request_or_completed(
             session,
             ControlCommand::EventCursor { next_event_seq },
-            Duration::ZERO,
-        ) {
-            Ok(reached) => {
-                control_failure_since = None;
-                reached
-            }
-            Err(error) => {
-                let since = control_failure_since.get_or_insert_with(Instant::now);
-                if since.elapsed() >= Duration::from_secs(2) {
-                    return Err(error).into_diagnostic();
-                }
-
-                thread::sleep(Duration::from_millis(20));
-
-                continue;
-            }
-        };
+            defaults::COMPLETION_GRACE,
+        )
+        .into_diagnostic()?;
 
         let (available, live_boundary, completed_hash) = if let Reached::Live(data) = reached {
             let ControlData::EventCursor {

@@ -232,7 +232,7 @@ pub(super) fn run_video_facade(
     };
 
     let resolved = resolve_session(arguments.session.clone())?;
-    if resolved.lifecycle != SessionPhase::Completed {
+    if resolved.phase != SessionPhase::Completed {
         return write_session_lifecycle(response, &resolved, "video", ExitCode::FAILURE);
     }
 

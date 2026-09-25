@@ -5,58 +5,20 @@ use crate::screen::PyResolvedState;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::time::Duration;
-use termtrace_model::protocol::control::ScreenPredicate;
-use termtrace_model::terminal::state::{KeyModifiers, NamedKey};
-use termtrace_sdk::actions::{ActionCondition, ActionOptions, InputAtom};
 use termtrace_sdk::client::Terminal;
-use termtrace_sdk::screen::frame_text;
+use termtrace_sdk::defaults;
+use termtrace_sdk::input::{ActRequest, KeyChord};
+use termtrace_sdk::screen::ScreenPredicate;
 
-fn parse_key(key: &str) -> PyResult<(NamedKey, KeyModifiers)> {
-    let lower = key.to_ascii_lowercase();
-    let mut modifiers = KeyModifiers::default();
-    let key_part = if lower.starts_with("ctrl+") || lower.starts_with("ctrl-") {
-        modifiers.control = true;
-
-        &lower[5..]
-    } else if lower.starts_with("alt+") || lower.starts_with("alt-") {
-        modifiers.alt = true;
-
-        &lower[4..]
-    } else if lower.starts_with("shift+") || lower.starts_with("shift-") {
-        modifiers.shift = true;
-
-        &lower[6..]
-    } else {
-        lower.as_str()
-    };
-
-    let named = match key_part {
-        "enter" | "return" => NamedKey::Enter,
-        "esc" | "escape" => NamedKey::Escape,
-        "tab" => NamedKey::Tab,
-        "backspace" => NamedKey::Backspace,
-        "delete" | "del" => NamedKey::Delete,
-        "insert" | "ins" => NamedKey::Insert,
-        "home" => NamedKey::Home,
-        "end" => NamedKey::End,
-        "pageup" | "page_up" => NamedKey::PageUp,
-        "pagedown" | "page_down" => NamedKey::PageDown,
-        "up" | "arrowup" | "arrow_up" => NamedKey::ArrowUp,
-        "down" | "arrowdown" | "arrow_down" => NamedKey::ArrowDown,
-        "left" | "arrowleft" | "arrow_left" => NamedKey::ArrowLeft,
-        "right" | "arrowright" | "arrow_right" => NamedKey::ArrowRight,
-        s if s.len() == 1 => {
-            let c = s
-                .chars()
-                .next()
-                .ok_or_else(|| return PyValueError::new_err("empty key string"))?;
-
-            NamedKey::Letter(c)
-        }
-        _ => return Err(PyValueError::new_err(format!("unknown key name: '{key}'"))),
-    };
-
-    return Ok((named, modifiers));
+/// Parse one key chord with the shared grammar, e.g. `Enter`, `ctrl+c`, `ctrl+shift+F5`.
+pub fn parse_key(key: &str) -> PyResult<KeyChord> {
+    return KeyChord::parse(key)
+        .map_err(|error| return PyValueError::new_err(error.to_string()))?
+        .ok_or_else(|| {
+            return PyValueError::new_err(format!(
+                "unknown key name: '{key}'; send plain characters as text"
+            ));
+        });
 }
 
 /// Fluent builder for atomic, state-guarded input sequences.
@@ -64,49 +26,71 @@ fn parse_key(key: &str) -> PyResult<(NamedKey, KeyModifiers)> {
 pub struct PyActionBuilder {
     pub(crate) terminal: Terminal,
     pub(crate) session_path: String,
-    pub(crate) atoms: Vec<InputAtom>,
-    pub(crate) options: ActionOptions,
+    pub(crate) request: ActRequest,
+}
+
+impl PyActionBuilder {
+    /// Start an empty action against one session.
+    pub(crate) fn new(terminal: Terminal, session_path: String) -> Self {
+        return Self {
+            terminal,
+            session_path,
+            request: ActRequest::new(),
+        };
+    }
+
+    /// Apply the action, returning its terminating frame when one was projected.
+    pub(crate) fn blocking_execute(
+        terminal: &Terminal,
+        session_path: &str,
+        request: ActRequest,
+    ) -> PyResult<Option<PyResolvedState>> {
+        let outcome = terminal
+            .attach(session_path)
+            .and_then(|session| return session.act(request))
+            .map_err(to_py_err)?;
+
+        return Ok(outcome.frame().map(PyResolvedState::from_frame));
+    }
 }
 
 #[pymethods]
 impl PyActionBuilder {
     /// Enforce that the terminal must be at the specified state hash before executing.
     pub fn if_state(mut slf: PyRefMut<'_, Self>, state_hash: String) -> PyRefMut<'_, Self> {
-        slf.options.if_state = Some(state_hash);
+        slf.request.guard.if_state = Some(state_hash);
         return slf;
     }
 
     /// Append UTF-8 text to send to the terminal.
     pub fn send_text(mut slf: PyRefMut<'_, Self>, text: String) -> PyRefMut<'_, Self> {
-        slf.atoms.push(InputAtom::Text(text));
+        slf.request = std::mem::take(&mut slf.request).text(text);
         return slf;
     }
 
-    /// Append a symbolic named key (e.g. 'Enter', 'Ctrl-C', 'Tab').
+    /// Append a key chord (e.g. 'Enter', 'ctrl+c', 'ctrl+shift+F5').
     pub fn send_key(mut slf: PyRefMut<'_, Self>, key: String) -> PyResult<PyRefMut<'_, Self>> {
-        let (named, modifiers) = parse_key(&key)?;
-        slf.atoms.push(InputAtom::Key {
-            key: named,
-            modifiers,
-        });
+        let chord = parse_key(&key)?;
+        slf.request = std::mem::take(&mut slf.request).key(chord);
         return Ok(slf);
     }
 
     /// Append exact raw bytes to send to the terminal.
     pub fn send_bytes(mut slf: PyRefMut<'_, Self>, bytes: Vec<u8>) -> PyRefMut<'_, Self> {
-        slf.atoms.push(InputAtom::Bytes(bytes));
+        slf.request = std::mem::take(&mut slf.request).bytes(bytes);
         return slf;
     }
 
     /// Send bracketed paste text.
     pub fn paste(mut slf: PyRefMut<'_, Self>, text: String) -> PyRefMut<'_, Self> {
-        slf.atoms.push(InputAtom::Paste(text));
+        slf.request = std::mem::take(&mut slf.request).paste(text);
         return slf;
     }
 
-    /// Set delay pacing between consecutive action atoms in milliseconds.
+    /// Set delay pacing between consecutive action atoms in milliseconds; paced text is typed
+    /// one character at a time.
     pub fn pace(mut slf: PyRefMut<'_, Self>, delay_ms: u64) -> PyRefMut<'_, Self> {
-        slf.options.pace = Duration::from_millis(delay_ms);
+        slf.request.pace = Duration::from_millis(delay_ms);
 
         return slf;
     }
@@ -118,11 +102,9 @@ impl PyActionBuilder {
         pattern: String,
         timeout_secs: Option<f64>,
     ) -> PyResult<PyRefMut<'_, Self>> {
-        let timeout = crate::parse_timeout(timeout_secs, 10.0)?;
-        slf.options.postcondition = ActionCondition::Screen {
-            predicate: ScreenPredicate::Contains { text: pattern },
-            timeout,
-        };
+        let timeout = crate::parse_timeout(timeout_secs, defaults::WAIT_TIMEOUT)?;
+        slf.request = std::mem::take(&mut slf.request)
+            .until_screen(ScreenPredicate::Contains { text: pattern }, timeout);
         return Ok(slf);
     }
 
@@ -133,37 +115,18 @@ impl PyActionBuilder {
         stable_for_ms: Option<u64>,
         timeout_secs: Option<f64>,
     ) -> PyResult<PyRefMut<'_, Self>> {
-        let stable_for = Duration::from_millis(stable_for_ms.unwrap_or(20));
-        let timeout = crate::parse_timeout(timeout_secs, 10.0)?;
-        slf.options.postcondition = ActionCondition::Idle {
-            stable_for,
-            timeout,
-        };
+        let stable_for = stable_for_ms.map_or(defaults::IDLE_STABLE_FOR, Duration::from_millis);
+        let timeout = crate::parse_timeout(timeout_secs, defaults::WAIT_TIMEOUT)?;
+        slf.request = std::mem::take(&mut slf.request).until_idle(stable_for, timeout);
         return Ok(slf);
     }
 
     /// Execute the action sequence and return the terminating screen frame.
     pub fn execute(&mut self, py: Python<'_>) -> PyResult<Option<PyResolvedState>> {
-        let terminal = self.terminal.clone();
-        let path = self.session_path.clone();
-        let atoms = std::mem::take(&mut self.atoms);
-        let options = self.options.clone();
+        let request = std::mem::take(&mut self.request);
 
-        return py.detach(move || {
-            let session = terminal.attach(path).map_err(to_py_err)?;
-            let result = session.act(&atoms, options).map_err(to_py_err)?;
-            if let Some(frame) = result.frame {
-                let text = frame_text(&frame);
-                let cursor_row = frame.cursor.row.unwrap_or_default();
-                let cursor_col = frame.cursor.column.unwrap_or_default();
-                return Ok(Some(PyResolvedState {
-                    hash: frame.state_hash,
-                    text,
-                    cursor_row,
-                    cursor_col,
-                }));
-            }
-            return Ok(None);
+        return py.detach(|| {
+            return Self::blocking_execute(&self.terminal, &self.session_path, request);
         });
-}
+    }
 }

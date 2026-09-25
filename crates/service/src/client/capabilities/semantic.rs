@@ -1,8 +1,7 @@
 use super::super::{
     diagnose_session, diff_session_states_with_semantic_states, explain_session,
-    observe_session_with_options, validated_visual_manifests, visit_session_timeline_while,
-    DiagnoseReport, DiagnosticCheck, ExplainReport, Observation, Result, SemanticDiff, Session,
-    StatePoint, TimelineEntry,
+    validated_visual_manifests, visit_session_timeline_while, DiagnoseReport, DiagnosticCheck,
+    ExplainReport, Result, SemanticDiff, Session, StatePoint, TimelineEntry,
 };
 
 /// Completed semantic inspection and diagnosis operations.
@@ -11,15 +10,10 @@ pub struct Semantic<'session> {
 }
 
 impl Semantic<'_> {
-    /// Inspect one truth-labeled state point.
-    pub fn inspect(&self, point: StatePoint, include_hidden: bool) -> Result<Observation> {
-        return observe_session_with_options(&self.session.path, point, include_hidden);
-    }
-
     /// Build the ordered semantic/canonical timeline.
     pub fn timeline(&self, all_states: bool, controls: bool) -> Result<Vec<TimelineEntry>> {
         let mut entries = Vec::new();
-        visit_session_timeline_while(&self.session.path, all_states, controls, None, |entry| {
+        visit_session_timeline_while(self.session.path(), all_states, controls, None, |entry| {
             entries.push(entry);
 
             return Ok(true);
@@ -31,14 +25,14 @@ impl Semantic<'_> {
     /// Compare two complete semantic endpoints.
     pub fn diff(&self, from: StatePoint, to: StatePoint) -> Result<SemanticDiff> {
         let (difference, _, _) =
-            diff_session_states_with_semantic_states(&self.session.path, from, to)?;
+            diff_session_states_with_semantic_states(self.session.path(), from, to)?;
 
         return Ok(difference);
     }
 
     /// Explain exact VT frames and transitions around one point.
     pub fn explain(&self, point: StatePoint, context_events: u64) -> Result<ExplainReport> {
-        return Ok(explain_session(&self.session.path, point, context_events)?);
+        return Ok(explain_session(self.session.path(), point, context_events)?);
     }
 
     /// Run conservative source-bound detectors.
@@ -47,10 +41,10 @@ impl Semantic<'_> {
         checks: Vec<DiagnosticCheck>,
         broad_change_percent: u8,
     ) -> Result<DiagnoseReport> {
-        let visual_evidence = validated_visual_manifests(&self.session.path)?;
+        let visual_evidence = validated_visual_manifests(self.session.path())?;
 
         return Ok(diagnose_session(
-            &self.session.path,
+            self.session.path(),
             checks,
             broad_change_percent,
             &visual_evidence,

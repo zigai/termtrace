@@ -12,7 +12,8 @@
     "name": "termtrace",
     "triples": {
       "default": true
-    }
+    },
+    "dtsHeaderFile": "dts-header.d.ts"
   },
   "scripts": {
     "build": "napi build --platform --release",

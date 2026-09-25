@@ -1,41 +1,6 @@
 use super::super::{
-    ByteString, ControlCommand, ControlData, ControlRequest, InputKind, KeyModifiers, MouseButton,
-    NamedKey, PointerOperation, Result, Session,
+    ControlCommand, ControlData, ControlRequest, MouseButton, PointerOperation, Result, Session,
 };
-
-/// Typed keyboard and byte input operations.
-pub struct Keyboard<'session> {
-    pub(in crate::client) session: &'session Session,
-}
-
-impl Keyboard<'_> {
-    /// Apply exact UTF-8 text with a caller-retainable request.
-    pub fn text(&self, text: impl Into<String>) -> Result<ControlData> {
-        let request = ControlRequest::new(ControlCommand::Input {
-            data: ByteString::new(text.into().into_bytes()),
-            input_kind: InputKind::Text,
-            caller_intent: None,
-        });
-
-        return self.session.send(&request);
-    }
-
-    /// Encode one symbolic key from live modes.
-    pub fn press(&self, key: NamedKey, modifiers: KeyModifiers) -> Result<ControlData> {
-        return self
-            .session
-            .send(&ControlRequest::new(ControlCommand::Key { key, modifiers }));
-    }
-
-    /// Encode caller-provided semantic paste content.
-    pub fn paste(&self, data: impl Into<Vec<u8>>) -> Result<ControlData> {
-        return self
-            .session
-            .send(&ControlRequest::new(ControlCommand::Paste {
-                data: ByteString::new(data.into()),
-            }));
-    }
-}
 
 /// Mode-aware cell pointer and focus operations.
 pub struct Pointer<'session> {
@@ -53,7 +18,7 @@ impl Pointer<'_> {
     ) -> Result<ControlData> {
         return self
             .session
-            .send(&ControlRequest::new(ControlCommand::Pointer {
+            .control(&ControlRequest::new(ControlCommand::Pointer {
                 column,
                 row,
                 operation: PointerOperation::Click { button },
@@ -65,7 +30,7 @@ impl Pointer<'_> {
     pub fn scroll(&self, column: u16, row: u16, lines: i16, strict: bool) -> Result<ControlData> {
         return self
             .session
-            .send(&ControlRequest::new(ControlCommand::Pointer {
+            .control(&ControlRequest::new(ControlCommand::Pointer {
                 column,
                 row,
                 operation: PointerOperation::Scroll { lines },
@@ -77,7 +42,7 @@ impl Pointer<'_> {
     pub fn focus(&self, focused: bool, strict: bool) -> Result<ControlData> {
         return self
             .session
-            .send(&ControlRequest::new(ControlCommand::Focus {
+            .control(&ControlRequest::new(ControlCommand::Focus {
                 focused,
                 strict,
             }));

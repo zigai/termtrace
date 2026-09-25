@@ -1,9 +1,6 @@
 //! Artifact planning, generation, save representations, bundles, and media export.
 
-use crate::{
-    error::{Error, Result},
-    types::ArtifactRef,
-};
+use crate::error::{Error, Result};
 use std::{io::Write, path::Path};
 use termtrace_export::{
     asciicast::{export as export_asciicast_file, export_to_writer as export_asciicast_writer},
@@ -24,25 +21,8 @@ impl ArtifactService {
     ///
     /// # Errors
     /// Returns an error if the session cannot be read or export fails.
-    pub fn export_asciicast(session: &Path, destination: &Path) -> Result<ArtifactRef> {
-        export_asciicast_file(session, destination).map_err(Error::from)?;
-
-        return Ok(ArtifactRef {
-            artifact_id: destination
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
-            path: destination.to_path_buf(),
-            manifest_path: None,
-            source_session_id: session
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
-            source_state_hash: None,
-            kind: "asciicast",
-        });
+    pub fn export_asciicast(session: &Path, destination: &Path) -> Result<()> {
+        return export_asciicast_file(session, destination).map_err(Error::from);
     }
 
     /// Stream an asciinema v2 cast directly to a caller-owned writer.

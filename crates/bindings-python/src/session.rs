@@ -9,10 +9,10 @@ use termtrace_model::artifact::bundle::BundleProfile;
 use termtrace_model::artifact::save::SaveFormat;
 use termtrace_model::terminal::observation::StatePoint;
 use termtrace_model::terminal::state::MouseButton;
-use termtrace_sdk::actions::ActionOptions;
 use termtrace_sdk::analysis::AnalysisService;
 use termtrace_sdk::artifacts::ArtifactService;
 use termtrace_sdk::client::Terminal;
+use termtrace_sdk::defaults;
 use termtrace_sdk::events::{EventCursor, EventsService};
 use termtrace_sdk::output::{OutputCursor, OutputService};
 
@@ -49,12 +49,7 @@ impl PySession {
 
     /// Create an action builder for input automation.
     pub fn actions(&self) -> PyActionBuilder {
-        return PyActionBuilder {
-            terminal: self.terminal.clone(),
-            session_path: self.session_path.clone(),
-            atoms: Vec::new(),
-            options: ActionOptions::default(),
-        };
+        return PyActionBuilder::new(self.terminal.clone(), self.session_path.clone());
     }
 
     /// Click mouse button at a terminal cell.
@@ -285,7 +280,7 @@ impl PySession {
         timeout_secs: Option<f64>,
     ) -> PyResult<bool> {
         let session_path = PathBuf::from(&self.session_path);
-        let timeout = crate::parse_timeout(timeout_secs, 10.0)?;
+        let timeout = crate::parse_timeout(timeout_secs, defaults::WAIT_TIMEOUT)?;
 
         return py.detach(move || {
             let _outcome =

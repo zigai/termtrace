@@ -7,6 +7,7 @@ use termtrace_model::{
     protocol::capability::CAPABILITY_IDS, protocol::control::ScreenPredicate,
     terminal::analysis::DiagnosticCheck, terminal::screen::ScreenRegion,
 };
+use termtrace_sdk::defaults;
 
 pub(super) fn parse_row_predicate(value: &str) -> Result<(u16, String)> {
     let (row, text) = value
@@ -145,6 +146,14 @@ pub(super) fn parse_pace_duration(value: &str) -> StdResult<Duration, String> {
 
 pub(super) fn parse_stability_duration(value: &str) -> StdResult<Duration, String> {
     return parse_duration(value, "stability duration");
+}
+
+/// Parse an idle interval; a flag given without a value selects the shared default.
+pub(super) fn parse_idle_interval(value: &str) -> StdResult<Duration, String> {
+    if value.is_empty() {
+        return Ok(defaults::IDLE_STABLE_FOR);
+    }
+    return parse_stability_duration(value);
 }
 
 pub(super) fn parse_wait_deadline_duration(value: &str) -> StdResult<Duration, String> {

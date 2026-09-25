@@ -1,21 +1,15 @@
 //! Full local mode consumer testing representative workflows from outside the workspace.
 
-use std::{
-    env,
-    error::Error,
-    ffi::OsString,
-    path::PathBuf,
-    time::Duration,
-};
+use std::{env, error::Error, ffi::OsString, path::PathBuf, time::Duration};
 use termtrace_sdk::{
-    actions::{ActionCondition, ActionOptions, InputAtom},
     analysis::AnalysisService,
     artifacts::ArtifactService,
     events::EventsService,
+    input::{ActRequest, KeyChord},
     output::OutputService,
     registry::RegistryService,
     screen::ScreenPredicate,
-    session::{ResolveOptions, Session, StateSelector},
+    session::{LaunchSpec, StopRequest},
     testing::{run_terminal_test, TerminalTestConfig},
     BundleProfile, BundleVerificationPolicy, StatePoint, Terminal,
 };
@@ -35,53 +29,56 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // 1. launch -> wait -> guarded action -> finish -> verify
     let terminal = Terminal::new(&binary, evidence_root.join("launch-evidence"));
-    let mut live_session = terminal
-        .launch([
+    let mut live_session = terminal.start(
+        LaunchSpec::new([
             OsString::from("/bin/sh"),
             OsString::from("-c"),
             OsString::from("printf READY; IFS= read -r line; printf '<%s>' \"$line\"; sleep 2"),
         ])
-        .geometry(90, 25)
-        .start()?;
+        .geometry(90, 25),
+    )?;
 
-    live_session.screen().wait(
+    let ready = live_session.wait_screen(
         ScreenPredicate::Contains {
             text: "READY".to_owned(),
         },
         Duration::ZERO,
         Duration::from_secs(5),
     )?;
+    assert!(ready.satisfied());
 
-    let frame = live_session.screen().frame(Default::default())?;
+    let frame = live_session.frame(Default::default())?;
+    let enter = KeyChord::parse("enter")?.ok_or("enter is a key")?;
     let action_result = live_session.act(
-        &[InputAtom::Text("hello\n".to_owned())],
-        ActionOptions {
-            if_state: Some(frame.state_hash),
-            postcondition: ActionCondition::Idle {
-                stable_for: Duration::from_millis(20),
-                timeout: Duration::from_secs(2),
-            },
-            ..Default::default()
-        },
+        ActRequest::new()
+            .text("hello")
+            .key(enter)
+            .if_state(frame.state_hash)
+            .until_idle(Duration::from_millis(20), Duration::from_secs(2)),
     )?;
-    assert_eq!(action_result.input.atom_count, 1);
+    assert_eq!(action_result.input.atom_count, 2);
 
-    let _completion = live_session.stop(Some(Duration::from_secs(5)))?;
+    let _completion = live_session.stop(StopRequest::default(), Some(Duration::from_secs(5)))?;
     assert!(live_session.path().join("completion.json").is_file());
 
-    // 2. attach -> observe/control -> detach without terminating the source
+    // 2. attach -> observe any state of the completed session
     let attached = terminal.attach(live_session.path())?;
-    assert!(attached.screen().observation()?.source_completed);
+    assert!(
+        attached
+            .observe(StatePoint::LatestPresented, false)?
+            .source_completed
+    );
+    let state_0 = attached.frame_at(
+        StatePoint::StateId { state_id: 0 },
+        false,
+        Default::default(),
+    )?;
+    let state_latest = attached.frame(Default::default())?;
+    assert!(!state_0.state_hash.is_empty());
+    assert!(!state_latest.state_hash.is_empty());
 
-    // 3. open completed recording -> resolve states -> diff -> render
-    let session_dir = live_session.path();
-    let logical_session = Session::from_directory(session_dir)?;
-    let state_0 = logical_session
-        .resolve_state(StateSelector::StateId(0), ResolveOptions::default())?;
-    let state_latest = logical_session
-        .resolve_state(StateSelector::LatestPresented, ResolveOptions::default())?;
-    assert!(!state_0.state_hash().is_empty());
-    assert!(!state_latest.state_hash().is_empty());
+    // 3. completed recording -> diff -> render
+    let logical_session = &attached;
 
     let (diff, _, _) = AnalysisService::diff(
         logical_session.path(),
@@ -130,7 +127,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         ],
     );
     let outcome = run_terminal_test(config, |test| -> Result<(), Box<dyn Error>> {
-        test.session().ok_or("session not available")?.output().wait_for(b"PASS", Duration::from_secs(5))?;
+        test.session()
+            .ok_or("session not available")?
+            .output()
+            .wait_for(b"PASS", Duration::from_secs(5))?;
         Ok(())
     });
     if let Err(err) = &outcome {

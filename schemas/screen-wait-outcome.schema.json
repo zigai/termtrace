@@ -1502,6 +1502,11 @@
           "const": "deadline",
           "description": "The actor-side deadline elapsed before a match.",
           "type": "string"
+        },
+        {
+          "const": "completed",
+          "description": "The session had already completed; the predicate was evaluated on its final screen.",
+          "type": "string"
         }
       ]
     },

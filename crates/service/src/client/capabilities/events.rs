@@ -1,4 +1,4 @@
-use super::super::control::client_error;
+use super::super::client_error;
 use super::super::{EventLog, EventProjection, Result, Session};
 use termtrace_model::execution::layout::SessionLayout;
 
@@ -20,7 +20,7 @@ impl Events<'_> {
         }
 
         let records = EventLog::read_page(
-            SessionLayout::new(&self.session.path).event_log(),
+            SessionLayout::new(self.session.path()).event_log(),
             from_event_seq,
             limit,
         )?;

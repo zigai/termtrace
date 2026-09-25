@@ -8,6 +8,7 @@ import tempfile
 from typing import Any
 import pytest
 from termtrace import (
+    StateGuardFailedError,
     Termtrace,
     TimeoutError,
     version,
@@ -221,5 +222,14 @@ def test_timeout_error_raised() -> None:
             screen = rec.screen()
             with pytest.raises(TimeoutError) as raised:
                 screen.wait_for_text("NON_EXISTENT_STRING_XYZ", timeout_secs=0.2)
+            assert raised.value.kind == "wait_unsatisfied"
             assert raised.value.effect == {"kind": "not_applied"}
             assert raised.value.retry == "new_request"
+
+            guarded = rec.actions().if_state("0" * 64).send_key("ctrl+shift+F5")
+            with pytest.raises(StateGuardFailedError) as stale:
+                guarded.execute()
+            assert stale.value.kind == "stale_state"
+            assert stale.value.code == "stale_observation"
+            assert stale.value.effect == {"kind": "not_applied"}
+            assert stale.value.retry == "new_request"

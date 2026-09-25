@@ -30,7 +30,7 @@ pub struct ClockSample {
 }
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 18;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 19;
 /// Maximum encoded request or response size.
 pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 16 * 1024 * 1024;
 /// Response deadline for commands that do not wait or pace input.
@@ -249,6 +249,8 @@ pub enum StableCaptureQuality {
     OutputClosed,
     /// The server-side deadline elapsed before the requested stable interval.
     Deadline,
+    /// The session had already completed; the frame is its final presented state.
+    Completed,
 }
 
 impl StableCaptureQuality {
@@ -260,7 +262,14 @@ impl StableCaptureQuality {
             Self::ChildCompleted => "child_completed",
             Self::OutputClosed => "output_closed",
             Self::Deadline => "deadline",
+            Self::Completed => "completed",
         };
+    }
+
+    /// Whether the returned frame can no longer change: stable while live, or final.
+    #[must_use]
+    pub const fn is_settled(self) -> bool {
+        return matches!(self, Self::Stable | Self::Completed);
     }
 }
 
@@ -278,6 +287,8 @@ pub enum ScreenWaitQuality {
     OutputClosed,
     /// The actor-side deadline elapsed before a match.
     Deadline,
+    /// The session had already completed; the predicate was evaluated on its final screen.
+    Completed,
 }
 
 /// Why an exact action screen postcondition returned.

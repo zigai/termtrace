@@ -1,7 +1,7 @@
 //! Canonical-session effects the tmux library asks of the CLI.
 //!
-//! Every operation here is a session-layer operation (registry, detached record, stop,
-//! completion, video, bundle); point them at service operations when those exist.
+//! Stop and completion go through the service session operations; detached record, video,
+//! and bundle still run through the CLI and export layers.
 
 use super::args::{TmuxBundleArgs, TmuxVideoArgs};
 use crate::cli::{
@@ -9,8 +9,8 @@ use crate::cli::{
         args::{VideoCursorStyleArg, VideoFacadeArgs},
         run_video_facade,
     },
-    control::{args::StopArgs, run_stop},
     output::ResponseWriter,
+    session_helpers::attach_session,
 };
 use miette::{IntoDiagnostic as _, Result};
 use std::{
@@ -21,9 +21,10 @@ use std::{
     process::{Command, ExitCode, Stdio},
     time::Duration,
 };
-use termtrace_engine::{inspection::wait_for_completion, registry::SessionRegistry};
+use termtrace_engine::registry::SessionRegistry;
 use termtrace_export::tmux::streaming;
 use termtrace_model::value::ByteString;
+use termtrace_sdk::session::StopRequest;
 use termtrace_tmux::{
     artifact::{TmuxSessionLink, TmuxStreamingBundleManifest},
     recording::{composite_session, Tracks},
@@ -105,28 +106,19 @@ impl Tracks for CliTracks {
     }
 
     fn stop(&self, session: &Path, wait: bool, timeout: Duration) -> TmuxResult<()> {
-        let arguments = StopArgs {
-            session: session.to_path_buf(),
-            wait,
-            timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
-            expected_presented_state_hash: None,
-            request_id: None,
-            json: false,
-        };
-
-        let exit_code = run_stop(&mut ResponseWriter::quiet(), arguments)
-            .map_err(|error| return failed("composite tmux client track stop", error))?;
-        if exit_code != ExitCode::SUCCESS {
-            return Err(failed(
-                "composite tmux client track stop",
-                "stop exited with failure",
-            ));
-        }
-        return Ok(());
+        return attach_session(session)
+            .and_then(|mut session| {
+                return session
+                    .stop(StopRequest::default(), wait.then_some(timeout))
+                    .into_diagnostic();
+            })
+            .map(drop)
+            .map_err(|error| return failed("composite tmux client track stop", error));
     }
 
     fn wait_completed(&self, session: &Path, timeout: Duration) -> TmuxResult<()> {
-        return wait_for_completion(session, timeout)
+        return attach_session(session)
+            .and_then(|mut session| return session.complete(timeout).into_diagnostic())
             .map(drop)
             .map_err(|error| return failed("tmux track completion", error));
     }

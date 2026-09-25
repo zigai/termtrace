@@ -23,11 +23,11 @@ impl Native<'_> {
         timeout: Duration,
     ) -> Result<NativeReplayWorker> {
         let (target, _) =
-            native_capture_target(&self.session.helper, &self.session.path, viewport)?;
+            native_capture_target(self.session.helper(), self.session.path(), viewport)?;
 
         return NativeReplayWorker::start(
-            &self.session.helper,
-            &self.session.path,
+            self.session.helper(),
+            self.session.path(),
             target,
             cancelled,
             timeout,
@@ -38,15 +38,15 @@ impl Native<'_> {
     /// Capture native pixels for this canonical session.
     pub fn capture(&self, options: &CaptureOptions) -> Result<CaptureOutcome> {
         let mut options = options.clone();
-        options.session_directory.clone_from(&self.session.path);
+        options.session_directory = self.session.path().to_path_buf();
 
-        return capture_native(&self.session.helper, &options).map_err(Error::from);
+        return capture_native(self.session.helper(), &options).map_err(Error::from);
     }
 
     /// Play this canonical session through the native playback runtime.
     pub fn playback(&self, options: &PlaybackOptions) -> Result<()> {
         let mut options = options.clone();
-        options.session_directory.clone_from(&self.session.path);
+        options.session_directory = self.session.path().to_path_buf();
 
         return playback(&options).map_err(Error::from);
     }

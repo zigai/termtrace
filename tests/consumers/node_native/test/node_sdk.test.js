@@ -278,7 +278,7 @@ test('asciicast export writes valid playback file', async () => {
   }
 });
 
-test('waitForText times out when pattern is absent', async () => {
+test('failures carry typed kind, code, effect, and retry', async () => {
   const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-timeout-'));
   try {
     const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
@@ -289,7 +289,27 @@ test('waitForText times out when pattern is absent', async () => {
       async () => {
         await screen.waitForText('ABSENT_PATTERN_123', 200);
       },
-      /timed out waiting for pattern/
+      (error) => {
+        assert.match(error.message, /timed out waiting for pattern/);
+        assert.equal(error.kind, 'wait_unsatisfied');
+        assert.deepEqual(error.effect, { kind: 'not_applied' });
+        assert.equal(error.retry, 'new_request');
+        return true;
+      }
+    );
+
+    const guarded = rec.actions();
+    guarded.ifState('0'.repeat(64));
+    guarded.sendKey('ctrl+shift+F5');
+    await assert.rejects(
+      () => guarded.execute(),
+      (error) => {
+        assert.equal(error.kind, 'stale_state');
+        assert.equal(error.code, 'stale_observation');
+        assert.deepEqual(error.effect, { kind: 'not_applied' });
+        assert.equal(error.retry, 'new_request');
+        return true;
+      }
     );
 
     await rec.stop();

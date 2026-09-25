@@ -3,15 +3,15 @@ use crate::cli::output::ResponseWriter;
 pub(super) mod args;
 
 use crate::cli::{
-    control::args::{ScreenArgs, ScreenEncoding, StatusArgs, StopArgs, WaitArgs},
+    control::args::{millis_or, ScreenArgs, ScreenEncoding, StatusArgs, StopArgs, WaitArgs},
     output::{
-        human_action_summary, human_screen_summary, write_json_line, write_json_pretty,
-        write_stdout,
+        human_action_summary, human_screen_summary, stable_enum_label, write_json_line,
+        write_json_pretty, write_stdout,
     },
     parsers::{parse_cursor_position, parse_region_predicate, parse_row_predicate},
     session_helpers::{
-        resolve_session, resolve_session_path, resolve_state_point, write_session_lifecycle,
-        ResolvedSessionRef,
+        attach_session, resolve_session, resolve_session_path, resolve_state_point,
+        write_session_lifecycle, ResolvedSessionRef,
     },
 };
 use miette::{IntoDiagnostic as _, Result};
@@ -21,29 +21,27 @@ use std::{
     process::ExitCode,
     time::Duration,
 };
-use termtrace_control::{
-    is_completed, request, request_or_completed, send_request, send_request_response,
-    Error as ControlError, Reached,
-};
+use termtrace_control::{is_completed, request};
 use termtrace_engine::{
     inspection::{wait_for_completion, wait_for_output},
     observation::observe_validated_prefix,
 };
 use termtrace_model::{
-    execution::event::InputKind,
     execution::session::SessionPhase,
     protocol::control::{
-        derive_input_operation_id, ActionPostcondition, ActionPostconditionResult, ControlCommand,
-        ControlData, ControlErrorDetails, ControlRequest, ControlResult, InputSequenceAtom,
-        InputSequenceAtomOutcome, ScreenPostconditionQuality, ScreenPredicate, ScreenWaitQuality,
+        ActionPostconditionResult, ControlCommand, ControlData, ControlRequest,
+        InputSequenceAtomOutcome, ScreenPostconditionQuality, ScreenPredicate,
         StableCaptureQuality, StateHashComparison,
     },
     terminal::observation::{ActorBoundaries, CaptureQuality, StatePoint},
     terminal::screen::{ScreenFrame, ScreenProjectionRequest},
-    terminal::state::{KeyModifiers, NamedKey},
-    value::ByteString,
+    terminal::state::KeyChord,
 };
-use termtrace_sdk::{observe_session_with_options, wait_for_screen};
+use termtrace_sdk::{
+    actions::hash_only_projection, defaults, session::Session, ActOutcome, ActRequest,
+    ActionCondition, Error as SessionError, InputAtom, MutationGuard, StableCaptureOptions,
+    StopOutcome, StopPolicy, StopRequest,
+};
 
 mod action;
 mod input;
@@ -54,7 +52,5 @@ mod wait;
 pub(in crate::cli) use action::run_send;
 pub(in crate::cli) use screen::run_screen;
 pub(in crate::cli) use transport::{run_status, run_stop};
-#[expect(unused_imports, reason = "Control transport types preserved for tests")]
-use transport::{send_cli_control, CliControlOutcome};
 use wait::compact_boundaries;
 pub(in crate::cli) use wait::run_wait;

@@ -22,24 +22,22 @@ fn concurrent_client_launches_keep_environment_snapshots_isolated() {
                 );
 
                 let terminal = ClientTerminal::new(env!("CARGO_BIN_EXE_termtrace"), &evidence);
-                let mut session = terminal
-                    .launch([
-                        OsString::from("/bin/sh"),
-                        OsString::from("-c"),
-                        OsString::from(script),
-                    ])
-                    .clear_environment()
-                    .copy_environment("PATH")
-                    .set_environment("ISOLATED_ID", value.into_bytes())
-                    .color_policy(ColorPolicy::Never)
-                    .output_byte_budget(1_000_000)
-                    .start()
-                    .expect("concurrent launch");
+                let spec = LaunchSpec::new([
+                    OsString::from("/bin/sh"),
+                    OsString::from("-c"),
+                    OsString::from(script),
+                ])
+                .clear_environment()
+                .copy_environment("PATH")
+                .set_environment("ISOLATED_ID", value.into_bytes())
+                .color_policy(ColorPolicy::Never)
+                .output_byte_budget(1_000_000);
+                let mut session = terminal.start(spec).expect("concurrent launch");
 
                 wait_for_output(session.path(), b"OK", Duration::from_secs(3))
                     .expect("concurrent output");
                 session
-                    .stop(Some(Duration::from_secs(5)))
+                    .stop(StopRequest::default(), Some(Duration::from_secs(5)))
                     .expect("concurrent stop");
                 let manifest = read_manifest(session.path()).expect("concurrent manifest");
                 assert_eq!(manifest.resource_limits.output_bytes, Some(1_000_000));

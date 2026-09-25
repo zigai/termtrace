@@ -2,115 +2,43 @@ use crate::cli::output::ResponseWriter;
 use crate::cli::{analysis::args::TimeRangeArgs, output::write_json_line};
 use miette::{IntoDiagnostic as _, Result};
 use std::{
-    ffi::OsString,
-    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
+    env,
+    os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     process::ExitCode,
-    str,
     time::Duration,
 };
-use termtrace_control::{observe_phase, request_or_completed, Reached};
+use termtrace_control::{request_or_completed, Reached};
 use termtrace_engine::{
-    registry::SessionRegistry,
     timeline::{resolve_session_prefix_source_selection, resolve_session_source_selection},
     Result as EngineResult,
 };
 use termtrace_model::{
-    execution::session::SessionPhase,
     protocol::control::{ControlCommand, ControlData},
     terminal::{observation::StatePoint, replay::SourceRange},
     value::ByteString,
 };
+use termtrace_sdk::session::{Session, SessionTarget};
 
-pub(super) struct ResolvedSessionRef {
-    pub(super) path: PathBuf,
-    pub(super) lifecycle: SessionPhase,
-    pub(super) diagnostic: Option<String>,
-}
+pub(super) use termtrace_sdk::session::LocatedSession as ResolvedSessionRef;
 
+/// Locate a session reference and observe its phase without requiring it to be healthy.
 pub(super) fn resolve_session(target: PathBuf) -> Result<ResolvedSessionRef> {
-    let bytes = target.as_os_str().as_bytes();
-    if let Some(path) = bytes.strip_prefix(b"path:") {
-        if path.is_empty() {
-            return Err(miette::miette!("path: session reference is empty"));
-        }
-
-        let path = PathBuf::from(OsString::from_vec(path.to_vec()));
-
-        return Ok(resolve_path_lifecycle(path));
-    }
-
-    if let Some(name) = bytes.strip_prefix(b"name:") {
-        let name = str::from_utf8(name)
-            .map_err(|_| miette::miette!("name: session reference must be valid UTF-8"))?;
-
-        let resolved = SessionRegistry::open_default()
-            .into_diagnostic()?
-            .resolve_lifecycle(name)
-            .into_diagnostic()?;
-
-        return Ok(ResolvedSessionRef {
-            path: resolved.session,
-            lifecycle: resolved.lifecycle,
-            diagnostic: resolved.diagnostic,
-        });
-    }
-
-    if bytes.contains(&b'/') || bytes.starts_with(b".") || target.exists() {
-        return Ok(resolve_path_lifecycle(target));
-    }
-
-    let name = target
-        .to_str()
-        .ok_or_else(|| miette::miette!("non-UTF-8 session paths require the path: prefix"))?;
-
-    let resolved = SessionRegistry::open_default()
-        .into_diagnostic()?
-        .resolve_lifecycle(name)
-        .into_diagnostic()?;
-
-    return Ok(ResolvedSessionRef {
-        path: resolved.session,
-        lifecycle: resolved.lifecycle,
-        diagnostic: resolved.diagnostic,
-    });
+    return SessionTarget::parse(target.as_os_str())
+        .and_then(|target| return target.locate())
+        .into_diagnostic();
 }
 
+/// Resolve a session reference to a healthy canonical session directory.
 pub(super) fn resolve_session_path(target: PathBuf) -> Result<PathBuf> {
-    let bytes = target.as_os_str().as_bytes();
-    if let Some(path) = bytes.strip_prefix(b"path:") {
-        if path.is_empty() {
-            return Err(miette::miette!("path: session reference is empty"));
-        }
-        return Ok(PathBuf::from(OsString::from_vec(path.to_vec())));
-    }
+    return SessionTarget::parse(target.as_os_str())
+        .and_then(|target| return target.path())
+        .into_diagnostic();
+}
 
-    if let Some(name) = bytes.strip_prefix(b"name:") {
-        let name = str::from_utf8(name)
-            .map_err(|_| miette::miette!("name: session reference must be valid UTF-8"))?;
-
-        let entry = SessionRegistry::open_default()
-            .into_diagnostic()?
-            .resolve(name)
-            .into_diagnostic()?;
-
-        return Ok(entry.session_path());
-    }
-
-    if bytes.contains(&b'/') || bytes.starts_with(b".") || target.exists() {
-        return Ok(target);
-    }
-
-    let name = target
-        .to_str()
-        .ok_or_else(|| miette::miette!("non-UTF-8 session paths require the path: prefix"))?;
-
-    let entry = SessionRegistry::open_default()
-        .into_diagnostic()?
-        .resolve(name)
-        .into_diagnostic()?;
-
-    return Ok(entry.session_path());
+/// Attach to a located session through this executable.
+pub(super) fn attach_session(path: &Path) -> Result<Session> {
+    return Session::attach(path, env::current_exe().into_diagnostic()?).into_diagnostic();
 }
 
 pub(super) fn write_session_lifecycle(
@@ -124,7 +52,7 @@ pub(super) fn write_session_lifecycle(
         &serde_json::json!({
             "kind": "session_lifecycle",
             "operation": operation,
-            "lifecycle": resolved.lifecycle.as_str(),
+            "lifecycle": resolved.phase.as_str(),
             "session": ByteString::from(resolved.path.as_os_str().as_bytes()),
             "session_display": resolved.path.display().to_string(),
             "diagnostic": resolved.diagnostic,
@@ -132,16 +60,6 @@ pub(super) fn write_session_lifecycle(
     )?;
 
     return Ok(exit_code);
-}
-
-fn resolve_path_lifecycle(path: PathBuf) -> ResolvedSessionRef {
-    let observation = observe_phase(&path);
-
-    return ResolvedSessionRef {
-        path,
-        lifecycle: observation.phase,
-        diagnostic: observation.diagnostic,
-    };
 }
 
 pub(super) fn resolve_cli_range(

@@ -82,7 +82,6 @@ EXPECTED_EDGES: dict[str, frozenset[str]] = {
     "termtrace-node": frozenset({"termtrace-model", "termtrace-sdk"}),
     "termtrace-scenario": frozenset(
         {
-            "termtrace-control",
             "termtrace-engine",
             "termtrace-evidence",
             "termtrace-model",

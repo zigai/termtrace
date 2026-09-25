@@ -10,7 +10,6 @@
 )]
 
 pub mod actions;
-pub mod aio;
 pub mod client;
 pub mod errors;
 pub mod recording;
@@ -20,9 +19,11 @@ pub mod session;
 use pyo3::prelude::*;
 use std::time::Duration;
 
-/// Parse and validate an optional timeout in seconds.
-pub fn parse_timeout(timeout_secs: Option<f64>, default_secs: f64) -> PyResult<Duration> {
-    let secs = timeout_secs.unwrap_or(default_secs);
+/// Parse and validate an optional timeout in seconds, falling back to a shared default.
+pub fn parse_timeout(timeout_secs: Option<f64>, default: Duration) -> PyResult<Duration> {
+    let Some(secs) = timeout_secs else {
+        return Ok(default);
+    };
     if !secs.is_finite() || secs < 0.0 {
         return Err(pyo3::exceptions::PyValueError::new_err(
             "timeout must be a non-negative finite number",
@@ -55,10 +56,6 @@ fn _termtrace(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Functions
     m.add_function(wrap_pyfunction!(version, m)?)?;
-    m.add_function(wrap_pyfunction!(aio::wait_for_text_async, m)?)?;
-    m.add_function(wrap_pyfunction!(aio::wait_for_idle_async, m)?)?;
-    m.add_function(wrap_pyfunction!(aio::execute_action_async, m)?)?;
-    m.add_function(wrap_pyfunction!(aio::stop_recording_async, m)?)?;
 
     // Exceptions
     m.add(

@@ -1,29 +1,33 @@
-//! Tests for ActionBuilder, Screen queries, and live control capabilities.
+//! Tests for action requests and rich-frame text.
 
 use std::time::Duration;
 use termtrace_model::{
-    protocol::control::ScreenPredicate,
+    protocol::control::{InputSequenceAtom, ScreenPredicate},
     terminal::screen::{
         FrameDetail, ScreenFrame, ScreenFrameData, ScreenProjectionRequest, ScreenSpanRow,
         ScreenTextRow,
     },
-    terminal::state::{KeyModifiers, NamedKey},
+    terminal::state::{KeyChord, KeyModifiers, NamedKey},
 };
 use termtrace_service::{
-    actions::{ActionBuilder, ActionCondition, InputAtom},
+    actions::{ActRequest, ActionCondition, InputAtom},
     screen::frame_text,
 };
+use uuid::Uuid;
 
 #[test]
-fn test_action_builder_constructs_composite_sequence() {
-    let (atoms, options) = ActionBuilder::new()
+fn act_request_builds_a_composite_sequence() {
+    let enter = KeyChord {
+        key: NamedKey::Enter,
+        modifiers: KeyModifiers::default(),
+    };
+    let request = ActRequest::new()
         .text("echo hello")
-        .key(NamedKey::Enter, KeyModifiers::default())
+        .key(enter)
         .paste("pasted content")
-        .bytes(vec![0x04]) // Ctrl-D
-        .if_state("abc".repeat(21) + "a")
+        .bytes(vec![0x04])
+        .if_state("a".repeat(64))
         .intent("test-scripted-action")
-        .pace(Duration::from_millis(15))
         .until_screen(
             ScreenPredicate::Contains {
                 text: "hello".to_owned(),
@@ -33,30 +37,21 @@ fn test_action_builder_constructs_composite_sequence() {
         .projection(ScreenProjectionRequest {
             detail: FrameDetail::Text,
             region: None,
-        })
-        .build();
-    assert_eq!(atoms.len(), 4);
-    assert_eq!(atoms[0], InputAtom::Text("echo hello".to_owned()));
+        });
+
     assert_eq!(
-        atoms[1],
-        InputAtom::Key {
-            key: NamedKey::Enter,
-            modifiers: KeyModifiers::default()
-        }
+        request.atoms,
+        vec![
+            InputAtom::Text("echo hello".to_owned()),
+            InputAtom::Key(enter),
+            InputAtom::Paste("pasted content".to_owned()),
+            InputAtom::Bytes(vec![0x04]),
+        ]
     );
-    assert_eq!(atoms[2], InputAtom::Paste("pasted content".to_owned()));
-    assert_eq!(atoms[3], InputAtom::Bytes(vec![0x04]));
+    assert_eq!(request.guard.if_state, Some("a".repeat(64)));
+    assert_eq!(request.intent.as_deref(), Some("test-scripted-action"));
     assert_eq!(
-        options.if_state.as_deref(),
-        Some("abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca")
-    );
-    assert_eq!(
-        options.caller_intent.as_deref(),
-        Some("test-scripted-action")
-    );
-    assert_eq!(options.pace, Duration::from_millis(15));
-    assert_eq!(
-        options.postcondition,
+        request.postcondition,
         ActionCondition::Screen {
             predicate: ScreenPredicate::Contains {
                 text: "hello".to_owned()
@@ -64,7 +59,33 @@ fn test_action_builder_constructs_composite_sequence() {
             timeout: Duration::from_secs(5),
         }
     );
-    assert_eq!(options.projection.detail, FrameDetail::Text);
+    assert_eq!(request.projection.detail, FrameDetail::Text);
+    assert_eq!(request.wire_atoms(Uuid::now_v7()).len(), 4);
+}
+
+#[test]
+fn paced_text_is_typed_one_scalar_per_atom() {
+    let request = ActRequest::new()
+        .text("hé")
+        .key(KeyChord {
+            key: NamedKey::Tab,
+            modifiers: KeyModifiers::default(),
+        })
+        .pace(Duration::from_millis(15));
+    let wire = request.wire_atoms(Uuid::now_v7());
+
+    assert_eq!(wire.len(), 3);
+    assert!(matches!(
+        &wire[1],
+        InputSequenceAtom::Bytes { data, .. } if data.as_bytes() == "é".as_bytes()
+    ));
+    assert!(matches!(
+        &wire[2],
+        InputSequenceAtom::Key {
+            key: NamedKey::Tab,
+            ..
+        }
+    ));
 }
 
 #[allow(

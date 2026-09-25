@@ -41,6 +41,13 @@ pub enum ModelValidationError {
     InvalidEnvironmentDigest,
     /// Durability thresholds disagree with the selected durability mode.
     InvalidDurabilityPolicy,
+    /// Key-shaped text does not name a valid key chord.
+    InvalidKeyChord {
+        /// Rejected chord text.
+        chord: String,
+        /// Why the chord was rejected.
+        reason: &'static str,
+    },
 }
 
 impl fmt::Display for ModelValidationError {
@@ -81,6 +88,9 @@ impl fmt::Display for ModelValidationError {
                     f,
                     "durability policy thresholds are invalid for the selected mode"
                 );
+            }
+            Self::InvalidKeyChord { chord, reason } => {
+                return write!(f, "invalid key chord `{chord}`: {reason}");
             }
         }
     }

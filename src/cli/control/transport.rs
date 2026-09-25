@@ -140,46 +140,6 @@ pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Val
     return Ok(value);
 }
 
-pub(super) enum CliControlOutcome {
-    Applied(Box<ControlData>),
-    Rejected(ExitCode),
-}
-
-pub(super) fn send_cli_control(
-    response: &mut ResponseWriter,
-    session: &Path,
-    request: &ControlRequest,
-    operation: &'static str,
-) -> Result<CliControlOutcome> {
-    let control_response = send_request_response(session, request).into_diagnostic()?;
-    match control_response.result {
-        ControlResult::Ok { data } => return Ok(CliControlOutcome::Applied(Box::new(data))),
-        ControlResult::Error {
-            code,
-            message,
-            effect,
-            details,
-        } => {
-            write_json_line(
-                response,
-                &serde_json::json!({
-                    "kind": "control_rejected",
-                    "operation": operation,
-                    "code": code,
-                    "message": message,
-                    "details": details,
-                    "request_id": control_response.request_id,
-                    "effect": effect,
-                    "retry": effect.retry(),
-                    "session_state": "live",
-                }),
-            )?;
-
-            return Ok(CliControlOutcome::Rejected(ExitCode::FAILURE));
-        }
-    }
-}
-
 pub(in crate::cli) fn run_status(
     response: &mut ResponseWriter,
     arguments: StatusArgs,
@@ -188,8 +148,8 @@ pub(in crate::cli) fn run_status(
         let registry = SessionRegistry::open_default().into_diagnostic()?;
         let report = registry
             .garbage_collect_with_quota(
-                arguments.older_than_days.unwrap_or(30),
-                arguments.keep_latest.unwrap_or(20),
+                arguments.older_than_days,
+                arguments.keep_latest,
                 None,
                 true,
             )
@@ -291,10 +251,12 @@ pub(in crate::cli) fn run_status(
     };
     let session_label = requested_session.display().to_string();
     let resolved = resolve_session(requested_session)?;
-    if arguments.wait_complete || resolved.lifecycle == SessionPhase::Completed {
-        let completion =
-            wait_for_completion(&resolved.path, Duration::from_millis(arguments.timeout_ms))
-                .into_diagnostic()?;
+    if arguments.wait_complete || resolved.phase == SessionPhase::Completed {
+        let completion = wait_for_completion(
+            &resolved.path,
+            millis_or(arguments.timeout_ms, defaults::STOP_TIMEOUT),
+        )
+        .into_diagnostic()?;
 
         let payload = serde_json::json!({
             "kind": "completed",
@@ -317,13 +279,13 @@ pub(in crate::cli) fn run_status(
         );
     }
 
-    if resolved.lifecycle != SessionPhase::Live {
+    if resolved.phase != SessionPhase::Live {
         if arguments.json {
             return write_session_lifecycle(response, &resolved, "status", ExitCode::SUCCESS);
         }
         return write_stdout(
             response,
-            format!("Session {session_label} {}\n", resolved.lifecycle.as_str()),
+            format!("Session {session_label} {}\n", resolved.phase.as_str()),
         );
     }
 
@@ -380,63 +342,59 @@ pub(in crate::cli) fn run_stop(
     arguments: StopArgs,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle == SessionPhase::Completed {
-        let completion = wait_for_completion(&resolved.path, Duration::ZERO).into_diagnostic()?;
-
-        let payload = serde_json::json!({
-            "kind": "completed",
-            "completion": completion,
-        });
-
-        if arguments.json {
-            return write_json_pretty(response, &payload);
-        }
-        return write_stdout(
-            response,
-            format!("Session {} already completed\n", resolved.path.display()),
-        );
-    }
-
-    if resolved.lifecycle != SessionPhase::Live {
+    if !matches!(resolved.phase, SessionPhase::Live | SessionPhase::Completed) {
         return write_session_lifecycle(response, &resolved, "stop", ExitCode::FAILURE);
     }
 
-    let mut control_request = ControlRequest::new(ControlCommand::Stop);
+    let already_completed = resolved.phase == SessionPhase::Completed;
+    let request = StopRequest {
+        guard: MutationGuard {
+            request_id: arguments.request_id,
+            if_state: arguments.expected_presented_state_hash,
+        },
+        policy: StopPolicy::Request,
+    };
+    let wait = arguments
+        .wait
+        .then(|| return millis_or(arguments.timeout_ms, defaults::STOP_TIMEOUT));
+    let outcome = match attach_session(&resolved.path)?.stop(request, wait) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            write_json_line(
+                response,
+                &serde_json::json!({
+                    "kind": "control_rejected",
+                    "operation": "stop",
+                    "code": error.code(),
+                    "message": error.to_string(),
+                    "details": error.details(),
+                    "effect": error.effect(),
+                    "retry": error.retry(),
+                }),
+            )?;
 
-    if let Some(request_id) = arguments.request_id {
-        control_request.request_id = request_id;
-    }
-
-    control_request.expected_presented_state_hash = arguments.expected_presented_state_hash;
-    let acknowledged = match send_cli_control(response, &resolved.path, &control_request, "stop")? {
-        CliControlOutcome::Applied(data) => *data,
-        CliControlOutcome::Rejected(exit_code) => return Ok(exit_code),
+            return Ok(ExitCode::FAILURE);
+        }
     };
 
-    if !arguments.wait {
-        if arguments.json {
-            return write_json_pretty(response, &compact_control_data(&acknowledged)?);
+    let (payload, summary) = match outcome {
+        StopOutcome::Requested(acknowledgement) => {
+            (compact_control_data(&acknowledgement)?, "stop requested")
         }
-        return write_stdout(
-            response,
-            format!("Session {} stop requested\n", resolved.path.display()),
-        );
-    }
-
-    let completion =
-        wait_for_completion(&resolved.path, Duration::from_millis(arguments.timeout_ms))
-            .into_diagnostic()?;
-
-    let payload = serde_json::json!({
-        "kind": "completed",
-        "completion": completion,
-    });
+        StopOutcome::Completed(completion) => (
+            serde_json::json!({
+                "kind": "completed",
+                "completion": completion,
+            }),
+            if already_completed { "already completed" } else { "stopped" },
+        ),
+    };
 
     if arguments.json {
         return write_json_pretty(response, &payload);
     }
     return write_stdout(
         response,
-        format!("Session {} stopped\n", resolved.path.display()),
+        format!("Session {} {summary}\n", resolved.path.display()),
     );
 }

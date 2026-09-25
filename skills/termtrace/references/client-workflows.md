@@ -8,48 +8,54 @@ multiple sessions, or caller-owned retry IDs.
 
 ## Rust SDK for Stateful Workflows
 
-When orchestrating multi-step interactive workflows, use `termtrace_sdk`:
+When orchestrating multi-step interactive workflows, use `termtrace_sdk`. One `Session`
+type carries every operation the CLI, agent driver, and Python/Node bindings use:
+`Terminal::start`/`attach`, `act`, `wait_screen`, `capture_stable`, `observe`, `frame`,
+`stop`, `complete`, and `detach`. Defaults (geometry, timeouts, idle interval) live in
+`termtrace_sdk::defaults`.
 
 ```rust
 use std::time::Duration;
 use termtrace_sdk::{
-    InputAtom, NamedKey, ScreenPredicate, StableCaptureOptions, Terminal,
+    screen::frame_text, ActRequest, KeyChord, LaunchSpec, ScreenPredicate, StopRequest,
+    Terminal,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let terminal = Terminal::new("termtrace", ".termtrace-evidence");
-    let mut session = terminal
-        .launch(["my-app", "--arg"])
-        .start()?;
+    let mut session = terminal.start(LaunchSpec::new(["my-app", "--arg"]))?;
 
-    // Wait for text or readiness predicate
-    session
-        .screen()
-        .wait(
-            ScreenPredicate::Contains { text: "Ready".to_owned() },
-            Duration::ZERO,
-            Duration::from_secs(5),
-        )?;
+    // Wait for a readiness predicate; `satisfied()` is the one match rule.
+    let ready = session.wait_screen(
+        ScreenPredicate::Contains { text: "Ready".to_owned() },
+        Duration::ZERO,
+        Duration::from_secs(5),
+    )?;
+    assert!(ready.satisfied());
 
-    // Send input
-    session.keyboard().text("help\n")?;
+    // Apply input and its postcondition under one actor ordering point.
+    let enter = KeyChord::parse("enter")?.ok_or("enter is a key")?;
+    let outcome = session.act(
+        ActRequest::new()
+            .text("help")
+            .key(enter)
+            .if_state(ready.frame.state_hash)
+            .until_screen(
+                ScreenPredicate::Contains { text: "Commands".to_owned() },
+                Duration::from_secs(5),
+            ),
+    )?;
+    println!("{}", outcome.frame().map(frame_text).unwrap_or_default());
 
-    // Wait for updated screen
-    session
-        .screen()
-        .wait(
-            ScreenPredicate::Contains { text: "Commands".to_owned() },
-            Duration::ZERO,
-            Duration::from_secs(5),
-        )?;
-
-    let frame = session.screen().frame(Default::default())?;
-    println!("{}", frame.viewport_text);
-
-    session.stop(Some(Duration::from_secs(5)))?;
+    session.stop(StopRequest::default(), Some(Duration::from_secs(5)))?;
     Ok(())
 }
 ```
+
+Every failure states what it did to the session: `error.effect()` is a `MutationEffect`
+and `error.retry()` derives whether a new request, the same request ID, or inspection
+comes next. `error.code()` keeps the actor's rejection code (`stale_observation`,
+`action_busy`, ...) and `error.details()` its actor-consistent context.
 
 ## Native Python SDK (`termtrace`)
 
@@ -75,6 +81,12 @@ with tt.record(["bash", "--norc"], rows=24, cols=80) as rec:
     frame = screen.frame()
     assert "hello" in frame.text
 ```
+
+Keys use the same chord grammar as `termtrace send`: `send_key("ctrl+shift+F5")`,
+`send_key("page-up")`. Every exception derives from `TermtraceError` and carries `kind`,
+`code`, `effect` (a dict such as `{"kind": "not_applied"}`), and `retry`; a stale
+`if_state` guard raises `StateGuardFailedError` with `code == "stale_observation"`, and an
+unmet wait raises `TimeoutError` with `kind == "wait_unsatisfied"`.
 
 For `asyncio` workflows:
 
@@ -114,6 +126,21 @@ await actions.execute();
 
 const frame = await screen.frame();
 console.log("Output:", frame.text);
+```
+
+Thrown errors are `TermtraceError`s with `kind`, `code`, `effect`, and `retry`:
+
+```typescript
+import type { TermtraceError } from "@termtrace/core";
+
+try {
+  await actions.execute();
+} catch (error) {
+  const { code, retry } = error as TermtraceError;
+  if (code === "stale_observation" && retry === "new_request") {
+    // observe again, then rebuild the action
+  }
+}
 ```
 
 For test suites:

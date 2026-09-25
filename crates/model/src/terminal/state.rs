@@ -1,6 +1,6 @@
 //! Stable Rust value types exposed by the Ghostty VT adapter.
 
-use crate::value::ByteString;
+use crate::{error::ModelValidationError, value::ByteString};
 use compact_str::CompactString;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -76,6 +76,116 @@ pub struct KeyModifiers {
     pub alt: bool,
     /// Super modifier.
     pub super_key: bool,
+}
+
+/// One named key with the modifiers held while it is pressed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct KeyChord {
+    /// Key to encode.
+    pub key: NamedKey,
+    /// Modifiers held while the key is pressed.
+    pub modifiers: KeyModifiers,
+}
+
+impl KeyChord {
+    /// Parse `[MODIFIER(+|-)]*KEY`, case-insensitively.
+    ///
+    /// Modifiers are `ctrl`/`control`, `shift`, `alt`, and `super`, each at most once. Keys are
+    /// `enter`/`return`, `escape`/`esc`, `tab`, `backspace`, `delete`/`del`, `insert`/`ins`,
+    /// `home`, `end`, `page-up`/`pageup`, `page-down`/`pagedown`, arrows as `up` or `arrow-up`,
+    /// `f1` through `f24`, and one ASCII letter when at least one modifier is held. `_` may
+    /// stand for `-`. Text that names no key returns `None` so callers can treat it as text.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the text is key-shaped but invalid: a repeated modifier, a
+    /// function key outside 1 through 24, or a modified key that is not an ASCII letter.
+    pub fn parse(text: &str) -> Result<Option<Self>, ModelValidationError> {
+        let invalid = |reason: &'static str| {
+            return ModelValidationError::InvalidKeyChord {
+                chord: text.to_owned(),
+                reason,
+            };
+        };
+        let normalized = text.to_ascii_lowercase().replace(['+', '_'], "-");
+        let mut remaining = normalized.as_str();
+        let mut modifiers = KeyModifiers::default();
+        let mut modified = false;
+
+        loop {
+            let (next, held) = if let Some(next) = remaining
+                .strip_prefix("ctrl-")
+                .or_else(|| return remaining.strip_prefix("control-"))
+            {
+                (next, &mut modifiers.control)
+            } else if let Some(next) = remaining.strip_prefix("shift-") {
+                (next, &mut modifiers.shift)
+            } else if let Some(next) = remaining.strip_prefix("alt-") {
+                (next, &mut modifiers.alt)
+            } else if let Some(next) = remaining.strip_prefix("super-") {
+                (next, &mut modifiers.super_key)
+            } else {
+                break;
+            };
+
+            if *held {
+                return Err(invalid("a modifier was supplied more than once"));
+            }
+
+            *held = true;
+            modified = true;
+            remaining = next;
+        }
+
+        let key = match remaining {
+            "enter" | "return" => NamedKey::Enter,
+            "escape" | "esc" => NamedKey::Escape,
+            "tab" => NamedKey::Tab,
+            "backspace" => NamedKey::Backspace,
+            "delete" | "del" => NamedKey::Delete,
+            "insert" | "ins" => NamedKey::Insert,
+            "home" => NamedKey::Home,
+            "end" => NamedKey::End,
+            "page-up" | "pageup" => NamedKey::PageUp,
+            "page-down" | "pagedown" => NamedKey::PageDown,
+            "up" | "arrow-up" | "arrowup" => NamedKey::ArrowUp,
+            "down" | "arrow-down" | "arrowdown" => NamedKey::ArrowDown,
+            "left" | "arrow-left" | "arrowleft" => NamedKey::ArrowLeft,
+            "right" | "arrow-right" | "arrowright" => NamedKey::ArrowRight,
+            name if name.len() >= 2
+                && name.starts_with('f')
+                && name
+                    .bytes()
+                    .skip(1)
+                    .all(|byte| return byte.is_ascii_digit()) =>
+            {
+                let number = name
+                    .get(1..)
+                    .and_then(|digits| return digits.parse::<u8>().ok())
+                    .filter(|number| return (1..=24).contains(number))
+                    .ok_or_else(|| return invalid("function keys are f1 through f24"))?;
+
+                NamedKey::Function(number)
+            }
+            name if modified && name.chars().count() == 1 => {
+                let letter = name
+                    .chars()
+                    .next()
+                    .filter(char::is_ascii_alphabetic)
+                    .ok_or_else(|| {
+                        return invalid("modified printable keys must be ASCII letters");
+                    })?;
+
+                NamedKey::Letter(letter)
+            }
+            _ if modified => {
+                return Err(invalid("modifiers must precede a named key or letter"));
+            }
+            _ => return Ok(None),
+        };
+
+        return Ok(Some(Self { key, modifiers }));
+    }
 }
 
 /// Result of encoding a semantic key against current terminal modes.
@@ -339,4 +449,37 @@ pub struct SemanticState {
     pub metadata: TerminalMetadata,
     /// Complete viewport grid.
     pub grid: Vec<RowState>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{KeyChord, KeyModifiers, NamedKey};
+
+    #[test]
+    fn key_chords_accept_stacked_modifiers_function_keys_and_aliases() {
+        let chord = KeyChord::parse("Ctrl+Shift+x")
+            .expect("valid")
+            .expect("key");
+        assert_eq!(chord.key, NamedKey::Letter('x'));
+        assert!(chord.modifiers.control && chord.modifiers.shift);
+
+        let chord = KeyChord::parse("super-F12").expect("valid").expect("key");
+        assert_eq!(chord.key, NamedKey::Function(12));
+        assert!(chord.modifiers.super_key);
+
+        for alias in ["page-up", "PageUp", "page_up"] {
+            let chord = KeyChord::parse(alias).expect("valid").expect("key");
+            assert_eq!(chord.key, NamedKey::PageUp);
+            assert_eq!(chord.modifiers, KeyModifiers::default());
+        }
+    }
+
+    #[test]
+    fn key_chords_leave_text_to_callers_and_reject_malformed_keys() {
+        assert_eq!(KeyChord::parse("a").expect("valid"), None);
+        assert_eq!(KeyChord::parse("text:hello").expect("valid"), None);
+        assert!(KeyChord::parse("ctrl-ctrl-c").is_err());
+        assert!(KeyChord::parse("f25").is_err());
+        assert!(KeyChord::parse("ctrl-1").is_err());
+    }
 }

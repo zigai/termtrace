@@ -10,7 +10,6 @@ use std::{
     collections::{HashMap, VecDeque},
     io::{BufRead, BufWriter, Write},
     path::PathBuf,
-    process::Child,
 };
 use termtrace_model::protocol::control::ControlData;
 use termtrace_model::protocol::driver::{
@@ -18,7 +17,7 @@ use termtrace_model::protocol::driver::{
     DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
 };
 use termtrace_model::protocol::mutation::MutationEffect;
-use termtrace_sdk::{Error, Result};
+use termtrace_sdk::{Error, Result, Session};
 use uuid::Uuid;
 
 pub(super) const DRIVER_RESPONSE_CACHE_BYTES: usize = 16 * 1024 * 1024;
@@ -79,21 +78,10 @@ fn encode_driver_response(response: &DriverResponse) -> Result<Vec<u8>> {
     return Ok(bytes);
 }
 
-#[derive(Debug)]
-pub(super) enum SessionOwnership {
-    External,
-    Launched { recorder: Option<Child> },
-}
-
-pub(super) struct AttachedSession {
-    pub(super) path: PathBuf,
-    pub(super) ownership: SessionOwnership,
-}
-
 #[derive(Default)]
 pub(super) struct Driver {
     pub(super) native: Option<super::native::DriverNativeWorker>,
-    pub(super) sessions: HashMap<Uuid, AttachedSession>,
+    pub(super) sessions: HashMap<Uuid, Session>,
     pub(super) cached: HashMap<Uuid, CachedDriverResponse>,
     order: VecDeque<Uuid>,
     pub(super) cached_bytes: usize,

@@ -35,10 +35,6 @@ impl ResponseWriter {
     pub(in crate::cli) fn mode(&self) -> ResponseMode {
         return self.mode;
     }
-
-    pub(in crate::cli) fn quiet() -> Self {
-        return Self::new(ResponseMode::Quiet);
-    }
 }
 
 mod helpers;

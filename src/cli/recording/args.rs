@@ -1,6 +1,6 @@
 use crate::cli::parsers::{
-    parse_bounded_screen_regex, parse_capture_target, parse_font_size, parse_provenance_rule,
-    parse_rgb_color, parse_stability_duration, parse_wait_deadline_duration,
+    parse_bounded_screen_regex, parse_capture_target, parse_font_size, parse_idle_interval,
+    parse_provenance_rule, parse_rgb_color, parse_wait_deadline_duration,
 };
 use clap::{Args, ValueEnum};
 use std::{ffi::OsString, path::PathBuf, time::Duration};
@@ -12,6 +12,7 @@ use termtrace_model::{
     execution::session::CaptureTarget,
     value::ByteString,
 };
+use termtrace_sdk::defaults;
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct GeometryProbeArgs {
@@ -44,16 +45,18 @@ pub(in crate::cli) struct RecordArgs {
     /// Run session in background (optionally under this friendly alias name).
     #[arg(short = 'd', long = "detach", num_args = 0..=1, default_missing_value = "")]
     pub(in crate::cli) detach: Option<String>,
-    /// Maximum time to wait for manifest and control readiness in milliseconds (1+).
-    #[arg(long, default_value_t = 5_000, value_parser = clap::value_parser!(u64).range(1..))]
-    pub(in crate::cli) startup_timeout_ms: u64,
-    /// Wait until the first presented screen remains unchanged for this duration.
+    /// Maximum time to wait for control readiness in milliseconds (1+); defaults to the shared
+    /// startup timeout.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(in crate::cli) startup_timeout_ms: Option<u64>,
+    /// Wait until the first presented screen remains unchanged for this duration, or for the
+    /// default idle interval when no value is given.
     #[arg(
         long,
-        value_parser = parse_stability_duration,
+        value_parser = parse_idle_interval,
         num_args = 0..=1,
         require_equals = true,
-        default_missing_value = "100ms",
+        default_missing_value = "",
         conflicts_with_all = ["until_screen", "until_screen_regex"]
     )]
     pub(in crate::cli) until_idle: Option<Duration>,
@@ -63,9 +66,9 @@ pub(in crate::cli) struct RecordArgs {
     /// Wait until the first presented screen matches this bounded regular expression.
     #[arg(long, conflicts_with_all = ["until_idle", "until_screen"], value_parser = parse_bounded_screen_regex)]
     pub(in crate::cli) until_screen_regex: Option<String>,
-    /// Maximum time to wait for matching presented state.
-    #[arg(long, value_parser = parse_wait_deadline_duration, default_value = "30s")]
-    pub(in crate::cli) timeout: Duration,
+    /// Maximum time to wait for matching presented state; defaults to the shared wait timeout.
+    #[arg(long, value_parser = parse_wait_deadline_duration)]
+    pub(in crate::cli) timeout: Option<Duration>,
     /// Emit stable structured output as JSON.
     #[arg(long)]
     pub(in crate::cli) json: bool,
@@ -137,9 +140,10 @@ pub(in crate::cli) struct RestartArgs {
     /// Existing friendly session name.
     pub(in crate::cli) name: String,
 
-    /// Maximum time for predecessor completion and successor readiness in milliseconds (1+).
-    #[arg(long, default_value_t = 10_000, value_parser = clap::value_parser!(u64).range(1..))]
-    pub(in crate::cli) timeout_ms: u64,
+    /// Maximum time for predecessor completion and successor readiness in milliseconds (1+);
+    /// defaults to the shared startup timeout.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    pub(in crate::cli) timeout_ms: Option<u64>,
     /// Override the successor working directory.
     #[arg(long)]
     pub(in crate::cli) cwd: Option<PathBuf>,
@@ -276,19 +280,19 @@ pub(in crate::cli) struct RecordingArgs {
     pub(in crate::cli) background: Option<String>,
 
     /// Terminal columns used by manual geometry (1-65535).
-    #[arg(long, default_value_t = 160, value_parser = clap::value_parser!(u16).range(1..))]
+    #[arg(long, default_value_t = defaults::COLS, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) cols: u16,
 
     /// Terminal rows used by manual geometry (1-65535).
-    #[arg(long, default_value_t = 45, value_parser = clap::value_parser!(u16).range(1..))]
+    #[arg(long, default_value_t = defaults::ROWS, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) rows: u16,
 
     /// Manual cell width, or inherited-geometry fallback, in pixels (1-65535).
-    #[arg(long, default_value_t = 12, value_parser = clap::value_parser!(u16).range(1..))]
+    #[arg(long, default_value_t = defaults::CELL_WIDTH, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) cell_width: u16,
 
     /// Manual cell height, or inherited-geometry fallback, in pixels (1-65535).
-    #[arg(long, default_value_t = 24, value_parser = clap::value_parser!(u16).range(1..))]
+    #[arg(long, default_value_t = defaults::CELL_HEIGHT, value_parser = clap::value_parser!(u16).range(1..))]
     pub(in crate::cli) cell_height: u16,
     #[arg(long, default_value = "xterm-ghostty")]
     pub(in crate::cli) term: String,

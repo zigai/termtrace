@@ -178,7 +178,7 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
         .args(["wait", "--json", "fast-success", "--idle"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""quality":"completed""#));
+        .stdout(predicate::str::contains(r#""quality": "completed""#));
 
     let mut completed_screen = Command::cargo_bin("termtrace").expect("binary should build");
     completed_screen

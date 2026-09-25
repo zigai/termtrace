@@ -12,7 +12,6 @@ use std::{
     sync::atomic::AtomicBool,
     time::Duration,
 };
-use termtrace_control::{send_or_completed, send_request};
 use termtrace_engine::{
     analysis::diagnostics::diagnose_snapshot,
     observation::{observe_session_with_options, state_text, StatePoint},
@@ -28,17 +27,16 @@ use termtrace_model::scenario::{
     ScenarioStatus, ScenarioStep, ScenarioStepResult, ScenarioTimelineAssertion, SCENARIO_VERSION,
 };
 use termtrace_model::{
-    execution::{
-        event::{Event, InputKind},
-        layout::SessionLayout,
-    },
-    protocol::control::{ControlCommand, ControlRequest, ScreenPredicate, ScreenWaitQuality},
+    execution::{event::Event, layout::SessionLayout},
+    protocol::control::{ControlCommand, ControlRequest, ScreenPredicate},
     terminal::analysis::DiagnosticCheck,
     terminal::screen::{ScreenFrame, ScreenFrameData},
-    terminal::state::KeyModifiers,
-    value::ByteString,
+    terminal::state::{KeyChord, KeyModifiers},
 };
-use termtrace_service::{client::Session, StableCaptureOptions, Terminal};
+use termtrace_service::{
+    ActRequest, InputAtom, LaunchSpec, MutationGuard, Session, StableCaptureOptions, StopRequest,
+    Terminal,
+};
 use uuid::Uuid;
 
 /// Execute a scenario in a fresh canonical session.
@@ -71,23 +69,18 @@ pub(crate) fn run_validated(
     let terminal = Terminal::new(binary, evidence_root);
     let command = scenario.launch.command.iter().map(OsString::from);
 
-    let mut builder = terminal
-        .launch(command)
+    let mut spec = LaunchSpec::new(command)
         .geometry(scenario.launch.geometry.cols, scenario.launch.geometry.rows)
         .startup_timeout(Duration::from_millis(scenario.launch.timeout_ms))
         .environment(to_environment_spec(&scenario.launch.environment)?);
+    spec.output_byte_budget = scenario.launch.output_byte_budget;
+    spec.working_directory
+        .clone_from(&scenario.launch.working_directory);
 
-    if let Some(limit) = scenario.launch.output_byte_budget {
-        builder = builder.output_byte_budget(limit);
-    }
-
-    if let Some(directory) = &scenario.launch.working_directory {
-        builder = builder.working_directory(directory);
-    }
-
-    let mut session = builder
-        .start()
+    let mut session = terminal
+        .start(spec)
         .map_err(|error| return operation("launch", error))?;
+    let stop_timeout = Some(Duration::from_millis(scenario.launch.timeout_ms));
 
     let mut steps: Vec<ScenarioStepResult> = Vec::new();
 
@@ -106,13 +99,10 @@ pub(crate) fn run_validated(
                 steps.push(result);
             }
             Err(failure) => {
-                let final_snapshot = send_request(
-                    session.path(),
-                    &ControlRequest::new(ControlCommand::Snapshot),
-                )
-                .ok();
-                let _stop_result =
-                    session.stop(Some(Duration::from_millis(scenario.launch.timeout_ms)));
+                let final_snapshot = session
+                    .control(&ControlRequest::new(ControlCommand::Snapshot))
+                    .ok();
+                let _stop_result = session.stop(StopRequest::default(), stop_timeout);
                 let failure_artifacts = failure_root.join(session.session_id().to_string());
 
                 let report = ScenarioReport {
@@ -140,7 +130,7 @@ pub(crate) fn run_validated(
 
     if !stopped {
         session
-            .stop(Some(Duration::from_millis(scenario.launch.timeout_ms)))
+            .stop(StopRequest::default(), stop_timeout)
             .map_err(|error| return operation("stop", error))?;
     }
 
@@ -250,22 +240,14 @@ fn execute_step(
             };
 
             let matched = session
-                .screen()
-                .wait(
+                .wait_screen(
                     predicate,
                     Duration::from_millis(wait.stable_for_ms),
                     Duration::from_millis(wait.timeout_ms.unwrap_or(scenario.launch.timeout_ms)),
                 )
                 .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
 
-            let wait_satisfied = matched.matched
-                && if wait.stable_for_ms == 0 {
-                    matched.quality == ScreenWaitQuality::MatchedUnsettled
-                } else {
-                    matched.quality == ScreenWaitQuality::Matched
-                };
-
-            if !wait_satisfied {
+            if !matched.satisfied() {
                 return Err(step_failure(
                     index,
                     step,
@@ -285,26 +267,34 @@ fn execute_step(
         }
 
         ScenarioStep::Send(inputs) => {
-            for input in inputs {
-                let command = match input {
-                    ScenarioInput::Text(input) => ControlCommand::Input {
-                        data: ByteString::new(input.text.as_bytes().to_vec()),
-                        input_kind: InputKind::Text,
-                        caller_intent: None,
-                    },
-                    ScenarioInput::Key(input) => ControlCommand::Key {
-                        key: input.key,
-                        modifiers: KeyModifiers::default(),
-                    },
-                };
+            let request_id = Uuid::now_v7();
+            request_ids.push(request_id);
 
-                let request = ControlRequest::new(command);
-                request_ids.push(request.request_id);
+            let atoms = inputs
+                .iter()
+                .map(|input| {
+                    return match input {
+                        ScenarioInput::Text(input) => InputAtom::Text(input.text.clone()),
+                        ScenarioInput::Key(input) => InputAtom::Key(KeyChord {
+                            key: input.key,
+                            modifiers: KeyModifiers::default(),
+                        }),
+                    };
+                })
+                .collect();
 
-                if let Err(error) = session.send(&request) {
-                    return Err(step_failure(index, step, request_ids, error.to_string()));
-                }
-            }
+            session
+                .act(ActRequest {
+                    atoms,
+                    guard: MutationGuard {
+                        request_id: Some(request_id),
+                        if_state: None,
+                    },
+                    ..ActRequest::default()
+                })
+                .map_err(|error| {
+                    return step_failure(index, step, request_ids.clone(), error.to_string());
+                })?;
 
             None
         }
@@ -314,7 +304,7 @@ fn execute_step(
                 label: label.clone(),
             });
             request_ids.push(request.request_id);
-            session.send(&request).map_err(|error| {
+            session.control(&request).map_err(|error| {
                 return step_failure(index, step, request_ids.clone(), error.to_string());
             })?;
             None
@@ -322,7 +312,6 @@ fn execute_step(
 
         ScenarioStep::MatchScreenSnapshot(snapshot) => {
             let capture = session
-                .screen()
                 .capture_stable(StableCaptureOptions {
                     stable_for: Duration::from_millis(snapshot.stable_for_ms),
                     timeout: Duration::from_millis(
@@ -396,15 +385,20 @@ fn execute_step(
         }
 
         ScenarioStep::Stop {} => {
-            let request = ControlRequest::new(ControlCommand::Stop);
-            request_ids.push(request.request_id);
-
-            send_or_completed(session.path(), &request, Duration::ZERO).map_err(|error| {
-                return step_failure(index, step, request_ids.clone(), error.to_string());
-            })?;
+            let request_id = Uuid::now_v7();
+            request_ids.push(request_id);
 
             session
-                .complete(Duration::from_millis(scenario.launch.timeout_ms))
+                .stop(
+                    StopRequest {
+                        guard: MutationGuard {
+                            request_id: Some(request_id),
+                            if_state: None,
+                        },
+                        ..StopRequest::default()
+                    },
+                    Some(Duration::from_millis(scenario.launch.timeout_ms)),
+                )
                 .map_err(|error| {
                     return step_failure(index, step, request_ids.clone(), error.to_string());
                 })?;

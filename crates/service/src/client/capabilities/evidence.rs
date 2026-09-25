@@ -1,4 +1,4 @@
-use super::super::control::client_error;
+use super::super::client_error;
 use super::super::{
     create_bundle, save, verify_bundle, verify_saved_artifact, verify_session, BundleManifest,
     BundleProfile, BundleVerificationPolicy, Path, Result, SaveFormat, SaveOutcome, Session,
@@ -18,7 +18,7 @@ impl Evidence<'_> {
         point: StatePoint,
     ) -> Result<SaveOutcome> {
         let outcome = save(
-            &self.session.path,
+            self.session.path(),
             destination.as_ref(),
             point,
             &[SaveFormat::Png],
@@ -38,8 +38,8 @@ impl Evidence<'_> {
         profile: BundleProfile,
     ) -> Result<BundleManifest> {
         let destination = destination.as_ref();
-        let manifest = create_bundle(&self.session.path, destination, profile, None)?;
-        let policy = BundleVerificationPolicy::new(&self.session.path, profile);
+        let manifest = create_bundle(self.session.path(), destination, profile, None)?;
+        let policy = BundleVerificationPolicy::new(self.session.path(), profile);
         let verified = verify_bundle(destination, &policy)?;
 
         if verified != manifest {
@@ -53,6 +53,6 @@ impl Evidence<'_> {
     /// Verify the completed canonical session without mutating it.
     #[must_use]
     pub fn verify(&self, level: VerificationLevel) -> VerificationReport {
-        return verify_session(&self.session.path, level);
+        return verify_session(self.session.path(), level);
     }
 }

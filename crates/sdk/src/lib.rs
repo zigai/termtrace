@@ -1,7 +1,7 @@
 //! Canonical Rust SDK for Termtrace: recording, live control, replay analysis, and evidence integrity.
 
 #[cfg(feature = "local")]
-pub use termtrace_service::client;
+pub use termtrace_service::{client, defaults};
 
 mod driver;
 pub mod instrumentation;
@@ -24,35 +24,23 @@ pub use termtrace_service::locator;
 #[cfg(feature = "local")]
 pub use termtrace_service::testing;
 
-/// Canonical entry point alias for Termtrace programmatic operations.
-#[cfg(feature = "local")]
-pub type Termtrace = Terminal;
-
-/// Process launch configuration, recording options, and owned leases.
-#[cfg(feature = "local")]
-pub mod recording {
-    pub use termtrace_service::client::{SessionBuilder, Terminal};
-    pub use termtrace_service::recording::{
-        DetachedRecording, FinishPolicy, Recording, RecordingOptions, StopOptions, StopReceipt,
-    };
-}
-
-/// Canonical live or completed session ownership and state resolution.
+/// Launching, attaching, and stopping sessions.
 #[cfg(feature = "local")]
 pub mod session {
-    pub use termtrace_service::client::Session as ClientSession;
-    pub use termtrace_service::session::{CompletedSession, LiveSession, ResolveOptions, Session};
-    pub use termtrace_service::types::{ResolvedState, SessionId, StateSelector};
+    pub use termtrace_service::client::{
+        await_ready, LaunchSpec, LocatedSession, Readiness, Session, SessionTarget, StopOutcome,
+        StopPolicy, StopRequest, Terminal,
+    };
 }
 
-/// Typed keyboard, pointer, and composite action operations.
+/// Typed key chords, pointer operations, and actor-ordered actions.
 #[cfg(feature = "local")]
 pub mod input {
-    pub use termtrace_model::terminal::state::{KeyModifiers, MouseButton, NamedKey};
+    pub use termtrace_model::terminal::state::{KeyChord, KeyModifiers, MouseButton, NamedKey};
     pub use termtrace_service::actions::{
-        ActionBuilder, ActionCompletion, ActionCondition, ActionOptions, ActionResult, InputAtom,
+        ActOutcome, ActRequest, ActionCondition, InputAtom, MutationGuard,
     };
-    pub use termtrace_service::client::{Keyboard, Pointer};
+    pub use termtrace_service::client::Pointer;
 }
 
 /// Screen frames, compact observations, predicates, and queries.
@@ -64,9 +52,7 @@ pub mod screen {
     pub use termtrace_model::terminal::screen::{
         FrameDetail, ScreenFrame, ScreenProjectionRequest, ScreenRegion, ScreenSnapshotOptions,
     };
-    pub use termtrace_service::screen::{
-        frame_text, Screen, StableCaptureOptions, StableScreenCapture,
-    };
+    pub use termtrace_service::screen::{frame_text, StableCaptureOptions, StableScreenCapture};
 }
 
 /// Raw child PTY byte streaming and text waits.
@@ -89,8 +75,8 @@ pub mod analysis {
     pub use termtrace_service::analysis::AnalysisService;
     pub use termtrace_service::client::Semantic;
     pub use termtrace_service::inspection::{
-        inspect_session, state_text, wait_for_completion, wait_for_output, wait_for_screen,
-        ScreenWaitOutcome, WaitOutcome,
+        inspect_session, state_text, wait_for_completion, wait_for_output, ScreenWaitOutcome,
+        WaitOutcome,
     };
 }
 
@@ -104,7 +90,6 @@ pub mod artifacts {
     };
     pub use termtrace_service::artifacts::ArtifactService;
     pub use termtrace_service::client::{Evidence, Native};
-    pub use termtrace_service::types::ArtifactRef;
 }
 
 /// Offline integrity verification and cryptographic provenance.
@@ -137,15 +122,6 @@ pub mod system {
     pub use termtrace_service::system::SystemService;
 }
 
-/// Synchronous blocking facade over shared application services.
-#[cfg(feature = "local")]
-pub mod blocking {
-    pub use termtrace_service::client::{
-        Events, Evidence, Keyboard, Native, Output, Pointer, Semantic, Session, SessionBuilder,
-        Terminal,
-    };
-}
-
 /// Low-level process driver and raw protocol access.
 pub mod advanced {
     pub use crate::driver::{Driver, DriverError};
@@ -153,25 +129,16 @@ pub mod advanced {
 }
 
 #[cfg(feature = "local")]
-pub use actions::{
-    ActionBuilder, ActionCompletion, ActionCondition, ActionOptions, ActionResult, InputAtom,
-};
+pub use actions::{ActOutcome, ActRequest, ActionCondition, InputAtom, MutationGuard};
 #[cfg(feature = "local")]
 pub use client::{
-    observe_session, observe_session_with_options, semantic_state_for_session,
-    semantic_state_with_hash_for_session, Events, Evidence, Keyboard, Native, Output, Pointer,
-    Semantic, Session, SessionBuilder, Terminal,
+    Events, Evidence, LaunchSpec, Native, Output, Pointer, Semantic, Session, SessionTarget,
+    StopOutcome, StopPolicy, StopRequest, Terminal,
 };
 #[cfg(feature = "local")]
 pub use locator::ScreenFrameQuery;
 #[cfg(feature = "local")]
-pub use recording::{
-    DetachedRecording, FinishPolicy, Recording, RecordingOptions, StopOptions, StopReceipt,
-};
-#[cfg(feature = "local")]
-pub use screen::{Screen, StableCaptureOptions, StableScreenCapture};
-#[cfg(feature = "local")]
-pub use session::{CompletedSession, LiveSession, ResolveOptions};
+pub use screen::{StableCaptureOptions, StableScreenCapture};
 pub use termtrace_control::{
     control_endpoint_is_reachable, request, send_request, send_request_response,
 };
@@ -191,14 +158,8 @@ pub use termtrace_model::terminal::observation::StatePoint;
 pub use termtrace_model::terminal::screen::{
     FrameDetail, ScreenFrame, ScreenProjectionRequest, ScreenRegion, ScreenSnapshotOptions,
 };
-pub use termtrace_model::terminal::state::{KeyModifiers, MouseButton, NamedKey};
-#[cfg(feature = "local")]
-pub use termtrace_service::context::OperationContext;
+pub use termtrace_model::terminal::state::{KeyChord, KeyModifiers, MouseButton, NamedKey};
 #[cfg(feature = "local")]
 pub use termtrace_service::inspection;
 #[cfg(feature = "local")]
-pub use termtrace_service::types::{
-    ArtifactRef, Operation, OperationStatus, ResolvedState, SessionId, StateSelector,
-};
-#[cfg(feature = "local")]
-pub use termtrace_service::{error::ErrorKind, wait_for_screen, Error, Result};
+pub use termtrace_service::{error::ErrorKind, Error, Result};

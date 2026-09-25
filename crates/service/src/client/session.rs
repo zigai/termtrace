@@ -1,46 +1,139 @@
-use super::control::{
-    action_atom, client_error, exact_duration_ns, public_control_error, validate_action_options,
-    wire_postcondition,
+use super::{client_error, Events, Evidence, Native, Output, Pointer, Semantic};
+use crate::{
+    actions::{duration_ns, ActOutcome, ActRequest, MutationGuard},
+    defaults,
+    screen::{StableCaptureOptions, StableScreenCapture},
+    Error, Result,
 };
-use super::{
-    derive_input_operation_id, read_manifest, send_request, send_request_response, sync_directory,
-    thread, validate_completed_session, wait_for_completion, ActionCompletion, ActionOptions,
-    ActionPostconditionResult, ActionResult, Child, ControlCommand, ControlData, ControlRequest,
-    ControlResult, Duration, Error, Events, Evidence, InputAtom, Keyboard, Native, Output, Path,
-    PathBuf, Pointer, Result, Screen, Semantic, SessionCompletion, StableCaptureQuality, Uuid,
+use std::{
+    io,
+    path::{Path, PathBuf},
+    process::Child,
+    thread,
+    time::{Duration, Instant},
 };
-use std::io;
-use termtrace_control::{request_or_completed, Reached};
+use termtrace_control::{
+    observe_phase, read_completed, send_or_completed, send_request, ExchangeTiming,
+    PhaseObservation, Reached,
+};
+use termtrace_engine::{
+    inspection::wait_for_completion,
+    observation::{
+        observation_from_live_snapshot, observe_session_with_options, project_screen_frame,
+        resolved_screen_state_for_session, semantic_state_from_live_snapshot,
+        semantic_state_with_hash_for_session, state_text,
+    },
+    recording::control::{compile_screen_predicate, evaluate_screen_predicate},
+};
+use termtrace_evidence::{
+    artifact::sync_directory,
+    session::{read_manifest, validate_completed_session},
+};
+use termtrace_model::{
+    execution::session::SessionCompletion,
+    protocol::control::{
+        ControlCommand, ControlData, ControlRequest, ProcessSignal, ScreenPredicate,
+        ScreenWaitQuality, StableCaptureQuality,
+    },
+    terminal::{
+        inspection::ScreenWaitOutcome,
+        observation::{CaptureQuality, Observation, StatePoint},
+        screen::{ScreenFrame, ScreenFrameSource, ScreenProjectionRequest},
+        state::SemanticState,
+    },
+};
 use termtrace_process::ProcessGroup;
+use uuid::Uuid;
 
-/// High-level live/completed session handle.
+/// One live or completed canonical session, owning its recorder when this process launched it.
+///
+/// Every interface drives sessions through these operations. Reads of a session that has
+/// completed, or completes within [`defaults::COMPLETION_GRACE`] of its actor becoming
+/// unreachable, are answered from validated completed evidence.
 pub struct Session {
-    pub(super) path: PathBuf,
-    pub(super) helper: PathBuf,
-    pub(super) session_id: Uuid,
-    pub(super) recorder: Option<Child>,
-    pub(super) recorded_process_group: Option<ProcessGroup>,
+    path: PathBuf,
+    helper: PathBuf,
+    session_id: Uuid,
+    ownership: Ownership,
+}
+
+enum Ownership {
+    Attached,
+    Launched(Option<Recorder>),
+}
+
+struct Recorder {
+    process: Child,
+    recorded_group: Option<ProcessGroup>,
+}
+
+/// How [`Session::stop`] asks the recording to end.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum StopPolicy {
+    /// Ask the actor to stop the child and finalize evidence.
+    #[default]
+    Request,
+    /// Deliver one signal to the recorded process group and let it exit on its own.
+    Signal(ProcessSignal),
+}
+
+/// One stop request.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct StopRequest {
+    /// Request identity and presented-state guard.
+    pub guard: MutationGuard,
+    /// How to ask the recording to end.
+    pub policy: StopPolicy,
+}
+
+/// What [`Session::stop`] observed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StopOutcome {
+    /// The actor acknowledged the request; completion was not awaited.
+    Requested(Box<ControlData>),
+    /// Validated completion evidence, published before or after the request.
+    Completed(Box<SessionCompletion>),
 }
 
 impl Session {
-    pub(crate) fn open(path: PathBuf, helper: PathBuf, recorder: Option<Child>) -> Result<Self> {
+    pub(super) fn open(path: PathBuf, helper: PathBuf, recorder: Option<Child>) -> Result<Self> {
         let manifest = read_manifest(&path)?;
-        let recorded_process_group = if recorder.is_some() {
-            match send_request(&path, &ControlRequest::new(ControlCommand::Status)) {
-                Ok(ControlData::Status { pid, .. }) => pid.and_then(ProcessGroup::from_leader),
-                _ => None,
-            }
-        } else {
-            None
-        };
+        let ownership = recorder.map_or(Ownership::Attached, |process| {
+            let recorded_group =
+                match send_request(&path, &ControlRequest::new(ControlCommand::Status)) {
+                    Ok(ControlData::Status { pid, .. }) => pid.and_then(ProcessGroup::from_leader),
+                    _ => None,
+                };
+
+            return Ownership::Launched(Some(Recorder {
+                process,
+                recorded_group,
+            }));
+        });
 
         return Ok(Self {
             path,
             helper,
             session_id: manifest.session_id,
-            recorder,
-            recorded_process_group,
+            ownership,
         });
+    }
+
+    /// Attach to an existing session without owning its recorder; `helper` is the Termtrace
+    /// executable used for native capture.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the directory is missing or has no valid manifest.
+    pub fn attach(session: impl AsRef<Path>, helper: impl Into<PathBuf>) -> Result<Self> {
+        let path = session.as_ref().canonicalize().map_err(|source| {
+            return Error::Filesystem {
+                path: session.as_ref().to_path_buf(),
+                source,
+            };
+        })?;
+
+        return Self::open(path, helper.into(), None);
     }
 
     /// Canonical evidence path.
@@ -49,246 +142,500 @@ impl Session {
         return &self.path;
     }
 
+    /// Termtrace executable used for native capture.
+    #[must_use]
+    pub fn helper(&self) -> &Path {
+        return &self.helper;
+    }
+
     /// Immutable canonical session identity.
     #[must_use]
-    pub fn session_id(&self) -> Uuid {
+    pub const fn session_id(&self) -> Uuid {
         return self.session_id;
     }
 
-    /// Presented-screen namespace.
+    /// Whether this handle launched the recording, and so owns its evidence.
     #[must_use]
-    pub fn screen(&self) -> Screen<'_> {
-        return Screen { session: self };
+    pub const fn launched(&self) -> bool {
+        return matches!(self.ownership, Ownership::Launched(_));
     }
 
-    /// Typed keyboard/input namespace.
+    /// Observe the session phase now.
     #[must_use]
-    pub fn keyboard(&self) -> Keyboard<'_> {
-        return Keyboard { session: self };
+    pub fn phase(&self) -> PhaseObservation {
+        return observe_phase(&self.path);
     }
 
     /// Mode-aware pointer and focus namespace.
     #[must_use]
-    pub fn pointer(&self) -> Pointer<'_> {
+    pub const fn pointer(&self) -> Pointer<'_> {
         return Pointer { session: self };
     }
 
     /// Canonical output-history namespace.
     #[must_use]
-    pub fn output(&self) -> Output<'_> {
+    pub const fn output(&self) -> Output<'_> {
         return Output { session: self };
     }
 
     /// Completed semantic derivation namespace.
     #[must_use]
-    pub fn semantic(&self) -> Semantic<'_> {
+    pub const fn semantic(&self) -> Semantic<'_> {
         return Semantic { session: self };
     }
 
     /// Typed canonical event namespace.
     #[must_use]
-    pub fn events(&self) -> Events<'_> {
+    pub const fn events(&self) -> Events<'_> {
         return Events { session: self };
     }
 
     /// Completed evidence, artifact, and retention namespace.
     #[must_use]
-    pub fn evidence(&self) -> Evidence<'_> {
+    pub const fn evidence(&self) -> Evidence<'_> {
         return Evidence { session: self };
     }
 
     /// Native capture, playback, and presentation namespace.
     #[must_use]
-    pub fn native(&self) -> Native<'_> {
+    pub const fn native(&self) -> Native<'_> {
         return Native { session: self };
     }
 
-    /// Send a caller-owned request so its UUID can be retained for retries.
-    pub fn send(&self, request: &ControlRequest) -> Result<ControlData> {
+    /// Send one caller-owned request to the live actor; its UUID can be retained for retries.
+    ///
+    /// # Errors
+    ///
+    /// Returns the transport failure or the actor's rejection.
+    pub fn control(&self, request: &ControlRequest) -> Result<ControlData> {
         return Ok(send_request(&self.path, request)?);
     }
 
-    /// Apply input and evaluate its postcondition under one actor ordering point.
-    pub fn act(&self, atoms: &[InputAtom], options: ActionOptions) -> Result<ActionResult> {
-        validate_action_options(atoms, &options)?;
+    fn reach(&self, request: &ControlRequest) -> Result<Reached> {
+        let timing = ExchangeTiming::Timeout(request.command.client_response_timeout());
 
-        let request_id = options.request_id.unwrap_or_else(Uuid::now_v7);
-        let wire_atoms = atoms
-            .iter()
-            .enumerate()
-            .map(|(index, atom)| {
-                return action_atom(
-                    atom,
-                    derive_input_operation_id(request_id, index),
-                    options.caller_intent.clone(),
-                );
-            })
-            .collect();
+        return self.reach_within(request, timing);
+    }
 
-        let mut request = ControlRequest::new(ControlCommand::Act {
-            atoms: wire_atoms,
-            pace_ns: exact_duration_ns("pace", options.pace)?,
-            include_atom_outcomes: options.verbose_atom_outcomes,
-            postcondition: wire_postcondition(&options.postcondition)?,
-            projection: options.projection,
-        });
-        request.request_id = request_id;
-
-        request
-            .expected_presented_state_hash
-            .clone_from(&options.if_state);
-        let response = send_request_response(&self.path, &request)?;
-        let data = match response.result {
-            ControlResult::Ok { data } => data,
-            ControlResult::Error {
-                code,
-                message,
-                effect,
-                details,
-            } => {
-                return Err(public_control_error(
-                    code,
-                    message,
-                    effect,
-                    details,
-                    Some(request_id),
-                    options.if_state,
-                ));
-            }
+    fn reach_within(&self, request: &ControlRequest, timing: ExchangeTiming) -> Result<Reached> {
+        let grace = match &timing {
+            ExchangeTiming::Timeout(_) => defaults::COMPLETION_GRACE,
+            ExchangeTiming::Deadline(deadline) => deadline
+                .saturating_duration_since(Instant::now())
+                .min(defaults::COMPLETION_GRACE),
         };
+
+        return Ok(send_or_completed(&self.path, request, timing, grace)?);
+    }
+
+    /// Apply input and evaluate its postcondition under one actor ordering point.
+    ///
+    /// # Errors
+    ///
+    /// Returns the actor's rejection or transport failure; its effect states what was applied.
+    /// An unmet postcondition is an error unless the request allows incomplete outcomes.
+    pub fn act(&self, request: ActRequest) -> Result<ActOutcome> {
+        let request_id = request.guard.request_id.unwrap_or_else(Uuid::now_v7);
+        let mut wire = ControlRequest::new(ControlCommand::Act {
+            atoms: request.wire_atoms(request_id),
+            pace_ns: duration_ns(request.pace),
+            include_atom_outcomes: request.verbose_atom_outcomes,
+            postcondition: request.postcondition.to_wire(),
+            projection: request.projection,
+        });
+        wire.request_id = request_id;
+        wire.expected_presented_state_hash = request.guard.if_state;
 
         let ControlData::ActionApplied {
             input,
             postcondition,
             boundaries,
-        } = data
+        } = self.control(&wire)?
         else {
             return Err(client_error("actor returned the wrong action payload"));
         };
-        let (completion, frame, complete) = match postcondition {
-            ActionPostconditionResult::None { frame, .. } => (ActionCompletion::None, frame, true),
-            ActionPostconditionResult::Idle {
-                matched,
-                quality,
-                frame,
-                ..
-            } => (
-                ActionCompletion::Idle { matched, quality },
-                frame,
-                quality == StableCaptureQuality::Stable,
-            ),
-            ActionPostconditionResult::Screen {
-                matched,
-                quality,
-                frame,
-                ..
-            } => (
-                ActionCompletion::Screen { matched, quality },
-                frame,
-                matched,
-            ),
-        };
 
-        let result = ActionResult {
+        if input.sequence_id != request_id {
+            return Err(client_error(
+                "actor returned an action input identifier that does not match the request",
+            ));
+        }
+
+        let outcome = ActOutcome {
             request_id,
             input,
-            completion,
-            frame,
+            postcondition,
             boundaries,
         };
 
-        if !complete && !options.allow_incomplete {
+        if !outcome.matched() && !request.allow_incomplete {
             return Err(Error::PostconditionIncomplete {
-                result: Box::new(result),
+                result: Box::new(outcome),
             });
         }
-        return Ok(result);
+        return Ok(outcome);
     }
 
-    /// Request graceful stop and optionally wait for immutable completion.
-    pub fn stop(&mut self, timeout: Option<Duration>) -> Result<Option<SessionCompletion>> {
-        let sent = match request_or_completed(&self.path, ControlCommand::Stop, Duration::ZERO) {
-            Ok(Reached::Completed(_)) => {
-                return self.complete(timeout.unwrap_or(Duration::ZERO)).map(Some);
+    /// Wait for a presented-screen predicate, or evaluate it once on a completed session.
+    ///
+    /// # Errors
+    ///
+    /// Returns the actor's rejection, a transport failure, or a completed-evidence failure.
+    pub fn wait_screen(
+        &self,
+        predicate: ScreenPredicate,
+        stable_for: Duration,
+        timeout: Duration,
+    ) -> Result<ScreenWaitOutcome> {
+        let request = ControlRequest::new(ControlCommand::WaitScreen {
+            predicate: predicate.clone(),
+            stable_for_ns: duration_ns(stable_for),
+            timeout_ns: duration_ns(timeout),
+            projection: ScreenProjectionRequest::default(),
+        });
+
+        let data = match self.reach(&request)? {
+            Reached::Live(data) => *data,
+            Reached::Completed(_) => {
+                return self.completed_screen_wait(predicate, duration_ns(stable_for));
             }
-            Ok(Reached::Live(_)) => Ok(()),
-            Err(error) => Err(error),
         };
 
-        if let Some(timeout) = timeout {
-            return match self.complete(timeout) {
-                Ok(completion) => Ok(Some(completion)),
-                Err(complete_error) => {
-                    sent?;
-                    Err(complete_error)
-                }
-            };
-        }
+        let ControlData::ScreenWait {
+            predicate,
+            matched,
+            first_match_monotonic_ns,
+            observed_monotonic_ns,
+            stable_for_ns,
+            quality,
+            frame,
+        } = data
+        else {
+            return Err(client_error("actor returned the wrong screen-wait payload"));
+        };
 
-        sent?;
-
-        return Ok(None);
+        return Ok(ScreenWaitOutcome {
+            predicate,
+            matched,
+            first_match_monotonic_ns,
+            observed_monotonic_ns,
+            stable_for_ns,
+            quality,
+            frame,
+        });
     }
 
-    /// Wait for and validate immutable completion evidence.
+    fn completed_screen_wait(
+        &self,
+        predicate: ScreenPredicate,
+        stable_for_ns: u64,
+    ) -> Result<ScreenWaitOutcome> {
+        let compiled = compile_screen_predicate(&predicate).map_err(client_error)?;
+        let (state, source, presented) =
+            resolved_screen_state_for_session(&self.path, StatePoint::LatestPresented, false)?;
+        let frame = project_screen_frame(
+            &state,
+            &ScreenProjectionRequest::default(),
+            source,
+            presented,
+            CaptureQuality::Completed,
+        )
+        .map_err(Error::ScreenFrame)?;
+        let matched =
+            evaluate_screen_predicate(&compiled, &state, &state_text(&state), &frame.state_hash);
+        let observed_monotonic_ns = frame_monotonic_ns(&frame);
+
+        return Ok(ScreenWaitOutcome {
+            predicate,
+            matched,
+            first_match_monotonic_ns: matched.then_some(observed_monotonic_ns),
+            observed_monotonic_ns,
+            stable_for_ns,
+            quality: ScreenWaitQuality::Completed,
+            frame,
+        });
+    }
+
+    /// Capture one exact frame once it stays unchanged, or the final frame once completed.
+    ///
+    /// # Errors
+    ///
+    /// Returns the actor's rejection, a transport failure, or, unless incomplete captures are
+    /// allowed, [`Error::StableCaptureIncomplete`] when the frame did not settle.
+    pub fn capture_stable(&self, options: StableCaptureOptions) -> Result<StableScreenCapture> {
+        return self.capture_stable_by(options, None);
+    }
+
+    /// [`Self::capture_stable`], abandoning the exchange at `deadline` when one is given.
+    pub(crate) fn capture_stable_by(
+        &self,
+        options: StableCaptureOptions,
+        deadline: Option<Instant>,
+    ) -> Result<StableScreenCapture> {
+        let stable_for_ns = duration_ns(options.stable_for);
+        let request = ControlRequest::new(ControlCommand::CaptureStable {
+            stable_for_ns,
+            timeout_ns: duration_ns(options.timeout),
+            projection: options.projection,
+        });
+        let timing = deadline.map_or_else(
+            || return ExchangeTiming::Timeout(request.command.client_response_timeout()),
+            ExchangeTiming::Deadline,
+        );
+
+        let capture = match self.reach_within(&request, timing)? {
+            Reached::Live(data) => {
+                let ControlData::StableSnapshot {
+                    frame,
+                    semantic_state_zstd,
+                    first_observed_monotonic_ns,
+                    observed_monotonic_ns,
+                    stable_for_ns,
+                    quality,
+                } = *data
+                else {
+                    return Err(client_error(
+                        "actor returned the wrong stable-capture payload",
+                    ));
+                };
+
+                StableScreenCapture {
+                    quality,
+                    frame,
+                    first_observed_monotonic_ns,
+                    observed_monotonic_ns,
+                    stable_for_ns,
+                    semantic_state_zstd: Some(semantic_state_zstd),
+                }
+            }
+            Reached::Completed(_) => {
+                let frame =
+                    self.completed_frame(StatePoint::LatestPresented, false, options.projection)?;
+                let observed_monotonic_ns = frame_monotonic_ns(&frame);
+
+                StableScreenCapture {
+                    quality: StableCaptureQuality::Completed,
+                    frame,
+                    first_observed_monotonic_ns: observed_monotonic_ns,
+                    observed_monotonic_ns,
+                    stable_for_ns,
+                    semantic_state_zstd: None,
+                }
+            }
+        };
+
+        if !capture.quality.is_settled() && !options.allow_incomplete {
+            return Err(Error::StableCaptureIncomplete {
+                result: Box::new(capture),
+            });
+        }
+        return Ok(capture);
+    }
+
+    /// Observe the latest presented state of a live session, or any state once completed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a live session is asked for another point, or observation fails.
+    pub fn observe(&self, point: StatePoint, include_hidden: bool) -> Result<Observation> {
+        if self.live_selectable(&point, false)? {
+            let request = ControlRequest::new(ControlCommand::Snapshot);
+            if let Reached::Live(snapshot) = self.reach(&request)? {
+                return Ok(observation_from_live_snapshot(&self.path, *snapshot)?);
+            }
+        }
+
+        return Ok(observe_session_with_options(
+            &self.path,
+            point,
+            include_hidden,
+        )?);
+    }
+
+    /// Resolve the complete semantic state and its hash, live or completed.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::observe`].
+    pub fn semantic_state(
+        &self,
+        point: &StatePoint,
+        include_hidden: bool,
+    ) -> Result<(SemanticState, String)> {
+        if self.live_selectable(point, false)? {
+            let request = ControlRequest::new(ControlCommand::Snapshot);
+            if let Reached::Live(snapshot) = self.reach(&request)? {
+                return Ok(semantic_state_from_live_snapshot(*snapshot)?);
+            }
+        }
+
+        return Ok(semantic_state_with_hash_for_session(
+            &self.path,
+            point,
+            include_hidden,
+        )?);
+    }
+
+    /// Project one bounded rich frame of the latest presented state.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::frame_at`].
+    pub fn frame(&self, projection: ScreenProjectionRequest) -> Result<ScreenFrame> {
+        return self.frame_at(StatePoint::LatestPresented, false, projection);
+    }
+
+    /// Project one bounded rich frame: the latest presented state of a live session, or any
+    /// state once completed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a live session is asked for another point or hidden states, the
+    /// projection exceeds its bounds, or observation fails.
+    pub fn frame_at(
+        &self,
+        point: StatePoint,
+        include_hidden: bool,
+        projection: ScreenProjectionRequest,
+    ) -> Result<ScreenFrame> {
+        if self.live_selectable(&point, include_hidden)? {
+            let request = ControlRequest::new(ControlCommand::ScreenFrame { projection });
+            if let Reached::Live(data) = self.reach(&request)? {
+                let ControlData::ScreenFrame { frame } = *data else {
+                    return Err(client_error("actor returned the wrong rich-screen payload"));
+                };
+
+                return Ok(frame);
+            }
+        }
+
+        return self.completed_frame(point, include_hidden, projection);
+    }
+
+    /// Whether `point` may be answered by the live actor; points only completed evidence can
+    /// answer are rejected while the session is still live.
+    fn live_selectable(&self, point: &StatePoint, include_hidden: bool) -> Result<bool> {
+        if *point == StatePoint::LatestPresented && !include_hidden {
+            return Ok(true);
+        }
+
+        if read_completed(&self.path)?.is_none() {
+            return Err(client_error(
+                "live sessions support only latest-presented selection without hidden states",
+            ));
+        }
+        return Ok(false);
+    }
+
+    fn completed_frame(
+        &self,
+        point: StatePoint,
+        include_hidden: bool,
+        projection: ScreenProjectionRequest,
+    ) -> Result<ScreenFrame> {
+        let (state, source, presented) =
+            resolved_screen_state_for_session(&self.path, point, include_hidden)?;
+
+        return project_screen_frame(
+            &state,
+            &projection,
+            source,
+            presented,
+            CaptureQuality::Completed,
+        )
+        .map_err(Error::ScreenFrame);
+    }
+
+    /// Ask the recording to end and, when `wait` is set, wait for validated completion.
+    ///
+    /// A session that has already completed reports its completion.
+    ///
+    /// # Errors
+    ///
+    /// Returns the actor's rejection, a transport failure, or a completion failure.
+    pub fn stop(&mut self, request: StopRequest, wait: Option<Duration>) -> Result<StopOutcome> {
+        let command = match request.policy {
+            StopPolicy::Request => ControlCommand::Stop,
+            StopPolicy::Signal(signal) => ControlCommand::Signal { signal },
+        };
+        let mut wire = ControlRequest::new(command);
+        if let Some(request_id) = request.guard.request_id {
+            wire.request_id = request_id;
+        }
+        wire.expected_presented_state_hash = request.guard.if_state;
+
+        return match (self.reach(&wire)?, wait) {
+            (Reached::Live(acknowledgement), None) => Ok(StopOutcome::Requested(acknowledgement)),
+            (Reached::Live(_) | Reached::Completed(_), wait) => Ok(StopOutcome::Completed(
+                Box::new(self.complete(wait.unwrap_or(Duration::ZERO))?),
+            )),
+        };
+    }
+
+    /// Wait for validated completion evidence and reap an owned recorder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when completion is not published in time or is invalid.
     pub fn complete(&mut self, timeout: Duration) -> Result<SessionCompletion> {
         let completion = wait_for_completion(&self.path, timeout)?;
 
-        if let Some(mut child) = self.recorder.take() {
-            let _status = child.wait();
+        if let Some(mut recorder) = self.take_recorder() {
+            let _status = recorder.process.wait();
         }
 
         return Ok(completion);
     }
 
-    /// Forcefully terminate and reap the recorded process group and owned recorder after bounded
-    /// graceful cleanup fails.
-    pub fn force_close(&mut self) -> Result<()> {
-        let Some(mut child) = self.recorder.take() else {
-            return Ok(());
+    fn take_recorder(&mut self) -> Option<Recorder> {
+        let Ownership::Launched(recorder) = &mut self.ownership else {
+            return None;
         };
 
-        let process_group_result = self
-            .recorded_process_group
-            .take()
-            .map_or(Ok(()), |group| return group.kill())
-            .map_err(|error| {
-                return Error::Filesystem {
-                    path: self.path.clone(),
-                    source: io::Error::from(error),
-                };
-            });
-        let recorder_kill_result = child.kill().map_err(|source| {
-            return Error::Filesystem {
-                path: self.path.clone(),
-                source,
-            };
-        });
-        let recorder_wait_result = child.wait().map(|_| ()).map_err(|source| {
-            return Error::Filesystem {
-                path: self.path.clone(),
-                source,
-            };
-        });
-
-        process_group_result?;
-
-        recorder_kill_result?;
-
-        return recorder_wait_result;
+        return recorder.take();
     }
 
-    /// Delete one validated completed canonical session owned by this handle.
+    /// Kill the recorded process group and the owned recorder after graceful stop failed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a kill signal or reaping the recorder fails.
+    pub fn force_close(&mut self) -> Result<()> {
+        let Some(mut recorder) = self.take_recorder() else {
+            return Ok(());
+        };
+        let filesystem = |source| {
+            return Error::Filesystem {
+                path: self.path.clone(),
+                source,
+            };
+        };
+
+        let group_result = recorder
+            .recorded_group
+            .map_or(Ok(()), |group| return group.kill())
+            .map_err(|error| return filesystem(io::Error::from(error)));
+        let kill_result = recorder.process.kill().map_err(filesystem);
+        let wait_result = recorder.process.wait().map(|_| ()).map_err(filesystem);
+
+        group_result?;
+
+        kill_result?;
+
+        return wait_result;
+    }
+
+    /// Delete one validated completed canonical session.
     ///
     /// # Errors
     ///
     /// Returns an error when completion is missing or invalid, the recorder cannot be
     /// reaped, or the canonical session tree cannot be removed durably.
-    pub fn discard_completed(mut self) -> Result<()> {
+    pub fn discard_completed(&mut self) -> Result<()> {
         validate_completed_session(&self.path)?;
 
-        if let Some(mut child) = self.recorder.take() {
-            child.wait().map_err(|source| {
+        if let Some(mut recorder) = self.take_recorder() {
+            recorder.process.wait().map_err(|source| {
                 return Error::Filesystem {
                     path: self.path.clone(),
                     source,
@@ -296,7 +643,6 @@ impl Session {
             })?;
         }
 
-        let parent = self.path.parent().map(Path::to_path_buf);
         fs_err::remove_dir_all(&self.path).map_err(|source| {
             return Error::Filesystem {
                 path: self.path.clone(),
@@ -304,35 +650,37 @@ impl Session {
             };
         })?;
 
-        if let Some(parent) = parent {
-            sync_directory(&parent)?;
+        if let Some(parent) = self.path.parent() {
+            sync_directory(parent)?;
         }
 
         return Ok(());
     }
 
-    /// Detach without stopping the independently valid recording.
-    pub fn detach(self) -> PathBuf {
-        let (path, recorder) = self.into_detached_parts();
-
-        if let Some(mut child) = recorder {
+    /// Stop managing the recording without stopping it; an owned recorder is reaped when it
+    /// exits.
+    #[must_use]
+    pub fn detach(mut self) -> PathBuf {
+        if let Some(mut recorder) = self.take_recorder() {
             thread::spawn(move || {
-                if let Err(error) = child.wait() {
+                if let Err(error) = recorder.process.wait() {
                     tracing::warn!(%error, "failed to reap detached recorder");
                 }
             });
         }
 
-        return path;
+        return self.path;
     }
+}
 
-    /// Split an owned session into its canonical path and recorder process.
-    ///
-    /// Process adapters must retain and reap the returned child before deleting the session tree.
-    #[must_use]
-    pub fn into_detached_parts(mut self) -> (PathBuf, Option<Child>) {
-        return (self.path, self.recorder.take());
-    }
+fn frame_monotonic_ns(frame: &ScreenFrame) -> u64 {
+    return match &frame.source {
+        ScreenFrameSource::Actor {
+            observed_monotonic_ns,
+            ..
+        } => *observed_monotonic_ns,
+        ScreenFrameSource::Resolved { monotonic_ns, .. } => monotonic_ns.unwrap_or_default(),
+    };
 }
 
 #[cfg(test)]
@@ -342,18 +690,20 @@ mod tests {
 
     #[test]
     fn detach_reaps_the_recorder_after_it_exits() {
-        let child = Command::new("/bin/sh")
+        let process = Command::new("/bin/sh")
             .args(["-c", "exit 0"])
             .spawn()
             .expect("spawn recorder stand-in");
 
-        let process_path = PathBuf::from(format!("/proc/{}", child.id()));
+        let process_path = PathBuf::from(format!("/proc/{}", process.id()));
         let session = Session {
             path: PathBuf::from("/unused"),
             helper: PathBuf::from("/unused-termtrace"),
             session_id: Uuid::now_v7(),
-            recorder: Some(child),
-            recorded_process_group: None,
+            ownership: Ownership::Launched(Some(Recorder {
+                process,
+                recorded_group: None,
+            })),
         };
         let _path = session.detach();
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -369,18 +719,17 @@ mod tests {
     }
 
     #[test]
-    fn stop_propagates_error_when_send_request_fails_and_completion_missing() {
+    fn stop_reports_an_unreachable_session_that_never_completes() {
         let mut session = Session {
             path: PathBuf::from("/nonexistent/termtrace/test/path"),
             helper: PathBuf::from("/unused-termtrace"),
             session_id: Uuid::now_v7(),
-            recorder: None,
-            recorded_process_group: None,
+            ownership: Ownership::Attached,
         };
-        let result_with_timeout = session.stop(Some(Duration::from_millis(50)));
-        assert!(result_with_timeout.is_err());
 
-        let result_without_timeout = session.stop(None);
-        assert!(result_without_timeout.is_err());
+        assert!(session
+            .stop(StopRequest::default(), Some(Duration::from_millis(50)))
+            .is_err());
+        assert!(session.stop(StopRequest::default(), None).is_err());
     }
 }

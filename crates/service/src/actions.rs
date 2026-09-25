@@ -1,35 +1,34 @@
-//! Immutable actor-ordered action requests and observation results.
+//! Immutable actor-ordered action requests and their outcomes.
 
+use crate::defaults;
 use std::time::Duration;
 use termtrace_model::{
+    execution::event::InputKind,
     protocol::control::{
-        ActionInputResult, ScreenPostconditionQuality, ScreenPredicate, StableCaptureQuality,
+        derive_input_operation_id, ActionInputResult, ActionPostcondition,
+        ActionPostconditionResult, InputSequenceAtom, ScreenPredicate,
     },
     terminal::observation::ActorBoundaries,
-    terminal::screen::{ScreenFrame, ScreenProjectionRequest},
-    terminal::state::{KeyModifiers, NamedKey},
+    terminal::screen::{FrameDetail, ScreenFrame, ScreenProjectionRequest},
+    terminal::state::KeyChord,
+    value::ByteString,
 };
 use uuid::Uuid;
 
-/// One immutable user-intent atom accepted by `Session::act`.
+/// One immutable user-intent atom applied by `Session::act`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InputAtom {
-    /// UTF-8 terminal text.
+    /// UTF-8 terminal text; typed one scalar per atom when the action is paced.
     Text(String),
     /// Exact raw terminal bytes.
     Bytes(Vec<u8>),
-    /// One symbolic key encoded against live terminal modes.
-    Key {
-        /// Named key to encode.
-        key: NamedKey,
-        /// Modifiers held while applying the key.
-        modifiers: KeyModifiers,
-    },
+    /// One key chord encoded against live terminal modes.
+    Key(KeyChord),
     /// UTF-8 paste encoded against live bracketed-paste mode.
     Paste(String),
 }
 
-/// Typed public postcondition using exact Rust durations.
+/// What must hold after input is applied, evaluated under the same actor ordering point.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum ActionCondition {
     /// Return immediately after complete input application.
@@ -51,72 +50,68 @@ pub enum ActionCondition {
     },
 }
 
-/// Public options for one actor-ordered input action.
+impl ActionCondition {
+    /// Wait for the default idle interval within the default wait timeout.
+    #[must_use]
+    pub const fn idle() -> Self {
+        return Self::Idle {
+            stable_for: defaults::IDLE_STABLE_FOR,
+            timeout: defaults::WAIT_TIMEOUT,
+        };
+    }
+
+    /// Wire form of this condition.
+    #[must_use]
+    pub fn to_wire(&self) -> ActionPostcondition {
+        return match self {
+            Self::None => ActionPostcondition::None,
+            Self::Idle {
+                stable_for,
+                timeout,
+            } => ActionPostcondition::Idle {
+                stable_for_ns: duration_ns(*stable_for),
+                timeout_ns: duration_ns(*timeout),
+            },
+            Self::Screen { predicate, timeout } => ActionPostcondition::Screen {
+                predicate: predicate.clone(),
+                timeout_ns: duration_ns(*timeout),
+            },
+        };
+    }
+}
+
+/// Caller-owned identity and optimistic presented-state guard for one mutation.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ActionOptions {
-    /// Caller-supplied request identity, or `None` to allocate a fresh UUID.
+pub struct MutationGuard {
+    /// Caller-retained request identity for safe retries, or `None` for a fresh UUID.
     pub request_id: Option<Uuid>,
     /// Presented-state hash that must still be current before mutation.
     pub if_state: Option<String>,
+}
+
+/// One actor-ordered input action and the condition that must hold afterward.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ActRequest {
+    /// Ordered input atoms.
+    pub atoms: Vec<InputAtom>,
+    /// Request identity and presented-state guard.
+    pub guard: MutationGuard,
     /// Optional human-readable intent retained with the input operations.
-    pub caller_intent: Option<String>,
-    /// Delay between consecutive input atoms.
+    pub intent: Option<String>,
+    /// Delay between consecutive atoms.
     pub pace: Duration,
-    /// Whether the actor should retain outcomes for individual atoms.
+    /// Whether the actor should report outcomes for individual atoms.
     pub verbose_atom_outcomes: bool,
     /// Completion condition evaluated after all input is applied.
     pub postcondition: ActionCondition,
     /// Detail and region requested for the terminating frame.
     pub projection: ScreenProjectionRequest,
-    /// Whether to return an incomplete postcondition result instead of an error.
+    /// Whether an unmet postcondition is returned as an outcome instead of an error.
     pub allow_incomplete: bool,
 }
 
-/// Typed public action completion without a protocol envelope.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ActionCompletion {
-    /// No postcondition was requested.
-    None,
-    /// Outcome of waiting for an unchanged presented state.
-    Idle {
-        /// Whether the requested unchanged interval was reached.
-        matched: bool,
-        /// Stability evidence reported by the actor.
-        quality: StableCaptureQuality,
-    },
-    /// Outcome of waiting for a presented-screen predicate.
-    Screen {
-        /// Whether the screen predicate matched before its deadline.
-        matched: bool,
-        /// Screen-predicate evidence reported by the actor.
-        quality: ScreenPostconditionQuality,
-    },
-}
-
-/// Complete owned result of one actor-ordered action.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ActionResult {
-    /// Identity of the action request.
-    pub request_id: Uuid,
-    /// Ordered input application outcome.
-    pub input: ActionInputResult,
-    /// Postcondition outcome.
-    pub completion: ActionCompletion,
-    /// Exact terminating screen frame, if returned.
-    pub frame: Option<ScreenFrame>,
-    /// Actor sequence boundaries enclosing the action.
-    pub boundaries: ActorBoundaries,
-}
-
-/// Fluent builder for constructing atomic sequences of input atoms and action options.
-#[derive(Clone, Debug, Default)]
-pub struct ActionBuilder {
-    atoms: Vec<InputAtom>,
-    options: ActionOptions,
-}
-
-impl ActionBuilder {
-    /// Construct a new empty action builder.
+impl ActRequest {
+    /// Start an empty action.
     #[must_use]
     pub fn new() -> Self {
         return Self::default();
@@ -138,10 +133,10 @@ impl ActionBuilder {
         return self;
     }
 
-    /// Append a symbolic named key with modifier flags.
+    /// Append one key chord.
     #[must_use]
-    pub fn key(mut self, key: NamedKey, modifiers: KeyModifiers) -> Self {
-        self.atoms.push(InputAtom::Key { key, modifiers });
+    pub fn key(mut self, chord: KeyChord) -> Self {
+        self.atoms.push(InputAtom::Key(chord));
 
         return self;
     }
@@ -154,10 +149,10 @@ impl ActionBuilder {
         return self;
     }
 
-    /// Enforce an optimistic state guard before applying any mutation.
+    /// Apply only while the presented state still has this hash.
     #[must_use]
     pub fn if_state(mut self, state_hash: impl Into<String>) -> Self {
-        self.options.if_state = Some(state_hash.into());
+        self.guard.if_state = Some(state_hash.into());
 
         return self;
     }
@@ -165,31 +160,31 @@ impl ActionBuilder {
     /// Attach a human-readable caller intent.
     #[must_use]
     pub fn intent(mut self, intent: impl Into<String>) -> Self {
-        self.options.caller_intent = Some(intent.into());
+        self.intent = Some(intent.into());
 
         return self;
     }
 
-    /// Set pacing delay between atoms.
+    /// Delay between consecutive atoms.
     #[must_use]
-    pub fn pace(mut self, delay: Duration) -> Self {
-        self.options.pace = delay;
+    pub const fn pace(mut self, delay: Duration) -> Self {
+        self.pace = delay;
 
         return self;
     }
 
-    /// Await a screen condition after input application.
+    /// Await a screen predicate after input application.
     #[must_use]
     pub fn until_screen(mut self, predicate: ScreenPredicate, timeout: Duration) -> Self {
-        self.options.postcondition = ActionCondition::Screen { predicate, timeout };
+        self.postcondition = ActionCondition::Screen { predicate, timeout };
 
         return self;
     }
 
-    /// Await idle stability after input application.
+    /// Await an unchanged presented state after input application.
     #[must_use]
     pub fn until_idle(mut self, stable_for: Duration, timeout: Duration) -> Self {
-        self.options.postcondition = ActionCondition::Idle {
+        self.postcondition = ActionCondition::Idle {
             stable_for,
             timeout,
         };
@@ -199,15 +194,132 @@ impl ActionBuilder {
 
     /// Request a terminating frame projection.
     #[must_use]
-    pub fn projection(mut self, projection: ScreenProjectionRequest) -> Self {
-        self.options.projection = projection;
+    pub const fn projection(mut self, projection: ScreenProjectionRequest) -> Self {
+        self.projection = projection;
 
         return self;
     }
 
-    /// Build into atoms and options tuple.
+    /// Wire atoms for this action: paced text is typed one Unicode scalar per atom, and
+    /// each atom's operation identity derives from the request identity and its position.
     #[must_use]
-    pub fn build(self) -> (Vec<InputAtom>, ActionOptions) {
-        return (self.atoms, self.options);
+    pub fn wire_atoms(&self, request_id: Uuid) -> Vec<InputSequenceAtom> {
+        let mut wire = Vec::with_capacity(self.atoms.len());
+
+        for atom in &self.atoms {
+            match atom {
+                InputAtom::Text(text) if !self.pace.is_zero() => {
+                    for scalar in text.chars() {
+                        let operation_id = derive_input_operation_id(request_id, wire.len());
+                        wire.push(InputSequenceAtom::Bytes {
+                            operation_id,
+                            data: ByteString::new(scalar.to_string().into_bytes()),
+                            input_kind: InputKind::Text,
+                            caller_intent: self.intent.clone(),
+                        });
+                    }
+                }
+                atom => {
+                    let operation_id = derive_input_operation_id(request_id, wire.len());
+                    wire.push(wire_atom(atom, operation_id, self.intent.clone()));
+                }
+            }
+        }
+
+        return wire;
     }
+}
+
+fn wire_atom(
+    atom: &InputAtom,
+    operation_id: Uuid,
+    caller_intent: Option<String>,
+) -> InputSequenceAtom {
+    return match atom {
+        InputAtom::Text(text) => InputSequenceAtom::Bytes {
+            operation_id,
+            data: ByteString::new(text.as_bytes().to_vec()),
+            input_kind: InputKind::Text,
+            caller_intent,
+        },
+        InputAtom::Bytes(bytes) => InputSequenceAtom::Bytes {
+            operation_id,
+            data: ByteString::new(bytes.clone()),
+            input_kind: InputKind::Raw,
+            caller_intent,
+        },
+        InputAtom::Key(chord) => InputSequenceAtom::Key {
+            operation_id,
+            key: chord.key,
+            modifiers: chord.modifiers,
+            caller_intent,
+        },
+        InputAtom::Paste(text) => InputSequenceAtom::Paste {
+            operation_id,
+            data: ByteString::new(text.as_bytes().to_vec()),
+            caller_intent,
+        },
+    };
+}
+
+/// Complete result of one actor-ordered action.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActOutcome {
+    /// Identity of the action request.
+    pub request_id: Uuid,
+    /// Ordered input application outcome.
+    pub input: ActionInputResult,
+    /// Postcondition result exactly as the actor reported it.
+    pub postcondition: ActionPostconditionResult,
+    /// Actor sequence boundaries enclosing the action.
+    pub boundaries: ActorBoundaries,
+}
+
+impl ActOutcome {
+    /// Whether the requested postcondition held.
+    #[must_use]
+    pub const fn matched(&self) -> bool {
+        return match &self.postcondition {
+            ActionPostconditionResult::None { matched, .. }
+            | ActionPostconditionResult::Idle { matched, .. }
+            | ActionPostconditionResult::Screen { matched, .. } => *matched,
+        };
+    }
+
+    /// Exact terminating frame, when one was projected.
+    #[must_use]
+    pub const fn frame(&self) -> Option<&ScreenFrame> {
+        return match &self.postcondition {
+            ActionPostconditionResult::None { frame, .. }
+            | ActionPostconditionResult::Idle { frame, .. }
+            | ActionPostconditionResult::Screen { frame, .. } => frame.as_ref(),
+        };
+    }
+
+    /// Terminating presented-state hash, from the actor or its frame.
+    #[must_use]
+    pub fn state_hash(&self) -> Option<&str> {
+        let (ActionPostconditionResult::None { state_hash, .. }
+        | ActionPostconditionResult::Idle { state_hash, .. }
+        | ActionPostconditionResult::Screen { state_hash, .. }) = &self.postcondition;
+
+        return state_hash
+            .as_deref()
+            .or_else(|| return self.frame().map(|frame| return frame.state_hash.as_str()));
+    }
+}
+
+/// Projection that returns only the terminating state hash, without frame content.
+#[must_use]
+pub const fn hash_only_projection() -> ScreenProjectionRequest {
+    return ScreenProjectionRequest {
+        detail: FrameDetail::None,
+        region: None,
+    };
+}
+
+/// Nanoseconds in a duration, saturating at the protocol's unsigned 64-bit range.
+#[must_use]
+pub fn duration_ns(duration: Duration) -> u64 {
+    return u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX);
 }

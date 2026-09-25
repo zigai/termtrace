@@ -4,17 +4,13 @@ use crate::support::*;
 use serde::Deserialize;
 use std::thread;
 use termtrace_model::{
-    protocol::control::{ScreenPostconditionQuality, StableCaptureQuality},
-    terminal::observation::CaptureQuality,
-    terminal::screen::{
-        FrameDetail, ScreenFrame, ScreenFrameData, ScreenFrameError, ScreenFrameLimitKind,
-        ScreenFrameSource,
+    protocol::control::{
+        ActionPostconditionResult, ScreenPostconditionQuality, StableCaptureQuality,
     },
+    terminal::observation::CaptureQuality,
+    terminal::screen::{FrameDetail, ScreenFrame, ScreenFrameData, ScreenFrameSource},
 };
-use termtrace_sdk::{
-    ActionCompletion, ActionCondition, ActionOptions, Error, InputAtom, MutationEffect, Retry,
-    StableCaptureOptions,
-};
+use termtrace_sdk::{MutationEffect, MutationGuard, Retry};
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -94,38 +90,30 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
     );
 
     let mut session = terminal
-        .launch([
+        .start(LaunchSpec::new([
             OsString::from("/bin/sh"),
             OsString::from("-c"),
             OsString::from(
                 "trap 'exit 0' TERM; printf READY; count=0; while IFS= read -r line; do count=$((count + 1)); printf '\\r\\nCOUNT:%s:%s' \"$count\" \"$line\"; done",
             ),
-        ])
-        .geometry(300, 150)
-        .start()
+        ]).geometry(300, 150))
         .expect("launch oversized action fixture");
 
     wait_for_output(session.path(), b"READY", Duration::from_secs(5))
         .expect("oversized action fixture ready");
     let initial = session
-        .screen()
         .frame(ScreenProjectionRequest::default())
         .expect("initial oversized action frame");
 
-    let atoms = [
-        InputAtom::Text("once".to_owned()),
-        InputAtom::Key {
-            key: NamedKey::Enter,
-            modifiers: KeyModifiers::default(),
+    let request = ActRequest {
+        atoms: vec![InputAtom::Text("once".to_owned()), InputAtom::Key(ENTER)],
+        guard: MutationGuard {
+            request_id: Some(
+                Uuid::parse_str("019fddda-17c8-7000-87da-8785e71ab5e1")
+                    .expect("oversized action request UUID"),
+            ),
+            if_state: Some(initial.state_hash),
         },
-    ];
-
-    let options = ActionOptions {
-        request_id: Some(
-            Uuid::parse_str("019fddda-17c8-7000-87da-8785e71ab5e1")
-                .expect("oversized action request UUID"),
-        ),
-        if_state: Some(initial.state_hash),
         postcondition: ActionCondition::Screen {
             predicate: ScreenPredicate::Contains {
                 text: "COUNT:1:once".to_owned(),
@@ -141,59 +129,41 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
                 bottom: 150,
             }),
         },
-        ..ActionOptions::default()
+        ..ActRequest::default()
     };
     let error = session
-        .act(&atoms, options.clone())
+        .act(request.clone())
         .expect_err("oversized action projection must fail loudly");
+    let details = error.details().expect("terminating-frame failure details");
+    let limit = details
+        .screen_frame
+        .as_ref()
+        .and_then(|frame| return frame.limit_kind.clone());
 
-    let Error::ActionTerminatingFrame {
-        request_id,
-        source: ScreenFrameError::ResourceLimit { limit, .. },
-        ..
-    } = &error
-    else {
-        panic!("unexpected oversized action error: {error:?}");
-    };
-
-    assert_eq!(
-        *request_id,
-        options.request_id.expect("fixed action request ID")
-    );
+    assert_eq!(error.code(), "screen_frame_resource_limit");
+    assert_eq!(details.scope, "action_terminating_screen_frame");
+    assert_eq!(limit.as_deref(), Some("serialized_bytes"));
     assert_eq!(error.effect(), MutationEffect::Applied);
     assert_eq!(error.retry(), Retry::DoNotRetry);
-    assert_eq!(*limit, ScreenFrameLimitKind::SerializedBytes);
 
     let retry = session
-        .act(&atoms, options)
+        .act(request)
         .expect_err("cached oversized action retry must retain its failure");
 
-    let Error::ActionTerminatingFrame {
-        request_id: retry_request_id,
-        source: ScreenFrameError::ResourceLimit {
-            limit: retry_limit, ..
-        },
-        ..
-    } = &retry
-    else {
-        panic!("unexpected retry action error: {retry:?}");
-    };
-
-    assert_eq!(retry_request_id, request_id);
+    assert_eq!(retry.code(), error.code());
     assert_eq!(retry.effect(), error.effect());
-    assert_eq!(retry_limit, limit);
+    assert_eq!(retry.details(), error.details());
 
     wait_for_output(session.path(), b"COUNT:1:once", Duration::from_secs(5))
         .expect("first action input reached the fixture");
     let frame = session
-        .screen()
         .frame(ScreenProjectionRequest::default())
         .expect("post-error screen frame");
     assert!(frame_contains(&frame, "COUNT:1:once"));
     assert!(!frame_contains(&frame, "COUNT:2:once"));
 
     session
-        .stop(Some(Duration::from_secs(5)))
+        .stop(StopRequest::default(), Some(Duration::from_secs(5)))
         .expect("stop oversized action fixture");
 }
 
@@ -206,48 +176,39 @@ fn action_termination_frame_remains_live_actor_evidence() {
     );
 
     let mut session = terminal
-        .launch([
+        .start(LaunchSpec::new([
             OsString::from("/bin/sh"),
             OsString::from("-c"),
             OsString::from("printf READY; IFS= read -r line; printf '\\r\\nDONE:%s' \"$line\""),
-        ])
-        .start()
+        ]))
         .expect("launch action quality fixture");
 
     wait_for_output(session.path(), b"READY", Duration::from_secs(5))
         .expect("action quality fixture ready");
     let result = session
-        .act(
-            &[
-                InputAtom::Text("once".to_owned()),
-                InputAtom::Key {
-                    key: NamedKey::Enter,
-                    modifiers: KeyModifiers::default(),
+        .act(ActRequest {
+            atoms: vec![InputAtom::Text("once".to_owned()), InputAtom::Key(ENTER)],
+            postcondition: ActionCondition::Screen {
+                predicate: ScreenPredicate::Contains {
+                    text: "never-matches".to_owned(),
                 },
-            ],
-            ActionOptions {
-                postcondition: ActionCondition::Screen {
-                    predicate: ScreenPredicate::Contains {
-                        text: "never-matches".to_owned(),
-                    },
-                    timeout: Duration::from_secs(5),
-                },
-                allow_incomplete: true,
-                ..ActionOptions::default()
+                timeout: Duration::from_secs(5),
             },
-        )
+            allow_incomplete: true,
+            ..ActRequest::default()
+        })
         .expect("child-terminated action result");
 
-    let ActionCompletion::Screen {
+    let ActionPostconditionResult::Screen {
         quality:
             ScreenPostconditionQuality::ChildCompleted | ScreenPostconditionQuality::OutputClosed,
         ..
-    } = &result.completion
+    } = &result.postcondition
     else {
-        panic!("unexpected action completion: {:?}", result.completion);
+        panic!("unexpected action completion: {:?}", result.postcondition);
     };
 
-    let frame = result.frame.as_ref().expect("frame");
+    let frame = result.frame().expect("frame");
     assert_eq!(
         frame.capture_quality,
         CaptureQuality::Live,
@@ -274,12 +235,11 @@ fn force_close_terminates_the_recorded_process_group() {
     );
 
     let mut session = terminal
-        .launch([
+        .start(LaunchSpec::new([
             OsString::from("/bin/sh"),
             OsString::from("-c"),
             OsString::from(command),
-        ])
-        .start()
+        ]))
         .expect("launch force-close fixture");
 
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -321,9 +281,7 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
 
     let command: Vec<OsString> = fixture.command.iter().map(OsString::from).collect();
     let mut session = terminal
-        .launch(command)
-        .geometry(fixture.region.width, fixture.region.height)
-        .start()
+        .start(LaunchSpec::new(command).geometry(fixture.region.width, fixture.region.height))
         .expect("launch Rust action fixture");
 
     wait_for_output(
@@ -333,7 +291,6 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
     )
     .expect("Rust fixture ready");
     let initial = session
-        .screen()
         .frame(ScreenProjectionRequest::default())
         .expect("initial Rust frame");
 
@@ -343,18 +300,21 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
         .map(|atom| {
             return match atom {
                 FixtureAtom::Text { text } => InputAtom::Text(text.clone()),
-                FixtureAtom::Key { key } if key == "enter" => InputAtom::Key {
-                    key: NamedKey::Enter,
-                    modifiers: KeyModifiers::default(),
-                },
-                FixtureAtom::Key { key } => panic!("unsupported fixture key {key}"),
+                FixtureAtom::Key { key } => InputAtom::Key(
+                    KeyChord::parse(key)
+                        .expect("valid fixture key")
+                        .expect("named fixture key"),
+                ),
             };
         })
         .collect();
 
-    let options = ActionOptions {
-        request_id: Some(fixture.request_id),
-        if_state: Some(initial.state_hash),
+    let request = ActRequest {
+        atoms,
+        guard: MutationGuard {
+            request_id: Some(fixture.request_id),
+            if_state: Some(initial.state_hash),
+        },
         postcondition: ActionCondition::Screen {
             predicate: fixture.predicate.clone(),
             timeout: Duration::from_secs(5),
@@ -368,16 +328,11 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
                 bottom: fixture.region.top + fixture.region.height,
             }),
         },
-        ..ActionOptions::default()
+        ..ActRequest::default()
     };
-    let result = session
-        .act(&atoms, options.clone())
-        .expect("Rust atomic action");
-    let retry = session
-        .act(&atoms, options)
-        .expect("idempotent Rust action retry");
+    let result = session.act(request.clone()).expect("Rust atomic action");
+    let retry = session.act(request).expect("idempotent Rust action retry");
     let stable = session
-        .screen()
         .capture_stable(StableCaptureOptions {
             stable_for: Duration::from_millis(20),
             timeout: Duration::from_secs(2),
@@ -386,13 +341,14 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
         })
         .expect("Rust stable capture");
 
-    let frame = result.frame.as_ref().expect("frame");
+    let frame = result.frame().expect("frame");
     let matched = matches!(
-        result.completion,
-        ActionCompletion::Screen {
+        result.postcondition,
+        ActionPostconditionResult::Screen {
             matched: true,
             quality: ScreenPostconditionQuality::Matched
                 | ScreenPostconditionQuality::MatchedUnsettled,
+            ..
         }
     ) && frame_contains(frame, &fixture.expected_text);
 
@@ -413,7 +369,7 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
     };
 
     session
-        .stop(Some(Duration::from_secs(5)))
+        .stop(StopRequest::default(), Some(Duration::from_secs(5)))
         .expect("stop Rust fixture");
 
     return summary;

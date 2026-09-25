@@ -1,14 +1,32 @@
 //! RAII Recording owner and context manager for Python.
 
 use crate::actions::PyActionBuilder;
+use crate::errors::to_py_err;
 use crate::screen::PyScreen;
 use crate::session::PySession;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use termtrace_sdk::actions::ActionOptions;
 use termtrace_sdk::client::{Session, Terminal};
+use termtrace_sdk::defaults;
+use termtrace_sdk::session::StopRequest;
+
+impl PyRecording {
+    fn take(&self) -> Option<Session> {
+        return self
+            .session
+            .lock()
+            .unwrap_or_else(|poisoned| return poisoned.into_inner())
+            .take();
+    }
+
+    fn restore(&self, session: Session) {
+        *self
+            .session
+            .lock()
+            .unwrap_or_else(|poisoned| return poisoned.into_inner()) = Some(session);
+    }
+}
 
 /// An active recording session owning child processes and evidence buffers.
 #[pyclass(name = "Recording", from_py_object)]
@@ -36,7 +54,7 @@ impl PyRecording {
         _exc_val: Option<&Bound<'_, PyAny>>,
         _exc_tb: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<()> {
-        self.stop(py)
+        self.stop(py, None)
     }
 
     /// Unique session identifier.
@@ -77,12 +95,10 @@ impl PyRecording {
                 "recording has already been stopped or detached",
             ));
         }
-        Ok(PyActionBuilder {
-            terminal: self.terminal.clone(),
-            session_path: self.path.clone(),
-            atoms: Vec::new(),
-            options: ActionOptions::default(),
-        })
+        Ok(PyActionBuilder::new(
+            self.terminal.clone(),
+            self.path.clone(),
+        ))
     }
 
     /// Get a logical session reference.
@@ -228,32 +244,22 @@ impl PyRecording {
         return sess.last_action(py, broad_change_percent);
     }
 
-    /// Stop the recording session and finalize evidence.
-    pub fn stop(&self, py: Python<'_>) -> PyResult<()> {
-        let mut session_opt = {
-            let mut guard = self
-                .session
-                .lock()
-                .unwrap_or_else(|e| return e.into_inner());
-            guard.take()
-        };
-
-        let Some(mut session) = session_opt.take() else {
+    /// Stop the recording session and wait for validated completion evidence.
+    #[pyo3(signature = (timeout_secs = None))]
+    pub fn stop(&self, py: Python<'_>, timeout_secs: Option<f64>) -> PyResult<()> {
+        let timeout = crate::parse_timeout(timeout_secs, defaults::STOP_TIMEOUT)?;
+        let Some(mut session) = self.take() else {
             return Ok(());
         };
 
-        let (session, stop_result) = py.detach(move || {
-            let result = session.stop(Some(Duration::from_secs(5)));
+        let (session, result) = py.detach(move || {
+            let result = session.stop(StopRequest::default(), Some(timeout));
             return (session, result);
         });
 
-        if let Err(error) = stop_result {
-            let mut guard = self
-                .session
-                .lock()
-                .unwrap_or_else(|e| return e.into_inner());
-            *guard = Some(session);
-            return Err(PyRuntimeError::new_err(error.to_string()));
+        if let Err(error) = result {
+            self.restore(session);
+            return Err(to_py_err(error));
         }
 
         return Ok(());
@@ -261,37 +267,25 @@ impl PyRecording {
 
     /// Forcefully terminate and reap the recorded process group and owned recorder.
     pub fn force_close(&self) -> PyResult<()> {
-        let mut guard = self
-            .session
-            .lock()
-            .unwrap_or_else(|e| return e.into_inner());
-        let Some(mut session) = guard.take() else {
+        let Some(mut session) = self.take() else {
             return Ok(());
         };
 
-        session
-            .force_close()
-            .map_err(|e| return PyRuntimeError::new_err(e.to_string()))?;
+        if let Err(error) = session.force_close() {
+            self.restore(session);
+            return Err(to_py_err(error));
+        }
 
         return Ok(());
     }
 
     /// Detach the recording so it continues running in the background.
     pub fn detach(&self) -> PyResult<()> {
-        let mut guard = self
-            .session
-            .lock()
-            .unwrap_or_else(|e| return e.into_inner());
-        return guard.take().map_or_else(
-            || {
-                return Err(PyRuntimeError::new_err(
-                    "recording has already been stopped or detached",
-                ));
-            },
-            |session| {
-                let _ = session.detach();
-                return Ok(());
-            },
-        );
+        let session = self.take().ok_or_else(|| {
+            return PyRuntimeError::new_err("recording has already been stopped or detached");
+        })?;
+        let _path = session.detach();
+
+        return Ok(());
     }
 }

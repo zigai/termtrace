@@ -3,10 +3,7 @@
 use super::query::{
     query_frame, LocatorSpec, QueryDescription, QueryError, QueryResult, ScreenMatch, StyleFilter,
 };
-use crate::{
-    client::{Screen, Session},
-    screen::StableCaptureOptions,
-};
+use crate::{client::Session, screen::StableCaptureOptions};
 use regex::Regex;
 use std::{
     error::Error as StdError,
@@ -19,37 +16,37 @@ use termtrace_model::terminal::screen::{
     FrameDetail, ScreenFrame, ScreenProjectionRequest, ScreenRegion,
 };
 
-impl<'session> Screen<'session> {
-    /// Bind an immutable specification to this screen without performing I/O.
+impl Session {
+    /// Bind an immutable specification to the latest presented screen without performing I/O.
     #[must_use]
-    pub fn locator(&self, spec: LocatorSpec) -> Locator<'session> {
-        return Locator::new(self.session(), spec);
+    pub fn locator(&self, spec: LocatorSpec) -> Locator<'_> {
+        return Locator::new(self, spec);
     }
 
     /// Bind a nonempty literal text query without performing I/O.
-    pub fn get_by_text(&self, text: impl Into<String>) -> Result<Locator<'session>, QueryError> {
+    pub fn get_by_text(&self, text: impl Into<String>) -> Result<Locator<'_>, QueryError> {
         return Ok(self.locator(LocatorSpec::text(text)?));
     }
 
     /// Bind an already compiled host-native regular expression without performing I/O.
-    pub fn get_by_regex(&self, regex: Regex) -> Result<Locator<'session>, QueryError> {
+    pub fn get_by_regex(&self, regex: Regex) -> Result<Locator<'_>, QueryError> {
         return Ok(self.locator(LocatorSpec::regex(regex)?));
     }
 
     /// Bind one absolute row scope without performing I/O.
     #[must_use]
-    pub fn row(&self, row: u16) -> Locator<'session> {
+    pub fn row(&self, row: u16) -> Locator<'_> {
         return self.locator(LocatorSpec::default().in_row(row));
     }
 
     /// Bind one exact absolute region without performing I/O.
-    pub fn region(&self, region: ScreenRegion) -> Result<Locator<'session>, QueryError> {
+    pub fn region(&self, region: ScreenRegion) -> Result<Locator<'_>, QueryError> {
         return Ok(self.locator(LocatorSpec::default().in_region(region)?));
     }
 
     /// Bind a complete appearance filter without performing I/O.
     #[must_use]
-    pub fn filter(&self, style: StyleFilter) -> Locator<'session> {
+    pub fn filter(&self, style: StyleFilter) -> Locator<'_> {
         return self.locator(LocatorSpec::default().with_style(style));
     }
 }
@@ -80,7 +77,6 @@ impl<'session> Locator<'session> {
     pub fn evaluate(&self) -> Result<QueryResult, LocatorError> {
         let frame = self
             .session
-            .screen()
             .frame(ScreenProjectionRequest {
                 detail: FrameDetail::Spans,
                 region: self.spec.region(),
@@ -174,15 +170,18 @@ impl<'session> Locator<'session> {
                 });
             };
             let capture_timeout = remaining.min(Duration::from_secs(3_600));
-            let capture = self.session.screen().capture_stable(StableCaptureOptions {
-                stable_for: Duration::from_nanos(1).min(capture_timeout),
-                timeout: capture_timeout,
-                projection: ScreenProjectionRequest {
-                    detail: FrameDetail::Spans,
-                    region: self.spec.region(),
+            let capture = self.session.capture_stable_by(
+                StableCaptureOptions {
+                    stable_for: Duration::from_nanos(1).min(capture_timeout),
+                    timeout: capture_timeout,
+                    projection: ScreenProjectionRequest {
+                        detail: FrameDetail::Spans,
+                        region: self.spec.region(),
+                    },
+                    allow_incomplete: true,
                 },
-                allow_incomplete: true,
-            });
+                Some(deadline),
+            );
 
             let observed_at = Instant::now();
             let capture = match capture {

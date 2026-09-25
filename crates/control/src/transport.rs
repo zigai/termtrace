@@ -226,7 +226,11 @@ pub fn send_request(
     session_directory: impl AsRef<Path>,
     request: &ControlRequest,
 ) -> Result<ControlData> {
-    let response = send_request_response(session_directory, request)?;
+    return send_request_response(session_directory, request).and_then(accepted);
+}
+
+/// The actor's answer as data, or its rejection as [`Error::Rejected`].
+pub(crate) fn accepted(response: ControlResponse) -> Result<ControlData> {
     match response.result {
         ControlResult::Ok { data } => return Ok(data),
         ControlResult::Error {

@@ -3,11 +3,13 @@ use crate::cli::output::ResponseWriter;
 pub(super) mod args;
 
 use crate::cli::{
+    control::args::millis_or,
     output::{response_output, write_json_line, write_json_pretty, write_stdout},
     recording::args::{
         ColorPolicyArg, DurabilityModeArg, GeometryMode, GeometryProbeArgs, ProvenancePolicyArg,
         RecordArgs, RecordingArgs, RestartArgs, RestartOverrides,
     },
+    session_helpers::attach_session,
 };
 use miette::{IntoDiagnostic as _, Result};
 use nix::{
@@ -31,10 +33,9 @@ use std::{
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, ExitCode, Stdio},
     result::Result as StdResult,
-    thread,
     time::{Duration, Instant},
 };
-use termtrace_control::{is_completed, recorder_identity, request_or_completed, send_request};
+use termtrace_control::is_completed;
 use termtrace_engine::{
     analysis::profile::{builtin_terminal_colors, terminal_colors_for_profile},
     inspection::wait_for_completion,
@@ -60,16 +61,17 @@ use termtrace_model::{
         ResourceLimits, SessionCompletion, SessionGeometry, SessionLineage, SessionManifest,
         GHOSTTY_REPLAY_PROFILE_NAME,
     },
-    protocol::control::{
-        ControlCommand, ControlData, ControlRequest, ScreenPredicate, ScreenWaitQuality,
-        StableCaptureQuality,
-    },
+    protocol::control::{ScreenPredicate, ScreenWaitQuality},
     registry::{AliasReservation, DetachedSessionPaths, RegistryEntry},
     terminal::screen::ScreenProjectionRequest,
     value::geometry::TerminalGeometryReport,
     value::ByteString,
 };
-use termtrace_sdk::wait_for_screen;
+use termtrace_sdk::{
+    defaults,
+    session::{await_ready, Readiness, StopOutcome, StopRequest},
+    StableCaptureOptions,
+};
 
 const DEFAULT_DURABILITY_MAX_INTERVAL_MS: u64 = 50;
 const DEFAULT_DURABILITY_MAX_UNCOMMITTED_BYTES: u64 = 65_536;

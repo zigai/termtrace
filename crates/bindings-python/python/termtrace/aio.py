@@ -12,10 +12,6 @@ from termtrace._termtrace import (
 from termtrace._termtrace import (
     ResolvedState,
     ScreenFrame,
-    execute_action_async,
-    stop_recording_async,
-    wait_for_idle_async,
-    wait_for_text_async,
 )
 from termtrace._termtrace import (
     Termtrace as _SyncTermtrace,
@@ -47,11 +43,11 @@ class AsyncScreen:
 
     async def wait_for_text(self, pattern: str, timeout: float | None = None) -> ResolvedState:
         """Asynchronously wait until the screen text contains pattern."""
-        return await wait_for_text_async(self._screen, pattern, timeout)
+        return await asyncio.to_thread(self._screen.wait_for_text, pattern, timeout)
 
     async def wait_for_idle(self, timeout: float | None = None) -> ResolvedState:
         """Asynchronously wait until the screen remains idle and unchanged."""
-        return await wait_for_idle_async(self._screen, timeout)
+        return await asyncio.to_thread(self._screen.wait_for_idle, timeout)
 
 
 class AsyncRecording:
@@ -84,7 +80,7 @@ class AsyncRecording:
 
     async def execute_action(self, actions_builder: Any) -> ResolvedState | None:
         """Asynchronously execute an action sequence."""
-        return await execute_action_async(actions_builder)
+        return await asyncio.to_thread(actions_builder.execute)
 
     def pointer_click(
         self, column: int, row: int, button: str | None = None, strict: bool | None = None
@@ -140,7 +136,7 @@ class AsyncRecording:
 
     async def stop(self) -> None:
         """Asynchronously stop and finalize the recording."""
-        await stop_recording_async(self._recording)
+        await asyncio.to_thread(self._recording.stop)
 
     async def __aenter__(self) -> Self:
         return self

@@ -288,8 +288,7 @@ fn locator_deadline_bounds_an_in_flight_actor_capture() {
         thread::sleep(Duration::from_secs(1));
     });
 
-    let screen = session.screen();
-    let locator = screen.get_by_text("READY").expect("valid locator");
+    let locator = session.get_by_text("READY").expect("valid locator");
     let started_at = Instant::now();
     let error = locator
         .wait(Duration::from_millis(50), Duration::from_millis(5))

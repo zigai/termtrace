@@ -16,12 +16,12 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
     );
 
     let mut line = terminal
-        .launch([fixtures.join("line-command.sh").into_os_string()])
-        .start()
+        .start(LaunchSpec::new([fixtures
+            .join("line-command.sh")
+            .into_os_string()]))
         .expect("launch line fixture");
 
-    wait_for_screen(
-        line.path(),
+    line.wait_screen(
         ScreenPredicate::Contains {
             text: "LINE_READY".to_owned(),
         },
@@ -29,8 +29,7 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("line fixture ready");
-    wait_for_screen(
-        line.path(),
+    line.wait_screen(
         ScreenPredicate::All {
             predicates: vec![
                 ScreenPredicate::MatchesRegex {
@@ -87,8 +86,7 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         other => panic!("unexpected snapshot response: {other:?}"),
     };
 
-    wait_for_screen(
-        line.path(),
+    line.wait_screen(
         ScreenPredicate::StateHash {
             hash: state_hash,
             comparison: StateHashComparison::Unchanged,
@@ -97,7 +95,8 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         Duration::from_secs(5),
     )
     .expect("unchanged screen predicate");
-    line.keyboard().text("fixture-value\n").expect("line input");
+    line.act(ActRequest::new().text("fixture-value\n"))
+        .expect("line input");
     wait_for_output(
         line.path(),
         b"LINE_VALUE=fixture-value",
@@ -108,22 +107,25 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         .expect("line completion");
 
     let mut alternate = terminal
-        .launch([fixtures.join("alternate-screen.py").into_os_string()])
-        .start()
+        .start(LaunchSpec::new([fixtures
+            .join("alternate-screen.py")
+            .into_os_string()]))
         .expect("launch alternate-screen fixture");
 
-    wait_for_screen(
-        alternate.path(),
-        ScreenPredicate::Contains {
-            text: "ALTERNATE_READY".to_owned(),
-        },
-        Duration::ZERO,
-        Duration::from_secs(5),
-    )
-    .expect("alternate fixture ready");
     alternate
-        .keyboard()
-        .press(NamedKey::ArrowRight, KeyModifiers::default())
+        .wait_screen(
+            ScreenPredicate::Contains {
+                text: "ALTERNATE_READY".to_owned(),
+            },
+            Duration::ZERO,
+            Duration::from_secs(5),
+        )
+        .expect("alternate fixture ready");
+    alternate
+        .act(ActRequest::new().key(KeyChord {
+            key: NamedKey::ArrowRight,
+            modifiers: KeyModifiers::default(),
+        }))
         .expect("mode-aware arrow");
     wait_for_output(alternate.path(), b"INPUT_HEX=", Duration::from_secs(5))
         .expect("alternate fixture input evidence");
@@ -132,27 +134,26 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
         .expect("alternate completion");
 
     let mut final_state = terminal
-        .launch([
+        .start(LaunchSpec::new([
             OsString::from("/bin/sh"),
             OsString::from("-c"),
             OsString::from("printf FINAL_READY; sleep .2"),
-        ])
-        .start()
+        ]))
         .expect("launch final-state fixture");
 
-    let final_wait = wait_for_screen(
-        final_state.path(),
-        ScreenPredicate::Contains {
-            text: "FINAL_READY".to_owned(),
-        },
-        Duration::from_secs(5),
-        Duration::from_secs(5),
-    )
-    .expect("completed final state is stable");
-    assert!(final_wait.matched);
+    let final_wait = final_state
+        .wait_screen(
+            ScreenPredicate::Contains {
+                text: "FINAL_READY".to_owned(),
+            },
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+        )
+        .expect("completed final state is stable");
+    assert!(final_wait.satisfied());
     assert!(matches!(
         final_wait.quality,
-        ScreenWaitQuality::ChildCompleted | ScreenWaitQuality::OutputClosed
+        ScreenWaitQuality::ChildCompleted | ScreenWaitQuality::Completed
     ));
 
     final_state
@@ -210,33 +211,31 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
     );
 
     let mut session = terminal
-        .launch([
-            OsString::from("/bin/sh"),
-            OsString::from("-c"),
-            OsString::from("printf READY; IFS= read -r line; printf '<%s>' \"$line\""),
-        ])
-        .geometry(90, 25)
-        .start()
+        .start(
+            LaunchSpec::new([
+                OsString::from("/bin/sh"),
+                OsString::from("-c"),
+                OsString::from("printf READY; IFS= read -r line; printf '<%s>' \"$line\""),
+            ])
+            .geometry(90, 25),
+        )
         .expect("launch through Rust facade");
 
     wait_for_output(session.path(), b"READY", Duration::from_secs(5)).expect("ready output");
     let frame = session
-        .screen()
         .frame(ScreenProjectionRequest::default())
         .expect("screen frame");
     assert_eq!(frame.geometry.cols, 90);
     assert_eq!(frame.geometry.rows, 25);
     assert!(session
-        .screen()
-        .observation()
+        .observe(StatePoint::LatestPresented, false)
         .expect("screen observation")
         .frame
         .viewport_text
         .contains("READY"));
 
     session
-        .screen()
-        .wait(
+        .wait_screen(
             ScreenPredicate::Contains {
                 text: "READY".to_owned(),
             },
@@ -247,7 +246,6 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
 
     assert_eq!(
         session
-            .screen()
             .capture_stable(StableCaptureOptions {
                 stable_for: Duration::from_millis(20),
                 timeout: Duration::from_secs(2),
@@ -260,8 +258,7 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
     );
 
     session
-        .keyboard()
-        .text("client\n")
+        .act(ActRequest::new().text("client\n"))
         .expect("typed client input");
     wait_for_output(session.path(), b"<client>", Duration::from_secs(5)).expect("client output");
     let completion = session
@@ -270,8 +267,7 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
     assert_eq!(completion.session_id, session.session_id());
     assert!(
         session
-            .semantic()
-            .inspect(StatePoint::LatestPresented, false)
+            .observe(StatePoint::LatestPresented, false)
             .expect("semantic inspection")
             .source_completed
     );
@@ -344,9 +340,11 @@ fn rust_facade_bridges_actor_shutdown_to_completion_publication() {
         fs::rename(restore_source, restore_destination).expect("publish delayed completion");
     });
 
-    let observation =
-        termtrace_sdk::observe_session_with_options(&session, StatePoint::LatestPresented, false)
-            .expect("bridge observation across completion publication");
+    let attached = termtrace_sdk::Session::attach(&session, env!("CARGO_BIN_EXE_termtrace"))
+        .expect("attach short-lived session");
+    let observation = attached
+        .observe(StatePoint::LatestPresented, false)
+        .expect("bridge observation across completion publication");
 
     restore.join().expect("join completion publisher");
 
@@ -362,12 +360,9 @@ fn rust_facade_bridges_actor_shutdown_to_completion_publication() {
         fs::rename(restore_source, restore_destination).expect("republish delayed completion");
     });
 
-    let (_, state_hash) = termtrace_sdk::semantic_state_with_hash_for_session(
-        &session,
-        &StatePoint::LatestPresented,
-        true,
-    )
-    .expect("bridge semantic state across completion publication");
+    let (_, state_hash) = attached
+        .semantic_state(&StatePoint::LatestPresented, true)
+        .expect("bridge semantic state across completion publication");
 
     restore.join().expect("join semantic completion publisher");
 
@@ -383,12 +378,11 @@ fn rust_facade_attach_retains_the_canonical_session_path() {
     );
 
     let mut recording = terminal
-        .launch([
+        .start(LaunchSpec::new([
             OsString::from("/bin/sh"),
             OsString::from("-c"),
             OsString::from("sleep .2"),
-        ])
-        .start()
+        ]))
         .expect("launch completed recording");
     recording
         .complete(Duration::from_secs(5))
@@ -409,7 +403,6 @@ fn rust_facade_attach_retains_the_canonical_session_path() {
     assert_eq!(attached.path(), canonical);
 
     attached
-        .semantic()
-        .inspect(StatePoint::LatestPresented, false)
+        .observe(StatePoint::LatestPresented, false)
         .expect("inspect original attached session");
 }

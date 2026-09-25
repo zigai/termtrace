@@ -1,4 +1,4 @@
-use super::runtime::{Driver, SessionOwnership};
+use super::runtime::Driver;
 use crate::cli::tooling::require_capability;
 use std::{
     env,
@@ -6,24 +6,16 @@ use std::{
     os::unix::ffi::OsStringExt as _,
     path::{Path, PathBuf},
     result::Result as StdResult,
-    thread,
     time::Duration,
 };
-use termtrace_control::{
-    is_completed, read_completed, send_request_response, Error as ControlError,
-};
+use termtrace_control::{is_completed, Error as ControlError};
 use termtrace_engine::{
-    analysis::diagnostics::diagnose_session,
-    diff::diff_session_states_with_semantic_states,
-    inspection::{wait_for_completion, wait_for_output},
-    observation::{resolved_screen_state_for_session, CaptureQuality},
-    registry::SessionRegistry,
-    timeline::build_session_timeline_page,
+    analysis::diagnostics::diagnose_session, diff::diff_session_states_with_semantic_states,
+    inspection::wait_for_output, timeline::build_session_timeline_page,
 };
 use termtrace_evidence::{
-    artifact::sync_directory,
     event_log::EventLog,
-    session::{read_completion, read_manifest, validate_completed_session, verify_session},
+    session::{read_completion, verify_session},
 };
 use termtrace_export::bundle::{create as create_bundle, verify_profile as verify_bundle};
 use termtrace_media::{
@@ -43,18 +35,16 @@ use termtrace_model::{
     execution::layout::SessionLayout,
     execution::session::ResourceLimits,
     protocol::capability::NATIVE_SCREENSHOT_CAPABILITY,
-    protocol::control::{
-        ControlCommand, ControlData, ControlErrorDetails, ControlRequest, ControlResponse,
-        ControlResult, CONTROL_PROTOCOL_VERSION,
-    },
+    protocol::control::{ControlErrorDetails, ControlRequest, CONTROL_PROTOCOL_VERSION},
     protocol::mutation::MutationEffect,
-    terminal::observation::StatePoint,
     terminal::replay::STATE_FORMAT_VERSION,
     terminal::screen::ScreenFrameError,
     value::ByteString,
 };
-use termtrace_sdk::{observe_session_with_options, Error, Result, Terminal};
-use termtrace_terminal::project_screen_frame;
+use termtrace_sdk::{
+    session::{LaunchSpec, Session, SessionTarget},
+    Error, Terminal,
+};
 use uuid::Uuid;
 
 impl Driver {
@@ -115,101 +105,62 @@ impl Driver {
                     command,
                     expected_presented_state_hash,
                 } => {
-                    let path = self.session_path(handle)?;
+                    let session = self.session(handle)?;
                     let mut control = ControlRequest::new(command.clone());
                     control.request_id = request.request_id;
                     control
                         .expected_presented_state_hash
                         .clone_from(expected_presented_state_hash);
 
-                    match send_request_response(path, &control) {
-                        Ok(response) => match response.result {
-                            ControlResult::Ok { data } => Ok(DriverData::Control { data }),
-                            ControlResult::Error {
-                                code,
-                                message,
-                                effect,
-                                details,
-                            } => Err(driver_failure_with_effect(
-                                &code,
-                                message,
-                                Some(path.clone()),
-                                effect,
-                                details,
-                            )),
-                        },
-                        Err(error) => Err(driver_control_failure_from_error(error, path.clone())),
-                    }
+                    session
+                        .control(&control)
+                        .map(|data| return DriverData::Control { data })
+                        .map_err(|error| return session_failure(error, session))
                 }
                 DriverMethod::WaitOutput {
                     handle,
                     data,
                     timeout_ms,
                 } => {
-                    let path = self.session_path(handle)?;
+                    let session = self.session(handle)?;
 
-                    wait_for_output(path, data.as_bytes(), Duration::from_millis(*timeout_ms))
-                        .map(|outcome| return DriverData::OutputWait { outcome })
-                        .map_err(|error| {
-                            return driver_failure_from_error(error, Some(path.clone()));
-                        })
+                    wait_for_output(
+                        session.path(),
+                        data.as_bytes(),
+                        Duration::from_millis(*timeout_ms),
+                    )
+                    .map(|outcome| return DriverData::OutputWait { outcome })
+                    .map_err(|error| return session_failure(error, session))
                 }
                 DriverMethod::Completion { handle } => {
-                    let path = self.session_path(handle)?;
+                    let session = self.session(handle)?;
 
-                    read_completion(path)
+                    read_completion(session.path())
                         .map(|completion| return DriverData::Completion { completion })
-                        .map_err(|error| {
-                            return driver_failure_from_error(error, Some(path.clone()));
-                        })
+                        .map_err(|error| return session_failure(error, session))
                 }
                 DriverMethod::Complete { handle, timeout_ms } => {
-                    let path = self.session_path(handle)?.clone();
-                    let completion = wait_for_completion(&path, Duration::from_millis(*timeout_ms))
-                        .map_err(|error| {
-                            return driver_failure_from_error(error, Some(path.clone()));
-                        })?;
+                    let session = self.session_mut(handle)?;
 
-                    self.reap_recorder(handle, &path)?;
-
-                    Ok(DriverData::Completion { completion })
+                    session
+                        .complete(Duration::from_millis(*timeout_ms))
+                        .map(|completion| return DriverData::Completion { completion })
+                        .map_err(|error| return session_failure(error, session))
                 }
                 DriverMethod::DiscardCompleted { handle } => {
-                    let session = self.sessions.get(handle).ok_or_else(|| {
-                        return driver_failure(
-                            "unknown_handle",
-                            "session handle is not attached",
-                            None,
-                        );
-                    })?;
+                    let session = self.session_mut(handle)?;
 
-                    if !matches!(session.ownership, SessionOwnership::Launched { .. }) {
+                    if !session.launched() {
                         return Err(driver_failure(
                             "evidence_not_driver_owned",
                             "only evidence launched by this driver can be discarded",
-                            Some(session.path.clone()),
+                            Some(session.path().to_path_buf()),
                         ));
                     }
 
-                    let path = session.path.clone();
-                    validate_completed_session(&path).map_err(|error| {
-                        return driver_failure_from_error(error, Some(path.clone()));
-                    })?;
-
-                    self.reap_recorder(handle, &path)?;
-                    fs_err::remove_dir_all(&path).map_err(|error| {
-                        return driver_failure(
-                            "evidence_discard_failed",
-                            error.to_string(),
-                            Some(path.clone()),
-                        );
-                    })?;
-
-                    if let Some(parent) = path.parent() {
-                        sync_directory(parent).map_err(|error| {
-                            return driver_failure_from_error(error, Some(path.clone()));
-                        })?;
-                    }
+                    session
+                        .discard_completed()
+                        .map_err(|error| return session_failure(error, session))?;
 
                     self.close_native(handle);
                     self.sessions.remove(handle);
@@ -223,17 +174,16 @@ impl Driver {
                     point,
                     include_hidden,
                 } => {
-                    let path = self.session_path(handle)?;
+                    let session = self.session(handle)?;
 
-                    observe_session_with_options(path, point.clone(), *include_hidden)
+                    session
+                        .observe(point.clone(), *include_hidden)
                         .map(|observation| {
                             return DriverData::Observation {
                                 observation: Box::new(observation),
                             };
                         })
-                        .map_err(|error| {
-                            return driver_failure_from_error(error, Some(path.clone()));
-                        })
+                        .map_err(|error| return session_failure(error, session))
                 }
                 DriverMethod::ScreenFrame {
                     handle,
@@ -241,90 +191,12 @@ impl Driver {
                     include_hidden,
                     projection,
                 } => {
-                    let path = self.session_path(handle)?;
+                    let session = self.session(handle)?;
 
-                    let completed = read_completed(path)
-                        .map_err(|error| {
-                            return driver_failure_from_error(error, Some(path.clone()));
-                        })?
-                        .is_some();
-
-                    if completed {
-                        let (state, source, presented) =
-                            resolved_screen_state_for_session(path, point.clone(), *include_hidden)
-                                .map_err(|error| {
-                                    return driver_failure_from_error(error, Some(path.clone()));
-                                })?;
-
-                        project_screen_frame(
-                            &state,
-                            projection,
-                            source,
-                            presented,
-                            CaptureQuality::Completed,
-                        )
+                    session
+                        .frame_at(point.clone(), *include_hidden, *projection)
                         .map(|frame| return DriverData::ScreenFrame { frame })
-                        .map_err(|error| {
-                            return driver_failure_from_error(
-                                Error::ScreenFrame(error),
-                                Some(path.clone()),
-                            );
-                        })
-                    } else {
-                        if point != &StatePoint::LatestPresented || *include_hidden {
-                            return Err(driver_failure(
-                                "invalid_state_point",
-                                "live rich frames support only latest-presented selection without hidden-state permission",
-                                Some(path.clone()),
-                            ));
-                        }
-
-                        let control = ControlRequest {
-                            version: CONTROL_PROTOCOL_VERSION,
-                            request_id: request.request_id,
-                            expected_presented_state_hash: None,
-                            command: ControlCommand::ScreenFrame {
-                                projection: *projection,
-                            },
-                        };
-
-                        match send_request_response(path, &control) {
-                            Ok(ControlResponse {
-                                result:
-                                    ControlResult::Ok {
-                                        data: ControlData::ScreenFrame { frame },
-                                    },
-                                ..
-                            }) => Ok(DriverData::ScreenFrame { frame }),
-                            Ok(ControlResponse {
-                                result: ControlResult::Ok { data: _ },
-                                ..
-                            }) => Err(driver_failure(
-                                "invalid_control_response",
-                                "actor returned the wrong rich-screen payload",
-                                Some(path.clone()),
-                            )),
-                            Ok(ControlResponse {
-                                result:
-                                    ControlResult::Error {
-                                        code,
-                                        message,
-                                        effect,
-                                        details,
-                                    },
-                                ..
-                            }) => Err(driver_failure_with_effect(
-                                &code,
-                                message,
-                                Some(path.clone()),
-                                effect,
-                                details,
-                            )),
-                            Err(error) => {
-                                Err(driver_control_failure_from_error(error, path.clone()))
-                            }
-                        }
-                    }
+                        .map_err(|error| return session_failure(error, session))
                 }
                 DriverMethod::Timeline {
                     handle,
@@ -333,7 +205,7 @@ impl Driver {
                     offset,
                     limit,
                 } => {
-                    let path = self.session_path(handle)?;
+                    let path = &self.session(handle)?.path().to_path_buf();
 
                     if *limit == 0 || *limit > 4096 {
                         return Err(driver_failure(
@@ -355,7 +227,7 @@ impl Driver {
                         })
                 }
                 DriverMethod::Diff { handle, from, to } => {
-                    let path = self.session_path(handle)?;
+                    let path = &self.session(handle)?.path().to_path_buf();
 
                     diff_session_states_with_semantic_states(path, from.clone(), to.clone())
                         .map(|(difference, _, _)| {
@@ -372,7 +244,7 @@ impl Driver {
                     checks,
                     broad_change_percent,
                 } => {
-                    let path = self.session_path(handle)?;
+                    let path = &self.session(handle)?.path().to_path_buf();
 
                     if !(1..=100).contains(broad_change_percent) {
                         return Err(driver_failure(
@@ -403,7 +275,7 @@ impl Driver {
                     limit,
                     metadata_only,
                 } => {
-                    let path = self.session_path(handle)?;
+                    let path = &self.session(handle)?.path().to_path_buf();
 
                     if *limit == 0 || *limit > 4096 {
                         return Err(driver_failure(
@@ -444,7 +316,7 @@ impl Driver {
                     viewport,
                     max_bytes,
                 } => {
-                    let path = self.session_path(handle)?.clone();
+                    let path = self.session(handle)?.path().to_path_buf();
 
                     match renderer {
                         DriverScreenshotRenderer::Semantic => save(
@@ -499,7 +371,7 @@ impl Driver {
                     }
                 }
                 DriverMethod::Verify { handle, level } => {
-                    let path = self.session_path(handle)?;
+                    let path = &self.session(handle)?.path().to_path_buf();
 
                     Ok(DriverData::Verification {
                         report: Box::new(verify_session(path, *level)),
@@ -511,7 +383,7 @@ impl Driver {
                     profile,
                     max_bytes,
                 } => {
-                    let path = self.session_path(handle)?;
+                    let path = &self.session(handle)?.path().to_path_buf();
                     let manifest = create_bundle(path, destination, *profile, *max_bytes).map_err(
                         |error| {
                             return driver_failure_from_error(error, Some(path.clone()));
@@ -538,14 +410,14 @@ impl Driver {
                 }
                 DriverMethod::Detach { handle } => {
                     self.close_native(handle);
-                    self.detach_recorder(handle);
-                    if self.sessions.remove(handle).is_none() {
-                        return Err(driver_failure(
+                    let session = self.sessions.remove(handle).ok_or_else(|| {
+                        return driver_failure(
                             "unknown_handle",
                             "session handle is not attached",
                             None,
-                        ));
-                    }
+                        );
+                    })?;
+                    let _path = session.detach();
 
                     Ok(DriverData::Detached)
                 }
@@ -566,41 +438,28 @@ impl Driver {
         };
     }
 
-    fn session_path(&self, handle: &Uuid) -> StdResult<&PathBuf, Box<DriverResult>> {
-        return self
-            .sessions
-            .get(handle)
-            .map(|s| return &s.path)
-            .ok_or_else(|| {
-                return driver_failure("unknown_handle", "session handle is not attached", None);
-            });
+    fn session(&self, handle: &Uuid) -> StdResult<&Session, Box<DriverResult>> {
+        return self.sessions.get(handle).ok_or_else(|| {
+            return driver_failure("unknown_handle", "session handle is not attached", None);
+        });
+    }
+
+    fn session_mut(&mut self, handle: &Uuid) -> StdResult<&mut Session, Box<DriverResult>> {
+        return self.sessions.get_mut(handle).ok_or_else(|| {
+            return driver_failure("unknown_handle", "session handle is not attached", None);
+        });
     }
 
     fn attach(&mut self, reference: &Path) -> StdResult<DriverData, Box<DriverResult>> {
-        let path = resolve_reference(reference)
+        let binary = env::current_exe().map_err(|error| {
+            return driver_failure("attach_failed", error.to_string(), None);
+        })?;
+        let session = SessionTarget::parse(reference.as_os_str())
+            .and_then(|target| return target.path())
+            .and_then(|path| return Session::attach(path, binary))
             .map_err(|error| return driver_failure_from_error(error, None))?;
 
-        let canonical = path.canonicalize().map_err(|error| {
-            return driver_failure("session_unavailable", error.to_string(), Some(path.clone()));
-        })?;
-        let manifest = read_manifest(&canonical)
-            .map_err(|error| return driver_failure_from_error(error, Some(canonical.clone())))?;
-
-        let handle = Uuid::now_v7();
-        self.sessions.insert(
-            handle,
-            super::runtime::AttachedSession {
-                path: canonical.clone(),
-                ownership: super::runtime::SessionOwnership::External,
-            },
-        );
-
-        return Ok(DriverData::Attached {
-            handle,
-            session_id: manifest.session_id,
-            completed: is_completed(&canonical),
-            canonical_session: canonical,
-        });
+        return Ok(self.insert(session));
     }
 
     fn launch(
@@ -624,103 +483,40 @@ impl Driver {
         let binary = env::current_exe().map_err(|error| {
             return driver_failure("launch_failed", error.to_string(), None);
         })?;
-
-        let terminal = Terminal::new(binary, evidence_root);
         let command = command
             .iter()
-            .map(|argument| return OsString::from_vec(argument.as_bytes().to_vec()))
-            .collect::<Vec<_>>();
-
-        let mut builder = terminal
-            .launch(command)
+            .map(|argument| return OsString::from_vec(argument.as_bytes().to_vec()));
+        let mut spec = LaunchSpec::new(command)
             .geometry(cols, rows)
             .environment(environment);
+        spec.output_byte_budget = resource_limits.output_bytes;
+        spec.working_directory = working_directory.map(Path::to_path_buf);
 
-        if let Some(limit) = resource_limits.output_bytes {
-            builder = builder.output_byte_budget(limit);
-        }
+        let session = Terminal::new(binary, evidence_root)
+            .start(spec)
+            .map_err(|error| {
+                return driver_failure_from_error(error, Some(evidence_root.to_path_buf()));
+            })?;
 
-        if let Some(directory) = working_directory {
-            builder = builder.working_directory(directory);
-        }
+        return Ok(self.insert(session));
+    }
 
-        let session = builder.start().map_err(|error| {
-            return driver_failure_from_error(error, Some(evidence_root.to_path_buf()));
-        })?;
-
-        let session_id = session.session_id();
-        let completed = is_completed(session.path());
-        let (canonical_session, recorder) = session.into_detached_parts();
+    fn insert(&mut self, session: Session) -> DriverData {
         let handle = Uuid::now_v7();
-        self.sessions.insert(
+        let data = DriverData::Attached {
             handle,
-            super::runtime::AttachedSession {
-                path: canonical_session.clone(),
-                ownership: super::runtime::SessionOwnership::Launched { recorder },
-            },
-        );
+            session_id: session.session_id(),
+            completed: is_completed(session.path()),
+            canonical_session: session.path().to_path_buf(),
+        };
+        self.sessions.insert(handle, session);
 
-        return Ok(DriverData::Attached {
-            handle,
-            session_id,
-            canonical_session,
-            completed,
-        });
-    }
-
-    fn reap_recorder(&mut self, handle: &Uuid, path: &Path) -> StdResult<(), Box<DriverResult>> {
-        let Some(session) = self.sessions.get_mut(handle) else {
-            return Ok(());
-        };
-        let super::runtime::SessionOwnership::Launched { recorder } = &mut session.ownership else {
-            return Ok(());
-        };
-        let Some(mut recorder) = recorder.take() else {
-            return Ok(());
-        };
-        recorder.wait().map_err(|error| {
-            return driver_failure(
-                "recorder_wait_failed",
-                error.to_string(),
-                Some(path.to_path_buf()),
-            );
-        })?;
-
-        return Ok(());
-    }
-
-    fn detach_recorder(&mut self, handle: &Uuid) {
-        let Some(session) = self.sessions.get_mut(handle) else {
-            return;
-        };
-        let super::runtime::SessionOwnership::Launched { recorder } = &mut session.ownership else {
-            return;
-        };
-        let Some(mut recorder) = recorder.take() else {
-            return;
-        };
-
-        thread::spawn(move || {
-            if let Err(error) = recorder.wait() {
-                tracing::warn!(%error, "failed to reap detached driver recorder");
-            }
-        });
+        return data;
     }
 }
 
-pub(super) fn resolve_reference(reference: &Path) -> Result<PathBuf> {
-    let text = reference.to_string_lossy();
-    if let Some(path) = text.strip_prefix("path:") {
-        return Ok(PathBuf::from(path));
-    }
-
-    let name = text.strip_prefix("name:").unwrap_or(&text);
-    if !name.contains('/') && !name.starts_with('.') {
-        return Ok(SessionRegistry::open_default()?
-            .resolve(name)?
-            .session_path());
-    }
-    return Ok(reference.to_path_buf());
+fn session_failure(error: impl Into<Error>, session: &Session) -> Box<DriverResult> {
+    return driver_failure_from_error(error, Some(session.path().to_path_buf()));
 }
 
 pub(super) fn driver_failure_from_error<E>(error: E, evidence: Option<PathBuf>) -> Box<DriverResult>
@@ -735,33 +531,33 @@ where
             detail,
             remediation,
         }) => (
-            "capability_blocked".to_owned(),
+            "capability_blocked",
             format!(
                 "required capability `{id}` is blocked ({code}): {detail}; fix: {remediation}; inspect with `termtrace doctor --require {id} --explain`"
             ),
         ),
-        Error::Control(ControlError::Rejected { code, .. }) => (code.clone(), error.to_string()),
+        Error::Control(control) => (control_code(control), error.to_string()),
         Error::ScreenFrame(ScreenFrameError::InvalidRegion { .. }) => {
-            ("invalid_screen_region".to_owned(), error.to_string())
+            ("invalid_screen_region", error.to_string())
         }
         Error::ScreenFrame(ScreenFrameError::ResourceLimit { .. }) => {
-            ("screen_frame_resource_limit".to_owned(), error.to_string())
+            ("screen_frame_resource_limit", error.to_string())
         }
-        Error::ScreenFrame(_) => (
-            "screen_frame_projection_failed".to_owned(),
-            error.to_string(),
-        ),
-        _ => ("operation_failed".to_owned(), error.to_string()),
+        Error::ScreenFrame(_) => ("screen_frame_projection_failed", error.to_string()),
+        _ => ("operation_failed", error.to_string()),
     };
 
-    return driver_failure_with_effect(&code, message, evidence, error.effect(), None);
+    return driver_failure_with_effect(
+        code,
+        message,
+        evidence,
+        error.effect(),
+        error.details().cloned(),
+    );
 }
 
-pub(super) fn driver_control_failure_from_error(
-    error: ControlError,
-    evidence: PathBuf,
-) -> Box<DriverResult> {
-    let code = match &error {
+fn control_code(error: &ControlError) -> &str {
+    return match error {
         ControlError::Unavailable { .. } => "control_unavailable",
         ControlError::Timeout { .. } => "control_timeout",
         ControlError::Transport { .. } => "control_transport",
@@ -774,14 +570,6 @@ pub(super) fn driver_control_failure_from_error(
             "control_failed"
         }
     };
-
-    return driver_failure_with_effect(
-        code,
-        error.to_string(),
-        Some(evidence),
-        error.effect(),
-        None,
-    );
 }
 
 pub(super) fn driver_response_is_cacheable(response: &DriverResponse) -> bool {

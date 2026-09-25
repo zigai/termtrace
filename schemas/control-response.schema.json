@@ -2885,6 +2885,11 @@
           "const": "deadline",
           "description": "The actor-side deadline elapsed before a match.",
           "type": "string"
+        },
+        {
+          "const": "completed",
+          "description": "The session had already completed; the predicate was evaluated on its final screen.",
+          "type": "string"
         }
       ]
     },
@@ -2928,6 +2933,11 @@
         {
           "const": "deadline",
           "description": "The server-side deadline elapsed before the requested stable interval.",
+          "type": "string"
+        },
+        {
+          "const": "completed",
+          "description": "The session had already completed; the frame is its final presented state.",
           "type": "string"
         }
       ]

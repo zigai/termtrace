@@ -1,13 +1,20 @@
 use crate::cli::{
     analysis::args::ShowFormat,
     parsers::{
-        parse_bounded_screen_regex, parse_pace_duration, parse_stability_duration,
-        parse_state_hash, parse_time_offset_ns, parse_wait_deadline_duration,
+        parse_bounded_screen_regex, parse_idle_interval, parse_pace_duration,
+        parse_stability_duration, parse_state_hash, parse_time_offset_ns,
+        parse_wait_deadline_duration,
     },
 };
 use clap::{ArgGroup, Args, ValueEnum};
 use std::{path::PathBuf, time::Duration};
 use termtrace_model::{protocol::control::ScreenMode, terminal::state::CursorStyle};
+use termtrace_sdk::defaults;
+
+/// Resolve an optional millisecond flag against its shared default.
+pub(in crate::cli) fn millis_or(value: Option<u64>, default: Duration) -> Duration {
+    return value.map_or(default, Duration::from_millis);
+}
 
 #[derive(Debug, Args)]
 #[command(group(
@@ -48,13 +55,14 @@ pub(in crate::cli) struct WaitArgs {
     /// Exact UTF-8 text to find in canonical output history.
     #[arg(long)]
     pub(in crate::cli) output: Option<String>,
-    /// Atomically return the exact presented snapshot after it remains unchanged for this duration.
+    /// Atomically return the exact presented snapshot after it remains unchanged for this
+    /// duration, or for the default idle interval when no value is given.
     #[arg(
         long,
-        value_parser = parse_stability_duration,
+        value_parser = parse_idle_interval,
         num_args = 0..=1,
         require_equals = true,
-        default_missing_value = "100ms"
+        default_missing_value = ""
     )]
     pub(in crate::cli) idle: Option<Duration>,
     /// Exact UTF-8 text required to be absent from the presented viewport.
@@ -98,9 +106,9 @@ pub(in crate::cli) struct WaitArgs {
         conflicts_with = "idle"
     )]
     pub(in crate::cli) stable_for: Duration,
-    /// Maximum wait duration.
-    #[arg(long, value_parser = parse_wait_deadline_duration, default_value = "30s")]
-    pub(in crate::cli) timeout: Duration,
+    /// Maximum wait duration; defaults to the shared wait timeout.
+    #[arg(long, value_parser = parse_wait_deadline_duration)]
+    pub(in crate::cli) timeout: Option<Duration>,
     /// Return typed completed/output-closed/deadline snapshots instead of rejecting them.
     #[arg(long, requires = "idle_selection")]
     pub(in crate::cli) allow_incomplete: bool,
@@ -172,9 +180,9 @@ pub(in crate::cli) struct ScreenArgs {
     /// Require an unchanged live presented state for this duration.
     #[arg(long, value_parser = parse_stability_duration, default_value = "0ms")]
     pub(in crate::cli) stable_for: Duration,
-    /// Maximum live stability wait.
-    #[arg(long, value_parser = parse_wait_deadline_duration, default_value = "30s")]
-    pub(in crate::cli) timeout: Duration,
+    /// Maximum live stability wait; defaults to the shared wait timeout.
+    #[arg(long, value_parser = parse_wait_deadline_duration)]
+    pub(in crate::cli) timeout: Option<Duration>,
     /// Write a concise provenance header to standard error.
     #[arg(long)]
     pub(in crate::cli) metadata: bool,
@@ -220,18 +228,19 @@ pub(in crate::cli) struct SendArgs {
     /// Wait until the presented screen matches this bounded regular expression.
     #[arg(long, value_parser = parse_bounded_screen_regex)]
     pub(in crate::cli) until_screen_regex: Option<String>,
-    /// Wait until the resulting presented screen remains unchanged for this duration.
+    /// Wait until the resulting presented screen remains unchanged for this duration, or for
+    /// the default idle interval when no value is given.
     #[arg(
         long,
-        value_parser = parse_stability_duration,
+        value_parser = parse_idle_interval,
         num_args = 0..=1,
         require_equals = true,
-        default_missing_value = "100ms"
+        default_missing_value = ""
     )]
     pub(in crate::cli) until_idle: Option<Duration>,
-    /// Maximum postcondition wait duration.
-    #[arg(long, value_parser = parse_wait_deadline_duration, default_value = "30s")]
-    pub(in crate::cli) timeout: Duration,
+    /// Maximum postcondition wait duration; defaults to the shared wait timeout.
+    #[arg(long, value_parser = parse_wait_deadline_duration)]
+    pub(in crate::cli) timeout: Option<Duration>,
     /// Delay between atoms; paced text is split by Unicode scalar.
     #[arg(long, value_parser = parse_pace_duration, default_value = "0ms")]
     pub(in crate::cli) pace: Duration,
@@ -312,18 +321,18 @@ pub(in crate::cli) struct StatusArgs {
     /// Wait for durable completion instead of returning live counters.
     #[arg(long)]
     pub(in crate::cli) wait_complete: bool,
-    /// Maximum completion wait in milliseconds.
-    #[arg(long, default_value_t = 30_000)]
-    pub(in crate::cli) timeout_ms: u64,
+    /// Maximum completion wait in milliseconds; defaults to the shared stop timeout.
+    #[arg(long)]
+    pub(in crate::cli) timeout_ms: Option<u64>,
     /// Run session garbage collection.
     #[arg(long)]
     pub(in crate::cli) gc: bool,
     /// Delete completed sessions older than this many days during gc.
-    #[arg(long)]
-    pub(in crate::cli) older_than_days: Option<u64>,
+    #[arg(long, default_value_t = defaults::GC_OLDER_THAN_DAYS)]
+    pub(in crate::cli) older_than_days: u64,
     /// Retain at least this many completed sessions during gc.
-    #[arg(long)]
-    pub(in crate::cli) keep_latest: Option<u64>,
+    #[arg(long, default_value_t = defaults::GC_KEEP_LATEST)]
+    pub(in crate::cli) keep_latest: u64,
     /// Remove alias name from registry.
     #[arg(long)]
     pub(in crate::cli) rm: Option<String>,
@@ -339,9 +348,9 @@ pub(in crate::cli) struct StopArgs {
     /// Wait for and validate durable completion after stop is acknowledged.
     #[arg(long)]
     pub(in crate::cli) wait: bool,
-    /// Maximum completion wait in milliseconds.
-    #[arg(long, default_value_t = 30_000)]
-    pub(in crate::cli) timeout_ms: u64,
+    /// Maximum completion wait in milliseconds; defaults to the shared stop timeout.
+    #[arg(long)]
+    pub(in crate::cli) timeout_ms: Option<u64>,
     /// Apply only if the actor's latest presented state has this BLAKE3 hash.
     #[arg(long = "if-state")]
     pub(in crate::cli) expected_presented_state_hash: Option<String>,

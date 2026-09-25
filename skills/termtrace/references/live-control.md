@@ -4,7 +4,7 @@ Use clean CLI commands or the Python SDK throughout an automated workflow:
 
 ```sh
 termtrace record -d app --until-screen Ready -- ./command
-termtrace send app text:/settings enter --until-idle 100ms
+termtrace send app text:/settings enter --until-idle=100ms
 termtrace screen app --since STATE
 ```
 
@@ -12,7 +12,7 @@ Pass `--json` to receive structured JSON objects on stdout:
 
 ```sh
 termtrace record -d app --json --until-screen Ready -- ./command
-termtrace send app --json text:/settings enter --until-idle 100ms
+termtrace send app --json text:/settings enter --until-idle=100ms
 termtrace screen app --json --since STATE
 ```
 
@@ -20,11 +20,18 @@ termtrace screen app --json --since STATE
 canonical child output. Use `wait --output` separately only when byte history is
 the requirement.
 
+`wait --screen` and `wait --idle` also answer for a session that has completed: the
+predicate is evaluated once on the final presented screen (`quality: completed`), so a
+program that prints and exits still satisfies a wait for its last output. A match counts
+when it met the requested stability, or when it held on the final screen of a completed
+child; pass `--require-live-stability` to `wait --idle` to reject completed sessions.
+
 `send` is the unified terminal input driver. It applies all input atoms under one guard and one request journal
 entry, then evaluates the requested postcondition without a caller-visible race.
 Supported input forms include:
 - **Keys**: named keys like `enter`, `tab`, `escape`, `backspace`, arrow keys (`up`, `down`, `left`, `right`), function keys (`f1`..`f24`).
-- **Modifiers**: `ctrl+f`, `ctrl-c`, `alt-enter`, `shift-tab`.
+- **Modifiers**: `ctrl+f`, `ctrl-c`, `alt-enter`, `shift-tab`, stacked as `ctrl+shift+x` or `super-f5`. The Python and Node `send_key`/`sendKey` accept the same grammar.
+- **Pacing**: `--pace 20ms` types `text:` atoms one character at a time.
 - **Text**: `text:any UTF-8 text`, `paste:pasted text`.
 - **Mouse**: `click:COL,ROW` (e.g. `click:10,20`).
 - **Activation**: `activate:"Button Text"` (finds visible row-contained text and activates it).

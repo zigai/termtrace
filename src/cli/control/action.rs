@@ -1,11 +1,10 @@
 use super::args::SendArgs;
-use super::input::input_sequence_atom_for_cli;
+use super::input::input_atom_for_cli;
 use super::*;
 use std::mem::take;
 use termtrace_model::{
-    protocol::control::{PointerOperation, ProcessSignal, ScreenPredicate},
+    protocol::control::{PointerOperation, ProcessSignal},
     protocol::mutation::{MutationEffect, Retry},
-    terminal::screen::FrameDetail,
     terminal::state::MouseButton,
 };
 
@@ -19,7 +18,7 @@ fn parse_click_str(s: &str) -> Result<(u16, u16)> {
     return Ok((col, row));
 }
 
-fn parse_resize_str(s: &str) -> Result<(u16, u16, u16, u16)> {
+fn parse_resize_str(s: &str) -> Result<ControlCommand> {
     let (w_str, h_str) = s
         .split_once('x')
         .or_else(|| return s.split_once('X'))
@@ -31,10 +30,13 @@ fn parse_resize_str(s: &str) -> Result<(u16, u16, u16, u16)> {
         })?;
     let cols = w_str.trim().parse::<u16>().into_diagnostic()?;
     let rows = h_str.trim().parse::<u16>().into_diagnostic()?;
-    let pixel_width = cols.saturating_mul(12);
-    let pixel_height = rows.saturating_mul(24);
 
-    return Ok((cols, rows, pixel_width, pixel_height));
+    return Ok(ControlCommand::Resize {
+        cols,
+        rows,
+        pixel_width: cols.saturating_mul(defaults::CELL_WIDTH),
+        pixel_height: rows.saturating_mul(defaults::CELL_HEIGHT),
+    });
 }
 
 fn parse_signal_str(s: &str) -> Result<ProcessSignal> {
@@ -53,510 +55,215 @@ fn parse_signal_str(s: &str) -> Result<ProcessSignal> {
     };
 }
 
-pub(in crate::cli) fn run_send(
-    response: &mut ResponseWriter,
-    arguments: SendArgs,
-) -> Result<ExitCode> {
-    let resolved = resolve_session(arguments.session.clone())?;
-    if resolved.lifecycle != SessionPhase::Live {
-        return write_session_lifecycle(response, &resolved, "send", ExitCode::FAILURE);
+/// One ordered piece of a `send`: a single control command, or a run of input atoms applied
+/// as one action.
+enum SendStep {
+    Control(ControlCommand, &'static str),
+    Act(Vec<InputAtom>),
+}
+
+fn send_steps(arguments: &SendArgs) -> Result<Vec<SendStep>> {
+    let stdin_requested = arguments.stdin || arguments.atoms.iter().any(|atom| return atom == "-");
+    let mut stdin_bytes = Vec::new();
+    if stdin_requested {
+        io::stdin()
+            .read_to_end(&mut stdin_bytes)
+            .into_diagnostic()?;
     }
 
-    let request_id = arguments.request_id.unwrap_or_else(uuid::Uuid::now_v7);
-    let mut stdin_bytes: Option<Vec<u8>> = None;
-    if arguments.stdin || arguments.atoms.iter().any(|a| return a == "-") {
-        let mut data = Vec::new();
-        io::stdin().read_to_end(&mut data).into_diagnostic()?;
-        stdin_bytes = Some(data);
-    }
-
-    enum SendOp {
-        Control(ControlCommand, &'static str),
-        PacedAtoms(Vec<InputSequenceAtom>),
-    }
-
-    let mut ops: Vec<SendOp> = Vec::new();
-    let mut current_atoms: Vec<InputSequenceAtom> = Vec::new();
+    let mut steps = Vec::new();
+    let mut atoms = Vec::new();
 
     if let Some(resize) = &arguments.resize {
-        let (cols, rows, pixel_width, pixel_height) = parse_resize_str(resize)?;
-        ops.push(SendOp::Control(
-            ControlCommand::Resize {
-                cols,
-                rows,
-                pixel_width,
-                pixel_height,
-            },
-            "resize",
+        steps.push(SendStep::Control(parse_resize_str(resize)?, "resize"));
+    }
+
+    if let Some(signal) = &arguments.signal {
+        let signal = parse_signal_str(signal)?;
+        steps.push(SendStep::Control(
+            ControlCommand::Signal { signal },
+            "signal",
         ));
     }
 
-    if let Some(signal_str) = &arguments.signal {
-        let signal = parse_signal_str(signal_str)?;
-        ops.push(SendOp::Control(ControlCommand::Signal { signal }, "signal"));
-    }
-
-    if let Some(mark) = &arguments.mark {
-        ops.push(SendOp::Control(
-            ControlCommand::Mark {
-                label: mark.clone(),
-            },
-            "mark",
-        ));
+    if let Some(label) = &arguments.mark {
+        let label = label.clone();
+        steps.push(SendStep::Control(ControlCommand::Mark { label }, "mark"));
     }
 
     for atom in &arguments.atoms {
-        if atom == "-" {
-            let data = stdin_bytes.clone().unwrap_or_default();
-            current_atoms.push(InputSequenceAtom::Bytes {
-                operation_id: derive_input_operation_id(request_id, current_atoms.len()),
-                data: ByteString::new(data),
-                input_kind: InputKind::Raw,
-                caller_intent: arguments.intent.clone(),
-            });
-        } else if let Some(coords) = atom.strip_prefix("click:") {
-            if !current_atoms.is_empty() {
-                ops.push(SendOp::PacedAtoms(take(&mut current_atoms)));
-            }
+        let control = if let Some(coordinates) = atom.strip_prefix("click:") {
+            let (column, row) = parse_click_str(coordinates)?;
+            let operation = PointerOperation::Click {
+                button: MouseButton::Left,
+            };
 
-            let (col, row) = parse_click_str(coords)?;
-            ops.push(SendOp::Control(
+            Some((
                 ControlCommand::Pointer {
-                    column: col,
+                    column,
                     row,
-                    operation: PointerOperation::Click {
-                        button: MouseButton::Left,
-                    },
+                    operation,
                     strict: false,
                 },
                 "pointer",
-            ));
+            ))
         } else if let Some(text) = atom.strip_prefix("activate:") {
-            if !current_atoms.is_empty() {
-                ops.push(SendOp::PacedAtoms(take(&mut current_atoms)));
-            }
-
-            ops.push(SendOp::Control(
+            Some((
                 ControlCommand::Activate {
                     text: text.to_owned(),
                     unique: false,
                     strict: false,
                 },
                 "activate",
-            ));
-        } else if let Some(wh) = atom.strip_prefix("resize:") {
-            if !current_atoms.is_empty() {
-                ops.push(SendOp::PacedAtoms(take(&mut current_atoms)));
-            }
-
-            let (cols, rows, pixel_width, pixel_height) = parse_resize_str(wh)?;
-            ops.push(SendOp::Control(
-                ControlCommand::Resize {
-                    cols,
-                    rows,
-                    pixel_width,
-                    pixel_height,
-                },
-                "resize",
-            ));
-        } else if let Some(sig) = atom.strip_prefix("signal:") {
-            if !current_atoms.is_empty() {
-                ops.push(SendOp::PacedAtoms(take(&mut current_atoms)));
-            }
-
-            let signal = parse_signal_str(sig)?;
-            ops.push(SendOp::Control(ControlCommand::Signal { signal }, "signal"));
+            ))
+        } else if let Some(geometry) = atom.strip_prefix("resize:") {
+            Some((parse_resize_str(geometry)?, "resize"))
+        } else if let Some(signal) = atom.strip_prefix("signal:") {
+            let signal = parse_signal_str(signal)?;
+            Some((ControlCommand::Signal { signal }, "signal"))
         } else if let Some(label) = atom.strip_prefix("mark:") {
-            if !current_atoms.is_empty() {
-                ops.push(SendOp::PacedAtoms(take(&mut current_atoms)));
-            }
-
-            ops.push(SendOp::Control(
-                ControlCommand::Mark {
-                    label: label.to_owned(),
-                },
-                "mark",
-            ));
-        } else if arguments.pace.is_zero() || !atom.starts_with("text:") {
-            let operation_id = derive_input_operation_id(request_id, current_atoms.len());
-            current_atoms.push(input_sequence_atom_for_cli(
-                atom,
-                operation_id,
-                arguments.intent.clone(),
-            )?);
+            let label = label.to_owned();
+            Some((ControlCommand::Mark { label }, "mark"))
         } else {
-            let text = atom.strip_prefix("text:").unwrap_or_default();
+            None
+        };
 
-            for scalar in text.chars() {
-                current_atoms.push(InputSequenceAtom::Bytes {
-                    operation_id: derive_input_operation_id(request_id, current_atoms.len()),
-                    data: ByteString::new(scalar.to_string().into_bytes()),
-                    input_kind: InputKind::Text,
-                    caller_intent: arguments.intent.clone(),
-                });
+        match control {
+            Some((command, label)) => {
+                if !atoms.is_empty() {
+                    steps.push(SendStep::Act(take(&mut atoms)));
+                }
+
+                steps.push(SendStep::Control(command, label));
             }
+            None if atom == "-" => atoms.push(InputAtom::Bytes(stdin_bytes.clone())),
+            None => atoms.push(input_atom_for_cli(atom)?),
         }
     }
 
     if let Some(text) = &arguments.text {
-        if arguments.pace.is_zero() {
-            current_atoms.push(InputSequenceAtom::Bytes {
-                operation_id: derive_input_operation_id(request_id, current_atoms.len()),
-                data: ByteString::new(text.as_bytes().to_vec()),
-                input_kind: InputKind::Text,
-                caller_intent: arguments.intent.clone(),
-            });
-        } else {
-            for scalar in text.chars() {
-                current_atoms.push(InputSequenceAtom::Bytes {
-                    operation_id: derive_input_operation_id(request_id, current_atoms.len()),
-                    data: ByteString::new(scalar.to_string().into_bytes()),
-                    input_kind: InputKind::Text,
-                    caller_intent: arguments.intent.clone(),
-                });
-            }
-        }
+        atoms.push(InputAtom::Text(text.clone()));
     }
 
     if let Some(path) = &arguments.file {
-        let bytes = fs_err::read(path).into_diagnostic()?;
-        current_atoms.push(InputSequenceAtom::Bytes {
-            operation_id: derive_input_operation_id(request_id, current_atoms.len()),
-            data: ByteString::new(bytes),
-            input_kind: InputKind::Raw,
-            caller_intent: arguments.intent.clone(),
-        });
+        atoms.push(InputAtom::Bytes(fs_err::read(path).into_diagnostic()?));
     }
 
-    if arguments.stdin && !arguments.atoms.iter().any(|a| return a == "-") {
-        let bytes = stdin_bytes.unwrap_or_default();
-        current_atoms.push(InputSequenceAtom::Bytes {
-            operation_id: derive_input_operation_id(request_id, current_atoms.len()),
-            data: ByteString::new(bytes),
-            input_kind: InputKind::Raw,
-            caller_intent: arguments.intent.clone(),
-        });
+    if arguments.stdin && !arguments.atoms.iter().any(|atom| return atom == "-") {
+        atoms.push(InputAtom::Bytes(stdin_bytes));
     }
 
-    if !current_atoms.is_empty() {
-        ops.push(SendOp::PacedAtoms(current_atoms));
+    if !atoms.is_empty() {
+        steps.push(SendStep::Act(atoms));
+    }
+    return Ok(steps);
+}
+
+pub(in crate::cli) fn run_send(
+    response: &mut ResponseWriter,
+    arguments: SendArgs,
+) -> Result<ExitCode> {
+    let resolved = resolve_session(arguments.session.clone())?;
+    if resolved.phase != SessionPhase::Live {
+        return write_session_lifecycle(response, &resolved, "send", ExitCode::FAILURE);
     }
 
-    if ops.is_empty() {
+    let session = attach_session(&resolved.path)?;
+    let request_id = arguments.request_id.unwrap_or_else(uuid::Uuid::now_v7);
+    let guard = MutationGuard {
+        request_id: Some(request_id),
+        if_state: arguments.if_state.clone(),
+    };
+    let steps = send_steps(&arguments)?;
+
+    if steps.is_empty() {
         return Err(miette::miette!(
             "send requires at least one input atom or flag"
         ));
     }
 
-    let postcondition = action_postcondition(&arguments);
-    let total_ops = ops.len();
+    let postcondition = action_condition(&arguments);
+    let total_steps = steps.len();
 
-    for (index, op) in ops.into_iter().enumerate() {
-        let is_last = index + 1 == total_ops;
-        match op {
-            SendOp::Control(cmd, label) => {
-                let mut request = ControlRequest::new(cmd);
+    for (index, step) in steps.into_iter().enumerate() {
+        let is_last = index + 1 == total_steps;
+        match step {
+            SendStep::Control(command, label) => {
+                let mut request = ControlRequest::new(command);
                 request.request_id = request_id;
                 request
                     .expected_presented_state_hash
                     .clone_from(&arguments.if_state);
-                let control_response = match send_request_response(&resolved.path, &request) {
-                    Ok(resp) => resp,
-                    Err(error) => {
-                        if arguments.json {
-                            write_json_pretty(
-                                response,
-                                &serde_json::json!({
-                                    "v": 1,
-                                    "ok": false,
-                                    "type": label,
-                                    "message": error.to_string(),
-                                    "request_id": request_id,
-                                    "effect": error.effect(),
-                                    "retry": error.retry(),
-                                }),
-                            )?;
-                        } else {
-                            write_stdout(response, format!("Send {label} failed: {error}\n"))?;
-                        }
 
-                        return Ok(ExitCode::FAILURE);
-                    }
-                };
-
-                if let ControlResult::Error {
-                    code,
-                    message,
-                    effect,
-                    details,
-                } = control_response.result
-                {
-                    let output = action_error_response(
-                        control_response.request_id,
-                        code,
-                        message,
-                        effect,
-                        details.as_ref(),
-                        is_completed(&resolved.path),
+                if let Err(error) = session.control(&request) {
+                    return write_send_failure(
+                        response, &arguments, &session, label, request_id, &error,
                     );
-
-                    if arguments.json {
-                        write_json_pretty(response, &output)?;
-                    } else {
-                        write_stdout(
-                            response,
-                            format!(
-                                "Send {label} error: {}\n",
-                                output
-                                    .get("message")
-                                    .and_then(|m| return m.as_str())
-                                    .unwrap_or("unknown error")
-                            ),
-                        )?;
-                    }
-
-                    return Ok(ExitCode::FAILURE);
                 }
 
                 if is_last {
-                    let (matched, post_kind, outcome) = match postcondition {
-                        ActionPostcondition::Idle {
-                            stable_for_ns,
-                            timeout_ns,
-                        } => {
-                            let capture_req = ControlRequest::new(ControlCommand::CaptureStable {
-                                stable_for_ns,
-                                timeout_ns,
-                                projection: action_projection(&arguments),
-                            });
-
-                            match send_request_response(&resolved.path, &capture_req) {
-                                Ok(resp) => match resp.result {
-                                    ControlResult::Ok { data } => {
-                                        let matched = matches!(
-                                            data,
-                                            ControlData::StableSnapshot { quality, .. }
-                                                if quality == StableCaptureQuality::Stable
-                                        );
-                                        (
-                                            matched,
-                                            "idle",
-                                            if matched { "matched" } else { "unmatched" },
-                                        )
-                                    }
-                                    ControlResult::Error { .. } => (false, "idle", "error"),
-                                },
-                                Err(_) => (false, "idle", "error"),
-                            }
-                        }
-                        ActionPostcondition::Screen {
-                            predicate,
-                            timeout_ns,
-                        } => {
-                            let wait_req = ControlRequest::new(ControlCommand::WaitScreen {
-                                predicate,
-                                stable_for_ns: 0,
-                                timeout_ns,
-                                projection: action_projection(&arguments),
-                            });
-
-                            match send_request_response(&resolved.path, &wait_req) {
-                                Ok(resp) => match resp.result {
-                                    ControlResult::Ok { data } => {
-                                        let matched = matches!(
-                                            data,
-                                            ControlData::ScreenWait { matched, .. } if matched
-                                        );
-                                        (
-                                            matched,
-                                            "screen",
-                                            if matched { "matched" } else { "deadline" },
-                                        )
-                                    }
-                                    ControlResult::Error { .. } => (false, "screen", "error"),
-                                },
-                                Err(_) => (false, "screen", "deadline"),
-                            }
-                        }
-                        ActionPostcondition::None => (true, "none", "matched"),
-                    };
-
-                    if arguments.json {
-                        write_json_pretty(
-                            response,
-                            &serde_json::json!({
-                                "v": 1,
-                                "ok": matched,
-                                "type": label,
-                                "request_id": request_id,
-                                "postcondition": {
-                                    "kind": post_kind,
-                                    "matched": matched,
-                                    "outcome": outcome,
-                                }
-                            }),
-                        )?;
-                    } else if matched {
-                        write_stdout(
-                            response,
-                            format!("Send command completed ({label}); postcondition {post_kind} matched={matched}, outcome={outcome}\n"),
-                        )?;
-                    } else {
-                        write_stdout(
-                            response,
-                            format!("Send command failed ({label}); postcondition {post_kind} matched={matched}, outcome={outcome}\n"),
-                        )?;
-                    }
-
-                    return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
+                    return write_trailing_postcondition(
+                        response,
+                        &session,
+                        &arguments,
+                        label,
+                        request_id,
+                        &postcondition,
+                    );
                 }
             }
-            SendOp::PacedAtoms(atoms) => {
-                let op_postcondition =
-                    if is_last { postcondition.clone() } else { ActionPostcondition::None };
-
-                let mut request = ControlRequest::new(ControlCommand::Act {
+            SendStep::Act(atoms) => {
+                let action = ActRequest {
                     atoms,
-                    pace_ns: u64::try_from(arguments.pace.as_nanos()).unwrap_or(u64::MAX),
-                    include_atom_outcomes: arguments.verbose,
-                    postcondition: op_postcondition,
+                    guard: guard.clone(),
+                    intent: arguments.intent.clone(),
+                    pace: arguments.pace,
+                    verbose_atom_outcomes: arguments.verbose,
+                    postcondition: if is_last {
+                        postcondition.clone()
+                    } else {
+                        ActionCondition::None
+                    },
                     projection: action_projection(&arguments),
-                });
-                request.request_id = request_id;
+                    allow_incomplete: true,
+                };
 
-                request
-                    .expected_presented_state_hash
-                    .clone_from(&arguments.if_state);
-                let control_response = match send_request_response(&resolved.path, &request) {
-                    Ok(control_response) => control_response,
+                let outcome = match session.act(action) {
+                    Ok(outcome) => outcome,
                     Err(error) => {
-                        let code = match &error {
-                            ControlError::InvalidRequest { .. } => "invalid_payload",
-                            _ => "control_transport_failed",
-                        };
-
-                        let payload = serde_json::json!({
-                            "v": 1,
-                            "ok": false,
-                            "type": "action",
-                            "code": code,
-                            "message": error.to_string(),
-                            "request_id": request.request_id,
-                            "input": {
-                                "effect": error.effect(),
-                                "atoms": serde_json::Value::Null,
-                                "bytes": serde_json::Value::Null,
-                                "retry": error.retry(),
-                            },
-                            "postcondition": {
-                                "matched": false,
-                                "quality": "unmatched",
-                                "state": serde_json::Value::Null,
-                                "screen": serde_json::Value::Null,
-                                "state_hash": serde_json::Value::Null,
-                                "timeout": true,
-                            },
-                        });
-
-                        if arguments.json {
-                            write_json_pretty(response, &payload)?;
-                        } else {
-                            write_stdout(response, format!("Send action failed: {error}\n"))?;
-                        }
-
-                        return Ok(ExitCode::FAILURE);
+                        return write_send_failure(
+                            response, &arguments, &session, "action", request_id, &error,
+                        );
                     }
                 };
 
-                match control_response.result {
-                    ControlResult::Ok { data } => {
-                        let is_direct_stream = arguments.atoms.is_empty()
-                            && (arguments.file.is_some()
-                                || arguments.stdin
-                                || arguments.text.is_some())
-                            && matches!(postcondition, ActionPostcondition::None);
-
-                        if is_direct_stream {
-                            if let ControlData::ActionApplied { input, .. } = &data {
-                                write_json_line(
-                                    response,
-                                    &serde_json::json!({
-                                        "kind": "input_sent",
-                                        "request_id": input.sequence_id,
-                                        "bytes_written": input.bytes_written,
-                                    }),
-                                )?;
-
-                                return Ok(ExitCode::SUCCESS);
-                            }
-
-                            if let ControlData::InputSequenceApplied {
-                                sequence_id,
-                                bytes_written,
-                                boundaries,
-                                ..
-                            } = &data
-                            {
-                                write_json_line(
-                                    response,
-                                    &serde_json::json!({
-                                        "kind": "input_sent",
-                                        "request_id": sequence_id,
-                                        "bytes_written": bytes_written,
-                                        "boundary": compact_boundaries(boundaries),
-                                    }),
-                                )?;
-
-                                return Ok(ExitCode::SUCCESS);
-                            }
-                        }
-
-                        let (output, matched) =
-                            action_applied_response(control_response.request_id, &data)?;
-
-                        if is_last {
-                            if arguments.json {
-                                write_json_pretty(response, &output)?;
-                            } else {
-                                write_stdout(response, human_action_summary(&output))?;
-                            }
-
-                            return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
-                        }
-                    }
-                    ControlResult::Error {
-                        code,
-                        message,
-                        effect,
-                        details,
-                    } => {
-                        let output = action_error_response(
-                            control_response.request_id,
-                            code,
-                            message,
-                            effect,
-                            details.as_ref(),
-                            is_completed(&resolved.path),
-                        );
-
-                        if arguments.json {
-                            write_json_pretty(response, &output)?;
-                        } else {
-                            write_stdout(
-                                response,
-                                format!(
-                                    "Send action error: {}\n",
-                                    output
-                                        .get("message")
-                                        .and_then(|m| return m.as_str())
-                                        .unwrap_or("unknown error")
-                                ),
-                            )?;
-                        }
-
-                        return Ok(ExitCode::FAILURE);
-                    }
+                if !is_last {
+                    continue;
                 }
+
+                let direct_stream = arguments.atoms.is_empty()
+                    && (arguments.file.is_some() || arguments.stdin || arguments.text.is_some())
+                    && postcondition == ActionCondition::None;
+
+                if direct_stream {
+                    return write_json_line(
+                        response,
+                        &serde_json::json!({
+                            "kind": "input_sent",
+                            "request_id": outcome.input.sequence_id,
+                            "bytes_written": outcome.input.bytes_written,
+                        }),
+                    );
+                }
+
+                let output = action_applied_response(&outcome)?;
+                if arguments.json {
+                    write_json_pretty(response, &output)?;
+                } else {
+                    write_stdout(response, human_action_summary(&output))?;
+                }
+
+                return Ok(if outcome.matched() { ExitCode::SUCCESS } else { ExitCode::FAILURE });
             }
         }
     }
@@ -564,40 +271,123 @@ pub(in crate::cli) fn run_send(
     return Ok(ExitCode::SUCCESS);
 }
 
-pub(super) fn action_postcondition(arguments: &SendArgs) -> ActionPostcondition {
+/// Wait for the requested postcondition after a trailing control command.
+fn write_trailing_postcondition(
+    response: &mut ResponseWriter,
+    session: &Session,
+    arguments: &SendArgs,
+    label: &'static str,
+    request_id: uuid::Uuid,
+    postcondition: &ActionCondition,
+) -> Result<ExitCode> {
+    let (matched, kind, outcome) = match postcondition {
+        ActionCondition::None => (true, "none", "matched".to_owned()),
+        ActionCondition::Idle {
+            stable_for,
+            timeout,
+        } => match session.capture_stable(StableCaptureOptions {
+            stable_for: *stable_for,
+            timeout: *timeout,
+            projection: action_projection(arguments),
+            allow_incomplete: true,
+        }) {
+            Ok(capture) => (
+                capture.quality.is_settled(),
+                "idle",
+                capture.quality.as_str().to_owned(),
+            ),
+            Err(_) => (false, "idle", "error".to_owned()),
+        },
+        ActionCondition::Screen { predicate, timeout } => {
+            match session.wait_screen(predicate.clone(), Duration::ZERO, *timeout) {
+                Ok(wait) => (
+                    wait.satisfied(),
+                    "screen",
+                    stable_enum_label(&wait.quality)?,
+                ),
+                Err(_) => (false, "screen", "error".to_owned()),
+            }
+        }
+    };
+
+    if arguments.json {
+        write_json_pretty(
+            response,
+            &serde_json::json!({
+                "v": 1,
+                "ok": matched,
+                "type": label,
+                "request_id": request_id,
+                "postcondition": {
+                    "kind": kind,
+                    "matched": matched,
+                    "outcome": outcome,
+                }
+            }),
+        )?;
+    } else {
+        let status = if matched { "completed" } else { "failed" };
+        write_stdout(
+            response,
+            format!("Send command {status} ({label}); postcondition {kind} matched={matched}, outcome={outcome}\n"),
+        )?;
+    }
+
+    return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
+}
+
+fn write_send_failure(
+    response: &mut ResponseWriter,
+    arguments: &SendArgs,
+    session: &Session,
+    label: &'static str,
+    request_id: uuid::Uuid,
+    error: &SessionError,
+) -> Result<ExitCode> {
+    let output = action_error_response(request_id, error, is_completed(session.path()));
+
+    if arguments.json {
+        write_json_pretty(response, &output)?;
+    } else {
+        write_stdout(response, format!("Send {label} failed: {error}\n"))?;
+    }
+
+    return Ok(ExitCode::FAILURE);
+}
+
+pub(super) fn action_condition(arguments: &SendArgs) -> ActionCondition {
+    let timeout = arguments.timeout.unwrap_or(defaults::WAIT_TIMEOUT);
+
     if let Some(stable_for) = arguments.until_idle {
-        return ActionPostcondition::Idle {
-            stable_for_ns: u64::try_from(stable_for.as_nanos()).unwrap_or(u64::MAX),
-            timeout_ns: u64::try_from(arguments.timeout.as_nanos()).unwrap_or(u64::MAX),
+        return ActionCondition::Idle {
+            stable_for,
+            timeout,
         };
     }
 
     if let Some(text) = &arguments.until_screen {
-        return ActionPostcondition::Screen {
+        return ActionCondition::Screen {
             predicate: ScreenPredicate::Contains { text: text.clone() },
-            timeout_ns: u64::try_from(arguments.timeout.as_nanos()).unwrap_or(u64::MAX),
+            timeout,
         };
     }
 
     if let Some(pattern) = &arguments.until_screen_regex {
-        return ActionPostcondition::Screen {
+        return ActionCondition::Screen {
             predicate: ScreenPredicate::MatchesRegex {
                 pattern: pattern.clone(),
             },
-            timeout_ns: u64::try_from(arguments.timeout.as_nanos()).unwrap_or(u64::MAX),
+            timeout,
         };
     }
-    return ActionPostcondition::None;
+    return ActionCondition::None;
 }
 
 pub(super) fn action_projection(arguments: &SendArgs) -> ScreenProjectionRequest {
     if arguments.verbose {
         return ScreenProjectionRequest::default();
     }
-    return ScreenProjectionRequest {
-        detail: FrameDetail::None,
-        region: None,
-    };
+    return hash_only_projection();
 }
 
 #[derive(serde::Serialize)]
@@ -608,16 +398,6 @@ pub(super) struct ActionObservation<'data> {
     pub(super) state_hash: Option<&'data str>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub(super) frame: Option<&'data ScreenFrame>,
-}
-
-#[cfg(test)]
-pub(super) fn action_observation(frame: &ScreenFrame) -> Result<serde_json::Value> {
-    return serde_json::to_value(ActionObservation {
-        state: Some(&frame.state_hash),
-        state_hash: Some(&frame.state_hash),
-        frame: Some(frame),
-    })
-    .into_diagnostic();
 }
 
 #[derive(serde::Serialize)]
@@ -663,56 +443,19 @@ pub(super) struct ActionAppliedOutput<'data> {
     pub(super) code: Option<&'static str>,
 }
 
-pub(super) fn action_applied_response(
-    request_id: uuid::Uuid,
-    data: &ControlData,
-) -> Result<(serde_json::Value, bool)> {
-    let ControlData::ActionApplied {
-        input,
-        postcondition,
-        boundaries,
-    } = data
-    else {
-        return Err(miette::miette!(
-            "recording actor returned an unexpected action payload"
-        ));
-    };
-    if input.sequence_id != request_id {
-        return Err(miette::miette!(
-            "recording actor returned an action input identifier that does not match the request"
-        ));
-    }
-
-    let input_summary = ActionInputSummary {
-        effect: MutationEffect::Applied,
-        atoms: input.atom_count,
-        bytes: input.bytes_written,
-        pace_ns: input.pace_ns,
-        outcomes: (!input.atoms.is_empty()).then_some(&input.atoms),
-    };
-
-    let (postcondition_summary, ended, matched, state_hash, frame) = match postcondition {
-        ActionPostconditionResult::None {
-            matched,
-            state_hash,
-            frame,
-        } => (
+pub(super) fn action_applied_response(outcome: &ActOutcome) -> Result<serde_json::Value> {
+    let input = &outcome.input;
+    let matched = outcome.matched();
+    let (postcondition, ended) = match &outcome.postcondition {
+        ActionPostconditionResult::None { matched, .. } => (
             ActionPostconditionSummary::None {
                 matched: *matched,
                 outcome: "matched",
             },
             false,
-            *matched,
-            state_hash
-                .as_deref()
-                .or_else(|| return frame.as_ref().map(|f| return f.state_hash.as_str())),
-            frame.as_ref(),
         ),
         ActionPostconditionResult::Idle {
-            matched,
-            quality,
-            state_hash,
-            frame,
+            matched, quality, ..
         } => (
             ActionPostconditionSummary::Idle {
                 matched: *matched,
@@ -722,17 +465,9 @@ pub(super) fn action_applied_response(
                 quality,
                 StableCaptureQuality::ChildCompleted | StableCaptureQuality::OutputClosed
             ),
-            *matched,
-            state_hash
-                .as_deref()
-                .or_else(|| return frame.as_ref().map(|f| return f.state_hash.as_str())),
-            frame.as_ref(),
         ),
         ActionPostconditionResult::Screen {
-            matched,
-            quality,
-            state_hash,
-            frame,
+            matched, quality, ..
         } => (
             ActionPostconditionSummary::Screen {
                 matched: *matched,
@@ -743,32 +478,34 @@ pub(super) fn action_applied_response(
                 ScreenPostconditionQuality::ChildCompleted
                     | ScreenPostconditionQuality::OutputClosed
             ),
-            *matched,
-            state_hash
-                .as_deref()
-                .or_else(|| return frame.as_ref().map(|f| return f.state_hash.as_str())),
-            frame.as_ref(),
         ),
     };
 
+    let state_hash = outcome.state_hash();
     let output = ActionAppliedOutput {
         v: 1,
         ok: matched,
         response_type: "action",
-        request_id,
-        input: input_summary,
-        postcondition: postcondition_summary,
+        request_id: outcome.request_id,
+        input: ActionInputSummary {
+            effect: MutationEffect::Applied,
+            atoms: input.atom_count,
+            bytes: input.bytes_written,
+            pace_ns: input.pace_ns,
+            outcomes: (!input.atoms.is_empty()).then_some(&input.atoms),
+        },
+        postcondition,
         observation: ActionObservation {
             state: state_hash,
             state_hash,
-            frame,
+            frame: outcome.frame(),
         },
         ended,
-        boundaries,
+        boundaries: &outcome.boundaries,
         code: (!matched).then_some("postcondition_failed"),
     };
 
-    return Ok((serde_json::to_value(&output).into_diagnostic()?, matched));
+    return serde_json::to_value(&output).into_diagnostic();
 }
 
 #[derive(serde::Serialize)]
@@ -794,13 +531,6 @@ pub(super) struct ActionFailedInputSummary {
 }
 
 #[derive(serde::Serialize)]
-pub(super) struct ActionErrorPostcondition {
-    pub(super) kind: &'static str,
-    pub(super) matched: bool,
-    pub(super) outcome: &'static str,
-}
-
-#[derive(serde::Serialize)]
 pub(super) struct ActionErrorObservation<'data> {
     pub(super) state: &'data str,
     pub(super) scope: &'data str,
@@ -812,11 +542,10 @@ pub(super) struct ActionErrorOutput<'data> {
     pub(super) ok: bool,
     #[serde(rename = "type")]
     pub(super) response_type: &'static str,
-    pub(super) code: String,
+    pub(super) code: &'data str,
     pub(super) message: String,
     pub(super) request_id: uuid::Uuid,
     pub(super) input: ActionFailedInputSummary,
-    pub(super) postcondition: ActionErrorPostcondition,
     pub(super) observation: Option<ActionErrorObservation<'data>>,
     pub(super) ended: bool,
     pub(super) boundaries: Option<&'data ActorBoundaries>,
@@ -824,60 +553,49 @@ pub(super) struct ActionErrorOutput<'data> {
 
 pub(super) fn action_error_response(
     request_id: uuid::Uuid,
-    code: String,
-    message: String,
-    effect: MutationEffect,
-    details: Option<&ControlErrorDetails>,
+    error: &SessionError,
     ended: bool,
 ) -> serde_json::Value {
-    let sequence = details
+    let effect = error.effect();
+    let details = error.details();
+    let prefix = details
         .and_then(|details| return details.input_sequence.as_ref())
-        .filter(|_| return effect != MutationEffect::NotApplied);
-    let prefix = sequence.map(|sequence| {
-        return ActionFailedPrefix {
-            atoms: sequence.atoms_applied,
-            bytes: sequence.bytes_written,
-            failed_atom: sequence.failed_atom_index,
-            failed_operation_id: sequence.failed_operation_id,
-            failed_atom_bytes: sequence.failed_atom_bytes_written,
-            first_intent_event_seq: sequence.first_intent_event_seq,
-            last_result_event_seq: sequence.last_result_event_seq,
-            resume_from_atom: sequence.resume_from_atom_index,
-        };
-    });
-
-    let input = ActionFailedInputSummary {
-        effect,
-        atoms: prefix.as_ref().map_or(0, |prefix| return prefix.atoms),
-        bytes: prefix.as_ref().map_or(0, |prefix| return prefix.bytes),
-        prefix,
-        retry: effect.retry(),
-    };
-
-    let observation = details.map(|details| {
-        return ActionErrorObservation {
-            state: &details.current_presented_state_hash,
-            scope: &details.scope,
-        };
-    });
-    let boundaries = details.map(|details| return &details.boundaries);
+        .filter(|_| return effect != MutationEffect::NotApplied)
+        .map(|sequence| {
+            return ActionFailedPrefix {
+                atoms: sequence.atoms_applied,
+                bytes: sequence.bytes_written,
+                failed_atom: sequence.failed_atom_index,
+                failed_operation_id: sequence.failed_operation_id,
+                failed_atom_bytes: sequence.failed_atom_bytes_written,
+                first_intent_event_seq: sequence.first_intent_event_seq,
+                last_result_event_seq: sequence.last_result_event_seq,
+                resume_from_atom: sequence.resume_from_atom_index,
+            };
+        });
 
     let output = ActionErrorOutput {
         v: 1,
         ok: false,
         response_type: "action",
-        code,
-        message,
+        code: error.code(),
+        message: error.to_string(),
         request_id,
-        input,
-        postcondition: ActionErrorPostcondition {
-            kind: "not_started",
-            matched: false,
-            outcome: "not_started",
+        input: ActionFailedInputSummary {
+            effect,
+            atoms: prefix.as_ref().map_or(0, |prefix| return prefix.atoms),
+            bytes: prefix.as_ref().map_or(0, |prefix| return prefix.bytes),
+            prefix,
+            retry: effect.retry(),
         },
-        observation,
+        observation: details.map(|details| {
+            return ActionErrorObservation {
+                state: &details.current_presented_state_hash,
+                scope: &details.scope,
+            };
+        }),
         ended,
-        boundaries,
+        boundaries: details.map(|details| return &details.boundaries),
     };
 
     #[expect(
@@ -889,26 +607,21 @@ pub(super) fn action_error_response(
 
 #[cfg(test)]
 mod action_response_tests {
-    use super::{
-        action_applied_response, action_error_response, action_observation, action_projection,
-    };
+    use super::{action_applied_response, action_error_response, action_projection};
     use crate::cli::control::args::SendArgs;
     use std::{path::PathBuf, time::Duration};
     use termtrace_model::{
-        protocol::control::{ControlData, ControlErrorDetails},
+        protocol::control::{ActionInputResult, ActionPostconditionResult, ControlErrorDetails},
         protocol::mutation::MutationEffect,
         terminal::observation::{ActorBoundaries, CaptureQuality},
         terminal::screen::FrameDetail,
         terminal::screen::{ScreenFrameSource, ScreenProjectionRequest},
     };
+    use termtrace_sdk::{ActOutcome, Error};
     use termtrace_terminal::{project_screen_frame, GhosttyVt};
 
-    #[test]
-    fn action_success_retains_input_observation_request_and_boundaries() {
-        let request_id =
-            uuid::Uuid::parse_str("018f47d2-7ad0-7000-8000-000000000001").expect("request UUID");
-
-        let boundaries: ActorBoundaries = serde_json::from_value(serde_json::json!({
+    fn boundaries() -> ActorBoundaries {
+        return serde_json::from_value(serde_json::json!({
             "durable": {
                 "next_event_seq": 4,
                 "event_hash": "b".repeat(64),
@@ -921,6 +634,12 @@ mod action_response_tests {
             }
         }))
         .expect("actor boundaries");
+    }
+
+    #[test]
+    fn action_success_retains_input_observation_request_and_boundaries() {
+        let request_id =
+            uuid::Uuid::parse_str("018f47d2-7ad0-7000-8000-000000000001").expect("request UUID");
 
         let mut engine = GhosttyVt::new(80, 24, 0).expect("semantic engine");
         engine.write(b"current screen");
@@ -930,7 +649,7 @@ mod action_response_tests {
             &ScreenProjectionRequest::default(),
             ScreenFrameSource::Actor {
                 session_id: request_id,
-                boundaries: boundaries.clone(),
+                boundaries: boundaries(),
                 observed_monotonic_ns: 1,
             },
             true,
@@ -938,36 +657,39 @@ mod action_response_tests {
         )
         .expect("rich frame");
 
-        let data: ControlData = serde_json::from_value(serde_json::json!({
-            "kind": "action_applied",
-            "input": {
-                "sequence_id": request_id,
-                "atom_count": 2,
-                "bytes_written": 4,
-                "first_intent_event_seq": 1,
-                "last_result_event_seq": 4,
-                "pace_ns": 1_000_000,
-                "atoms": [{
-                    "operation_id": "018f47d2-7ad0-7000-8000-000000000002",
-                    "input_kind": "text",
-                    "bytes_written": 2,
-                    "intent_event_seq": 1,
-                    "result_event_seq": 2
-                }]
-            },
-            "postcondition": {
-                "kind": "screen",
-                "matched": false,
-                "quality": "deadline",
-                "frame": frame
-            },
-            "boundaries": boundaries
+        let input: ActionInputResult = serde_json::from_value(serde_json::json!({
+            "sequence_id": request_id,
+            "atom_count": 2,
+            "bytes_written": 4,
+            "first_intent_event_seq": 1,
+            "last_result_event_seq": 4,
+            "pace_ns": 1_000_000,
+            "atoms": [{
+                "operation_id": "018f47d2-7ad0-7000-8000-000000000002",
+                "input_kind": "text",
+                "bytes_written": 2,
+                "intent_event_seq": 1,
+                "result_event_seq": 2
+            }]
         }))
-        .expect("action payload");
+        .expect("action input");
+        let postcondition: ActionPostconditionResult = serde_json::from_value(serde_json::json!({
+            "kind": "screen",
+            "matched": false,
+            "quality": "deadline",
+            "frame": frame
+        }))
+        .expect("postcondition");
+        let outcome = ActOutcome {
+            request_id,
+            input,
+            postcondition,
+            boundaries: boundaries(),
+        };
 
-        let (response, matched) =
-            action_applied_response(request_id, &data).expect("action response");
-        assert!(!matched);
+        let response = action_applied_response(&outcome).expect("action response");
+        assert_eq!(response["ok"], false);
+        assert_eq!(response["code"], "postcondition_failed");
         assert_eq!(response["request_id"], request_id.to_string());
         assert_eq!(response["input"]["effect"]["kind"], "applied");
         assert_eq!(response["input"]["atoms"], 2);
@@ -978,10 +700,10 @@ mod action_response_tests {
         );
         assert_eq!(response["postcondition"]["outcome"], "deadline");
         assert_eq!(response["ended"], false);
+        assert_eq!(response["observation"]["state"], frame.state_hash);
         assert!(response["observation"]["data"]["rows"][0]["text"]
             .as_str()
             .is_some_and(|text| return text.starts_with("current screen")));
-        assert_eq!(response["boundaries"]["durable"]["next_event_seq"], 4);
         assert_eq!(response["boundaries"]["observed"]["next_event_seq"], 5);
     }
 
@@ -992,18 +714,7 @@ mod action_response_tests {
 
         let details: ControlErrorDetails = serde_json::from_value(serde_json::json!({
             "current_presented_state_hash": "d".repeat(64),
-            "boundaries": {
-                "durable": {
-                    "next_event_seq": 7,
-                    "event_hash": "e".repeat(64),
-                    "output_bytes": 20
-                },
-                "observed": {
-                    "next_event_seq": 8,
-                    "event_hash": "f".repeat(64),
-                    "output_bytes": 21
-                }
-            },
+            "boundaries": boundaries(),
             "scope": "input_sequence_attempted_prefix",
             "input_sequence": {
                 "sequence_id": request_id,
@@ -1019,120 +730,61 @@ mod action_response_tests {
             }
         }))
         .expect("failure details");
+        let error = Error::Control(termtrace_control::Error::Rejected {
+            code: "input_sequence_incomplete".to_owned(),
+            message: "input stopped".to_owned(),
+            effect: MutationEffect::Unknown,
+            details: Some(Box::new(details)),
+        });
 
-        let response = action_error_response(
-            request_id,
-            "input_sequence_incomplete".to_owned(),
-            "input stopped".to_owned(),
-            MutationEffect::Unknown,
-            Some(&details),
-            false,
-        );
+        let response = action_error_response(request_id, &error, false);
+        assert_eq!(response["code"], "input_sequence_incomplete");
         assert_eq!(response["request_id"], request_id.to_string());
         assert_eq!(response["input"]["effect"]["kind"], "unknown");
         assert_eq!(response["input"]["retry"], "same_request_id");
         assert_eq!(response["input"]["atoms"], 1);
         assert_eq!(response["input"]["bytes"], 5);
-        assert_eq!(response["input"]["prefix"]["atoms"], 1);
-        assert_eq!(response["input"]["prefix"]["bytes"], 5);
         assert_eq!(response["input"]["prefix"]["failed_atom"], 1);
         assert_eq!(response["input"]["prefix"]["failed_atom_bytes"], 2);
         assert_eq!(response["input"]["prefix"]["resume_from_atom"], 2);
-        assert_eq!(response["postcondition"]["outcome"], "not_started");
         assert_eq!(response["observation"]["state"], "d".repeat(64));
-        assert_eq!(response["boundaries"]["observed"]["next_event_seq"], 8);
+        assert_eq!(response["boundaries"]["observed"]["next_event_seq"], 5);
     }
 
-    #[test]
-    fn action_observation_serializes_state_and_flattened_frame() {
-        let request_id =
-            uuid::Uuid::parse_str("018f47d2-7ad0-7000-8000-000000000001").expect("request UUID");
-
-        let boundaries: ActorBoundaries = serde_json::from_value(serde_json::json!({
-            "durable": {
-                "next_event_seq": 1,
-                "event_hash": "a".repeat(64),
-                "output_bytes": 0
-            },
-            "observed": {
-                "next_event_seq": 2,
-                "event_hash": "b".repeat(64),
-                "output_bytes": 16
-            }
-        }))
-        .expect("actor boundaries");
-
-        let mut engine = GhosttyVt::new(80, 24, 0).expect("semantic engine");
-        engine.write(b"observation test");
-        let state = engine.snapshot().expect("semantic state");
-        let frame = project_screen_frame(
-            &state,
-            &ScreenProjectionRequest::default(),
-            ScreenFrameSource::Actor {
-                session_id: request_id,
-                boundaries,
-                observed_monotonic_ns: 1,
-            },
-            true,
-            CaptureQuality::Live,
-        )
-        .expect("rich frame");
-
-        let value = action_observation(&frame).expect("observation JSON");
-        assert_eq!(value["state"], frame.state_hash);
-        assert_eq!(value["state_hash"], frame.state_hash);
-        assert_eq!(value["version"], 1);
+    fn send_args(verbose: bool) -> SendArgs {
+        return SendArgs {
+            session: PathBuf::from("test-session"),
+            atoms: Vec::new(),
+            stdin: false,
+            text: None,
+            file: None,
+            resize: None,
+            signal: None,
+            mark: None,
+            until_screen: Some("ready".to_owned()),
+            until_screen_regex: None,
+            until_idle: None,
+            timeout: None,
+            pace: Duration::ZERO,
+            intent: None,
+            if_state: None,
+            request_id: None,
+            verbose,
+            json: false,
+        };
     }
 
     #[test]
     fn action_projection_selects_lightweight_detail_by_default() {
-        let args = SendArgs {
-            session: PathBuf::from("test-session"),
-            atoms: Vec::new(),
-            stdin: false,
-            text: None,
-            file: None,
-            resize: None,
-            signal: None,
-            mark: None,
-            until_screen: Some("ready".to_owned()),
-            until_screen_regex: None,
-            until_idle: None,
-            timeout: Duration::from_secs(30),
-            pace: Duration::ZERO,
-            intent: None,
-            if_state: None,
-            request_id: None,
-            verbose: false,
-            json: false,
-        };
-        let projection = action_projection(&args);
-        assert_eq!(projection.detail, FrameDetail::None);
+        assert_eq!(
+            action_projection(&send_args(false)).detail,
+            FrameDetail::None
+        );
     }
 
     #[test]
     fn action_projection_preserves_full_rich_spans_when_verbose_requested() {
-        let args = SendArgs {
-            session: PathBuf::from("test-session"),
-            atoms: Vec::new(),
-            stdin: false,
-            text: None,
-            file: None,
-            resize: None,
-            signal: None,
-            mark: None,
-            until_screen: Some("ready".to_owned()),
-            until_screen_regex: None,
-            until_idle: None,
-            timeout: Duration::from_secs(30),
-            pace: Duration::ZERO,
-            intent: None,
-            if_state: None,
-            request_id: None,
-            verbose: true,
-            json: false,
-        };
-        let projection = action_projection(&args);
+        let projection = action_projection(&send_args(true));
         assert_eq!(projection.detail, FrameDetail::Spans);
         assert!(projection.region.is_none());
     }

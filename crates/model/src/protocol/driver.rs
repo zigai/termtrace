@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Current JSONL driver protocol version.
-pub const DRIVER_PROTOCOL_VERSION: u32 = 6;
+pub const DRIVER_PROTOCOL_VERSION: u32 = 7;
 /// Maximum JSON bytes accepted in one newline-delimited request frame.
 pub const DRIVER_MAX_REQUEST_BYTES: u64 = 4 * 1024 * 1024;
 /// Maximum JSON bytes emitted in one newline-delimited response frame.

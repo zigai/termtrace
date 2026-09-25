@@ -1,11 +1,13 @@
 //! Screen observation and state representations for Python.
 
-use crate::errors::{to_py_err, with_effect, TimeoutError};
+use crate::errors::{to_py_err, unsatisfied_wait};
 use pyo3::prelude::*;
-use termtrace_model::protocol::mutation::MutationEffect;
+use std::time::Duration;
 use termtrace_sdk::client::Terminal;
-use termtrace_sdk::screen::frame_text;
-use termtrace_sdk::screen::ScreenProjectionRequest;
+use termtrace_sdk::defaults;
+use termtrace_sdk::screen::{
+    frame_text, ScreenFrame, ScreenPredicate, ScreenProjectionRequest, StableCaptureOptions,
+};
 
 /// Immutable snapshot of a resolved presented terminal state.
 #[pyclass(name = "ResolvedState", from_py_object)]
@@ -23,6 +25,18 @@ pub struct PyResolvedState {
     /// Zero-indexed cursor column.
     #[pyo3(get)]
     pub cursor_col: u16,
+}
+
+impl PyResolvedState {
+    /// Summarize one exact frame.
+    pub fn from_frame(frame: &ScreenFrame) -> Self {
+        return Self {
+            hash: frame.state_hash.clone(),
+            text: frame_text(frame),
+            cursor_row: frame.cursor.row.unwrap_or_default(),
+            cursor_col: frame.cursor.column.unwrap_or_default(),
+        };
+    }
 }
 
 #[pymethods]
@@ -72,41 +86,76 @@ pub struct PyScreen {
     pub(crate) session_path: String,
 }
 
+impl PyScreen {
+    fn latest_frame(&self) -> PyResult<ScreenFrame> {
+        return self
+            .terminal
+            .attach(&self.session_path)
+            .and_then(|session| return session.frame(ScreenProjectionRequest::default()))
+            .map_err(to_py_err);
+    }
+
+    /// Wait for literal text on the presented screen; an unmet wait raises `TimeoutError`.
+    pub(crate) fn blocking_wait_for_text(
+        &self,
+        pattern: &str,
+        timeout: Duration,
+    ) -> PyResult<PyResolvedState> {
+        let session = self
+            .terminal
+            .attach(&self.session_path)
+            .map_err(to_py_err)?;
+
+        let predicate = ScreenPredicate::Contains {
+            text: pattern.to_owned(),
+        };
+        let outcome = session
+            .wait_screen(predicate, Duration::ZERO, timeout)
+            .map_err(to_py_err)?;
+
+        if !outcome.satisfied() {
+            return Err(unsatisfied_wait(format!(
+                "timed out waiting for pattern: '{pattern}'"
+            )));
+        }
+        return Ok(PyResolvedState::from_frame(&outcome.frame));
+    }
+
+    /// Wait until the presented screen stays unchanged for the default idle interval.
+    pub(crate) fn blocking_wait_for_idle(&self, timeout: Duration) -> PyResult<PyResolvedState> {
+        let capture = self
+            .terminal
+            .attach(&self.session_path)
+            .and_then(|session| {
+                return session.capture_stable(StableCaptureOptions {
+                    timeout,
+                    ..StableCaptureOptions::default()
+                });
+            })
+            .map_err(to_py_err)?;
+
+        return Ok(PyResolvedState::from_frame(&capture.frame));
+    }
+}
+
 #[pymethods]
 impl PyScreen {
     /// Return the current presented screen frame.
     pub fn frame(&self, py: Python<'_>) -> PyResult<PyFrame> {
-        let terminal = self.terminal.clone();
-        let path = self.session_path.clone();
+        return py.detach(|| {
+            let frame = self.latest_frame()?;
 
-        return py.detach(move || {
-            let session = terminal.attach(path).map_err(to_py_err)?;
-            let screen = session.screen();
-            let frame = screen
-                .frame(ScreenProjectionRequest::default())
-                .map_err(to_py_err)?;
-            let text = frame_text(&frame);
             return Ok(PyFrame {
                 rows: frame.geometry.rows,
                 cols: frame.geometry.cols,
-                text,
+                text: frame_text(&frame),
             });
         });
     }
 
     /// Return the normalized plain text of the latest presented frame.
     pub fn text(&self, py: Python<'_>) -> PyResult<String> {
-        let terminal = self.terminal.clone();
-        let path = self.session_path.clone();
-
-        return py.detach(move || {
-            let session = terminal.attach(path).map_err(to_py_err)?;
-            let screen = session.screen();
-            let frame = screen
-                .frame(ScreenProjectionRequest::default())
-                .map_err(to_py_err)?;
-            return Ok(frame_text(&frame));
-        });
+        return py.detach(|| return Ok(frame_text(&self.latest_frame()?)));
     }
 
     /// Wait until the presented screen contains the specified text pattern.
@@ -117,30 +166,9 @@ impl PyScreen {
         pattern: String,
         timeout_secs: Option<f64>,
     ) -> PyResult<PyResolvedState> {
-        let terminal = self.terminal.clone();
-        let path = self.session_path.clone();
-        let timeout = crate::parse_timeout(timeout_secs, 10.0)?;
+        let timeout = crate::parse_timeout(timeout_secs, defaults::WAIT_TIMEOUT)?;
 
-        return py.detach(move || {
-            let session = terminal.attach(path).map_err(to_py_err)?;
-            let screen = session.screen();
-            let outcome = screen.wait_for_text(&pattern, timeout).map_err(to_py_err)?;
-            if !outcome.matched {
-                return Err(with_effect(
-                    TimeoutError::new_err(format!("timed out waiting for pattern: '{pattern}'")),
-                    MutationEffect::NotApplied,
-                ));
-            }
-            let text = frame_text(&outcome.frame);
-            let cursor_row = outcome.frame.cursor.row.unwrap_or_default();
-            let cursor_col = outcome.frame.cursor.column.unwrap_or_default();
-            return Ok(PyResolvedState {
-                hash: outcome.frame.state_hash,
-                text,
-                cursor_row,
-                cursor_col,
-            });
-        });
+        return py.detach(|| return self.blocking_wait_for_text(&pattern, timeout));
     }
 
     /// Wait until the presented screen remains unchanged for an idle window.
@@ -150,23 +178,8 @@ impl PyScreen {
         py: Python<'_>,
         timeout_secs: Option<f64>,
     ) -> PyResult<PyResolvedState> {
-        let terminal = self.terminal.clone();
-        let path = self.session_path.clone();
-        let timeout = crate::parse_timeout(timeout_secs, 10.0)?;
+        let timeout = crate::parse_timeout(timeout_secs, defaults::WAIT_TIMEOUT)?;
 
-        return py.detach(move || {
-            let session = terminal.attach(path).map_err(to_py_err)?;
-            let screen = session.screen();
-            let capture = screen.wait_for_idle(timeout).map_err(to_py_err)?;
-            let text = frame_text(&capture.frame);
-            let cursor_row = capture.frame.cursor.row.unwrap_or_default();
-            let cursor_col = capture.frame.cursor.column.unwrap_or_default();
-            return Ok(PyResolvedState {
-                hash: capture.frame.state_hash,
-                text,
-                cursor_row,
-                cursor_col,
-            });
-        });
+        return py.detach(|| return self.blocking_wait_for_idle(timeout));
     }
 }

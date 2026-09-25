@@ -1,7 +1,7 @@
 use super::{
     operations::{
-        driver_control_failure_from_error, driver_error, driver_failure_from_error,
-        driver_failure_with_effect, driver_response_is_cacheable,
+        driver_error, driver_failure_from_error, driver_failure_with_effect,
+        driver_response_is_cacheable,
     },
     runtime::{bounded_response, serialized_size, DRIVER_RESPONSE_CACHE_BYTES},
     serve,
@@ -347,7 +347,7 @@ fn retryable_transport_failures_are_not_cached_by_request_id() {
 #[test]
 fn transport_failures_carry_the_effect_implied_by_delivery() {
     let failure = |effect| {
-        return driver_control_failure_from_error(
+        return driver_failure_from_error(
             ControlError::Timeout {
                 session: PathBuf::from("/session"),
                 step: "read response",
@@ -355,7 +355,7 @@ fn transport_failures_carry_the_effect_implied_by_delivery() {
                 effect,
                 source: io::Error::from(io::ErrorKind::TimedOut),
             },
-            PathBuf::from("/session"),
+            Some(PathBuf::from("/session")),
         );
     };
 

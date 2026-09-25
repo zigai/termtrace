@@ -4,24 +4,20 @@ pub(in crate::cli) fn run_restart(
     response: &mut ResponseWriter,
     arguments: RestartArgs,
 ) -> Result<ExitCode> {
-    if arguments.timeout_ms == 0 {
-        return Err(miette::miette!("--timeout-ms must be greater than zero"));
-    }
-
     let registry = SessionRegistry::open_default().into_diagnostic()?;
     let overrides = restart_overrides_from_args(&arguments)?;
     let encoded_overrides = serde_json::to_string(&overrides).into_diagnostic()?;
     let predecessor_entry = registry.resolve(&arguments.name).into_diagnostic()?;
     let predecessor = predecessor_entry.session_path();
-    let timeout = Duration::from_millis(arguments.timeout_ms);
-
-    if let Err(error) = request_or_completed(&predecessor, ControlCommand::Stop, Duration::ZERO)
-        && !error.is_connection_failure()
-    {
-        return Err(error).into_diagnostic();
-    }
-
-    let completion = wait_for_completion(&predecessor, timeout).into_diagnostic()?;
+    let timeout = millis_or(arguments.timeout_ms, defaults::STARTUP_TIMEOUT);
+    let StopOutcome::Completed(completion) = attach_session(&predecessor)?
+        .stop(StopRequest::default(), Some(timeout))
+        .into_diagnostic()?
+    else {
+        return Err(miette::miette!(
+            "predecessor stop did not wait for completion"
+        ));
+    };
     let predecessor_manifest_bytes =
         fs_err::read(SessionLayout::new(&predecessor).manifest()).into_diagnostic()?;
 
@@ -55,60 +51,9 @@ pub(in crate::cli) fn run_restart(
 
     let deadline = Instant::now() + timeout;
 
-    loop {
-        if recorder_identity(&paths.session).is_some() {
-            let successor_manifest = read_manifest(&paths.session).into_diagnostic()?;
-            if successor_manifest.lineage.as_ref() != Some(&expected_lineage) {
-                return Err(miette::miette!(
-                    "successor lineage does not match the completed predecessor; alias remains unchanged; recoverable orphan: {}",
-                    paths.session.display()
-                ));
-            }
-
-            let successor = registry
-                .retarget(
-                    &arguments.name,
-                    predecessor_entry.session_id,
-                    &paths.session,
-                )
-                .map_err(|error| {
-                    return miette::miette!(
-                        "successor became ready but alias retargeting failed; alias remains unchanged; recoverable orphan: {}; stdout log: {}; stderr log: {}; {error}",
-                        paths.session.display(),
-                        paths.stdout_log.display(),
-                        paths.stderr_log.display(),
-                    );
-                })?;
-
-            let predecessor_display = predecessor.display().to_string();
-            let successor_display = successor.session_path().display().to_string();
-
-            let payload = serde_json::json!({
-                "alias": arguments.name,
-                "predecessor": {
-                    "canonical_session": predecessor_entry.canonical_session,
-                    "canonical_session_display": predecessor_display,
-                    "session_id": predecessor_entry.session_id,
-                },
-                "successor": {
-                    "canonical_session": successor.canonical_session,
-                    "canonical_session_display": successor_display,
-                    "session_id": successor.session_id,
-                    "recorder_pid": successor.recorder_pid,
-                    "recorder_process_start_ticks": successor.recorder_process_start_ticks,
-                },
-                "stdout_log": paths.stdout_log,
-                "stderr_log": paths.stderr_log,
-                "ready": true,
-            });
-
-            if arguments.json {
-                return write_json_pretty(response, &payload);
-            }
-            return write_stdout(response, format!("Restarted session {}\n", arguments.name));
-        }
-
-        if let Some(status) = recorder.try_wait().into_diagnostic()? {
+    match await_ready(&paths.session, &mut recorder, deadline).into_diagnostic()? {
+        Readiness::Live | Readiness::Completed(_) => {}
+        Readiness::Exited(status) => {
             return Err(miette::miette!(
                 "restart successor exited before readiness with {status}; alias remains bound to predecessor; recoverable session candidate: {}; stdout log: {}; stderr log: {}",
                 paths.session.display(),
@@ -116,19 +61,66 @@ pub(in crate::cli) fn run_restart(
                 paths.stderr_log.display()
             ));
         }
-
-        if Instant::now() >= deadline {
+        Readiness::TimedOut => {
             return Err(miette::miette!(
                 "restart successor did not become ready within {} ms; alias remains bound to predecessor; recoverable orphan: {}; stdout log: {}; stderr log: {}",
-                arguments.timeout_ms,
+                timeout.as_millis(),
                 paths.session.display(),
                 paths.stdout_log.display(),
                 paths.stderr_log.display()
             ));
         }
-
-        thread::sleep(Duration::from_millis(10));
     }
+
+    let successor_manifest = read_manifest(&paths.session).into_diagnostic()?;
+    if successor_manifest.lineage.as_ref() != Some(&expected_lineage) {
+        return Err(miette::miette!(
+            "successor lineage does not match the completed predecessor; alias remains unchanged; recoverable orphan: {}",
+            paths.session.display()
+        ));
+    }
+
+    let successor = registry
+        .retarget(
+            &arguments.name,
+            predecessor_entry.session_id,
+            &paths.session,
+        )
+        .map_err(|error| {
+            return miette::miette!(
+                "successor became ready but alias retargeting failed; alias remains unchanged; recoverable orphan: {}; stdout log: {}; stderr log: {}; {error}",
+                paths.session.display(),
+                paths.stdout_log.display(),
+                paths.stderr_log.display(),
+            );
+        })?;
+
+    let predecessor_display = predecessor.display().to_string();
+    let successor_display = successor.session_path().display().to_string();
+
+    let payload = serde_json::json!({
+        "alias": arguments.name,
+        "predecessor": {
+            "canonical_session": predecessor_entry.canonical_session,
+            "canonical_session_display": predecessor_display,
+            "session_id": predecessor_entry.session_id,
+        },
+        "successor": {
+            "canonical_session": successor.canonical_session,
+            "canonical_session_display": successor_display,
+            "session_id": successor.session_id,
+            "recorder_pid": successor.recorder_pid,
+            "recorder_process_start_ticks": successor.recorder_process_start_ticks,
+        },
+        "stdout_log": paths.stdout_log,
+        "stderr_log": paths.stderr_log,
+        "ready": true,
+    });
+
+    if arguments.json {
+        return write_json_pretty(response, &payload);
+    }
+    return write_stdout(response, format!("Restarted session {}\n", arguments.name));
 }
 
 pub(super) fn restart_record_arguments(

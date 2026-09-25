@@ -37,3 +37,20 @@ pub struct ScreenWaitOutcome {
     /// Exact satisfying or terminating frame.
     pub frame: ScreenFrame,
 }
+
+impl ScreenWaitOutcome {
+    /// Whether the predicate held on a frame that met the requested stability: settled
+    /// while live, unsettled when no stability was requested, or a final screen that can no
+    /// longer change because the child completed.
+    #[must_use]
+    pub const fn satisfied(&self) -> bool {
+        return self.matched
+            && matches!(
+                self.quality,
+                ScreenWaitQuality::Matched
+                    | ScreenWaitQuality::MatchedUnsettled
+                    | ScreenWaitQuality::ChildCompleted
+                    | ScreenWaitQuality::Completed
+            );
+    }
+}

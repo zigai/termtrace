@@ -1,17 +1,16 @@
 //! Coherent errors exposed by the blocking SDK boundary.
 
-use crate::{actions::ActionResult, client::StableScreenCapture};
+use crate::{actions::ActOutcome, screen::StableScreenCapture};
 use std::{io::Error as IoError, path::PathBuf, result::Result as StdResult};
 use termtrace_control::Error as ControlError;
 use termtrace_model::{
     protocol::{
-        control::InputSequenceFailureDetails,
+        control::ControlErrorDetails,
         mutation::{MutationEffect, Retry},
     },
-    terminal::{observation::ActorBoundaries, screen::ScreenFrameError},
+    terminal::screen::ScreenFrameError,
 };
 use thiserror::Error;
-use uuid::Uuid;
 
 /// Machine-readable classification of SDK and service errors.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -40,24 +39,18 @@ pub enum ErrorKind {
     InvalidControlProtocol,
     /// Rich screen frame projection failure.
     ScreenFrame,
-    /// Action atom validation failure.
-    InvalidAtom,
-    /// Action guard rejected due to state hash mismatch.
+    /// The presented-state guard no longer matched, so nothing was applied.
     StaleState,
     /// Actor was busy processing another action.
     ActionBusy,
     /// Partial input failure with known prefix.
     PartialInput,
-    /// Terminating frame projection failed.
-    ActionTerminatingFrame,
     /// Strict action postcondition was incomplete.
     PostconditionIncomplete,
     /// Strict stable capture was incomplete.
     StableCaptureIncomplete,
     /// Caller contract or SDK invariant violation.
     InvalidOperation,
-    /// Invalid duration argument.
-    InvalidDuration,
 }
 
 /// Failures translated at the SDK boundary.
@@ -101,64 +94,11 @@ pub enum Error {
     /// A rich-screen request was invalid or exceeded a bound.
     #[error(transparent)]
     ScreenFrame(ScreenFrameError),
-    /// A public action atom violated the input contract.
-    #[error("invalid input atom at index {atom_index}: {reason}")]
-    InvalidAtom {
-        /// Zero-based index of the invalid input atom.
-        atom_index: usize,
-        /// Input contract violation.
-        reason: String,
-    },
-    /// A public duration violated an operation bound.
-    #[error("invalid duration `{field}`: {reason}")]
-    InvalidDuration {
-        /// Name of the invalid duration.
-        field: &'static str,
-        /// Duration contract violation.
-        reason: String,
-    },
-    /// An optimistic action guard rejected before mutation.
-    #[error("presented state changed from `{expected_state_hash}` to `{current_state_hash}`")]
-    StaleState {
-        /// Presented-state hash required by the caller.
-        expected_state_hash: String,
-        /// Presented-state hash observed by the actor.
-        current_state_hash: String,
-        /// Actor sequence boundaries proving rejection preceded mutation.
-        boundaries: Box<ActorBoundaries>,
-    },
-    /// Actor exclusivity rejected an action before mutation.
-    #[error("actor action is busy: {message}")]
-    ActionBusy {
-        /// Safe actor-busy detail.
-        message: String,
-    },
-    /// An input action retained a known applied prefix.
-    #[error("partial input stopped after a bounded applied prefix")]
-    PartialInput {
-        /// Bounded per-atom input failure evidence.
-        details: InputSequenceFailureDetails,
-        /// Applied prefix as stated by the actor.
-        effect: MutationEffect,
-    },
-    /// Input completed but projection of its terminating frame failed.
-    #[error(
-        "action `{request_id}` applied all input but could not project its terminating frame: {source}"
-    )]
-    ActionTerminatingFrame {
-        /// Identity of the applied action.
-        request_id: Uuid,
-        /// Actor sequence boundaries enclosing input application.
-        boundaries: Box<ActorBoundaries>,
-        #[source]
-        /// Rich-frame projection failure.
-        source: ScreenFrameError,
-    },
     /// A strict action postcondition returned incomplete evidence.
     #[error("action postcondition did not complete successfully")]
     PostconditionIncomplete {
         /// Complete incomplete action result retained for inspection.
-        result: Box<ActionResult>,
+        result: Box<ActOutcome>,
     },
     /// A strict stable capture returned incomplete evidence.
     #[error("stable capture did not reach the requested stable interval")]
@@ -190,7 +130,15 @@ impl Error {
                 ControlError::InvalidJson { .. } => ErrorKind::InvalidJson,
                 ControlError::Filesystem { .. } => ErrorKind::Filesystem,
                 ControlError::CompletionIdentity { .. } => ErrorKind::Evidence,
-                ControlError::Rejected { .. } => ErrorKind::ControlRejected,
+                ControlError::Rejected { code, .. } => match code.as_str() {
+                    "stale_observation" => ErrorKind::StaleState,
+                    "action_busy" | "input_sequence_busy" => ErrorKind::ActionBusy,
+                    "input_sequence_incomplete" => ErrorKind::PartialInput,
+                    "invalid_screen_region" | "screen_frame_resource_limit" => {
+                        ErrorKind::ScreenFrame
+                    }
+                    _ => ErrorKind::ControlRejected,
+                },
             },
             Self::Evidence(_) => ErrorKind::Evidence,
             Self::Engine(_) => ErrorKind::Engine,
@@ -199,44 +147,30 @@ impl Error {
             Self::Filesystem { .. } => ErrorKind::Filesystem,
             Self::InvalidJson { .. } => ErrorKind::InvalidJson,
             Self::ScreenFrame(_) => ErrorKind::ScreenFrame,
-            Self::InvalidAtom { .. } => ErrorKind::InvalidAtom,
-            Self::InvalidDuration { .. } => ErrorKind::InvalidDuration,
-            Self::StaleState { .. } => ErrorKind::StaleState,
-            Self::ActionBusy { .. } => ErrorKind::ActionBusy,
-            Self::PartialInput { .. } => ErrorKind::PartialInput,
-            Self::ActionTerminatingFrame { .. } => ErrorKind::ActionTerminatingFrame,
             Self::PostconditionIncomplete { .. } => ErrorKind::PostconditionIncomplete,
             Self::StableCaptureIncomplete { .. } => ErrorKind::StableCaptureIncomplete,
             Self::InvalidOperation { .. } => ErrorKind::InvalidOperation,
         };
     }
 
-    /// Return the stable string error code.
+    /// Stable code: the actor's rejection code when it rejected the request, otherwise the
+    /// code of [`Self::kind`].
     #[must_use]
-    pub fn code(&self) -> &'static str {
-        return match self.kind() {
-            ErrorKind::Evidence => "evidence",
-            ErrorKind::Engine => "engine",
-            ErrorKind::Export => "export",
-            ErrorKind::Media => "media",
-            ErrorKind::Filesystem => "filesystem",
-            ErrorKind::InvalidJson => "invalid_json",
-            ErrorKind::InvalidControlProtocol => "invalid_control_protocol",
-            ErrorKind::ControlUnavailable => "control_unavailable",
-            ErrorKind::ControlTimeout => "control_timeout",
-            ErrorKind::ControlTransport => "control_transport",
-            ErrorKind::ControlRejected => "control_rejected",
-            ErrorKind::ScreenFrame => "screen_frame",
-            ErrorKind::InvalidAtom => "invalid_atom",
-            ErrorKind::InvalidDuration => "invalid_duration",
-            ErrorKind::StaleState => "stale_state",
-            ErrorKind::ActionBusy => "action_busy",
-            ErrorKind::PartialInput => "partial_input",
-            ErrorKind::ActionTerminatingFrame => "action_terminating_frame",
-            ErrorKind::PostconditionIncomplete => "postcondition_incomplete",
-            ErrorKind::StableCaptureIncomplete => "stable_capture_incomplete",
-            ErrorKind::InvalidOperation => "invalid_operation",
+    pub fn code(&self) -> &str {
+        if let Self::Control(ControlError::Rejected { code, .. }) = self {
+            return code;
+        }
+        return self.kind().as_str();
+    }
+
+    /// Actor-consistent context attached to a rejection.
+    #[must_use]
+    pub fn details(&self) -> Option<&ControlErrorDetails> {
+        let Self::Control(ControlError::Rejected { details, .. }) = self else {
+            return None;
         };
+
+        return details.as_deref();
     }
 
     /// What the failed request did to the session.
@@ -244,10 +178,7 @@ impl Error {
     pub const fn effect(&self) -> MutationEffect {
         return match self {
             Self::Control(error) => error.effect(),
-            Self::PartialInput { effect, .. } => *effect,
-            Self::ActionTerminatingFrame { .. } | Self::PostconditionIncomplete { .. } => {
-                MutationEffect::Applied
-            }
+            Self::PostconditionIncomplete { .. } => MutationEffect::Applied,
             Self::Evidence(_)
             | Self::Engine(_)
             | Self::Export(_)
@@ -255,10 +186,6 @@ impl Error {
             | Self::Filesystem { .. }
             | Self::InvalidJson { .. }
             | Self::ScreenFrame(_)
-            | Self::InvalidAtom { .. }
-            | Self::InvalidDuration { .. }
-            | Self::StaleState { .. }
-            | Self::ActionBusy { .. }
             | Self::StableCaptureIncomplete { .. }
             | Self::InvalidOperation { .. } => MutationEffect::NotApplied,
         };
@@ -268,6 +195,33 @@ impl Error {
     #[must_use]
     pub const fn retry(&self) -> Retry {
         return self.effect().retry();
+    }
+}
+
+impl ErrorKind {
+    /// Stable snake-case spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        return match self {
+            Self::Evidence => "evidence",
+            Self::Engine => "engine",
+            Self::Export => "export",
+            Self::Media => "media",
+            Self::Filesystem => "filesystem",
+            Self::InvalidJson => "invalid_json",
+            Self::InvalidControlProtocol => "invalid_control_protocol",
+            Self::ControlUnavailable => "control_unavailable",
+            Self::ControlTimeout => "control_timeout",
+            Self::ControlTransport => "control_transport",
+            Self::ControlRejected => "control_rejected",
+            Self::ScreenFrame => "screen_frame",
+            Self::StaleState => "stale_state",
+            Self::ActionBusy => "action_busy",
+            Self::PartialInput => "partial_input",
+            Self::PostconditionIncomplete => "postcondition_incomplete",
+            Self::StableCaptureIncomplete => "stable_capture_incomplete",
+            Self::InvalidOperation => "invalid_operation",
+        };
     }
 }
 

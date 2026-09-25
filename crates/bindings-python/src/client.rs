@@ -12,8 +12,10 @@ use termtrace_model::artifact::bundle::{BundleProfile, BundleVerificationPolicy}
 use termtrace_model::execution::session::VerificationLevel;
 use termtrace_sdk::artifacts::ArtifactService;
 use termtrace_sdk::client::Terminal;
+use termtrace_sdk::defaults;
 use termtrace_sdk::integrity::IntegrityService;
 use termtrace_sdk::registry::RegistryService;
+use termtrace_sdk::session::LaunchSpec;
 use termtrace_sdk::system::SystemService;
 use termtrace_sdk::tmux::TmuxService;
 
@@ -73,26 +75,22 @@ impl PyTermtrace {
     ) -> PyResult<PyRecording> {
         let terminal = self.terminal.clone();
         let cmd_os: Vec<OsString> = command.into_iter().map(OsString::from).collect();
-        let rows_val = rows.unwrap_or(24);
-        let cols_val = cols.unwrap_or(80);
+        let mut spec = LaunchSpec::new(cmd_os).geometry(
+            cols.unwrap_or(defaults::COLS),
+            rows.unwrap_or(defaults::ROWS),
+        );
+        spec.working_directory = cwd.map(PathBuf::from);
+        for (name, value) in env.unwrap_or_default() {
+            spec = spec.set_environment(name, value.into_bytes());
+        }
 
         py.detach(move || {
-            let mut builder = terminal.launch(cmd_os).geometry(cols_val, rows_val);
-            if let Some(dir) = cwd {
-                builder = builder.working_directory(dir);
-            }
-            if let Some(env_map) = env {
-                for (k, v) in env_map {
-                    builder = builder.set_environment(k, v.into_bytes());
-                }
-            }
-
-            let session = builder.start().map_err(to_py_err)?;
+            let session = terminal.start(spec).map_err(to_py_err)?;
             let session_id = session.session_id().to_string();
             let path = session.path().display().to_string();
 
             Ok(PyRecording {
-                terminal: terminal.clone(),
+                terminal,
                 session: Arc::new(Mutex::new(Some(session))),
                 session_id,
                 path,
@@ -276,8 +274,8 @@ impl PyTermtrace {
         max_completed_bytes: Option<u64>,
         apply: Option<bool>,
     ) -> PyResult<String> {
-        let days = older_than_days.unwrap_or(30);
-        let keep = keep_latest.unwrap_or(10);
+        let days = older_than_days.unwrap_or(defaults::GC_OLDER_THAN_DAYS);
+        let keep = keep_latest.unwrap_or(defaults::GC_KEEP_LATEST);
         let is_apply = apply.unwrap_or(false);
 
         py.detach(move || {

@@ -1219,6 +1219,7 @@ dependencies = [
  "termtrace-evidence",
  "termtrace-model",
  "termtrace-render",
+ "termtrace-tmux",
  "thiserror 2.0.20",
  "uuid",
 ]
@@ -1321,8 +1322,8 @@ dependencies = [
  "termtrace-process",
  "termtrace-render",
  "termtrace-terminal",
+ "termtrace-tmux",
  "thiserror 2.0.20",
- "tokio",
  "tracing",
  "uuid",
  "zstd",
@@ -1339,6 +1340,26 @@ dependencies = [
  "serde",
  "serde_json",
  "termtrace-model",
+]
+
+[[package]]
+name = "termtrace-tmux"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "fs-err",
+ "nix 0.30.1",
+ "rusqlite",
+ "schemars",
+ "serde",
+ "serde_json",
+ "termtrace-control",
+ "termtrace-evidence",
+ "termtrace-model",
+ "termtrace-process",
+ "thiserror 2.0.20",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1412,15 +1433,6 @@ name = "tinyvec"
 version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
-
-[[package]]
-name = "tokio"
-version = "1.53.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
-dependencies = [
- "pin-project-lite",
-]
 
 [[package]]
 name = "tracing"

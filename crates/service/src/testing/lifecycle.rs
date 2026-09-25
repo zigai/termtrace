@@ -89,9 +89,9 @@ impl TerminalTestConfig {
         return Self {
             terminal,
             command: command.into_iter().collect(),
-            columns: 160,
-            rows: 45,
-            startup_timeout: Duration::from_secs(10),
+            columns: defaults::COLS,
+            rows: defaults::ROWS,
+            startup_timeout: defaults::STARTUP_TIMEOUT,
             finalization_timeout: Duration::from_secs(10),
             evidence_policy: EvidencePolicy::OnFailure,
             snapshot_root,
@@ -128,10 +128,11 @@ impl TerminalTest {
         let session = config
             .terminal
             .with_evidence_root(&attempt_directory)
-            .launch(config.command)
-            .geometry(config.columns, config.rows)
-            .startup_timeout(config.startup_timeout)
-            .start()?;
+            .start(
+                LaunchSpec::new(config.command)
+                    .geometry(config.columns, config.rows)
+                    .startup_timeout(config.startup_timeout),
+            )?;
 
         return Ok(Self {
             state: LifecycleState::Open(session),
@@ -180,12 +181,6 @@ impl TerminalTest {
         return Some(&self.attempt_directory);
     }
 
-    /// Presented-screen namespace for this attempt while it remains open.
-    #[must_use]
-    pub fn screen(&self) -> Option<Screen<'_>> {
-        return self.session().map(Session::screen);
-    }
-
     /// Bind a pure immutable locator to the owned session without performing I/O.
     #[must_use]
     pub fn locator(&self, spec: LocatorSpec) -> Option<Locator<'_>> {
@@ -199,11 +194,11 @@ impl TerminalTest {
         &self,
         expected: &str,
     ) -> StdResult<ScreenFrame, TerminalAssertionError> {
-        let screen = self
-            .screen()
+        let session = self
+            .session()
             .ok_or(TerminalAssertionError::SessionUnavailable)?;
 
-        let frame = screen.frame(Default::default())?;
+        let frame = session.frame(Default::default())?;
         assert_screen_text(&frame, expected)
             .map_err(|error| return AssertionError::Mismatch(error))?;
 
@@ -215,11 +210,11 @@ impl TerminalTest {
         &self,
         expected: &CursorState,
     ) -> StdResult<ScreenFrame, TerminalAssertionError> {
-        let screen = self
-            .screen()
+        let session = self
+            .session()
             .ok_or(TerminalAssertionError::SessionUnavailable)?;
 
-        let frame = screen.frame(Default::default())?;
+        let frame = session.frame(Default::default())?;
         assert_cursor(&frame, expected).map_err(|error| return AssertionError::Mismatch(error))?;
 
         return Ok(frame);
@@ -266,38 +261,36 @@ impl TerminalTest {
         let mut secondary_failures: Vec<SecondaryFailure> = Vec::new();
         let mut verified_artifacts: Vec<PathBuf> = Vec::new();
         let finalization_started = Instant::now();
-        let stop_failure = stop_session_with_timeout(
-            &session,
-            remaining_timeout(finalization_started, self.finalization_timeout),
-        )
-        .err();
-        let completed = match session.complete(remaining_timeout(
-            finalization_started,
-            self.finalization_timeout,
-        )) {
-            Ok(_) => {
-                if let Some(stop_error) = stop_failure {
-                    secondary_failures.push(bounded_secondary("session_stop", &stop_error));
+        let completed = match session.stop(
+            StopRequest::default(),
+            Some(remaining_timeout(
+                finalization_started,
+                self.finalization_timeout,
+            )),
+        ) {
+            Ok(_) => true,
+            Err(stop_error) => {
+                secondary_failures.push(bounded_secondary("session_stop", &stop_error.to_string()));
+
+                match session.complete(remaining_timeout(
+                    finalization_started,
+                    self.finalization_timeout,
+                )) {
+                    Ok(_) => true,
+                    Err(error) => {
+                        secondary_failures
+                            .push(bounded_secondary("session_completion", &error.to_string()));
+
+                        if let Err(close_error) = session.force_close() {
+                            secondary_failures.push(bounded_secondary(
+                                "session_force_close",
+                                &close_error.to_string(),
+                            ));
+                        }
+
+                        false
+                    }
                 }
-
-                true
-            }
-            Err(error) => {
-                if let Some(stop_error) = stop_failure {
-                    secondary_failures.push(bounded_secondary("session_stop", &stop_error));
-                }
-
-                secondary_failures
-                    .push(bounded_secondary("session_completion", &error.to_string()));
-
-                if let Err(close_error) = session.force_close() {
-                    secondary_failures.push(bounded_secondary(
-                        "session_force_close",
-                        &close_error.to_string(),
-                    ));
-                }
-
-                false
             }
         };
 
@@ -460,24 +453,6 @@ pub fn run_terminal_test<T, E>(
 
 fn remaining_timeout(started: Instant, timeout: Duration) -> Duration {
     return timeout.saturating_sub(started.elapsed());
-}
-
-fn stop_session_with_timeout(session: &Session, timeout: Duration) -> StdResult<(), String> {
-    if timeout.is_zero() {
-        return Err("finalization deadline expired before the stop request".to_owned());
-    }
-
-    let request = ControlRequest::new(ControlCommand::Stop);
-    let timing = ExchangeTiming::deadline(timeout).map_err(|error| return error.to_string())?;
-    let response =
-        exchange(session.path(), &request, timing).map_err(|error| return error.to_string())?;
-
-    match response.result {
-        ControlResult::Ok { .. } => return Ok(()),
-        ControlResult::Error { code, message, .. } => {
-            return Err(format!("stop request was rejected ({code:?}): {message}"));
-        }
-    }
 }
 
 fn emit_panic_finalization_diagnostics(report: &FinalizationReport) {
