@@ -12,13 +12,14 @@ use std::{
 use termtrace_model::{
     artifact::{
         bundle as model_bundle, metadata as artifact, playback, presentation, save, semantic_video,
-        tmux, visual,
+        visual,
     },
     execution::{environment, event, event_log, provenance, receipt, request_journal, session},
     protocol::{capability, control, driver, output_projection},
     registry as model_registry, scenario,
     terminal::{analysis, diff, inspection, observation, replay, reviewer, screen, timeline, vt},
 };
+use termtrace_tmux::artifact as tmux;
 
 /// Result type for schema catalog operations.
 pub type Result<T, E = Error> = StdResult<T, E>;
@@ -322,9 +323,6 @@ registry!(
     ),
     ("tmux-recording-manifest.schema.json",
         tmux::TmuxRecordingManifest
-    ),
-    ("tmux-bundle-manifest.schema.json",
-        tmux::TmuxBundleManifest
     ),
     ("tmux-streaming-bundle-manifest.schema.json",
         tmux::TmuxStreamingBundleManifest

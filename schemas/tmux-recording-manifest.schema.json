@@ -42,58 +42,39 @@
           "description": "Registry alias for the outer-client track.",
           "type": "string"
         },
-        "lifecycle": {
-          "$ref": "#/$defs/TmuxRecordingLifecycle",
-          "description": "Outer-client track lifecycle."
-        },
-        "session": {
+        "link": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Base64Bytes"
+              "$ref": "#/$defs/TmuxSessionLink"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Canonical Termtrace session path once linked."
-        },
-        "session_id": {
-          "description": "Canonical Termtrace session identity once linked.",
-          "format": "uuid",
-          "type": [
-            "string",
-            "null"
-          ]
+          "description": "Canonical session once the composite client started."
         }
       },
       "required": [
-        "alias",
-        "lifecycle"
+        "alias"
       ],
       "type": "object"
     },
     "TmuxCoverageGap": {
       "description": "One uncovered pane or explicit observation limitation.",
       "properties": {
-        "detail": {
-          "description": "Human-readable limitation or uncovered-state description.",
-          "type": "string"
-        },
         "first_observed_unix_ns": {
-          "default": 0,
           "description": "First observation wall-clock time.",
-          "format": "uint128",
+          "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
         "kind": {
-          "description": "Stable gap category.",
-          "type": "string"
+          "$ref": "#/$defs/TmuxGapKind",
+          "description": "Gap category."
         },
         "last_observed_unix_ns": {
-          "default": 0,
           "description": "Most recent observation wall-clock time.",
-          "format": "uint128",
+          "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
@@ -105,9 +86,8 @@
           ]
         },
         "resolved_unix_ns": {
-          "default": null,
           "description": "Wall-clock time when the gap was first observed to be resolved.",
-          "format": "uint128",
+          "format": "uint64",
           "minimum": 0,
           "type": [
             "integer",
@@ -117,9 +97,35 @@
       },
       "required": [
         "kind",
-        "detail"
+        "first_observed_unix_ns",
+        "last_observed_unix_ns"
       ],
       "type": "object"
+    },
+    "TmuxGapKind": {
+      "description": "Category of an uncovered pane or observation limitation.",
+      "oneOf": [
+        {
+          "const": "polling_interval",
+          "description": "Transitions shorter than the supervisor polling interval may only be visible in the\ncomposite client track.",
+          "type": "string"
+        },
+        {
+          "const": "client_overlay_index",
+          "description": "tmux messages and command prompts are captured by the composite client track but are\nnot separately indexed in lifecycle events.",
+          "type": "string"
+        },
+        {
+          "const": "observer_start",
+          "description": "Aggregate observation resumed; transitions since the preceding snapshot may be missing.\nPane recording runs independently.",
+          "type": "string"
+        },
+        {
+          "const": "uncovered_pane",
+          "description": "A selected pane's root process is not a Termtrace pane wrapper.",
+          "type": "string"
+        }
+      ]
     },
     "TmuxJournalBoundary": {
       "description": "Committed prefix of the append-only lifecycle journal beside the snapshot.",
@@ -139,67 +145,19 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "version": {
+          "description": "Journal record shape version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [
+        "version",
         "bytes",
         "sequence",
         "hash"
-      ],
-      "type": "object"
-    },
-    "TmuxLifecycleEvent": {
-      "description": "One lifecycle transition observed by the tmux supervisor.",
-      "properties": {
-        "kind": {
-          "description": "Stable lifecycle event kind.",
-          "type": "string"
-        },
-        "observed_unix_ns": {
-          "description": "Observation wall-clock time.",
-          "format": "uint128",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "pane_id": {
-          "description": "Related stable tmux pane ID.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "sequence": {
-          "description": "Monotonic sequence within this aggregate manifest.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "session_id": {
-          "description": "Related stable tmux session ID.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "value": {
-          "description": "Event-specific state or linked path.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "window_id": {
-          "description": "Related stable tmux window ID.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "sequence",
-        "observed_unix_ns",
-        "kind"
       ],
       "type": "object"
     },
@@ -279,37 +237,6 @@
       ],
       "type": "object"
     },
-    "TmuxPaneTrack": {
-      "description": "Aggregate identity, links, lifecycle, and coverage for a full tmux recording.",
-      "properties": {
-        "linked_unix_ns": {
-          "description": "Time this incarnation was linked to the aggregate.",
-          "format": "uint128",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "pane_id": {
-          "description": "Stable pane ID; a pane may have arbitrarily many recording incarnations.",
-          "type": "string"
-        },
-        "session": {
-          "$ref": "#/$defs/Base64Bytes",
-          "description": "Exact canonical session path."
-        },
-        "session_id": {
-          "description": "Immutable canonical recording identity.",
-          "format": "uuid",
-          "type": "string"
-        }
-      },
-      "required": [
-        "pane_id",
-        "session_id",
-        "session",
-        "linked_unix_ns"
-      ],
-      "type": "object"
-    },
     "TmuxRecordingCoverage": {
       "description": "Coverage policy committed by an aggregate tmux recording.",
       "oneOf": [
@@ -326,7 +253,7 @@
       ]
     },
     "TmuxRecordingLifecycle": {
-      "description": "Aggregate recording lifecycle.",
+      "description": "Aggregate recording lifecycle; see [`crate::lifecycle`] for its legal transitions.",
       "oneOf": [
         {
           "const": "starting",
@@ -345,26 +272,108 @@
         },
         {
           "const": "completed",
-          "description": "The composite client recording completed.",
+          "description": "The composite and every pane track completed; history is sealed.",
           "type": "string"
+        }
+      ]
+    },
+    "TmuxServerIdentity": {
+      "description": "Immutable tmux server identity bound by the first successful observation.",
+      "properties": {
+        "pid": {
+          "description": "tmux server PID.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "socket_device": {
+          "description": "Device containing the server socket.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "socket_inode": {
+          "description": "Inode of the server socket.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "socket_path": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Server socket path bytes."
+        }
+      },
+      "required": [
+        "pid",
+        "socket_path",
+        "socket_device",
+        "socket_inode"
+      ],
+      "type": "object"
+    },
+    "TmuxSessionLink": {
+      "description": "Immutable identity and exact path of one canonical Termtrace session.",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact canonical session path bytes."
+        },
+        "session_id": {
+          "description": "Canonical Termtrace session identity.",
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "session"
+      ],
+      "type": "object"
+    },
+    "TmuxSocket": {
+      "description": "How a tmux client reaches its server.",
+      "oneOf": [
+        {
+          "const": "default",
+          "description": "tmux's default socket selection.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A socket name, equivalent to `tmux -L`.",
+          "properties": {
+            "name": {
+              "$ref": "#/$defs/Base64Bytes"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A socket path, equivalent to `tmux -S`.",
+          "properties": {
+            "path": {
+              "$ref": "#/$defs/Base64Bytes"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
         }
       ]
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/tmux-recording-manifest.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Aggregate identity, links, lifecycle, and coverage for a full tmux recording.",
+  "description": "Aggregate identity and current state; complete history lives in the lifecycle journal.\n\nThe snapshot holds no history: events, resolved gaps, and every track incarnation are\nread through the journal-backed catalog.",
   "properties": {
     "catalog": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/TmuxCatalogSummary"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Complete historical counts; the lifecycle journal is authoritative for this index."
+      "$ref": "#/$defs/TmuxCatalogSummary",
+      "description": "Complete historical counts indexed from the journal."
     },
     "composite_track": {
       "$ref": "#/$defs/TmuxCompositeTrack",
@@ -375,7 +384,7 @@
       "description": "Coverage enforcement policy."
     },
     "coverage_gaps": {
-      "description": "Currently unresolved coverage gaps; resolved intervals remain in the journal/catalog.",
+      "description": "Unresolved coverage gaps; resolved intervals live in the journal and catalog.",
       "items": {
         "$ref": "#/$defs/TmuxCoverageGap"
       },
@@ -383,16 +392,9 @@
     },
     "created_unix_ns": {
       "description": "Creation wall-clock time.",
-      "format": "uint128",
+      "format": "uint64",
       "minimum": 0,
       "type": "integer"
-    },
-    "events": {
-      "description": "Observed pane, window, session, layout, focus, zoom, and mode transitions.",
-      "items": {
-        "$ref": "#/$defs/TmuxLifecycleEvent"
-      },
-      "type": "array"
     },
     "format": {
       "description": "Stable format identifier.",
@@ -403,15 +405,8 @@
       "description": "Aggregate lifecycle."
     },
     "lifecycle_journal": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/TmuxJournalBoundary"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Durable full lifecycle history; `events` contains only its recent tail."
+      "$ref": "#/$defs/TmuxJournalBoundary",
+      "description": "Committed lifecycle journal prefix."
     },
     "name": {
       "description": "Friendly aggregate recording name.",
@@ -421,11 +416,11 @@
       "additionalProperties": {
         "$ref": "#/$defs/Base64Bytes"
       },
-      "description": "Stable pane IDs linked to pane-specific Termtrace sessions.",
+      "description": "Present pane IDs linked to their current pane-specific session path.",
       "type": "object"
     },
     "panes": {
-      "description": "Latest per-pane state observations.",
+      "description": "Latest per-pane observations.",
       "items": {
         "$ref": "#/$defs/TmuxPaneSnapshot"
       },
@@ -436,80 +431,28 @@
       "format": "uuid",
       "type": "string"
     },
-    "server_pid": {
-      "description": "Immutable tmux server PID captured by the first successful snapshot.",
-      "format": "uint32",
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "server_socket_device": {
-      "description": "Device containing the immutable tmux server socket.",
-      "format": "uint64",
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "server_socket_inode": {
-      "description": "Inode of the immutable tmux server socket.",
-      "format": "uint64",
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "server_socket_path": {
+    "server": {
       "anyOf": [
         {
-          "$ref": "#/$defs/Base64Bytes"
+          "$ref": "#/$defs/TmuxServerIdentity"
         },
         {
           "type": "null"
         }
       ],
-      "description": "Immutable tmux server socket path captured by the first successful snapshot."
+      "description": "Immutable tmux server identity once observed."
     },
-    "socket_name": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Base64Bytes"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Configured tmux socket name bytes."
-    },
-    "socket_path": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Base64Bytes"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "Configured tmux socket path bytes."
+    "socket": {
+      "$ref": "#/$defs/TmuxSocket",
+      "description": "Configured tmux server socket."
     },
     "tmux_executable": {
       "$ref": "#/$defs/Base64Bytes",
       "description": "Exact tmux executable path bytes."
     },
-    "track_history": {
-      "additionalProperties": {
-        "$ref": "#/$defs/TmuxPaneTrack"
-      },
-      "description": "Recent recording incarnations, bounded to 128; the catalog retains complete history.",
-      "type": "object"
-    },
     "updated_unix_ns": {
-      "description": "Last supervisor update wall-clock time.",
-      "format": "uint128",
+      "description": "Last state change wall-clock time.",
+      "format": "uint64",
       "minimum": 0,
       "type": "integer"
     },
@@ -525,17 +468,18 @@
     "version",
     "recording_id",
     "name",
-    "lifecycle",
     "created_unix_ns",
-    "updated_unix_ns",
     "coverage",
     "tmux_executable",
+    "socket",
+    "lifecycle",
     "composite_track",
     "panes",
     "pane_tracks",
-    "track_history",
-    "events",
-    "coverage_gaps"
+    "coverage_gaps",
+    "updated_unix_ns",
+    "lifecycle_journal",
+    "catalog"
   ],
   "title": "TmuxRecordingManifest",
   "type": "object"

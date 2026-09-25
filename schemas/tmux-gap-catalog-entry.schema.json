@@ -3,25 +3,19 @@
     "TmuxCoverageGap": {
       "description": "One uncovered pane or explicit observation limitation.",
       "properties": {
-        "detail": {
-          "description": "Human-readable limitation or uncovered-state description.",
-          "type": "string"
-        },
         "first_observed_unix_ns": {
-          "default": 0,
           "description": "First observation wall-clock time.",
-          "format": "uint128",
+          "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
         "kind": {
-          "description": "Stable gap category.",
-          "type": "string"
+          "$ref": "#/$defs/TmuxGapKind",
+          "description": "Gap category."
         },
         "last_observed_unix_ns": {
-          "default": 0,
           "description": "Most recent observation wall-clock time.",
-          "format": "uint128",
+          "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
@@ -33,9 +27,8 @@
           ]
         },
         "resolved_unix_ns": {
-          "default": null,
           "description": "Wall-clock time when the gap was first observed to be resolved.",
-          "format": "uint128",
+          "format": "uint64",
           "minimum": 0,
           "type": [
             "integer",
@@ -45,9 +38,35 @@
       },
       "required": [
         "kind",
-        "detail"
+        "first_observed_unix_ns",
+        "last_observed_unix_ns"
       ],
       "type": "object"
+    },
+    "TmuxGapKind": {
+      "description": "Category of an uncovered pane or observation limitation.",
+      "oneOf": [
+        {
+          "const": "polling_interval",
+          "description": "Transitions shorter than the supervisor polling interval may only be visible in the\ncomposite client track.",
+          "type": "string"
+        },
+        {
+          "const": "client_overlay_index",
+          "description": "tmux messages and command prompts are captured by the composite client track but are\nnot separately indexed in lifecycle events.",
+          "type": "string"
+        },
+        {
+          "const": "observer_start",
+          "description": "Aggregate observation resumed; transitions since the preceding snapshot may be missing.\nPane recording runs independently.",
+          "type": "string"
+        },
+        {
+          "const": "uncovered_pane",
+          "description": "A selected pane's root process is not a Termtrace pane wrapper.",
+          "type": "string"
+        }
+      ]
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/tmux-gap-catalog-entry.schema.json",

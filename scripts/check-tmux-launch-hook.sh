@@ -10,6 +10,10 @@ cleanup() {
     rm -rf "$root"
 }
 trap cleanup EXIT HUP INT TERM
+observer_pid() {
+    "$recorder" tmux status --json --tmux "$tmux_binary" -L "$socket" |
+        sed -n "s/.*\"$1\": *\([0-9][0-9]*\).*/\1/p"
+}
 wait_completed() {
     remaining=200
     while [ "$remaining" -gt 0 ]; do
@@ -55,24 +59,24 @@ wait_completed 8
 remaining=200
 observer=
 while [ "$remaining" -gt 0 ]; do
-    observer=$("$tmux_binary" -L "$socket" show-options -gqv @termtrace-supervisor-pid)
+    observer=$(observer_pid supervisor)
     if [ -n "$observer" ] && kill -0 "$observer" 2>/dev/null; then break; fi
     remaining=$((remaining - 1))
     sleep 0.05
 done
 test "$remaining" -gt 0
-watchdog=$("$tmux_binary" -L "$socket" show-options -gqv @termtrace-watchdog-pid)
+watchdog=$(observer_pid watchdog)
 kill -0 "$watchdog"
 kill -KILL "$observer"
 remaining=200
 while [ "$remaining" -gt 0 ]; do
-    replacement=$("$tmux_binary" -L "$socket" show-options -gqv @termtrace-supervisor-pid)
+    replacement=$(observer_pid supervisor)
     if [ -n "$replacement" ] && [ "$replacement" != "$observer" ] && kill -0 "$replacement" 2>/dev/null; then break; fi
     remaining=$((remaining - 1))
     sleep 0.05
 done
 test "$remaining" -gt 0
-test "$("$tmux_binary" -L "$socket" show-options -gqv @termtrace-watchdog-pid)" = "$watchdog"
+test "$(observer_pid watchdog)" = "$watchdog"
 for session in "$root"/state/sessions/*.termtrace; do
     "$recorder" show "$session" >>"$root/output"
 done

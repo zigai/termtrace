@@ -6,11 +6,11 @@
       "type": "string"
     },
     "TmuxPaneTrack": {
-      "description": "Aggregate identity, links, lifecycle, and coverage for a full tmux recording.",
+      "description": "One immutable pane recording incarnation linked to an aggregate.",
       "properties": {
         "linked_unix_ns": {
-          "description": "Time this incarnation was linked to the aggregate.",
-          "format": "uint128",
+          "description": "Time this incarnation was first linked to the aggregate.",
+          "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },

@@ -15,6 +15,9 @@ pub enum Error {
     /// Deterministic semantic rendering failed.
     #[error(transparent)]
     Render(#[from] RenderError),
+    /// Aggregate tmux history is unreadable or invalid.
+    #[error(transparent)]
+    Tmux(#[from] termtrace_tmux::Error),
     /// A filesystem path could not be read, written, or published.
     #[error("filesystem operation failed for `{path}`: {source}")]
     Filesystem {

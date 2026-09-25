@@ -1,18 +1,20 @@
-//! Tmux aggregate recording, catalog inspection, bundle export, and setup services.
+//! Evidence export for completed aggregate tmux recordings.
+//!
+//! Recording, observation, and stop live in `termtrace-tmux`; this service only exposes
+//! the streaming bundle export.
 
 use crate::error::{Error, Result};
 use std::path::Path;
-use termtrace_evidence::tmux_catalog::TmuxCatalog;
 use termtrace_export::tmux::streaming::{
     create as create_tmux_streaming_bundle, verify as verify_tmux_streaming_bundle,
 };
-use termtrace_model::artifact::tmux::{TmuxRecordingManifest, TmuxStreamingBundleManifest};
+use termtrace_tmux::artifact::TmuxStreamingBundleManifest;
 
-/// Service managing tmux aggregate recording lifecycles, catalogs, and streaming bundles.
+/// Streaming evidence bundles of completed aggregate tmux recordings.
 pub struct TmuxService;
 
 impl TmuxService {
-    /// Bundle an aggregate tmux recording into an evidentiary streaming bundle archive.
+    /// Bundle a completed aggregate tmux recording into a streaming evidence bundle.
     ///
     /// # Errors
     /// Returns an error if bundling fails or evidence is incomplete.
@@ -32,27 +34,5 @@ impl TmuxService {
         aggregate_manifest: &Path,
     ) -> Result<TmuxStreamingBundleManifest> {
         return verify_tmux_streaming_bundle(directory, aggregate_manifest).map_err(Error::from);
-    }
-
-    /// Open an index catalog reader for a tmux aggregate recording.
-    ///
-    /// # Errors
-    /// Returns an error if the catalog cannot be read or validated.
-    pub fn catalog_reader(
-        directory: &Path,
-        manifest: &TmuxRecordingManifest,
-    ) -> Result<TmuxCatalog> {
-        return TmuxCatalog::read(directory, manifest).map_err(Error::from);
-    }
-
-    /// Open a fully verified index catalog reader.
-    ///
-    /// # Errors
-    /// Returns an error if verification fails.
-    pub fn catalog_reader_verified(
-        directory: &Path,
-        manifest: &TmuxRecordingManifest,
-    ) -> Result<TmuxCatalog> {
-        return TmuxCatalog::read_verified(directory, manifest).map_err(Error::from);
     }
 }

@@ -1,11 +1,11 @@
 //! Aggregate exports with a bounded manifest and a streamed track inventory.
 
 use super::{
-    bundle, commit_directory, create_private_directory, parse_aggregate, read_regular_bounded,
-    sync_directory, tmux_journal, track_directory, validate_aggregate, validate_destination,
-    visit_source_tracks, write_secure, BundleProfile, BundleVerificationPolicy, ByteString,
-    DirectoryCleanup, Error, Result, TmuxBundleTrack, TmuxRecordingManifest, Uuid,
-    MAX_AGGREGATE_MANIFEST_BYTES,
+    bundle, commit_directory, create_private_directory, journal, parse_aggregate,
+    read_regular_bounded, sync_directory, track_directory, validate_aggregate,
+    validate_destination, visit_source_tracks, write_secure, BundleProfile,
+    BundleVerificationPolicy, ByteString, DirectoryCleanup, Error, Result, TmuxBundleTrack,
+    TmuxRecordingManifest, Uuid, MAX_AGGREGATE_MANIFEST_BYTES,
 };
 use std::os::unix::ffi::OsStrExt as _;
 use std::{
@@ -15,12 +15,13 @@ use std::{
 use termtrace_evidence::artifact::{
     finish_writer, hash_regular_file, open_regular_file_nofollow, secure_writer,
 };
-use termtrace_model::artifact::tmux::TmuxStreamingBundleManifest;
+use termtrace_tmux::artifact::TmuxStreamingBundleManifest;
 
 const FORMAT: &str = "termtrace-tmux-streaming-bundle";
 const VERSION: u32 = 1;
 const INVENTORY: &str = "tracks.jsonl";
 const MAX_ROW_BYTES: u64 = 1024 * 1024;
+const LIFECYCLE_JOURNAL: &str = "aggregate-lifecycle.jsonl";
 
 #[cfg(test)]
 mod tests;
@@ -67,17 +68,15 @@ pub fn create(
     let cleanup = DirectoryCleanup::new(staging.clone());
     write_secure(&staging.join("aggregate-recording-manifest.json"), &bytes)?;
 
-    if let Some(boundary) = &aggregate.lifecycle_journal {
-        let source = aggregate_manifest
-            .parent()
-            .ok_or_else(|| return Error::invalid("aggregate has no parent"))?;
+    let source = aggregate_manifest
+        .parent()
+        .ok_or_else(|| return Error::invalid("aggregate has no parent"))?;
 
-        tmux_journal::copy_committed(
-            &source.join(tmux_journal::JOURNAL_NAME),
-            &staging.join("aggregate-lifecycle.jsonl"),
-            boundary,
-        )?;
-    }
+    journal::copy_committed(
+        &source.join(journal::JOURNAL_NAME),
+        &staging.join(LIFECYCLE_JOURNAL),
+        &aggregate.lifecycle_journal,
+    )?;
 
     create_private_directory(&staging.join("tracks"))?;
     let inventory_path = staging.join(INVENTORY);
@@ -209,18 +208,17 @@ fn verify_contents(
         ));
     }
 
-    if let Some(boundary) = &aggregate.lifecycle_journal {
-        let journal = directory.join("aggregate-lifecycle.jsonl");
-        let (_, length) = open_regular_file_nofollow(&journal)?;
+    let boundary = &aggregate.lifecycle_journal;
+    let lifecycle = directory.join(LIFECYCLE_JOURNAL);
+    let (_, length) = open_regular_file_nofollow(&lifecycle)?;
 
-        if length != boundary.bytes {
-            return Err(Error::invalid(
-                "aggregate journal has an unexpected suffix or truncation",
-            ));
-        }
-
-        tmux_journal::visit(&journal, boundary, |_| return Ok(()))?;
+    if length != boundary.bytes {
+        return Err(Error::invalid(
+            "aggregate journal has an unexpected suffix or truncation",
+        ));
     }
+
+    journal::visit(&lifecycle, boundary, |_| return Ok(()))?;
 
     let inventory = directory.join(INVENTORY);
     let (bytes, hash) = hash_regular_file(&inventory)?;
@@ -309,16 +307,12 @@ fn verify_contents(
         ));
     }
 
-    verify_directory_entries(
-        directory,
-        aggregate.lifecycle_journal.is_some(),
-        manifest.track_count,
-    )?;
+    verify_directory_entries(directory, manifest.track_count)?;
 
     return Ok(manifest);
 }
 
-fn verify_directory_entries(directory: &Path, journal: bool, track_count: u64) -> Result<()> {
+fn verify_directory_entries(directory: &Path, track_count: u64) -> Result<()> {
     for entry in
         fs_err::read_dir(directory).map_err(|error| return Error::filesystem(directory, error))?
     {
@@ -327,7 +321,7 @@ fn verify_directory_entries(directory: &Path, journal: bool, track_count: u64) -
         let allowed = name == "manifest.json"
             || name == "aggregate-recording-manifest.json"
             || name == INVENTORY
-            || (journal && name == "aggregate-lifecycle.jsonl");
+            || name == LIFECYCLE_JOURNAL;
 
         let kind = entry
             .file_type()
@@ -386,25 +380,25 @@ mod directory_tests {
         let manifest = root.path().join("manifest.json");
         fs::write(&manifest, b"{}").expect("regular manifest");
 
-        verify_directory_entries(root.path(), false, 0).expect("regular file accepted");
+        verify_directory_entries(root.path(), 0).expect("regular file accepted");
 
         fs::remove_file(&manifest).expect("remove regular file");
 
         let target = tempfile::NamedTempFile::new().expect("external regular file");
         symlink(target.path(), &manifest).expect("manifest symlink");
 
-        assert!(verify_directory_entries(root.path(), false, 0).is_err());
+        assert!(verify_directory_entries(root.path(), 0).is_err());
 
         fs::remove_file(&manifest).expect("remove symlink");
 
         let _socket = UnixListener::bind(&manifest).expect("manifest socket");
 
-        assert!(verify_directory_entries(root.path(), false, 0).is_err());
+        assert!(verify_directory_entries(root.path(), 0).is_err());
 
         fs::remove_file(&manifest).expect("remove socket path");
 
         fs::create_dir_all(&manifest).expect("manifest directory");
 
-        assert!(verify_directory_entries(root.path(), false, 0).is_err());
+        assert!(verify_directory_entries(root.path(), 0).is_err());
     }
 }

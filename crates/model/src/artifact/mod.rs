@@ -7,5 +7,4 @@ pub mod playback;
 pub mod presentation;
 pub mod save;
 pub mod semantic_video;
-pub mod tmux;
 pub mod visual;

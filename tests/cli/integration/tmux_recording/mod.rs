@@ -1,6 +1,6 @@
 use crate::support::*;
 use serde::Deserialize;
-use termtrace_model::artifact::tmux::{TmuxBundleTrack, TmuxStreamingBundleManifest};
+use termtrace_tmux::artifact::{TmuxBundleTrack, TmuxStreamingBundleManifest};
 
 mod bundle;
 mod coverage;
@@ -343,16 +343,18 @@ impl PrivateTmux {
                 ])
                 .output()
                 .expect("diagnose pane list");
-            let supervisor = self
-                .command()
-                .args(["show-options", "-gqv", "@termtrace-supervisor-pid"])
+            let status = Command::cargo_bin("termtrace")
+                .expect("binary should build")
+                .args(["tmux", "status", "--json", "--tmux"])
+                .arg(&self.binary)
+                .args(["-L", self.socket.as_str()])
                 .output()
-                .expect("diagnose supervisor");
+                .expect("diagnose observers");
 
             panic!(
-                "unrecorded pane {pane} remained alive; panes={}; supervisor={}",
+                "unrecorded pane {pane} remained alive; panes={}; status={}",
                 String::from_utf8_lossy(&panes.stdout),
-                String::from_utf8_lossy(&supervisor.stdout),
+                String::from_utf8_lossy(&status.stdout),
             );
         }
     }

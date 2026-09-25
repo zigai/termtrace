@@ -42,6 +42,7 @@ EXPECTED_EDGES: dict[str, frozenset[str]] = {
             "termtrace-sdk",
             "termtrace-service",
             "termtrace-terminal",
+            "termtrace-tmux",
         }
     ),
     "termtrace-control": frozenset({"termtrace-model", "termtrace-process"}),
@@ -56,7 +57,13 @@ EXPECTED_EDGES: dict[str, frozenset[str]] = {
     ),
     "termtrace-evidence": frozenset({"termtrace-model"}),
     "termtrace-export": frozenset(
-        {"termtrace-engine", "termtrace-evidence", "termtrace-model", "termtrace-render"}
+        {
+            "termtrace-engine",
+            "termtrace-evidence",
+            "termtrace-model",
+            "termtrace-render",
+            "termtrace-tmux",
+        }
     ),
     "termtrace-media": frozenset(
         {
@@ -84,7 +91,7 @@ EXPECTED_EDGES: dict[str, frozenset[str]] = {
         }
     ),
     "termtrace-python": frozenset({"termtrace-model", "termtrace-sdk"}),
-    "termtrace-schema": frozenset({"termtrace-model"}),
+    "termtrace-schema": frozenset({"termtrace-model", "termtrace-tmux"}),
     "termtrace-sdk": frozenset(
         {
             "termtrace-control",
@@ -106,9 +113,18 @@ EXPECTED_EDGES: dict[str, frozenset[str]] = {
             "termtrace-process",
             "termtrace-render",
             "termtrace-terminal",
+            "termtrace-tmux",
         }
     ),
     "termtrace-terminal": frozenset({"termtrace-model"}),
+    "termtrace-tmux": frozenset(
+        {
+            "termtrace-control",
+            "termtrace-evidence",
+            "termtrace-model",
+            "termtrace-process",
+        }
+    ),
     "termtrace-test-fixture": frozenset(
         {"termtrace-engine", "termtrace-evidence", "termtrace-model"}
     ),

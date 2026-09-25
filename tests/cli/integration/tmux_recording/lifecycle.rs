@@ -237,7 +237,7 @@ fn tmux_new_recording_allocates_a_socket_instead_of_reusing_default_server() {
             .expect("aggregate manifest JSON");
 
     let allocated_socket_bytes: ByteString =
-        serde_json::from_value(manifest["socket_name"].clone())
+        serde_json::from_value(manifest["socket"]["name"].clone())
             .expect("allocated socket name bytes");
 
     let allocated_socket = String::from_utf8(allocated_socket_bytes.into_bytes())
@@ -256,7 +256,7 @@ fn tmux_new_recording_allocates_a_socket_instead_of_reusing_default_server() {
         "unexpected allocated socket name: {allocated_socket}"
     );
     assert_ne!(
-        manifest["server_pid"]
+        manifest["server"]["pid"]
             .as_u64()
             .map(|pid| return pid.to_string()),
         Some(existing_pid)
@@ -338,7 +338,7 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
         let value: serde_json::Value =
             serde_json::from_slice(&fs::read(&manifest_path).expect("read aggregate manifest"))
                 .expect("aggregate manifest JSON");
-        if value["server_pid"].is_number() && value["server_socket_inode"].is_number() {
+        if value["server"]["pid"].is_number() && value["server"]["socket_inode"].is_number() {
             break value;
         }
 
@@ -357,7 +357,7 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
     assert!(killed.success());
 
     wait_for_tmux_server_exit(
-        original["server_pid"]
+        original["server"]["pid"]
             .as_u64()
             .expect("original tmux server PID"),
     );
@@ -389,11 +389,7 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
     let preserved: serde_json::Value =
         serde_json::from_slice(&fs::read(&manifest_path).expect("read preserved manifest"))
             .expect("preserved aggregate manifest JSON");
-    assert_eq!(preserved["server_pid"], original["server_pid"]);
-    assert_eq!(
-        preserved["server_socket_inode"],
-        original["server_socket_inode"]
-    );
+    assert_eq!(preserved["server"], original["server"]);
     assert!(preserved["panes"].as_array().is_some_and(|panes| {
         return panes
             .iter()

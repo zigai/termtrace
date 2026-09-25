@@ -3,7 +3,15 @@ use crate::cli::{
     parsers::parse_video_fps,
 };
 use clap::{Args, Subcommand, ValueEnum};
-use std::{ffi::OsString, path::PathBuf};
+use std::{ffi::OsString, os::unix::ffi::OsStrExt as _, path::PathBuf};
+use termtrace_model::value::ByteString;
+use termtrace_tmux::{
+    artifact::{TmuxRecordingCoverage, TmuxSocket},
+    client::TmuxClient,
+    pane::PaneRunRequest,
+    scope::ScopeTargets,
+    setup::{GhosttyProfileMode, SetupRequest},
+};
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct TmuxArgs {
@@ -78,18 +86,17 @@ pub(in crate::cli) enum TmuxGhosttyProfileMode {
     Off,
 }
 
-impl TmuxGhosttyProfileMode {
-    pub(in crate::cli) fn as_str(self) -> &'static str {
-        return match self {
-            Self::Auto => "auto",
-            Self::Required => "required",
-            Self::Off => "off",
+impl From<TmuxGhosttyProfileMode> for GhosttyProfileMode {
+    fn from(mode: TmuxGhosttyProfileMode) -> Self {
+        return match mode {
+            TmuxGhosttyProfileMode::Auto => Self::Auto,
+            TmuxGhosttyProfileMode::Required => Self::Required,
+            TmuxGhosttyProfileMode::Off => Self::Off,
         };
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, ValueEnum)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(in crate::cli) enum TmuxCoverageMode {
     /// Report uncovered panes without terminating them.
     Warn,
@@ -97,11 +104,55 @@ pub(in crate::cli) enum TmuxCoverageMode {
     Strict,
 }
 
-impl TmuxCoverageMode {
-    pub(in crate::cli) fn as_str(self) -> &'static str {
-        return match self {
-            Self::Warn => "warn",
-            Self::Strict => "strict",
+impl From<TmuxCoverageMode> for TmuxRecordingCoverage {
+    fn from(mode: TmuxCoverageMode) -> Self {
+        return match mode {
+            TmuxCoverageMode::Warn => Self::Warn,
+            TmuxCoverageMode::Strict => Self::Strict,
+        };
+    }
+}
+
+impl TmuxConnectionArgs {
+    pub(super) fn client(&self) -> TmuxClient {
+        let socket = match (&self.socket_name, &self.socket_path) {
+            (Some(name), _) => TmuxSocket::Name(ByteString::from(name.as_bytes())),
+            (None, Some(path)) => TmuxSocket::Path(ByteString::from(path.as_os_str().as_bytes())),
+            (None, None) => TmuxSocket::Default,
+        };
+
+        return TmuxClient::new(self.tmux.clone(), socket);
+    }
+}
+
+impl TmuxSetupArgs {
+    pub(super) fn request(self) -> SetupRequest {
+        return SetupRequest {
+            launch_hook: self.launch_hook,
+            profile_mode: self.ghostty_profile.into(),
+            ghostty_config: self.ghostty_config,
+            coverage: self.coverage.into(),
+            aggregate_manifest: self.aggregate_manifest,
+            explicit_only: self.explicit_only,
+            targets: ScopeTargets {
+                sessions: self.sessions,
+                windows: self.windows,
+                panes: self.panes,
+            },
+            cell_width: self.cell_width,
+            cell_height: self.cell_height,
+            term: self.term,
+        };
+    }
+}
+
+impl From<TmuxRunArgs> for PaneRunRequest {
+    fn from(arguments: TmuxRunArgs) -> Self {
+        return Self {
+            pane_launch: arguments.pane_launch,
+            force: arguments.force,
+            shell_command: arguments.shell_command,
+            command: arguments.command,
         };
     }
 }

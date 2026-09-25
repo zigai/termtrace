@@ -11,14 +11,17 @@ use std::{
 use termtrace_evidence::artifact::{
     commit_directory, create_private_directory, sync_directory, write_secure,
 };
-use termtrace_evidence::{tmux_catalog::TmuxCatalog, tmux_journal};
 use termtrace_model::{
     artifact::bundle::{BundleProfile, BundleVerificationPolicy},
-    artifact::tmux::{
+    value::ByteString,
+};
+use termtrace_tmux::{
+    artifact::{
         TmuxBundleTrack, TmuxRecordingLifecycle, TmuxRecordingManifest, TMUX_RECORDING_FORMAT,
         TMUX_RECORDING_VERSION,
     },
-    value::ByteString,
+    catalog::TmuxCatalog,
+    journal,
 };
 use uuid::Uuid;
 
@@ -42,73 +45,57 @@ fn visit_source_tracks(
     aggregate: &TmuxRecordingManifest,
     mut visit: impl FnMut(SourceTrack) -> Result<()>,
 ) -> Result<()> {
-    let composite = aggregate.composite_track.session.as_ref().ok_or_else(|| {
-        return Error::invalid("aggregate tmux recording has no linked composite track");
-    })?;
+    let composite = aggregate
+        .state
+        .composite_track
+        .link
+        .as_ref()
+        .ok_or_else(|| {
+            return Error::invalid("aggregate tmux recording has no linked composite track");
+        })?;
 
     visit(SourceTrack {
         role: "composite",
         pane_id: None,
-        session: path_from_bytes(composite),
-        session_id: aggregate
-            .composite_track
-            .session_id
-            .ok_or_else(|| return Error::invalid("composite track has no identity"))?,
+        session: path_from_bytes(&composite.session),
+        session_id: composite.session_id,
     })?;
 
     let mut current = aggregate
+        .state
         .pane_tracks
         .iter()
         .map(|(pane, session)| return (pane.clone(), path_from_bytes(session)))
         .collect::<BTreeSet<_>>();
 
-    if aggregate.catalog.is_some() {
-        let directory = aggregate_manifest
-            .parent()
-            .ok_or_else(|| return Error::invalid("aggregate manifest has no parent"))?;
+    let directory = aggregate_manifest
+        .parent()
+        .ok_or_else(|| return Error::invalid("aggregate manifest has no parent"))?;
+    let catalog = TmuxCatalog::read_verified(directory, aggregate)?;
+    let mut next = 0;
 
-        let catalog = TmuxCatalog::read_verified(directory, aggregate)?;
-        let mut next = 0;
-
-        loop {
-            let page = catalog.tracks(next, 128, false)?;
-            if page.is_empty() {
-                break;
-            }
-
-            for entry in page {
-                next = entry
-                    .sequence
-                    .checked_add(1)
-                    .ok_or_else(|| return Error::invalid("tmux catalog sequence overflow"))?;
-
-                current.remove(&(
-                    entry.track.pane_id.clone(),
-                    path_from_bytes(&entry.track.session),
-                ));
-
-                visit(SourceTrack {
-                    role: "pane",
-                    pane_id: Some(entry.track.pane_id),
-                    session: path_from_bytes(&entry.track.session),
-                    session_id: entry.track.session_id,
-                })?;
-            }
+    loop {
+        let page = catalog.tracks(next, 128, false)?;
+        if page.is_empty() {
+            break;
         }
-    } else {
-        for (identity, track) in &aggregate.track_history {
-            if identity != &track.session_id {
-                return Err(Error::invalid(
-                    "historical pane track identity differs from its inventory key",
-                ));
-            }
 
-            current.remove(&(track.pane_id.clone(), path_from_bytes(&track.session)));
+        for entry in page {
+            next = entry
+                .sequence
+                .checked_add(1)
+                .ok_or_else(|| return Error::invalid("tmux catalog sequence overflow"))?;
+
+            current.remove(&(
+                entry.track.pane_id.clone(),
+                path_from_bytes(&entry.track.session),
+            ));
+
             visit(SourceTrack {
                 role: "pane",
-                pane_id: Some(track.pane_id.clone()),
-                session: path_from_bytes(&track.session),
-                session_id: track.session_id,
+                pane_id: Some(entry.track.pane_id),
+                session: path_from_bytes(&entry.track.session),
+                session_id: entry.track.session_id,
             })?;
         }
     }
@@ -139,12 +126,7 @@ fn validate_aggregate(aggregate: &TmuxRecordingManifest) -> Result<()> {
         ));
     }
 
-    if !matches!(aggregate.lifecycle, TmuxRecordingLifecycle::Completed)
-        || !matches!(
-            aggregate.composite_track.lifecycle,
-            TmuxRecordingLifecycle::Completed
-        )
-    {
+    if aggregate.state.lifecycle != TmuxRecordingLifecycle::Completed {
         return Err(Error::invalid(
             "aggregate tmux recording and composite track must be completed before export",
         ));

@@ -4,6 +4,7 @@ members = [
     "crates/model",
     "crates/control",
     "crates/process",
+    "crates/tmux",
     "crates/terminal",
     "crates/evidence",
     "crates/engine",
@@ -70,6 +71,7 @@ termtrace-schema = { path = "crates/schema" }
     termtrace-service = { path = "crates/service" }
     termtrace-sdk = { path = "crates/sdk", features = ["in-process"] }
 termtrace-terminal = { path = "crates/terminal" }
+termtrace-tmux = { path = "crates/tmux" }
 tracing = "0.1.41"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }

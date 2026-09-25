@@ -12,6 +12,7 @@ termtrace-model = { version = "=0.1.0", path = "../model" }
 termtrace-evidence = { version = "=0.1.0", path = "../evidence" }
 termtrace-engine = { version = "=0.1.0", path = "../engine" }
 termtrace-render = { version = "=0.1.0", path = "../render" }
+termtrace-tmux = { version = "=0.1.0", path = "../tmux" }
 blake3 = "1.8.2"
 fs-err = "3.2.0"
 serde = { version = "1.0.228", features = ["derive"] }
