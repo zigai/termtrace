@@ -1,4 +1,5 @@
 use super::*;
+use termtrace_model::execution::layout::SessionLayout;
 
 #[test]
 fn live_control_drives_and_audits_a_detached_session() {
@@ -97,7 +98,7 @@ fn live_control_drives_and_audits_a_detached_session() {
 
     assert!(matches!(
         send_request(&session, &collision),
-        Err(Error::ControlRejected { code, .. })
+        Err(termtrace_control::Error::Rejected { code, .. })
             if code == "request_id_collision"
     ));
 
@@ -155,7 +156,8 @@ fn live_control_drives_and_audits_a_detached_session() {
         "control endpoint should close on exit"
     );
 
-    let recording = EventLog::read(session.join("events.jsonl")).expect("valid event log");
+    let recording =
+        EventLog::read(SessionLayout::new(&session).event_log()).expect("valid event log");
     assert_control_events(&recording, &session);
 
     let marker = recording
@@ -198,7 +200,7 @@ fn live_control_drives_and_audits_a_detached_session() {
         return matches!(pair, [left, right] if left == right);
     }));
 
-    let journal_path = session.join("requests.jsonl");
+    let journal_path = SessionLayout::new(&session).mutation_journal();
     validate_json_lines("mutation-journal-record.schema.json", &journal_path);
     let mutation_records = read_mutation_journal(&journal_path).expect("mutation journal");
     assert_eq!(
@@ -251,7 +253,8 @@ fn live_control_uses_a_bounded_endpoint_for_long_evidence_paths() {
 
     let ready_deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < ready_deadline {
-        let events = fs_err::read_to_string(session.join("events.jsonl")).unwrap_or_default();
+        let events =
+            fs_err::read_to_string(SessionLayout::new(&session).event_log()).unwrap_or_default();
         if events.contains("READY") {
             break;
         }

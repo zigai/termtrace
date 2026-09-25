@@ -1,47 +1,24 @@
 use super::control::client_error;
 use super::{
     completed_semantic_state_with_hash_for_session, observation_from_live_snapshot,
-    observe_completed_session_with_options, semantic_state_from_live_snapshot, send_request,
-    thread, ControlCommand, ControlData, ControlRequest, Duration, Error, Instant, Observation,
-    Path, Result, StatePoint,
+    observe_completed_session_with_options, semantic_state_from_live_snapshot, ControlCommand,
+    ControlData, Duration, Observation, Path, Result, StatePoint,
 };
+use termtrace_control::{read_completed, request_or_completed, Reached};
 use termtrace_model::terminal::state::SemanticState;
 
 const COMPLETION_TRANSITION_TIMEOUT: Duration = Duration::from_secs(2);
-const COMPLETION_TRANSITION_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-fn request_snapshot_across_completion(session: &Path) -> Result<Option<ControlData>> {
-    match send_request(session, &ControlRequest::new(ControlCommand::Snapshot)) {
-        Ok(snapshot) => return Ok(Some(snapshot)),
-        Err(error)
-            if matches!(
-                &error,
-                Error::ControlUnavailable { .. }
-                    | Error::ControlTimeout { .. }
-                    | Error::ControlTransport { .. }
-            ) =>
-        {
-            let completion = session.join("completion.json");
-            let deadline = Instant::now() + COMPLETION_TRANSITION_TIMEOUT;
-
-            loop {
-                if completion.is_file() {
-                    return Ok(None);
-                }
-
-                let now = Instant::now();
-                if now >= deadline {
-                    return Err(error);
-                }
-
-                thread::sleep(
-                    COMPLETION_TRANSITION_POLL_INTERVAL
-                        .min(deadline.saturating_duration_since(now)),
-                );
-            }
-        }
-        Err(error) => return Err(error),
-    }
+/// Take a live snapshot, or `None` once the session has completed.
+fn live_snapshot(session: &Path) -> Result<Option<ControlData>> {
+    return match request_or_completed(
+        session,
+        ControlCommand::Snapshot,
+        COMPLETION_TRANSITION_TIMEOUT,
+    )? {
+        Reached::Live(snapshot) => Ok(Some(*snapshot)),
+        Reached::Completed(_) => Ok(None),
+    };
 }
 
 /// Observe a live actor snapshot or a validated completed semantic state.
@@ -66,7 +43,7 @@ pub fn observe_session_with_options(
     include_hidden: bool,
 ) -> Result<Observation> {
     let session = session.as_ref();
-    if session.join("completion.json").is_file() {
+    if read_completed(session)?.is_some() {
         return Ok(observe_completed_session_with_options(
             session,
             state_point,
@@ -80,7 +57,7 @@ pub fn observe_session_with_options(
         ));
     }
 
-    let Some(snapshot) = request_snapshot_across_completion(session)? else {
+    let Some(snapshot) = live_snapshot(session)? else {
         return Ok(observe_completed_session_with_options(
             session,
             state_point,
@@ -118,7 +95,7 @@ pub fn semantic_state_with_hash_for_session(
     include_hidden: bool,
 ) -> Result<(SemanticState, String)> {
     let session = session.as_ref();
-    if session.join("completion.json").is_file() {
+    if read_completed(session)?.is_some() {
         return Ok(completed_semantic_state_with_hash_for_session(
             session,
             point,
@@ -132,7 +109,7 @@ pub fn semantic_state_with_hash_for_session(
         ));
     }
 
-    let Some(snapshot) = request_snapshot_across_completion(session)? else {
+    let Some(snapshot) = live_snapshot(session)? else {
         return Ok(completed_semantic_state_with_hash_for_session(
             session,
             point,

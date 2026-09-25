@@ -189,7 +189,10 @@ impl<'session> Locator<'session> {
                 Ok(capture) => capture,
                 Err(error)
                     if observed_at >= deadline
-                        || matches!(&error, crate::Error::ControlTimeout { .. }) =>
+                        || matches!(
+                            &error,
+                            crate::Error::Control(termtrace_control::Error::Timeout { .. })
+                        ) =>
                 {
                     return Err(LocatorError::Timeout {
                         timeout,

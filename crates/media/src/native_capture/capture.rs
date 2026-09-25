@@ -19,6 +19,7 @@ use crate::error::finish_with_cleanup;
 use std::{
     env, fs, path::Path, process::Command, str, sync::atomic::AtomicBool, thread, time::Duration,
 };
+use termtrace_control::read_completed;
 use termtrace_engine::{replay::visit_session_states_while, timeline::resolve_source_range};
 use termtrace_evidence::{
     artifact::{
@@ -26,7 +27,7 @@ use termtrace_evidence::{
         sync_directory, verify_artifact_members, write_secure,
     },
     event_log::EventLogSummary,
-    session::{read_completion, read_manifest, validate_completion_summary_candidate},
+    session::{read_manifest, validate_completion_summary_candidate},
 };
 use termtrace_model::{
     artifact::metadata::ArtifactSourceRange,
@@ -35,6 +36,7 @@ use termtrace_model::{
         visual_directory_name_for, CaptureKind, CaptureOptions, CaptureOutcome, VisualManifest,
         GHOSTTY_EFFECTIVE_CONFIG_NAME, VISUAL_MANIFEST_VERSION,
     },
+    execution::layout::SessionLayout,
     execution::session::{GeometrySource, SessionManifest, GHOSTTY_REPLAY_PROFILE_NAME},
     terminal::replay::SourceRange,
 };
@@ -51,18 +53,14 @@ use termtrace_model::{
 /// native playback or capture fails, or the resulting artifacts cannot be verified and published.
 pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome> {
     validate_options(options)?;
-    if !options.session_directory.join("completion.json").is_file() {
+    let Some(completion) = read_completed(&options.session_directory)? else {
         return Err(Error::SessionIncomplete {
             session: options.session_directory.clone(),
         });
-    }
+    };
 
-    let log = EventLogSummary::read(options.session_directory.join("events.jsonl"))?;
-    validate_completion_summary_candidate(
-        &options.session_directory,
-        &log,
-        &read_completion(&options.session_directory)?,
-    )?;
+    let log = EventLogSummary::read(SessionLayout::new(&options.session_directory).event_log())?;
+    validate_completion_summary_candidate(&options.session_directory, &log, &completion)?;
 
     let final_ns = log
         .terminal

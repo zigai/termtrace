@@ -2,6 +2,7 @@
 
 use crate::{actions::ActionResult, client::StableScreenCapture};
 use std::{io::Error as IoError, path::PathBuf, result::Result as StdResult};
+use termtrace_control::Error as ControlError;
 use termtrace_model::{
     protocol::control::InputSequenceFailureDetails,
     terminal::{observation::ActorBoundaries, screen::ScreenFrameError},
@@ -23,10 +24,6 @@ pub enum RetrySafety {
 /// Machine-readable classification of SDK and service errors.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ErrorKind {
-    /// Invalid protocol message from driver.
-    InvalidDriverProtocol,
-    /// Transport I/O failure on driver connection.
-    DriverTransport,
     /// Evidence storage or validation error.
     Evidence,
     /// Terminal engine or replay error.
@@ -94,23 +91,9 @@ pub enum MutationEffect {
 /// Failures translated at the SDK boundary.
 #[derive(Debug, Error)]
 pub enum Error {
-    /// The installed process driver violated its framing or correlation contract.
-    #[error("invalid driver protocol message: {reason}")]
-    InvalidDriverProtocol {
-        /// Bounded diagnostic without raw response contents.
-        reason: String,
-    },
-    /// Process-driver I/O failed or exceeded its deadline.
-    #[error("driver transport failed during `{phase}`: {source}")]
-    DriverTransport {
-        /// Transport operation that failed.
-        phase: &'static str,
-        /// Whether any request bytes may have reached the driver.
-        request_dispatched: bool,
-        /// Underlying transport error, including `TimedOut` deadlines.
-        #[source]
-        source: IoError,
-    },
+    /// Live control transport, rejection, or phase observation failed.
+    #[error(transparent)]
+    Control(#[from] termtrace_control::Error),
     /// Canonical evidence access or verification failed.
     #[error(transparent)]
     Evidence(#[from] termtrace_evidence::Error),
@@ -142,61 +125,6 @@ pub enum Error {
         #[source]
         /// Underlying JSON decoding failure.
         source: serde_json::Error,
-    },
-    /// A control message violated framing or correlation rules.
-    #[error("invalid control protocol message: {reason}")]
-    InvalidControlProtocol {
-        /// Bounded protocol validation failure.
-        reason: String,
-    },
-    /// A live actor was unavailable.
-    #[error("live control is unavailable for session `{session}` ({lifecycle})")]
-    ControlUnavailable {
-        /// Canonical session directory.
-        session: PathBuf,
-        /// Observed session lifecycle.
-        lifecycle: String,
-        #[source]
-        /// Connection failure reported by the operating system.
-        source: IoError,
-    },
-    /// A dispatched request exceeded its deadline.
-    #[error(
-        "live control timed out during `{phase}` for session `{session}` after {timeout_ms} ms"
-    )]
-    ControlTimeout {
-        /// Canonical session directory.
-        session: PathBuf,
-        /// Transport phase that exceeded its deadline.
-        phase: &'static str,
-        /// Requested deadline in milliseconds.
-        timeout_ms: u64,
-        /// Whether the request may have reached the actor.
-        request_dispatched: bool,
-        #[source]
-        /// Underlying timeout or transport failure.
-        source: IoError,
-    },
-    /// Control transport failed with possibly uncertain delivery.
-    #[error("live control transport failed during `{phase}` for session `{session}`: {source}")]
-    ControlTransport {
-        /// Canonical session directory.
-        session: PathBuf,
-        /// Transport phase that failed.
-        phase: &'static str,
-        /// Whether the request may have reached the actor.
-        request_dispatched: bool,
-        #[source]
-        /// Underlying transport failure.
-        source: IoError,
-    },
-    /// The actor rejected a well-formed request.
-    #[error("live session rejected control request `{code}`: {message}")]
-    ControlRejected {
-        /// Stable actor rejection code.
-        code: String,
-        /// Safe actor rejection detail.
-        message: String,
     },
     /// A rich-screen request was invalid or exceeded a bound.
     #[error(transparent)]
@@ -287,19 +215,23 @@ impl Error {
     #[must_use]
     pub fn kind(&self) -> ErrorKind {
         return match self {
-            Self::InvalidDriverProtocol { .. } => ErrorKind::InvalidDriverProtocol,
-            Self::DriverTransport { .. } => ErrorKind::DriverTransport,
+            Self::Control(error) => match error {
+                ControlError::Unavailable { .. } => ErrorKind::ControlUnavailable,
+                ControlError::Timeout { .. } => ErrorKind::ControlTimeout,
+                ControlError::Transport { .. } => ErrorKind::ControlTransport,
+                ControlError::InvalidProtocol { .. } => ErrorKind::InvalidControlProtocol,
+                ControlError::InvalidRequest { .. } => ErrorKind::InvalidOperation,
+                ControlError::InvalidJson { .. } => ErrorKind::InvalidJson,
+                ControlError::Filesystem { .. } => ErrorKind::Filesystem,
+                ControlError::CompletionIdentity { .. } => ErrorKind::Evidence,
+                ControlError::Rejected { .. } => ErrorKind::ControlRejected,
+            },
             Self::Evidence(_) => ErrorKind::Evidence,
             Self::Engine(_) => ErrorKind::Engine,
             Self::Export(_) => ErrorKind::Export,
             Self::Media(_) => ErrorKind::Media,
             Self::Filesystem { .. } => ErrorKind::Filesystem,
             Self::InvalidJson { .. } => ErrorKind::InvalidJson,
-            Self::InvalidControlProtocol { .. } => ErrorKind::InvalidControlProtocol,
-            Self::ControlUnavailable { .. } => ErrorKind::ControlUnavailable,
-            Self::ControlTimeout { .. } => ErrorKind::ControlTimeout,
-            Self::ControlTransport { .. } => ErrorKind::ControlTransport,
-            Self::ControlRejected { .. } => ErrorKind::ControlRejected,
             Self::ScreenFrame(_) => ErrorKind::ScreenFrame,
             Self::InvalidAtom { .. } => ErrorKind::InvalidAtom,
             Self::InvalidDuration { .. } => ErrorKind::InvalidDuration,
@@ -317,8 +249,6 @@ impl Error {
     #[must_use]
     pub fn code(&self) -> &'static str {
         return match self.kind() {
-            ErrorKind::InvalidDriverProtocol => "invalid_driver_protocol",
-            ErrorKind::DriverTransport => "driver_transport",
             ErrorKind::Evidence => "evidence",
             ErrorKind::Engine => "engine",
             ErrorKind::Export => "export",
@@ -363,21 +293,16 @@ impl Error {
                 MutationEffect::FullyAppliedPostconditionIncomplete
             }
             Self::ActionTerminatingFrame { .. } => MutationEffect::AppliedProjectionFailed,
-            Self::ControlTimeout {
-                request_dispatched: false,
-                ..
-            }
-            | Self::ControlUnavailable { .. }
-            | Self::InvalidOperation { .. }
-            | Self::InvalidDuration { .. } => MutationEffect::NotDispatched,
-            Self::ControlTimeout {
-                request_dispatched: true,
-                ..
-            }
-            | Self::ControlTransport {
-                request_dispatched: true,
-                ..
-            } => MutationEffect::DeliveryUnknown,
+            Self::Control(
+                ControlError::Timeout {
+                    request_dispatched: true,
+                    ..
+                }
+                | ControlError::Transport {
+                    request_dispatched: true,
+                    ..
+                },
+            ) => MutationEffect::DeliveryUnknown,
             _ => MutationEffect::NotDispatched,
         };
     }
@@ -386,23 +311,27 @@ impl Error {
     #[must_use]
     pub fn retry_safety(&self) -> RetrySafety {
         return match self {
-            Self::StaleState { retry_safety, .. } => *retry_safety,
-            Self::PartialInput { retry_safety, .. } => *retry_safety,
-            Self::ActionTerminatingFrame { retry_safety, .. } => *retry_safety,
-            Self::ControlRejected { .. } => RetrySafety::NewRequest,
-            Self::ControlTimeout {
-                request_dispatched: true,
-                ..
-            }
-            | Self::ControlTransport {
-                request_dispatched: true,
-                ..
-            } => RetrySafety::SameRequestOnly,
-            Self::ControlUnavailable { .. }
-            | Self::ControlTimeout {
-                request_dispatched: false,
-                ..
-            } => RetrySafety::NewRequest,
+            Self::StaleState { retry_safety, .. }
+            | Self::PartialInput { retry_safety, .. }
+            | Self::ActionTerminatingFrame { retry_safety, .. } => *retry_safety,
+            Self::Control(
+                ControlError::Timeout {
+                    request_dispatched: true,
+                    ..
+                }
+                | ControlError::Transport {
+                    request_dispatched: true,
+                    ..
+                },
+            ) => RetrySafety::SameRequestOnly,
+            Self::Control(
+                ControlError::Rejected { .. }
+                | ControlError::Unavailable { .. }
+                | ControlError::Timeout {
+                    request_dispatched: false,
+                    ..
+                },
+            ) => RetrySafety::NewRequest,
             _ => RetrySafety::Unknown,
         };
     }

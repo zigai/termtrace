@@ -34,6 +34,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use termtrace_control::{is_completed, recorder_identity, request_or_completed, send_request};
 use termtrace_engine::{
     analysis::profile::{builtin_terminal_colors, terminal_colors_for_profile},
     inspection::wait_for_completion,
@@ -42,7 +43,7 @@ use termtrace_engine::{
         resolve_ghostty_profile, restore_ghostty_profile, EffectiveEnvironment, RecordOptions,
         RecordOutcome, ResolvedGhosttyProfile,
     },
-    registry::{recorder_identity, SessionRegistry},
+    registry::SessionRegistry,
 };
 use termtrace_evidence::{
     event_log::{DurabilityPolicy, EventLogSummary},
@@ -52,6 +53,7 @@ use termtrace_media::native_capture::probe_ghostty_geometry;
 use termtrace_model::{
     execution::environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},
     execution::event_log::DurabilityMode,
+    execution::layout::SessionLayout,
     execution::provenance::{ProvenanceCapture, ProvenancePolicy},
     execution::session::{
         GeometryProvenance, GeometrySource, GhosttyVisualOverrides, ImportProvenance,
@@ -67,7 +69,7 @@ use termtrace_model::{
     value::geometry::TerminalGeometryReport,
     value::ByteString,
 };
-use termtrace_sdk::{request, send_request, wait_for_screen};
+use termtrace_sdk::wait_for_screen;
 
 const DEFAULT_DURABILITY_MAX_INTERVAL_MS: u64 = 50;
 const DEFAULT_DURABILITY_MAX_UNCOMMITTED_BYTES: u64 = 65_536;

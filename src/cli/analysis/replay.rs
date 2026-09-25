@@ -14,6 +14,7 @@ use std::{
     process::ExitCode,
     time::Duration,
 };
+use termtrace_control::read_completed;
 use termtrace_engine::{
     analysis::reviewer::{
         export_state as export_review_state, search as search_review, summarize as summarize_review,
@@ -102,7 +103,11 @@ pub(in crate::cli) fn run_index(
     response: &mut ResponseWriter,
     arguments: IndexArgs,
 ) -> Result<ExitCode> {
-    if !arguments.live_snapshot && !arguments.session.join("completion.json").is_file() {
+    if !arguments.live_snapshot
+        && read_completed(&arguments.session)
+            .into_diagnostic()?
+            .is_none()
+    {
         return Err(Error::SessionIncomplete {
             session: arguments.session,
         })

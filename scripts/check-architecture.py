@@ -29,6 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 EXPECTED_EDGES: dict[str, frozenset[str]] = {
     "termtrace": frozenset(
         {
+            "termtrace-control",
             "termtrace-engine",
             "termtrace-evidence",
             "termtrace-export",
@@ -42,8 +43,14 @@ EXPECTED_EDGES: dict[str, frozenset[str]] = {
             "termtrace-terminal",
         }
     ),
+    "termtrace-control": frozenset({"termtrace-model"}),
     "termtrace-engine": frozenset(
-        {"termtrace-evidence", "termtrace-model", "termtrace-terminal"}
+        {
+            "termtrace-control",
+            "termtrace-evidence",
+            "termtrace-model",
+            "termtrace-terminal",
+        }
     ),
     "termtrace-evidence": frozenset({"termtrace-model"}),
     "termtrace-export": frozenset(
@@ -51,6 +58,7 @@ EXPECTED_EDGES: dict[str, frozenset[str]] = {
     ),
     "termtrace-media": frozenset(
         {
+            "termtrace-control",
             "termtrace-engine",
             "termtrace-evidence",
             "termtrace-model",
@@ -63,6 +71,7 @@ EXPECTED_EDGES: dict[str, frozenset[str]] = {
     "termtrace-node": frozenset({"termtrace-model", "termtrace-sdk"}),
     "termtrace-scenario": frozenset(
         {
+            "termtrace-control",
             "termtrace-engine",
             "termtrace-evidence",
             "termtrace-model",
@@ -74,6 +83,7 @@ EXPECTED_EDGES: dict[str, frozenset[str]] = {
     "termtrace-schema": frozenset({"termtrace-model"}),
     "termtrace-sdk": frozenset(
         {
+            "termtrace-control",
             "termtrace-media",
             "termtrace-model",
             "termtrace-scenario",
@@ -82,6 +92,7 @@ EXPECTED_EDGES: dict[str, frozenset[str]] = {
     ),
     "termtrace-service": frozenset(
         {
+            "termtrace-control",
             "termtrace-engine",
             "termtrace-evidence",
             "termtrace-export",

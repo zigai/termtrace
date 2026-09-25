@@ -14,6 +14,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
+use termtrace_control::{request_or_completed, Reached};
 use termtrace_media::native_capture::{native_capture_target, NativeReplayWorker};
 use termtrace_model::{
     execution::session::CaptureTarget,
@@ -43,24 +44,24 @@ pub(super) fn run(
 ) -> Result<ExitCode> {
     require_cli_capability(NATIVE_SCREENSHOT_CAPABILITY)?;
 
-    let live_boundary = if session.join("completion.json").is_file() {
-        None
-    } else {
-        if points != [StatePoint::LatestPresented] {
-            return Err(miette::miette!(
-                "live native capture currently requires the latest presented state"
-            ));
-        }
+    let live_boundary = match request_or_completed(session, ControlCommand::Status, Duration::ZERO)
+        .into_diagnostic()?
+    {
+        Reached::Completed(_) => None,
+        Reached::Live(data) => {
+            if points != [StatePoint::LatestPresented] {
+                return Err(miette::miette!(
+                    "live native capture currently requires the latest presented state"
+                ));
+            }
 
-        match termtrace_sdk::request(session, ControlCommand::Status) {
-            Ok(ControlData::Status { boundaries, .. }) => Some(boundaries.durable),
-            Err(_) if session.join("completion.json").is_file() => None,
-            Err(error) => return Err(error).into_diagnostic(),
-            _ => {
+            let ControlData::Status { boundaries, .. } = *data else {
                 return Err(miette::miette!(
                     "live status returned an unexpected response"
                 ));
-            }
+            };
+
+            Some(boundaries.durable)
         }
     };
 

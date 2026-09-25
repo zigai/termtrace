@@ -1,8 +1,9 @@
 //! Explicit, fallible application instrumentation over authenticated local IPC.
 
-use crate::{Client, Error, Result};
+use crate::Client;
 use serde_json::Value;
 use std::{collections::BTreeMap, process, time::Instant};
+use termtrace_control::{Error, Result};
 pub use termtrace_model::execution::application::{ApplicationEvent, ApplicationEventKind};
 use termtrace_model::protocol::control::ControlCommand;
 use uuid::Uuid;
@@ -86,7 +87,7 @@ impl Instrumentation {
             process_instance_id: self.process_instance_id,
             process_id: process::id(),
             monotonic_ns: u64::try_from(self.started.elapsed().as_nanos()).map_err(|_| {
-                return Error::InvalidOperation {
+                return Error::InvalidRequest {
                     reason: "application monotonic clock overflow".to_owned(),
                 };
             })?,
@@ -98,7 +99,7 @@ impl Instrumentation {
         };
 
         data.validate().map_err(|reason| {
-            return Error::InvalidOperation {
+            return Error::InvalidRequest {
                 reason: reason.to_owned(),
             };
         })?;

@@ -1,6 +1,5 @@
 //! Bounded synchronous access to every installed process-driver method.
 
-use crate::{Error, Result};
 use nix::{
     errno::Errno,
     fcntl::{fcntl, FcntlArg, OFlag},
@@ -13,6 +12,7 @@ use std::{
     os::{fd::AsFd, unix::process::CommandExt as _},
     path::Path,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    result::Result as StdResult,
     thread,
     time::{Duration, Instant},
 };
@@ -23,7 +23,32 @@ use termtrace_model::protocol::{
         DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
     },
 };
+use thiserror::Error;
 use uuid::Uuid;
+
+/// Failure of the installed process driver's framing or transport.
+#[derive(Debug, Error)]
+pub enum DriverError {
+    /// The installed process driver violated its framing or correlation contract.
+    #[error("invalid driver protocol message: {reason}")]
+    InvalidProtocol {
+        /// Bounded diagnostic without raw response contents.
+        reason: String,
+    },
+    /// Process-driver I/O failed or exceeded its deadline.
+    #[error("driver transport failed during `{phase}`: {source}")]
+    Transport {
+        /// Transport operation that failed.
+        phase: &'static str,
+        /// Whether any request bytes may have reached the driver.
+        request_dispatched: bool,
+        /// Underlying transport error, including `TimedOut` deadlines.
+        #[source]
+        source: io::Error,
+    },
+}
+
+type Result<T, E = DriverError> = StdResult<T, E>;
 
 /// Owns an installed `termtrace agent` process without linking the recording engine.
 ///
@@ -335,14 +360,14 @@ fn ready(
     }
 }
 
-fn protocol(reason: &str) -> Error {
-    return Error::InvalidDriverProtocol {
+fn protocol(reason: &str) -> DriverError {
+    return DriverError::InvalidProtocol {
         reason: reason.to_owned(),
     };
 }
 
-fn transport(phase: &'static str, request_dispatched: bool, source: io::Error) -> Error {
-    return Error::DriverTransport {
+fn transport(phase: &'static str, request_dispatched: bool, source: io::Error) -> DriverError {
+    return DriverError::Transport {
         phase,
         request_dispatched,
         source,

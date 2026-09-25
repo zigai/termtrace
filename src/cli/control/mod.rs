@@ -21,6 +21,10 @@ use std::{
     process::ExitCode,
     time::Duration,
 };
+use termtrace_control::{
+    is_completed, request, request_or_completed, send_request, send_request_response,
+    Error as ControlError, Reached,
+};
 use termtrace_engine::{
     inspection::{wait_for_completion, wait_for_output},
     observation::observe_validated_prefix,
@@ -39,10 +43,7 @@ use termtrace_model::{
     terminal::state::{KeyModifiers, NamedKey},
     value::ByteString,
 };
-use termtrace_sdk::{
-    observe_session_with_options, request, send_request, send_request_response, wait_for_screen,
-    Error as SdkError,
-};
+use termtrace_sdk::{observe_session_with_options, wait_for_screen};
 
 mod action;
 mod input;

@@ -1,11 +1,12 @@
 use super::{
-    ensure_owner_directory, fs, read_manifest, read_registry_record_nofollow, recorder_identity,
+    ensure_owner_directory, fs, inspect_entry, read_manifest, read_registry_record_nofollow,
     registry_error, sync_directory, validate_owner_directory, DetachedSessionPaths, Duration,
     Error, ErrorKind, GarbageCollectionCandidate, GarbageCollectionReport, HashSet, OsStr, Path,
-    PathBuf, RegistryRecord, Result, SessionRegistry, SystemTime, Uuid, UNIX_EPOCH,
+    PathBuf, RegistryRecord, Result, SessionPhase, SessionRegistry, SystemTime, Uuid, UNIX_EPOCH,
 };
 use std::cmp::Reverse;
 use termtrace_evidence::session::validate_completed_session;
+use termtrace_model::execution::layout::SessionLayout;
 
 impl SessionRegistry {
     /// Allocate collision-free paths for a detached session and supervisor logs.
@@ -148,7 +149,7 @@ impl SessionRegistry {
                 report.protected_registered = report.protected_registered.saturating_add(1);
             }
 
-            let completion_path = session.join("completion.json");
+            let completion_path = SessionLayout::new(&session).completion();
             let Ok(completion) = validate_completed_session(&session) else {
                 report.skipped_non_completed = report.skipped_non_completed.saturating_add(1);
                 continue;
@@ -310,19 +311,12 @@ impl SessionRegistry {
                 }
                 RegistryRecord::Entry(entry) => {
                     let session = entry.session_path();
-                    let responsive_identity = recorder_identity(&session);
-                    let is_live = entry
-                        .recorder_pid
-                        .zip(entry.recorder_process_start_ticks)
-                        .map_or_else(
-                            || return responsive_identity.is_some(),
-                            |identity| return responsive_identity == Some(identity),
-                        );
-
-                    let completion_exists = session.join("completion.json").is_file();
                     // Retention age applies to completed evidence, never to an
                     // authenticated live recorder or its interactive process group.
-                    let should_reap = !completion_exists && !is_live;
+                    let should_reap = !matches!(
+                        inspect_entry(&entry).lifecycle,
+                        SessionPhase::Live | SessionPhase::Completed
+                    );
 
                     if should_reap {
                         if apply {

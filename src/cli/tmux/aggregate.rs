@@ -35,9 +35,10 @@ use std::{
     str, thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use termtrace_control::{is_completed, read_completed};
 use termtrace_engine::{inspection::wait_for_completion, registry::SessionRegistry};
 use termtrace_evidence::artifact::sync_directory;
-use termtrace_evidence::session::{read_completion, read_manifest};
+use termtrace_evidence::session::read_manifest;
 use termtrace_evidence::tmux_catalog::TmuxCatalog;
 use termtrace_evidence::tmux_journal;
 use termtrace_export::tmux;
@@ -413,9 +414,7 @@ pub(in crate::cli) fn run_tmux_stop(
     let client = client_from_manifest(&initial_manifest);
     // A wrapper can be running before its asynchronous track registration is
     // published. Include those panes in shutdown as well as the saved links.
-    if server_validated
-        && let Ok(report) = tmux_status_report(&client)
-    {
+    if server_validated && let Ok(report) = tmux_status_report(&client) {
         for pane in report.panes {
             if pane.selected && pane.recorded {
                 let _ = client.run(["kill-pane", "-t", pane.pane_id.as_str()]);
@@ -650,9 +649,9 @@ fn refresh_track_lifecycle(path: &Path, manifest: &mut TmuxRecordingManifest) ->
         .session
         .as_ref()
         .is_some_and(|session| {
-            return PathBuf::from(OsString::from_vec(session.as_bytes().to_vec()))
-                .join("completion.json")
-                .is_file();
+            return is_completed(&PathBuf::from(OsString::from_vec(
+                session.as_bytes().to_vec(),
+            )));
         });
 
     if !composite_completed {
@@ -681,8 +680,7 @@ fn refresh_track_lifecycle(path: &Path, manifest: &mut TmuxRecordingManifest) ->
 
             let session = PathBuf::from(OsString::from_vec(entry.track.session.into_bytes()));
 
-            if session.join("completion.json").is_file() {
-                let completion = read_completion(&session).into_diagnostic()?;
+            if let Some(completion) = read_completed(&session).into_diagnostic()? {
                 if completion.session_id != entry.track.session_id {
                     return Err(miette::miette!("tmux track completion identity changed"));
                 }

@@ -3,10 +3,7 @@
 use crate::{
     actions::{ActionCompletion, ActionCondition, ActionOptions, ActionResult, InputAtom},
     error::RetrySafety,
-    protocol::{
-        control_endpoint_is_reachable, exchange, send_request, send_request_response,
-        wait_for_screen, ExchangeTiming,
-    },
+    protocol::wait_for_screen,
     screen::StableCaptureOptions,
     Error, Result,
 };
@@ -24,6 +21,10 @@ use std::{
     process::{Child, Command, Stdio},
     thread,
     time::{Duration, Instant},
+};
+use termtrace_control::{
+    control_endpoint_is_reachable, exchange, read_completed, send_request, send_request_response,
+    ExchangeTiming,
 };
 use termtrace_engine::observation::{project_screen_frame, resolved_screen_state_for_session};
 use termtrace_engine::{

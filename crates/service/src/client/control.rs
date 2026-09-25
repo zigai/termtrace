@@ -271,7 +271,7 @@ pub(super) fn public_control_error(
                 "cell_count" => ScreenFrameLimitKind::CellCount,
                 "serialized_bytes" => ScreenFrameLimitKind::SerializedBytes,
                 "response_bytes" => ScreenFrameLimitKind::ResponseBytes,
-                _ => return Error::ControlRejected { code, message },
+                _ => return rejected(code, message, Some(details.clone())),
             };
 
             let source = ScreenFrameError::ResourceLimit {
@@ -286,7 +286,15 @@ pub(super) fn public_control_error(
         }
     }
 
-    return Error::ControlRejected { code, message };
+    return rejected(code, message, details);
+}
+
+fn rejected(code: String, message: String, details: Option<ControlErrorDetails>) -> Error {
+    return Error::Control(termtrace_control::Error::Rejected {
+        code,
+        message,
+        details: details.map(Box::new),
+    });
 }
 
 pub(super) fn public_screen_frame_error(

@@ -10,6 +10,7 @@ use super::{
     Keyboard, Native, Output, Path, PathBuf, Pid, Pointer, Result, Screen, Semantic,
     SessionCompletion, Signal, StableCaptureQuality, Uuid,
 };
+use termtrace_control::{request_or_completed, Reached};
 
 /// High-level live/completed session handle.
 pub struct Session {
@@ -103,7 +104,7 @@ impl Session {
 
     /// Send a caller-owned request so its UUID can be retained for retries.
     pub fn send(&self, request: &ControlRequest) -> Result<ControlData> {
-        return send_request(&self.path, request);
+        return Ok(send_request(&self.path, request)?);
     }
 
     /// Apply input and evaluate its postcondition under one actor ordering point.
@@ -203,32 +204,25 @@ impl Session {
 
     /// Request graceful stop and optionally wait for immutable completion.
     pub fn stop(&mut self, timeout: Option<Duration>) -> Result<Option<SessionCompletion>> {
-        if self.path.join("completion.json").is_file() {
-            return self.complete(timeout.unwrap_or(Duration::ZERO)).map(Some);
-        }
-
-        let send_result = send_request(&self.path, &ControlRequest::new(ControlCommand::Stop));
+        let sent = match request_or_completed(&self.path, ControlCommand::Stop, Duration::ZERO) {
+            Ok(Reached::Completed(_)) => {
+                return self.complete(timeout.unwrap_or(Duration::ZERO)).map(Some);
+            }
+            Ok(Reached::Live(_)) => Ok(()),
+            Err(error) => Err(error),
+        };
 
         if let Some(timeout) = timeout {
-            match self.complete(timeout) {
-                Ok(completion) => return Ok(Some(completion)),
+            return match self.complete(timeout) {
+                Ok(completion) => Ok(Some(completion)),
                 Err(complete_error) => {
-                    if let Err(send_error) = send_result
-                        && !self.path.join("completion.json").is_file()
-                    {
-                        return Err(send_error);
-                    }
-                    return Err(complete_error);
+                    sent?;
+                    Err(complete_error)
                 }
-            }
+            };
         }
 
-        if let Err(send_error) = send_result {
-            if self.path.join("completion.json").is_file() {
-                return self.complete(Duration::ZERO).map(Some);
-            }
-            return Err(send_error);
-        }
+        sent?;
 
         return Ok(None);
     }

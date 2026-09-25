@@ -4,7 +4,6 @@ use crate::{Error, Result};
 use nix::{
     fcntl::{Flock, FlockArg},
     libc::O_NOFOLLOW,
-    sys::socket::{getsockopt, sockopt::PeerCredentials},
     unistd::getuid,
 };
 use serde::de::{self, Deserialize, Deserializer};
@@ -14,20 +13,16 @@ use std::{
     ffi::OsStr,
     fs::{self, File, OpenOptions, Permissions},
     io::ErrorKind,
-    os::linux::net::SocketAddrExt as _,
     os::unix::{
         ffi::OsStrExt as _,
         fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
-        net::{SocketAddr, UnixStream},
     },
     path::{Path, PathBuf},
     result::Result as StdResult,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use termtrace_evidence::{
-    artifact::write_secure,
-    session::{read_completion, read_manifest},
-};
+use termtrace_control::{observe_phase, recorder_identity};
+use termtrace_evidence::{artifact::write_secure, session::read_manifest};
 use termtrace_model::{
     execution::session::SessionPhase,
     execution::session::{SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION},
@@ -44,8 +39,6 @@ use uuid::Uuid;
 const REGISTRY_DIRECTORY: &str = "registry";
 const REGISTRY_RESERVATION_FORMAT: &str = "termtrace-session-registry-reservation";
 const REGISTRY_RESERVATION_VERSION: u32 = 1;
-
-pub use liveness::recorder_identity;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RegistryRecord {
@@ -77,15 +70,14 @@ pub struct SessionRegistry {
     directory: PathBuf,
 }
 
-mod liveness;
 mod reservation;
 mod retention;
 mod store;
 
 use reservation::{system_time_unix_ns, valid_reservation, validate_alias};
 use store::{
-    ensure_owner_directory, read_registry_record_nofollow, registry_error, sync_directory,
-    sync_parent_directory, validate_owner_directory,
+    ensure_owner_directory, inspect_entry, read_registry_record_nofollow, registry_error,
+    sync_directory, sync_parent_directory, validate_owner_directory,
 };
 
 #[cfg(test)]

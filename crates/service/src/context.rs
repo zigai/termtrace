@@ -6,6 +6,7 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
+use termtrace_control::Error as ControlError;
 use uuid::Uuid;
 
 /// Operation context tracking request identity, total deadlines, and cancellation.
@@ -83,18 +84,18 @@ impl OperationContext {
     /// Check whether the total deadline has expired.
     ///
     /// # Errors
-    /// Returns `Error::ControlTimeout` if the deadline has passed.
-    pub fn check_deadline(&self, phase: &'static str) -> Result<()> {
+    /// Returns a control timeout if the deadline has passed.
+    pub fn check_deadline(&self, step: &'static str) -> Result<()> {
         if let Some(deadline) = self.deadline
             && Instant::now() >= deadline
         {
-            return Err(Error::ControlTimeout {
+            return Err(Error::Control(ControlError::Timeout {
                 session: PathBuf::from("<operation-context>"),
-                phase,
+                step,
                 timeout_ms: 0,
                 request_dispatched: false,
                 source: IoError::new(IoErrorKind::TimedOut, "deadline expired"),
-            });
+            }));
         }
         return Ok(());
     }

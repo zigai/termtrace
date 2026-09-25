@@ -1,5 +1,6 @@
 use super::super::control::client_error;
 use super::super::{EventLog, EventProjection, Result, Session};
+use termtrace_model::execution::layout::SessionLayout;
 
 /// Bounded typed canonical event reads.
 pub struct Events<'session> {
@@ -19,7 +20,7 @@ impl Events<'_> {
         }
 
         let records = EventLog::read_page(
-            self.session.path.join("events.jsonl"),
+            SessionLayout::new(&self.session.path).event_log(),
             from_event_seq,
             limit,
         )?;

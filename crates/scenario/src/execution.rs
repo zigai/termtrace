@@ -12,6 +12,7 @@ use std::{
     sync::atomic::AtomicBool,
     time::Duration,
 };
+use termtrace_control::{send_or_completed, send_request};
 use termtrace_engine::{
     analysis::diagnostics::diagnose_snapshot,
     observation::{observe_session_with_options, state_text, StatePoint},
@@ -27,16 +28,17 @@ use termtrace_model::scenario::{
     ScenarioStatus, ScenarioStep, ScenarioStepResult, ScenarioTimelineAssertion, SCENARIO_VERSION,
 };
 use termtrace_model::{
-    execution::event::{Event, InputKind},
+    execution::{
+        event::{Event, InputKind},
+        layout::SessionLayout,
+    },
     protocol::control::{ControlCommand, ControlRequest, ScreenPredicate, ScreenWaitQuality},
     terminal::analysis::DiagnosticCheck,
     terminal::screen::{ScreenFrame, ScreenFrameData},
     terminal::state::KeyModifiers,
     value::ByteString,
 };
-use termtrace_service::{
-    client::Session, send_request, Error as SdkError, StableCaptureOptions, Terminal,
-};
+use termtrace_service::{client::Session, StableCaptureOptions, Terminal};
 use uuid::Uuid;
 
 /// Execute a scenario in a fresh canonical session.
@@ -397,24 +399,9 @@ fn execute_step(
             let request = ControlRequest::new(ControlCommand::Stop);
             request_ids.push(request.request_id);
 
-            let stopped_already = session.path().join("completion.json").is_file();
-
-            if !stopped_already {
-                match session.send(&request) {
-                    Ok(_) => {}
-                    Err(SdkError::ControlUnavailable { lifecycle, .. })
-                        if lifecycle == "completed"
-                            || session.path().join("completion.json").is_file() => {}
-                    Err(error) => {
-                        return Err(step_failure(
-                            index,
-                            step,
-                            request_ids.clone(),
-                            error.to_string(),
-                        ));
-                    }
-                }
-            }
+            send_or_completed(session.path(), &request, Duration::ZERO).map_err(|error| {
+                return step_failure(index, step, request_ids.clone(), error.to_string());
+            })?;
 
             session
                 .complete(Duration::from_millis(scenario.launch.timeout_ms))
@@ -492,7 +479,7 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
         .map_err(|error| return operation("snapshot timeline assertion", error))?;
 
     let marker_time = |label: &str| -> Result<u64> {
-        let mut cursor = EventLogCursor::open(snapshot.path().join("events.jsonl"))
+        let mut cursor = EventLogCursor::open(SessionLayout::new(snapshot.path()).event_log())
             .map_err(|error| return operation("read timeline assertion", error))?;
 
         let mut count = 0_u64;

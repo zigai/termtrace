@@ -9,6 +9,9 @@ use std::{
     thread,
     time::Duration,
 };
+use termtrace_control::{
+    is_completed, read_completed, send_request_response, Error as ControlError,
+};
 use termtrace_engine::{
     analysis::diagnostics::diagnose_session,
     diff::diff_session_states_with_semantic_states,
@@ -37,6 +40,7 @@ use termtrace_model::{
     artifact::save::SaveFormat,
     execution::environment::EnvironmentSpec,
     execution::event::{EventProjection, EVENT_LOG_VERSION},
+    execution::layout::SessionLayout,
     execution::session::ResourceLimits,
     protocol::capability::NATIVE_SCREENSHOT_CAPABILITY,
     protocol::control::{
@@ -48,7 +52,7 @@ use termtrace_model::{
     terminal::screen::ScreenFrameError,
     value::ByteString,
 };
-use termtrace_sdk::{observe_session_with_options, send_request_response, Error, Result, Terminal};
+use termtrace_sdk::{observe_session_with_options, Error, Result, Terminal};
 use termtrace_terminal::project_screen_frame;
 use uuid::Uuid;
 
@@ -247,7 +251,13 @@ impl Driver {
                 } => {
                     let path = self.session_path(handle)?;
 
-                    if path.join("completion.json").is_file() {
+                    let completed = read_completed(path)
+                        .map_err(|error| {
+                            return driver_failure_from_error(error, Some(path.clone()));
+                        })?
+                        .is_some();
+
+                    if completed {
                         let (state, source, presented) =
                             resolved_screen_state_for_session(path, point.clone(), *include_hidden)
                                 .map_err(|error| {
@@ -418,11 +428,14 @@ impl Driver {
                         ));
                     }
 
-                    let records =
-                        EventLog::read_page(path.join("events.jsonl"), *from_event_seq, *limit)
-                            .map_err(|error| {
-                                return driver_failure_from_error(error, Some(path.clone()));
-                            })?;
+                    let records = EventLog::read_page(
+                        SessionLayout::new(path).event_log(),
+                        *from_event_seq,
+                        *limit,
+                    )
+                    .map_err(|error| {
+                        return driver_failure_from_error(error, Some(path.clone()));
+                    })?;
 
                     let events = records
                         .iter()
@@ -600,7 +613,7 @@ impl Driver {
         return Ok(DriverData::Attached {
             handle,
             session_id: manifest.session_id,
-            completed: canonical.join("completion.json").is_file(),
+            completed: is_completed(&canonical),
             canonical_session: canonical,
         });
     }
@@ -651,7 +664,7 @@ impl Driver {
         })?;
 
         let session_id = session.session_id();
-        let completed = session.path().join("completion.json").is_file();
+        let completed = is_completed(session.path());
         let (canonical_session, recorder) = session.into_detached_parts();
         let handle = Uuid::now_v7();
         self.sessions.insert(
@@ -742,7 +755,7 @@ where
                 "required capability `{id}` is blocked ({code}): {detail}; fix: {remediation}; inspect with `termtrace doctor --require {id} --explain`"
             ),
         ),
-        Error::ControlRejected { code, .. } => (code.clone(), error.to_string()),
+        Error::Control(ControlError::Rejected { code, .. }) => (code.clone(), error.to_string()),
         Error::ScreenFrame(ScreenFrameError::InvalidRegion { .. }) => {
             ("invalid_screen_region".to_owned(), error.to_string())
         }
@@ -760,22 +773,23 @@ where
 }
 
 pub(super) fn driver_control_failure_from_error(
-    error: Error,
+    error: ControlError,
     evidence: PathBuf,
     mutation: bool,
 ) -> Box<DriverResult> {
     let (code, dispatched) = match &error {
-        Error::ControlUnavailable { .. } => ("control_unavailable", false),
-        Error::ControlTimeout {
+        ControlError::Unavailable { .. } => ("control_unavailable", false),
+        ControlError::Timeout {
             request_dispatched, ..
         } => ("control_timeout", *request_dispatched),
-        Error::ControlTransport {
+        ControlError::Transport {
             request_dispatched, ..
         } => ("control_transport", *request_dispatched),
-        Error::InvalidControlProtocol { .. } | Error::InvalidJson { .. } => {
+        ControlError::InvalidRequest { .. } => ("invalid_control_request", false),
+        ControlError::InvalidProtocol { .. } | ControlError::InvalidJson { .. } => {
             ("invalid_control_response", true)
         }
-        Error::ControlRejected { code, .. } => {
+        ControlError::Rejected { code, .. } => {
             return driver_failure_with_retry(
                 code,
                 error.to_string(),

@@ -93,6 +93,9 @@ pub enum Error {
         /// Failure encountered while restoring or removing resources.
         cleanup: Box<Error>,
     },
+    /// Session phase observation failed.
+    #[error("{0}")]
+    Control(#[from] termtrace_control::Error),
     /// Evidence reading, validation, or publication failed.
     #[error("{0}")]
     Evidence(#[from] EvidenceError),

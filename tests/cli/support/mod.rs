@@ -142,7 +142,7 @@ pub(crate) use termtrace_model::{
     value::ByteString,
 };
 pub(crate) use termtrace_sdk::{
-    control_endpoint_is_reachable, send_request, send_request_response, wait_for_screen, Error,
+    control_endpoint_is_reachable, send_request, send_request_response, wait_for_screen,
     StableCaptureOptions, Terminal as ClientTerminal,
 };
 pub(crate) use zstd::stream::read::Decoder;

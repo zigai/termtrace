@@ -5,6 +5,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
+use termtrace_control::{request_or_completed, Reached};
 use termtrace_engine::observation::{replay_endpoint_for_prefix, replay_endpoint_for_session};
 use termtrace_engine::Error as EngineError;
 use termtrace_media::native_capture::{native_capture_target, CaptureOutcome, NativeReplayWorker};
@@ -13,7 +14,7 @@ use termtrace_model::{
     protocol::control::{ControlCommand, ControlData},
     terminal::{observation::StatePoint, replay::ReplayEndpoint},
 };
-use termtrace_sdk::{request, Error, Result};
+use termtrace_sdk::{Error, Result};
 use uuid::Uuid;
 
 /// Keep at most one private terminal per language-driver process.
@@ -34,26 +35,26 @@ impl Driver {
         viewport: Option<CaptureTarget>,
     ) -> Result<CaptureOutcome> {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let boundary = if session.join("completion.json").is_file() {
-            None
-        } else {
-            if *point != StatePoint::LatestPresented {
-                return Err(EngineError::InvalidReplay {
-                    reason: "live native capture requires the latest presented state".to_owned(),
+        let boundary = match request_or_completed(session, ControlCommand::Status, Duration::ZERO)?
+        {
+            Reached::Completed(_) => None,
+            Reached::Live(data) => {
+                if *point != StatePoint::LatestPresented {
+                    return Err(EngineError::InvalidReplay {
+                        reason: "live native capture requires the latest presented state"
+                            .to_owned(),
+                    }
+                    .into());
                 }
-                .into());
-            }
 
-            match request(session, ControlCommand::Status) {
-                Ok(ControlData::Status { boundaries, .. }) => Some(boundaries.durable),
-                Err(_) if session.join("completion.json").is_file() => None,
-                Err(error) => return Err(error),
-                _ => {
+                let ControlData::Status { boundaries, .. } = *data else {
                     return Err(EngineError::InvalidReplay {
                         reason: "live status returned an unexpected response".to_owned(),
                     }
                     .into());
-                }
+                };
+
+                Some(boundaries.durable)
             }
         };
 

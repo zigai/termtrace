@@ -4,7 +4,6 @@ use crate::{
     context::OperationContext,
     error::Result,
     inspection::wait_for_completion,
-    protocol::request,
     session::{CompletedSession, Session},
 };
 use std::{
@@ -14,6 +13,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use termtrace_control::{read_completed, request};
 use termtrace_model::{
     execution::environment::EnvironmentSpec,
     execution::session::ResourceLimits,
@@ -173,13 +173,15 @@ impl Recording {
 
         match policy {
             FinishPolicy::Graceful => {
-                let remaining = context.remaining_duration().unwrap_or(DEFAULT_FINISH_TIMEOUT);
+                let remaining = context
+                    .remaining_duration()
+                    .unwrap_or(DEFAULT_FINISH_TIMEOUT);
                 let natural_budget = remaining / 2;
                 let start = Instant::now();
                 let mut exited_naturally = false;
 
                 while start.elapsed() < natural_budget {
-                    if self.path().join("completion.json").is_file() {
+                    if read_completed(self.path())?.is_some() {
                         exited_naturally = true;
                         break;
                     }
@@ -199,8 +201,9 @@ impl Recording {
                     request(self.path(), ControlCommand::Stop)?;
                 }
 
-                let remaining_evidence =
-                    context.remaining_duration().unwrap_or(DEFAULT_FINISH_TIMEOUT);
+                let remaining_evidence = context
+                    .remaining_duration()
+                    .unwrap_or(DEFAULT_FINISH_TIMEOUT);
                 wait_for_completion(self.path(), remaining_evidence)?;
             }
             FinishPolicy::Terminate => {
@@ -210,7 +213,9 @@ impl Recording {
                         signal: ProcessSignal::Terminate,
                     },
                 )?;
-                let remaining = context.remaining_duration().unwrap_or(DEFAULT_FINISH_TIMEOUT);
+                let remaining = context
+                    .remaining_duration()
+                    .unwrap_or(DEFAULT_FINISH_TIMEOUT);
                 wait_for_completion(self.path(), remaining)?;
             }
             FinishPolicy::ForceKill => {
@@ -224,10 +229,12 @@ impl Recording {
                         },
                     );
                 }
-                let remaining = context.remaining_duration().unwrap_or(DEFAULT_FINISH_TIMEOUT);
+                let remaining = context
+                    .remaining_duration()
+                    .unwrap_or(DEFAULT_FINISH_TIMEOUT);
                 let start = Instant::now();
                 while start.elapsed() < remaining {
-                    if self.path().join("completion.json").is_file() {
+                    if read_completed(self.path())?.is_some() {
                         break;
                     }
                     if let Some(child) = &mut self.child
@@ -239,8 +246,9 @@ impl Recording {
                         Duration::from_millis(20).min(remaining.saturating_sub(start.elapsed())),
                     );
                 }
-                let remaining_evidence =
-                    context.remaining_duration().unwrap_or(DEFAULT_FINISH_TIMEOUT);
+                let remaining_evidence = context
+                    .remaining_duration()
+                    .unwrap_or(DEFAULT_FINISH_TIMEOUT);
                 wait_for_completion(self.path(), remaining_evidence)?;
             }
         }
@@ -301,12 +309,12 @@ impl DetachedRecording {
 mod tests {
     use super::*;
     use crate::error::ErrorKind;
+    use crate::session::tests::write_test_manifest;
     use nix::sys::signal::kill;
     use nix::unistd::Pid;
     use std::process::Command;
     use tempfile::TempDir;
     use uuid::Uuid;
-    use crate::session::tests::write_test_manifest;
 
     fn setup_test_session(dir: &Path) -> Session {
         let session_id = Uuid::now_v7();
@@ -357,7 +365,10 @@ mod tests {
 
         let context = OperationContext::default();
         let result = recording.request_stop(StopOptions::default(), &context);
-        assert!(result.is_err(), "request_stop must propagate error when control socket missing");
+        assert!(
+            result.is_err(),
+            "request_stop must propagate error when control socket missing"
+        );
         return;
     }
 
@@ -381,16 +392,28 @@ mod tests {
         // Context with short timeout; finish should fail because control socket/completion.json is missing
         let context = OperationContext::default().with_timeout(Duration::from_millis(50));
         let result = recording.finish(FinishPolicy::Graceful, &context);
-        assert!(result.is_err(), "finish should fail due to missing completion/socket");
+        assert!(
+            result.is_err(),
+            "finish should fail due to missing completion/socket"
+        );
 
         // Crucial verification: self.child was NOT taken! Child is still alive because recording still owns it.
-        assert!(kill(Pid::from_raw(raw_pid), None).is_ok(), "child should still be alive because ownership was retained");
-        assert!(recording.child.is_some(), "recording.child must remain Some on failure");
+        assert!(
+            kill(Pid::from_raw(raw_pid), None).is_ok(),
+            "child should still be alive because ownership was retained"
+        );
+        assert!(
+            recording.child.is_some(),
+            "recording.child must remain Some on failure"
+        );
 
         // When recording is dropped now, child should be reaped
         drop(recording);
         thread::sleep(Duration::from_millis(50));
-        assert!(kill(Pid::from_raw(raw_pid), None).is_err(), "child should be reaped upon drop of recording");
+        assert!(
+            kill(Pid::from_raw(raw_pid), None).is_err(),
+            "child should be reaped upon drop of recording"
+        );
         return;
     }
 
@@ -408,10 +431,16 @@ mod tests {
 
         let context = OperationContext::default().with_timeout(Duration::from_millis(50));
         let result = recording.finish(FinishPolicy::ForceKill, &context);
-        assert!(result.is_err(), "finish should fail due to missing completion.json");
+        assert!(
+            result.is_err(),
+            "finish should fail due to missing completion.json"
+        );
 
         // Ownership must be retained in recording.child
-        assert!(recording.child.is_some(), "recording.child must remain Some on failure");
+        assert!(
+            recording.child.is_some(),
+            "recording.child must remain Some on failure"
+        );
         return;
     }
 
@@ -429,10 +458,16 @@ mod tests {
 
         let context = OperationContext::default().with_timeout(Duration::from_millis(50));
         let result = recording.finish(FinishPolicy::Terminate, &context);
-        assert!(result.is_err(), "finish should fail due to missing control socket");
+        assert!(
+            result.is_err(),
+            "finish should fail due to missing control socket"
+        );
 
         // Ownership must be retained in recording.child
-        assert!(recording.child.is_some(), "recording.child must remain Some on failure");
+        assert!(
+            recording.child.is_some(),
+            "recording.child must remain Some on failure"
+        );
         return;
     }
 
@@ -448,7 +483,10 @@ mod tests {
             wait_timeout: Some(Duration::from_millis(50)),
         };
         let result = recording.request_stop(options, &context);
-        assert!(result.is_err(), "request_stop must propagate error when control socket missing");
+        assert!(
+            result.is_err(),
+            "request_stop must propagate error when control socket missing"
+        );
         return;
     }
 }

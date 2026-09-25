@@ -214,7 +214,7 @@ impl SessionBuilder {
             })?;
 
             if let Some(status) = status {
-                if path.join("completion.json").is_file() {
+                if read_completed(&path)?.is_some() {
                     validate_completed_session(&path)?;
 
                     break;

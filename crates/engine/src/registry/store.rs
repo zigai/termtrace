@@ -308,7 +308,7 @@ impl SessionRegistry {
             .map_err(|_| return Error::ClockBeforeEpoch)?
             .as_nanos();
 
-        let process_identity = recorder_identity(&canonical);
+        let recorder = recorder_identity(&canonical);
 
         return Ok(RegistryEntry {
             format: REGISTRY_ENTRY_FORMAT.to_owned(),
@@ -316,8 +316,8 @@ impl SessionRegistry {
             alias: alias.to_owned(),
             canonical_session: ByteString::from(canonical.as_os_str().as_bytes()),
             session_id: manifest.session_id,
-            recorder_pid: process_identity.map(|identity| return identity.0),
-            recorder_process_start_ticks: process_identity.map(|identity| return identity.1),
+            recorder_pid: recorder.map(|identity| return identity.pid),
+            recorder_process_start_ticks: recorder.map(|identity| return identity.start_ticks),
             control_protocol_version: CONTROL_PROTOCOL_VERSION,
             registered_unix_ns,
         });
@@ -365,7 +365,7 @@ impl SessionRegistry {
     }
 }
 
-fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
+pub(super) fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
     let mut row = RegistryListEntry {
         alias: entry.alias.clone(),
         canonical_session: entry.canonical_session.clone(),
@@ -435,44 +435,19 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         return row;
     }
 
-    let completion_path = canonical.join("completion.json");
-    if completion_path.exists() {
-        match read_completion(&canonical) {
-            Ok(completion) if completion.session_id == entry.session_id => {
-                row.lifecycle = SessionPhase::Completed;
+    let observation = observe_phase(&canonical);
+    row.lifecycle = observation.phase;
+    row.diagnostic = observation.diagnostic;
 
-                return row;
-            }
-            Ok(_) => {
-                row.lifecycle = SessionPhase::IdentityMismatch;
-                row.diagnostic =
-                    Some("completion session ID differs from registry binding".to_owned());
-
-                return row;
-            }
-            Err(error) => {
-                row.lifecycle = SessionPhase::MissingEvidence;
-                row.diagnostic = Some(error.to_string());
-
-                return row;
-            }
-        }
-    }
-
-    let responsive_identity = recorder_identity(&canonical);
-
-    if let Some(identity) = entry.recorder_pid.zip(entry.recorder_process_start_ticks) {
-        if responsive_identity == Some(identity) {
-            row.lifecycle = SessionPhase::Live;
-        } else {
-            row.lifecycle = SessionPhase::Stale;
-            row.diagnostic =
-                Some("recorder PID/start identity or control socket is stale".to_owned());
-        }
-    } else if responsive_identity.is_some() {
-        row.lifecycle = SessionPhase::Live;
-    } else {
-        row.lifecycle = SessionPhase::Incomplete;
+    if let Some(recorded) = entry.recorder_pid.zip(entry.recorder_process_start_ticks)
+        && matches!(row.lifecycle, SessionPhase::Live | SessionPhase::Incomplete)
+        && observation
+            .recorder
+            .map(|identity| return (identity.pid, identity.start_ticks))
+            != Some(recorded)
+    {
+        row.lifecycle = SessionPhase::Stale;
+        row.diagnostic = Some("recorder PID/start identity or control socket is stale".to_owned());
     }
 
     return row;

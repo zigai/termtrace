@@ -126,7 +126,7 @@ pub(super) fn run_detached_record(
     let mut ready_since: Option<Instant> = None;
 
     loop {
-        if paths.session.join("completion.json").is_file() {
+        if is_completed(&paths.session) {
             return promote_completed_start(
                 response,
                 &registry,
@@ -137,9 +137,7 @@ pub(super) fn run_detached_record(
             );
         }
 
-        if paths.session.join("session.json").is_file()
-            && recorder_identity(&paths.session).is_some()
-        {
+        if recorder_identity(&paths.session).is_some() {
             let ready_at = ready_since.get_or_insert_with(Instant::now);
             if ready_at.elapsed() >= Duration::from_millis(30) {
                 let entry = registry.promote(&reservation).map_err(|error| {
@@ -163,7 +161,7 @@ pub(super) fn run_detached_record(
         }
 
         if let Some(status) = recorder.try_wait().into_diagnostic()? {
-            if paths.session.join("completion.json").is_file() {
+            if is_completed(&paths.session) {
                 return promote_completed_start(
                     response,
                     &registry,
@@ -305,7 +303,7 @@ fn report_start_outcome(
                     false,
                     serde_json::json!({
                         "matched": false,
-                        "ended": entry.session_path().join("completion.json").is_file(),
+                        "ended": is_completed(&entry.session_path()),
                         "error": error.to_string(),
                     }),
                 ),

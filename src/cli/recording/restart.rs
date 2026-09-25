@@ -15,21 +15,15 @@ pub(in crate::cli) fn run_restart(
     let predecessor = predecessor_entry.session_path();
     let timeout = Duration::from_millis(arguments.timeout_ms);
 
-    if !predecessor.join("completion.json").is_file()
-        && let Err(error) = request(&predecessor, ControlCommand::Stop)
-        && !matches!(
-            error,
-            termtrace_sdk::Error::ControlUnavailable { .. }
-                | termtrace_sdk::Error::ControlTimeout { .. }
-                | termtrace_sdk::Error::ControlTransport { .. }
-        )
+    if let Err(error) = request_or_completed(&predecessor, ControlCommand::Stop, Duration::ZERO)
+        && !error.is_connection_failure()
     {
         return Err(error).into_diagnostic();
     }
 
     let completion = wait_for_completion(&predecessor, timeout).into_diagnostic()?;
     let predecessor_manifest_bytes =
-        fs_err::read(predecessor.join("session.json")).into_diagnostic()?;
+        fs_err::read(SessionLayout::new(&predecessor).manifest()).into_diagnostic()?;
 
     let expected_lineage = SessionLineage {
         predecessor_session_id: predecessor_entry.session_id,
@@ -62,9 +56,7 @@ pub(in crate::cli) fn run_restart(
     let deadline = Instant::now() + timeout;
 
     loop {
-        if paths.session.join("session.json").is_file()
-            && recorder_identity(&paths.session).is_some()
-        {
+        if recorder_identity(&paths.session).is_some() {
             let successor_manifest = read_manifest(&paths.session).into_diagnostic()?;
             if successor_manifest.lineage.as_ref() != Some(&expected_lineage) {
                 return Err(miette::miette!(
@@ -177,7 +169,8 @@ pub(super) fn restarted_record_options(
     overrides: &RestartOverrides,
     environment_override: Option<EnvironmentSpec>,
 ) -> Result<RecordOptions> {
-    let manifest_bytes = fs_err::read(predecessor.join("session.json")).into_diagnostic()?;
+    let manifest_bytes =
+        fs_err::read(SessionLayout::new(predecessor).manifest()).into_diagnostic()?;
     let manifest = read_manifest(predecessor).into_diagnostic()?;
     let completion = wait_for_completion(predecessor, Duration::ZERO).into_diagnostic()?;
     let event_log =

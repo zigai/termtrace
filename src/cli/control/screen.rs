@@ -91,8 +91,10 @@ pub(in crate::cli) fn run_screen(
     }
 
     let mut resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle == SessionPhase::Stale
-        && wait_for_completion(&resolved.path, Duration::from_millis(500)).is_ok()
+    if matches!(
+        resolved.lifecycle,
+        SessionPhase::Incomplete | SessionPhase::Stale
+    ) && wait_for_completion(&resolved.path, Duration::from_millis(500)).is_ok()
     {
         resolved.lifecycle = SessionPhase::Completed;
         resolved.diagnostic = None;
@@ -183,9 +185,7 @@ pub(in crate::cli) fn run_screen(
     }
 
     if let Some(format) = arguments.format {
-        if matches!(format, ShowFormat::Vt | ShowFormat::Html)
-            && !session.join("completion.json").is_file()
-        {
+        if matches!(format, ShowFormat::Vt | ShowFormat::Html) && !is_completed(&session) {
             return Err(miette::miette!(
                 "--format vt and --format html are supported only on completed sessions"
             ));
@@ -260,12 +260,15 @@ pub(in crate::cli) fn run_screen(
             let point = StatePoint::StateHash {
                 state_hash: since.clone(),
             };
-            let prior = if session.join("completion.json").is_file() {
-                observe_session_with_options(&session, point, false).into_diagnostic()?
-            } else {
-                let _ = request(&session, ControlCommand::Status).into_diagnostic()?;
-
-                observe_validated_prefix(&session, point, false).into_diagnostic()?
+            let prior = match request_or_completed(&session, ControlCommand::Status, Duration::ZERO)
+                .into_diagnostic()?
+            {
+                Reached::Completed(_) => {
+                    observe_session_with_options(&session, point, false).into_diagnostic()?
+                }
+                Reached::Live(_) => {
+                    observe_validated_prefix(&session, point, false).into_diagnostic()?
+                }
             };
 
             Some(diff_screen(

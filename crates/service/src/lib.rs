@@ -49,9 +49,7 @@ pub use events::{EventCursor, EventPage, EventsService};
 pub use integrity::IntegrityService;
 pub use locator::ScreenFrameQuery;
 pub use output::{OutputCursor, OutputPage, OutputService};
-pub use protocol::{
-    control_endpoint_is_reachable, request, send_request, send_request_response, wait_for_screen,
-};
+pub use protocol::wait_for_screen;
 pub use recording::{
     DetachedRecording, FinishPolicy, Recording, RecordingOptions, StopOptions, StopReceipt,
 };

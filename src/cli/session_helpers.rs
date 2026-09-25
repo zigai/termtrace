@@ -7,18 +7,20 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
     str,
+    time::Duration,
 };
+use termtrace_control::{observe_phase, request_or_completed, Reached};
 use termtrace_engine::{
     registry::SessionRegistry,
     timeline::{resolve_session_prefix_source_selection, resolve_session_source_selection},
+    Result as EngineResult,
 };
 use termtrace_model::{
     execution::session::SessionPhase,
     protocol::control::{ControlCommand, ControlData},
-    terminal::observation::StatePoint,
+    terminal::{observation::StatePoint, replay::SourceRange},
     value::ByteString,
 };
-use termtrace_sdk::{control_endpoint_is_reachable, request};
 
 pub(super) struct ResolvedSessionRef {
     pub(super) path: PathBuf,
@@ -133,44 +135,12 @@ pub(super) fn write_session_lifecycle(
 }
 
 fn resolve_path_lifecycle(path: PathBuf) -> ResolvedSessionRef {
-    if !path.is_dir() {
-        return ResolvedSessionRef {
-            path,
-            lifecycle: SessionPhase::MissingEvidence,
-            diagnostic: Some("session directory is missing or unreadable".to_owned()),
-        };
-    }
+    let observation = observe_phase(&path);
 
-    if path.join("completion.json").is_file() {
-        return ResolvedSessionRef {
-            path,
-            lifecycle: SessionPhase::Completed,
-            diagnostic: None,
-        };
-    }
-
-    if !path.join("session.json").is_file() {
-        return ResolvedSessionRef {
-            path,
-            lifecycle: SessionPhase::Incomplete,
-            diagnostic: Some("session manifest has not been published".to_owned()),
-        };
-    }
-
-    if control_endpoint_is_reachable(&path) {
-        return ResolvedSessionRef {
-            path,
-            lifecycle: SessionPhase::Live,
-            diagnostic: None,
-        };
-    }
     return ResolvedSessionRef {
         path,
-        lifecycle: SessionPhase::Stale,
-        diagnostic: Some(
-            "session has no completion evidence and its abstract control endpoint is unreachable"
-                .to_owned(),
-        ),
+        lifecycle: observation.phase,
+        diagnostic: observation.diagnostic,
     };
 }
 
@@ -182,44 +152,46 @@ pub(super) fn resolve_cli_range(
         return Ok((range.start_monotonic_ns, range.end_monotonic_ns));
     }
 
-    let live_event_count = if !session.join("completion.json").is_file() {
-        match request(session, ControlCommand::Status).into_diagnostic() {
-            Ok(ControlData::Status { boundaries, .. }) => Some(boundaries.durable.next_event_seq),
-            Ok(_) => {
-                return Err(miette::miette!(
-                    "live status returned an unexpected response"
+    let live_event_count =
+        match request_or_completed(session, ControlCommand::Status, Duration::ZERO) {
+            Ok(Reached::Completed(_)) => {
+                return selection_bounds(resolve_session_source_selection(
+                    session,
+                    range.start_monotonic_ns,
+                    range.end_monotonic_ns,
+                    range.from_marker.as_deref(),
+                    range.to_marker.as_deref(),
                 ));
+            }
+            Ok(Reached::Live(data)) => {
+                let ControlData::Status { boundaries, .. } = *data else {
+                    return Err(miette::miette!(
+                        "live status returned an unexpected response"
+                    ));
+                };
+
+                Some(boundaries.durable.next_event_seq)
             }
             Err(error) => {
                 tracing::debug!(%error, "marker selection has no responsive control boundary");
                 None
             }
-        }
-    } else {
-        None
-    };
+        };
 
-    let resolved = if session.join("completion.json").is_file() {
-        resolve_session_source_selection(
-            session,
-            range.start_monotonic_ns,
-            range.end_monotonic_ns,
-            range.from_marker.as_deref(),
-            range.to_marker.as_deref(),
-        )
-    } else {
-        resolve_session_prefix_source_selection(
-            session,
-            live_event_count,
-            range.start_monotonic_ns,
-            range.end_monotonic_ns,
-            range.from_marker.as_deref(),
-            range.to_marker.as_deref(),
-        )
-    }
-    .into_diagnostic()?;
+    return selection_bounds(resolve_session_prefix_source_selection(
+        session,
+        live_event_count,
+        range.start_monotonic_ns,
+        range.end_monotonic_ns,
+        range.from_marker.as_deref(),
+        range.to_marker.as_deref(),
+    ));
+}
 
-    return Ok(resolved.map_or((None, None), |value| {
+fn selection_bounds(
+    selection: EngineResult<Option<SourceRange>>,
+) -> Result<(Option<u64>, Option<u64>)> {
+    return Ok(selection.into_diagnostic()?.map_or((None, None), |value| {
         return (Some(value.start_monotonic_ns), Some(value.end_monotonic_ns));
     }));
 }

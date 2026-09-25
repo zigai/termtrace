@@ -292,7 +292,7 @@ pub(in crate::cli) fn run_send(
                         code,
                         message,
                         details.as_ref(),
-                        resolved.path.join("completion.json").is_file(),
+                        is_completed(&resolved.path),
                     );
 
                     if arguments.json {
@@ -426,7 +426,7 @@ pub(in crate::cli) fn run_send(
                     Ok(control_response) => control_response,
                     Err(error) => {
                         let (code, applied, retry) = match &error {
-                            SdkError::InvalidControlProtocol { .. } => {
+                            ControlError::InvalidRequest { .. } => {
                                 ("invalid_payload", "none", "safe_new_request")
                             }
                             _ => (
@@ -535,7 +535,7 @@ pub(in crate::cli) fn run_send(
                             code,
                             message,
                             details.as_ref(),
-                            resolved.path.join("completion.json").is_file(),
+                            is_completed(&resolved.path),
                         );
 
                         if arguments.json {

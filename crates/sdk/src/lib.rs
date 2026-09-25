@@ -4,20 +4,10 @@
 pub use termtrace_service::client;
 
 mod driver;
-#[cfg(not(feature = "local"))]
-mod error;
-#[cfg(feature = "local")]
-pub(crate) use termtrace_service::error;
-
 pub mod instrumentation;
-#[cfg(not(feature = "local"))]
-mod protocol;
-#[cfg(feature = "local")]
-pub(crate) use termtrace_service::protocol;
-
 mod remote;
 
-pub use driver::Driver;
+pub use driver::{Driver, DriverError};
 pub use remote::Client;
 pub use termtrace_model::protocol::driver::{
     DriverData, DriverMethod, DriverRequest, DriverResponse, DriverResult,
@@ -158,7 +148,7 @@ pub mod blocking {
 
 /// Low-level process driver and raw protocol access.
 pub mod advanced {
-    pub use crate::driver::Driver;
+    pub use crate::driver::{Driver, DriverError};
     pub use crate::remote::Client;
 }
 
@@ -172,12 +162,8 @@ pub use client::{
     semantic_state_with_hash_for_session, Events, Evidence, Keyboard, Native, Output, Pointer,
     Semantic, Session, SessionBuilder, Terminal,
 };
-pub use error::{Error, ErrorKind, Result, RetrySafety};
 #[cfg(feature = "local")]
 pub use locator::ScreenFrameQuery;
-pub use protocol::{
-    control_endpoint_is_reachable, request, send_request, send_request_response, wait_for_screen,
-};
 #[cfg(feature = "local")]
 pub use recording::{
     DetachedRecording, FinishPolicy, Recording, RecordingOptions, StopOptions, StopReceipt,
@@ -186,6 +172,11 @@ pub use recording::{
 pub use screen::{Screen, StableCaptureOptions, StableScreenCapture};
 #[cfg(feature = "local")]
 pub use session::{CompletedSession, LiveSession, ResolveOptions};
+pub use termtrace_control::{
+    control_endpoint_is_reachable, request, send_request, send_request_response,
+};
+#[cfg(not(feature = "local"))]
+pub use termtrace_control::{wait_for_screen, Error, Result};
 #[cfg(feature = "local")]
 pub use termtrace_model::artifact::bundle::{
     BundleManifest, BundleProfile, BundleVerificationPolicy,
@@ -208,3 +199,5 @@ pub use termtrace_service::inspection;
 pub use termtrace_service::types::{
     ArtifactRef, Operation, OperationStatus, ResolvedState, SessionId, StateSelector,
 };
+#[cfg(feature = "local")]
+pub use termtrace_service::{error::ErrorKind, wait_for_screen, Error, Result, RetrySafety};

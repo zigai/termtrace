@@ -15,16 +15,19 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use termtrace_control::{request_or_completed, Reached};
 use termtrace_engine::timeline::resolve_session_source_selection;
 use termtrace_evidence::{
     artifact::write_secure, event_log::EventLogCursor, session::validate_completed_session,
 };
 use termtrace_model::{
-    execution::event::{event_type, Event, EventProjection, EventRecord},
+    execution::{
+        event::{event_type, Event, EventProjection, EventRecord},
+        layout::SessionLayout,
+    },
     protocol::control::{ControlCommand, ControlData},
     protocol::output_projection::{OutputProjectionQuality, OutputProjectionReport},
 };
-use termtrace_sdk::request;
 use termtrace_terminal::ControlStripper;
 
 pub(in crate::cli) fn run_output(
@@ -77,7 +80,8 @@ pub(in crate::cli) fn run_output(
         ));
     }
 
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl")).into_diagnostic()?;
+    let mut cursor =
+        EventLogCursor::open(SessionLayout::new(&session).event_log()).into_diagnostic()?;
     let session_id = cursor.header().session_id;
     let mut staged = tempfile::tempfile().into_diagnostic()?;
     let mut source_hash = blake3::Hasher::new();
@@ -269,7 +273,8 @@ pub(in crate::cli) fn run_events(
         ));
     }
 
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl")).into_diagnostic()?;
+    let mut cursor =
+        EventLogCursor::open(SessionLayout::new(&session).event_log()).into_diagnostic()?;
     let mut staged = tempfile::tempfile().into_diagnostic()?;
     let mut total = 0_usize;
     let mut returned = 0_usize;
@@ -375,50 +380,43 @@ fn follow_records(
     event_types: &[String],
     mut emit: impl FnMut(&mut ResponseWriter, EventRecord) -> Result<bool>,
 ) -> Result<ExitCode> {
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl")).into_diagnostic()?;
+    let mut cursor =
+        EventLogCursor::open(SessionLayout::new(session).event_log()).into_diagnostic()?;
     let mut initialized = false;
     let mut control_failure_since = None;
     let mut staged = tempfile::tempfile().into_diagnostic()?;
     let mut line = Vec::new();
 
     loop {
-        let completion_exists = session.join("completion.json").is_file();
-        let (available, live_boundary, completed_hash) = if completion_exists {
-            // A seeded suffix is not full-log operation verification. Validate the completed
-            // source once, streaming, before allowing its final suffix to become observable.
-            let completion = validate_completed_session(session).into_diagnostic()?;
-
-            (
-                completion.event_count,
-                None,
-                Some(completion.final_event_hash),
-            )
-        } else {
-            let data = match request(session, ControlCommand::EventCursor { next_event_seq }) {
-                Ok(data) => {
-                    control_failure_since = None;
-                    data
+        let reached = match request_or_completed(
+            session,
+            ControlCommand::EventCursor { next_event_seq },
+            Duration::ZERO,
+        ) {
+            Ok(reached) => {
+                control_failure_since = None;
+                reached
+            }
+            Err(error) => {
+                let since = control_failure_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= Duration::from_secs(2) {
+                    return Err(error).into_diagnostic();
                 }
-                Err(_) if session.join("completion.json").is_file() => continue,
-                Err(error) => {
-                    let since = control_failure_since.get_or_insert_with(Instant::now);
-                    if since.elapsed() >= Duration::from_secs(2) {
-                        return Err(error).into_diagnostic();
-                    }
 
-                    thread::sleep(Duration::from_millis(20));
+                thread::sleep(Duration::from_millis(20));
 
-                    continue;
-                }
-            };
+                continue;
+            }
+        };
 
+        let (available, live_boundary, completed_hash) = if let Reached::Live(data) = reached {
             let ControlData::EventCursor {
                 device,
                 inode,
                 header_hash,
                 start,
                 durable,
-            } = data
+            } = *data
             else {
                 return Err(miette::miette!(
                     "live cursor returned an unexpected response"
@@ -441,7 +439,19 @@ fn follow_records(
             }
 
             (durable.next_event_seq, Some(durable), None)
+        } else {
+            // A seeded suffix is not full-log operation verification. Validate the completed
+            // source once, streaming, before allowing its final suffix to become observable.
+            let completion = validate_completed_session(session).into_diagnostic()?;
+
+            (
+                completion.event_count,
+                None,
+                Some(completion.final_event_hash),
+            )
         };
+        let completed = completed_hash.is_some();
+
         if next_event_seq > available {
             return Err(miette::miette!(
                 "event resume cursor {next_event_seq} exceeds durable event count {available}"
@@ -508,14 +518,14 @@ fn follow_records(
 
         next_event_seq = emit_end;
 
-        if completion_exists && end_event_seq.is_some_and(|end| return end > available) {
+        if completed && end_event_seq.is_some_and(|end| return end > available) {
             return Err(miette::miette!(
                 "event end cursor exceeds completed event count {available}"
             ));
         }
 
         if end_event_seq.is_some_and(|end| return next_event_seq >= end)
-            || (completion_exists && next_event_seq >= available)
+            || (completed && next_event_seq >= available)
         {
             return Ok(ExitCode::SUCCESS);
         }

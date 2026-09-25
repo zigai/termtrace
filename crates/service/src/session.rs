@@ -4,7 +4,6 @@ use crate::{
     actions::{ActionOptions, ActionResult, InputAtom},
     client::Session as ClientSession,
     error::{Error, Result},
-    protocol::request,
     types::{ResolvedState, StateSelector},
 };
 use std::{
@@ -13,6 +12,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use termtrace_control::request;
 use termtrace_engine::observation::{
     project_screen_frame, resolved_screen_state_for_session, state_text,
 };
@@ -237,12 +237,7 @@ impl CompletedSession {
 pub(crate) mod tests {
     use super::{CompletedSession, LiveSession, Session};
     use crate::error::ErrorKind;
-    use std::{
-        collections::BTreeMap,
-        ffi::OsString,
-        fs::write,
-        path::Path,
-    };
+    use std::{collections::BTreeMap, ffi::OsString, fs::write, path::Path};
     use tempfile::TempDir;
     use termtrace_evidence::{
         provenance::{collect_execution_provenance, RecorderBuildIdentity},
@@ -252,6 +247,7 @@ pub(crate) mod tests {
         execution::{
             environment::ChildEnvironmentPolicy,
             event_log::DurabilityPolicy,
+            layout::{self, SessionLayout},
             provenance::ProvenancePolicy,
             session::{
                 GeometryProvenance, ResourceLimits, SessionGeometry, SessionManifest,
@@ -360,9 +356,9 @@ pub(crate) mod tests {
             termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
             operating_system: "linux".to_owned(),
             architecture: "test".to_owned(),
-            event_log: "events.jsonl".to_owned(),
+            event_log: layout::EVENT_LOG.to_owned(),
             control_socket: format!("termtrace-control-{session_id}"),
-            request_journal: "requests.jsonl".to_owned(),
+            request_journal: layout::MUTATION_JOURNAL.to_owned(),
             contains_sensitive_terminal_data: true,
             durability_policy: DurabilityPolicy::default(),
             resource_limits: ResourceLimits::default(),
@@ -371,7 +367,7 @@ pub(crate) mod tests {
         let Ok(bytes) = canonical_manifest_bytes(&manifest) else {
             return false;
         };
-        return write(dir.join("session.json"), bytes).is_ok();
+        return write(SessionLayout::new(dir).manifest(), bytes).is_ok();
     }
 
     #[test]

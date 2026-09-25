@@ -2,7 +2,7 @@ use super::super::control::{
     client_error, exact_duration_ns, public_control_error, validate_stable_options,
 };
 use super::super::{
-    exchange, observe_session_with_options, project_screen_frame,
+    exchange, observe_session_with_options, project_screen_frame, read_completed,
     resolved_screen_state_for_session, send_request_response, wait_for_screen, CaptureQuality,
     ControlCommand, ControlData, ControlRequest, ControlResult, Duration, Error, ExchangeTiming,
     FrameDetail, Observation, Result, ScreenFrame, ScreenPredicate, ScreenProjectionRequest,
@@ -38,7 +38,7 @@ impl<'session> Screen<'session> {
 
     /// Return one bounded rich latest-presented frame from a live or completed session.
     pub fn frame(&self, projection: ScreenProjectionRequest) -> Result<ScreenFrame> {
-        if self.session.path.join("completion.json").is_file() {
+        if read_completed(&self.session.path)?.is_some() {
             let (state, source, presented) = resolved_screen_state_for_session(
                 &self.session.path,
                 StatePoint::LatestPresented,
@@ -138,7 +138,7 @@ impl<'session> Screen<'session> {
         validate_stable_options(options)?;
         let stable_for_ns = exact_duration_ns("stable_for", options.stable_for)?;
 
-        if self.session.path.join("completion.json").is_file() {
+        if read_completed(&self.session.path)?.is_some() {
             return Ok(StableScreenCapture {
                 quality: StableCaptureQuality::Stable,
                 frame: self.frame(options.projection)?,

@@ -7,7 +7,6 @@ use crate::{
     },
     client::{Screen, Session, Terminal},
     locator::{Locator, LocatorSpec},
-    protocol::{exchange, ExchangeTiming},
     Error, Result,
 };
 use nix::libc::{O_CLOEXEC, O_NOFOLLOW};
@@ -26,6 +25,7 @@ use std::{
     thread::panicking,
     time::{Duration, Instant},
 };
+use termtrace_control::{exchange, ExchangeTiming};
 use termtrace_evidence::artifact::{create_private_directory, sync_directory, write_secure};
 use termtrace_model::{
     artifact::bundle::BundleProfile,

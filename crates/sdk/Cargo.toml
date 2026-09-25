@@ -15,6 +15,7 @@ scenario = ["local", "dep:termtrace-scenario"]
 
 [dependencies]
 termtrace-model = { version = "=0.1.0", path = "../model" }
+termtrace-control = { version = "=0.1.0", path = "../control" }
 termtrace-service = { version = "=0.1.0", path = "../service", optional = true }
 termtrace-scenario = { version = "=0.1.0", path = "../scenario", optional = true }
 termtrace-media = { version = "=0.1.0", path = "../media", optional = true }
