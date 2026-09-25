@@ -36,6 +36,7 @@ use termtrace_evidence::{
     session::{read_completion, read_manifest, validate_completion_summary_candidate},
     Error as EvidenceError,
 };
+use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::{
     artifact::visual::{
         CaptureKind, CaptureOptions, CaptureOutcome, VisualManifest, GHOSTTY_EFFECTIVE_CONFIG_NAME,
@@ -362,15 +363,17 @@ fn capture_staged(
     }
 
     let completion = read_completion(&options.session_directory)?;
-    let summary =
-        EventLogSummary::read_with_check(options.session_directory.join("events.jsonl"), || {
+    let summary = EventLogSummary::read_with_check(
+        SessionLayout::new(&options.session_directory).event_log(),
+        || {
             if cancelled.load(Ordering::Relaxed) {
                 return Err(EvidenceError::InvalidEvidence {
                     reason: "original capture cancelled".to_owned(),
                 });
             }
             return Ok(());
-        })?;
+        },
+    )?;
 
     validate_completion_summary_candidate(&options.session_directory, &summary, &completion)?;
     if completion.failure.is_some() {

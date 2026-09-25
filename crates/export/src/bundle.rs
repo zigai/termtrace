@@ -760,8 +760,8 @@ mod tests {
         fs_err::create_dir(&canonical).expect("canonical directory");
 
         for (name, bytes) in [
-            ("session.json", b"session".as_slice()),
-            ("events.jsonl", b"events".as_slice()),
+            (layout::MANIFEST, b"session".as_slice()),
+            (layout::EVENT_LOG, b"events".as_slice()),
         ] {
             fs_err::write(source.join(name), bytes).expect("source member");
             fs_err::write(canonical.join(name), bytes).expect("included member");
@@ -784,13 +784,15 @@ mod tests {
 
         verify_canonical_payload(&bundle, &members, &source).expect("exact canonical inventory");
 
-        fs_err::write(canonical.join("events.jsonl"), b"changed").expect("tamper member");
+        fs_err::write(SessionLayout::new(&canonical).event_log(), b"changed")
+            .expect("tamper member");
 
         let content_error = verify_canonical_payload(&bundle, &members, &source)
             .expect_err("canonical content must match");
         assert!(content_error.to_string().contains("does not match"));
 
-        fs_err::write(canonical.join("events.jsonl"), b"events").expect("restore member");
+        fs_err::write(SessionLayout::new(&canonical).event_log(), b"events")
+            .expect("restore member");
 
         let mut injected_members = members;
         injected_members.push(ArtifactMember {

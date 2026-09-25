@@ -24,6 +24,7 @@ use termtrace_model::execution::{
     event_log::CanonicalBoundary,
     layout::{self, SessionLayout},
 };
+use termtrace_model::terminal::replay::STATE_INDEX;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct ArtifactMemberEnvelope {
@@ -431,7 +432,7 @@ pub fn member_schema_type(path: &str) -> Option<&'static str> {
     match Path::new(path).file_name()?.to_str()? {
         layout::MANIFEST => return Some("session.schema.json"),
         layout::COMPLETION => return Some("completion.schema.json"),
-        "state-index.jsonl" => return Some("state-index-entry.schema.json"),
+        STATE_INDEX => return Some("state-index-entry.schema.json"),
         "video-map.jsonl" => return Some("video-map-entry.schema.json"),
         "replay-endpoint.json" => return Some("replay-endpoint.schema.json"),
         "semantic-source-map.jsonl" => return Some("semantic-frame-span.schema.json"),
@@ -446,7 +447,7 @@ fn member_relationship(path: &str) -> &'static str {
         .unwrap_or(path)
     {
         "states.jsonl.zst" => return "semantic_state_stream",
-        "state-index.jsonl" => return "semantic_state_index",
+        STATE_INDEX => return "semantic_state_index",
         "final.txt" | "final.vt" | "final.html" => return "semantic_final_state",
         "session.mkv" => return "native_capture_master",
         "final.png" => return "native_final_frame",

@@ -1,15 +1,11 @@
 //! Canonical-session effects the tmux library asks of the CLI.
 //!
-//! Stop and completion go through the service session operations; detached record, video,
-//! and bundle still run through the CLI and export layers.
+//! Track start, stop, completion, video, and bundle requests go through the service operations;
+//! the adapter never calls CLI command functions.
 
 use super::args::{TmuxBundleArgs, TmuxVideoArgs};
 use crate::cli::{
-    artifacts::{
-        args::{VideoCursorStyleArg, VideoFacadeArgs},
-        run_video_facade,
-    },
-    output::ResponseWriter,
+    recording::{args::RecordingArgs, detached_record_arguments},
     session_helpers::attach_session,
 };
 use miette::{IntoDiagnostic as _, Result};
@@ -18,13 +14,15 @@ use std::{
     ffi::OsString,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
-    process::{Command, ExitCode, Stdio},
     time::Duration,
 };
-use termtrace_engine::registry::SessionRegistry;
-use termtrace_export::tmux::streaming;
 use termtrace_model::value::ByteString;
-use termtrace_sdk::session::StopRequest;
+use termtrace_sdk::{defaults, session::StopRequest};
+use termtrace_service::{
+    artifacts::{VideoMode, VideoRequest},
+    registry::{DetachedStart, RegistryService},
+    tmux::TmuxService,
+};
 use termtrace_tmux::{
     artifact::{TmuxSessionLink, TmuxStreamingBundleManifest},
     recording::{composite_session, Tracks},
@@ -32,15 +30,15 @@ use termtrace_tmux::{
     Error as TmuxError, Result as TmuxResult,
 };
 
-/// Session effects backed by the managed registry and CLI commands.
+/// Session effects backed by the managed registry and the service session operations.
 pub(super) struct CliTracks {
-    registry: SessionRegistry,
+    registry: RegistryService,
 }
 
 impl CliTracks {
     pub(super) fn open(output_root: Option<&Path>) -> Result<Self> {
         let registry = output_root
-            .map_or_else(SessionRegistry::open_default, SessionRegistry::open)
+            .map_or_else(RegistryService::open_default, RegistryService::open)
             .into_diagnostic()?;
 
         return Ok(Self { registry });
@@ -67,33 +65,27 @@ impl Tracks for CliTracks {
     }
 
     fn start(&self, alias: &str, command: &[OsString]) -> TmuxResult<TmuxSessionLink> {
-        let executable = env::current_exe()
-            .map_err(|error| return failed("composite tmux client track start", error))?;
-        let output = Command::new(executable)
-            .args(["record", "-d"])
-            .arg(alias)
-            .arg("--")
-            .args(command)
-            .env("TERMTRACE_STATE_DIR", self.registry.state_root())
-            .stderr(Stdio::inherit())
-            .output()
-            .map_err(|error| return failed("composite tmux client track start", error))?;
-
-        if !output.status.success() {
-            return Err(failed(
-                "composite tmux client track start",
-                format!("exited with {}", output.status),
-            ));
-        }
-
-        let entry = self
+        let operation = "composite tmux client track start";
+        let recording = RecordingArgs::defaults_for(command)
+            .map_err(|error| return failed(operation, error))?;
+        let executable = env::current_exe().map_err(|error| return failed(operation, error))?;
+        let started = self
             .registry
-            .resolve(alias)
-            .map_err(|error| return failed("composite tmux client track start", error))?;
+            .start_detached(
+                &executable,
+                DetachedStart {
+                    alias: alias.to_owned(),
+                    session: None,
+                    startup_timeout: defaults::STARTUP_TIMEOUT,
+                    stdin: None,
+                },
+                |session| return detached_record_arguments(alias, session, &recording),
+            )
+            .map_err(|error| return failed(operation, error))?;
 
         return Ok(TmuxSessionLink {
-            session_id: entry.session_id,
-            session: ByteString::from(entry.session_path().as_os_str().as_bytes()),
+            session_id: started.entry.session_id,
+            session: ByteString::from(started.entry.session_path().as_os_str().as_bytes()),
         });
     }
 
@@ -124,42 +116,16 @@ impl Tracks for CliTracks {
     }
 }
 
-/// Render an aggregate recording's composite client track.
-pub(super) fn render_video(
-    response: &mut ResponseWriter,
-    tracks: &CliTracks,
-    arguments: TmuxVideoArgs,
-) -> Result<ExitCode> {
+/// Video request for an aggregate recording's composite client track.
+pub(super) fn video_request(tracks: &CliTracks, arguments: TmuxVideoArgs) -> Result<VideoRequest> {
     let session = composite_session(tracks.state_root(), &arguments.name).into_diagnostic()?;
 
-    return run_video_facade(
-        response,
-        VideoFacadeArgs {
-            session,
-            out: Some(arguments.out),
-            dry_run: false,
-            preview_out: None,
-            edit: None,
-            preset: arguments.preset,
-            fps: arguments.fps,
-            renderer: arguments.renderer,
-            semantic_raster_profile: None,
-            resolution: None,
-            scale: None,
-            start_marker: None,
-            end_marker: None,
-            trim_idle: false,
-            hold_start: None,
-            hold_end: None,
-            cursor_style: VideoCursorStyleArg::Recorded,
-            columns: 4,
-            tile_width: 320,
-            max_frames: 12,
-            change_only: false,
-            preview_width: 640,
-            json: false,
-        },
-    );
+    return Ok(VideoRequest {
+        preset: arguments.preset.into(),
+        fps: arguments.fps,
+        renderer: arguments.renderer.into(),
+        ..VideoRequest::new(session, VideoMode::Render { out: arguments.out })
+    });
 }
 
 /// Export a completed aggregate recording as a streaming evidence bundle.
@@ -169,5 +135,5 @@ pub(super) fn bundle(
 ) -> Result<TmuxStreamingBundleManifest> {
     let store = RecordingStore::locate(tracks.state_root(), &arguments.name).into_diagnostic()?;
 
-    return streaming::create(store.manifest_path(), &arguments.out).into_diagnostic();
+    return TmuxService::bundle(&store.manifest_path(), &arguments.out).into_diagnostic();
 }

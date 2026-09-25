@@ -17,7 +17,7 @@ use std::{
     str,
 };
 pub use termtrace_model::execution::request_journal::{
-    MUTATION_JOURNAL_FORMAT, MUTATION_JOURNAL_NAME, MUTATION_JOURNAL_VERSION,
+    MUTATION_JOURNAL_FORMAT, MUTATION_JOURNAL_VERSION,
 };
 use termtrace_model::{
     execution::event::{Event, InputSource},
@@ -489,6 +489,7 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
         let mut operation = database
             .prepare("INSERT INTO operations VALUES (?1, ?2, ?3)")
             .map_err(index_error)?;
+
         let mut host_operations = HashSet::new();
 
         while let Some(event) = cursor.next_record()? {
@@ -540,8 +541,8 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
                 .map_err(index_error)?;
 
             let mut previous = None;
-            let mut matched_count = 0;
 
+            let mut matched_count = 0;
             while let Some(row) = rows.next().map_err(index_error)? {
                 let bytes: Vec<u8> = row.get(0).map_err(index_error)?;
                 let id = Uuid::from_slice(&bytes).map_err(|_| {
@@ -550,6 +551,7 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
                 if previous == Some(id) {
                     continue;
                 }
+
                 previous = Some(id);
 
                 if record.operation_ids.get(matched_count) == Some(&id) {
@@ -625,10 +627,12 @@ fn event_operation(event: &Event, host_operations: &mut HashSet<Uuid>) -> Option
             if is_host {
                 host_operations.insert(*operation_id);
             }
+
             Some((*operation_id, is_host))
         }
         Event::InputResult { operation_id, .. } => {
             let is_host = host_operations.contains(operation_id);
+
             Some((*operation_id, is_host))
         }
         Event::ResizeIntent { operation_id, .. }
@@ -745,7 +749,7 @@ mod tests {
     #[test]
     fn incompatible_version_is_rejected_before_response_decode() {
         let temporary = tempfile::tempdir().expect("temporary directory");
-        let path = temporary.path().join(MUTATION_JOURNAL_NAME);
+        let path = SessionLayout::new(temporary.path()).mutation_journal();
         fs::write(
             &path,
             format!(
@@ -823,7 +827,7 @@ mod tests {
                 if reason == "mutation journal byte budget would be exceeded"
         ));
         assert_eq!(
-            fs::metadata(temporary.path().join(MUTATION_JOURNAL_NAME))
+            fs::metadata(SessionLayout::new(temporary.path()).mutation_journal())
                 .expect("journal metadata")
                 .len(),
             0
@@ -875,8 +879,10 @@ mod tests {
             432,
             "xterm",
         );
-        let mut writer = EventLogWriter::create(session.join("events.jsonl"), &header, clock)
-            .expect("event log");
+
+        let mut writer =
+            EventLogWriter::create(SessionLayout::new(session).event_log(), &header, clock)
+                .expect("event log");
 
         let client_op1 = Uuid::now_v7();
         let host_op = Uuid::now_v7();
@@ -899,7 +905,6 @@ mod tests {
         writer
             .append(input_result_event(client_op2))
             .expect("append");
-
         let final_event_hash = writer.current_hash();
         let end_seq = writer.next_seq();
         drop(writer);
@@ -940,15 +945,16 @@ mod tests {
             432,
             "xterm",
         );
-        let mut writer = EventLogWriter::create(session.join("events.jsonl"), &header, clock)
-            .expect("event log");
+
+        let mut writer =
+            EventLogWriter::create(SessionLayout::new(session).event_log(), &header, clock)
+                .expect("event log");
 
         let host_op = Uuid::now_v7();
         writer
             .append(input_intent_event(host_op, InputSource::Host))
             .expect("append");
         writer.append(input_result_event(host_op)).expect("append");
-
         let final_event_hash = writer.current_hash();
         let end_seq = writer.next_seq();
         drop(writer);
@@ -995,15 +1001,16 @@ mod tests {
             432,
             "xterm",
         );
-        let mut writer = EventLogWriter::create(session.join("events.jsonl"), &header, clock)
-            .expect("event log");
+
+        let mut writer =
+            EventLogWriter::create(SessionLayout::new(session).event_log(), &header, clock)
+                .expect("event log");
 
         let host_op = Uuid::now_v7();
         writer
             .append(input_intent_event(host_op, InputSource::Host))
             .expect("append");
         writer.append(input_result_event(host_op)).expect("append");
-
         let final_event_hash = writer.current_hash();
         let end_seq = writer.next_seq();
         drop(writer);
@@ -1045,8 +1052,10 @@ mod tests {
             432,
             "xterm",
         );
-        let mut writer = EventLogWriter::create(session.join("events.jsonl"), &header, clock)
-            .expect("event log");
+
+        let mut writer =
+            EventLogWriter::create(SessionLayout::new(session).event_log(), &header, clock)
+                .expect("event log");
 
         let client_op1 = Uuid::now_v7();
         let client_op2 = Uuid::now_v7();
@@ -1063,7 +1072,6 @@ mod tests {
         writer
             .append(input_result_event(client_op2))
             .expect("append");
-
         let final_event_hash = writer.current_hash();
         let end_seq = writer.next_seq();
         drop(writer);
@@ -1109,8 +1117,10 @@ mod tests {
             432,
             "xterm",
         );
-        let mut writer = EventLogWriter::create(session.join("events.jsonl"), &header, clock)
-            .expect("event log");
+
+        let mut writer =
+            EventLogWriter::create(SessionLayout::new(session).event_log(), &header, clock)
+                .expect("event log");
 
         let atom1 = Uuid::now_v7();
         let host_op = Uuid::now_v7();
@@ -1138,7 +1148,6 @@ mod tests {
                 error_code: Some("io_broken_pipe".to_owned()),
             })
             .expect("append");
-
         let final_event_hash = writer.current_hash();
         let end_seq = writer.next_seq();
         drop(writer);

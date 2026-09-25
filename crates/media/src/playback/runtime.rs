@@ -13,6 +13,7 @@ use termtrace_evidence::{
     event_log::{EventLogCursor, EventLogSummary},
     session::read_manifest,
 };
+use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::{
     artifact::playback::{PlaybackFailure, PlaybackTiming},
     execution::event::{Event, OperationStatus},
@@ -130,7 +131,7 @@ fn validate_options(options: &PlaybackOptions) -> Result<()> {
 }
 
 fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result<()> {
-    let log = EventLogSummary::read(options.session_directory.join("events.jsonl"))?;
+    let log = EventLogSummary::read(SessionLayout::new(&options.session_directory).event_log())?;
     let final_ns = log
         .terminal
         .as_ref()
@@ -148,7 +149,8 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
         let manifest = read_manifest(&options.session_directory)?;
         let mut grid = (manifest.geometry.cols, manifest.geometry.rows);
         let mut output = io::stdout().lock();
-        let mut cursor = EventLogCursor::open(options.session_directory.join("events.jsonl"))?;
+        let mut cursor =
+            EventLogCursor::open(SessionLayout::new(&options.session_directory).event_log())?;
         validate_playback_header(&cursor, &log)?;
 
         while let Some(record) = cursor.next_record()? {
@@ -228,7 +230,8 @@ fn timed_playback(
     sleep_until(monotonic_origin);
 
     let mut output = io::stdout().lock();
-    let mut cursor = EventLogCursor::open(options.session_directory.join("events.jsonl"))?;
+    let mut cursor =
+        EventLogCursor::open(SessionLayout::new(&options.session_directory).event_log())?;
     validate_playback_header(&cursor, log)?;
 
     let mut endpoint_seen = false;

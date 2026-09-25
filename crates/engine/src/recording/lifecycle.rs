@@ -36,15 +36,16 @@ use termtrace_evidence::{
     artifact::write_secure,
     event_log::{CanonicalBoundary, EventLogSummary, EventLogWriter, SessionClock},
     provenance::{collect_execution_provenance, RecorderBuildIdentity},
-    request_journal::{MutationJournal, MUTATION_JOURNAL_NAME},
+    request_journal::MutationJournal,
     session::{canonical_manifest_bytes, manifest_hash, validate_completion_summary_candidate},
 };
+use termtrace_model::execution::layout::{self, SessionLayout};
 use termtrace_model::{
     execution::event::{Event, EventLogHeader, LifecycleKind, TerminalColors},
     execution::session::{
         SessionCompletion, SessionFailure, SessionGeometry, SessionManifest,
-        COMPLETION_VALIDATION_VERSION, GHOSTTY_REPLAY_PROFILE_NAME, SESSION_COMPLETION_FORMAT,
-        SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
+        COMPLETION_VALIDATION_VERSION, SESSION_COMPLETION_FORMAT, SESSION_COMPLETION_VERSION,
+        SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
     },
     terminal::observation::StatePoint,
     terminal::replay::GHOSTTY_REVISION,
@@ -59,7 +60,6 @@ use uuid::Uuid;
 const MUTATION_CACHE_CAPACITY: usize = 256;
 const SESSION_FAILURE_FORMAT: &str = "termtrace-session-failure";
 const SESSION_FAILURE_VERSION: u32 = 1;
-const SESSION_FAILURE_NAME: &str = "failure.json";
 
 #[cfg(test)]
 thread_local! {
@@ -138,7 +138,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
 
     if let Some(profile) = &options.ghostty_profile {
         write_secure(
-            &options.output_directory.join(GHOSTTY_REPLAY_PROFILE_NAME),
+            &SessionLayout::new(&options.output_directory).ghostty_replay_profile(),
             &profile.replay_config,
         )?;
     }
@@ -169,14 +169,14 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
 
     let header_bytes = serde_json::to_vec(&header).map_err(|source| {
         return Error::InvalidJson {
-            path: options.output_directory.join("events.jsonl"),
+            path: SessionLayout::new(&options.output_directory).event_log(),
             json_path: "$".to_owned(),
             source,
         };
     })?;
 
     let event_header_hash = blake3::hash(&header_bytes).to_hex().to_string();
-    let event_log_path = options.output_directory.join("events.jsonl");
+    let event_log_path = SessionLayout::new(&options.output_directory).event_log();
     let mut event_log = EventLogWriter::create_with_policy(
         &event_log_path,
         &header,
@@ -417,9 +417,9 @@ fn write_session_manifest(
         termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
         operating_system: OS.to_owned(),
         architecture: ARCH.to_owned(),
-        event_log: "events.jsonl".to_owned(),
+        event_log: layout::EVENT_LOG.to_owned(),
         control_socket: control_socket_name(session_id),
-        request_journal: MUTATION_JOURNAL_NAME.to_owned(),
+        request_journal: layout::MUTATION_JOURNAL.to_owned(),
         contains_sensitive_terminal_data: true,
         durability_policy: options.durability_policy.clone(),
         resource_limits: options.resource_limits.clone(),
@@ -427,7 +427,10 @@ fn write_session_manifest(
     let encoded = canonical_manifest_bytes(&manifest)?;
     let hash = manifest_hash(&encoded);
 
-    write_secure(&options.output_directory.join("session.json"), &encoded)?;
+    write_secure(
+        &SessionLayout::new(&options.output_directory).manifest(),
+        &encoded,
+    )?;
 
     return Ok(hash);
 }
@@ -437,7 +440,7 @@ fn publish_session_completion(
     completion: &SessionCompletion,
 ) -> Result<()> {
     let validation_result = (|| {
-        let log = EventLogSummary::read(options.output_directory.join("events.jsonl"))?;
+        let log = EventLogSummary::read(SessionLayout::new(&options.output_directory).event_log())?;
 
         return validate_completion_summary_candidate(&options.output_directory, &log, completion);
     })();
@@ -467,7 +470,7 @@ fn publish_session_completion(
     }
 
     return write_json_secure(
-        &options.output_directory.join("completion.json"),
+        &SessionLayout::new(&options.output_directory).completion(),
         completion,
     );
 }
@@ -490,7 +493,7 @@ fn close_failed_recording(
             POISON_FATAL_APPEND.with(|poison| {
                 if poison.replace(false) {
                     return Err(termtrace_evidence::Error::EventLogPoisoned {
-                        path: options.output_directory.join("events.jsonl"),
+                        path: SessionLayout::new(&options.output_directory).event_log(),
                     });
                 }
                 return Ok(());
@@ -549,7 +552,7 @@ fn write_incomplete_session_diagnostic(
     durable_boundary: Option<CanonicalBoundary>,
 ) -> Result<()> {
     return write_json_secure(
-        &options.output_directory.join(SESSION_FAILURE_NAME),
+        &SessionLayout::new(&options.output_directory).failure_diagnostic(),
         &IncompleteSessionDiagnostic {
             format: SESSION_FAILURE_FORMAT,
             version: SESSION_FAILURE_VERSION,
@@ -590,7 +593,7 @@ fn recorder_failure_code(error: &Error) -> &'static str {
         Error::Filesystem { path, .. }
             if path
                 .file_name()
-                .is_some_and(|name| return name == OsStr::new("events.jsonl")) =>
+                .is_some_and(|name| return name == OsStr::new(layout::EVENT_LOG)) =>
         {
             "canonical_log_failed"
         }

@@ -38,7 +38,6 @@ fn act_request_builds_a_composite_sequence() {
             detail: FrameDetail::Text,
             region: None,
         });
-
     assert_eq!(
         request.atoms,
         vec![
@@ -72,8 +71,8 @@ fn paced_text_is_typed_one_scalar_per_atom() {
             modifiers: KeyModifiers::default(),
         })
         .pace(Duration::from_millis(15));
-    let wire = request.wire_atoms(Uuid::now_v7());
 
+    let wire = request.wire_atoms(Uuid::now_v7());
     assert_eq!(wire.len(), 3);
     assert!(matches!(
         &wire[1],

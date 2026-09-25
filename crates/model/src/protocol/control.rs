@@ -1096,7 +1096,6 @@ mod tests {
             pace_ns: 11_000_000_000,
             include_atom_outcomes: false,
         };
-
         assert_eq!(command.actor_response_timeout(), Duration::from_secs(21));
         assert_eq!(command.client_response_timeout(), Duration::from_secs(21));
     }
@@ -1111,6 +1110,7 @@ mod tests {
             timeout_ns: 5_000_000_000,
             projection: ScreenProjectionRequest::default(),
         };
+
         let act = ControlCommand::Act {
             atoms: two_text_atoms(),
             pace_ns: 0,
@@ -1166,14 +1166,11 @@ mod tests {
             last_result_event_seq: 6,
             resume_from_atom_index: 3,
         };
-
         assert_eq!(
             details.effect(),
             MutationEffect::Partial { completed_atoms: 2 }
         );
-
         details.failed_atom_bytes_written = 1;
-
         assert_eq!(details.effect(), MutationEffect::Unknown);
     }
 }

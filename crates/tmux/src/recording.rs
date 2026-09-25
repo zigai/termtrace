@@ -36,25 +36,21 @@ const TRACK_PAGE: u16 = 128;
 pub trait Tracks {
     /// Managed state root holding sessions, the registry, and aggregate recordings.
     fn state_root(&self) -> &Path;
-
     /// Fail unless `alias` is free in the session registry.
     ///
     /// # Errors
     /// Returns a taken alias or registry failures.
     fn reserve(&self, alias: &str) -> Result<()>;
-
     /// Start a detached recording of `command` registered as `alias`.
     ///
     /// # Errors
     /// Returns a failure to start the recording.
     fn start(&self, alias: &str, command: &[OsString]) -> Result<TmuxSessionLink>;
-
     /// Resolve a registered alias to its session directory.
     ///
     /// # Errors
     /// Returns an unknown alias or registry failures.
     fn resolve(&self, alias: &str) -> Result<PathBuf>;
-
     /// Request that a session stop, optionally awaiting durable completion.
     ///
     /// Stopping a completed session succeeds.
@@ -62,7 +58,6 @@ pub trait Tracks {
     /// # Errors
     /// Returns a rejected stop or a completion timeout.
     fn stop(&self, session: &Path, wait: bool, timeout: Duration) -> Result<()>;
-
     /// Await validated completion of a session.
     ///
     /// # Errors
@@ -143,13 +138,14 @@ fn start(
         command,
     } = request;
     setup.aggregate_manifest = Some(store.manifest_path());
-
     let setup = PreparedTmuxSetup::prepare(setup, client.executable.clone(), tracks.state_root())?;
+
     let alias = format!("tmux-{name}-composite");
     tracks.reserve(&alias)?;
 
     let now = unix_time_ns();
     let gaps = permanent_gaps(now);
+
     let mut events = vec![TmuxEvent::RecordingStarted {
         coverage: setup.coverage,
     }];
@@ -197,6 +193,7 @@ fn start(
 
     let link = composite_command(&client, config.as_deref(), &command)
         .and_then(|command| return tracks.start(&alias, &command));
+
     let link = match link {
         Ok(link) => link,
         Err(error) => {
@@ -318,8 +315,8 @@ fn observe(
     let mut locked = store.lock()?;
     let now = unix_time_ns();
     settle(store, &mut locked, now)?;
-
     let manifest = locked.manifest();
+
     if !manifest.state.lifecycle.is_open() {
         return Ok(());
     }
@@ -328,6 +325,7 @@ fn observe(
         .iter()
         .map(|row| return row.snapshot.clone())
         .collect::<Vec<_>>();
+
     let mut links = BTreeMap::new();
     for (pane_id, session) in unlinked_recordings(&manifest.state, &snapshots) {
         links.insert(
@@ -360,6 +358,7 @@ fn settle(store: &RecordingStore, locked: &mut LockedRecording<'_>, now: u64) ->
         .link
         .as_ref()
         .is_some_and(|link| return is_completed(&path_from_bytes(&link.session)));
+
     if !composite_completed {
         return Ok(());
     }
@@ -377,6 +376,7 @@ fn settle(store: &RecordingStore, locked: &mut LockedRecording<'_>, now: u64) ->
             remaining = remaining
                 .checked_sub(1)
                 .ok_or_else(|| return Error::invalid("tmux unfinished track count underflow"))?;
+
             completed.push((entry.track.pane_id, entry.track.session_id));
         }
     }
@@ -402,11 +402,11 @@ fn unfinished_tracks(catalog: &TmuxCatalog) -> Result<Vec<TmuxTrackCatalogEntry>
         let Some(last) = page.last() else {
             return Ok(entries);
         };
-
         next = last
             .sequence
             .checked_add(1)
             .ok_or_else(|| return Error::invalid("tmux track sequence overflow"))?;
+
         entries.extend(page);
     }
 }
@@ -483,9 +483,11 @@ pub fn stop(tracks: &impl Tracks, request: StopRequest<'_>) -> Result<TmuxRecord
         Some(link) => path_from_bytes(&link.session),
         None => tracks.resolve(&manifest.state.composite_track.alias)?,
     };
+
     tracks.stop(&composite, request.wait, request.timeout)?;
 
     let client = client_of(&manifest);
+
     // A wrapper can be running before its asynchronous track registration is
     // published. Include those panes in shutdown as well as the saved links.
     if server_validated && let Ok(report) = status::observe(&client) {
@@ -514,6 +516,7 @@ pub fn stop(tracks: &impl Tracks, request: StopRequest<'_>) -> Result<TmuxRecord
 
     if request.wait {
         let deadline = Instant::now() + request.timeout;
+
         for entry in unfinished_tracks(&store.catalog(&manifest)?)? {
             tracks.wait_completed(
                 &path_from_bytes(&entry.track.session),
@@ -527,11 +530,12 @@ pub fn stop(tracks: &impl Tracks, request: StopRequest<'_>) -> Result<TmuxRecord
     }
 
     let deadline = Instant::now() + request.timeout;
+
     loop {
         let mut locked = store.lock()?;
         settle(&store, &mut locked, unix_time_ns())?;
-
         let manifest = locked.into_manifest();
+
         if !request.wait || manifest.state.lifecycle == TmuxRecordingLifecycle::Completed {
             return Ok(manifest);
         }
@@ -610,6 +614,7 @@ pub fn catalog_page(
     } else {
         CatalogPage::Tracks(catalog.tracks(from_sequence, limit, active_only)?)
     };
+
     let summary = catalog.summary().clone();
 
     return Ok((manifest, summary, page));

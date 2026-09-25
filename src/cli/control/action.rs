@@ -64,6 +64,7 @@ enum SendStep {
 
 fn send_steps(arguments: &SendArgs) -> Result<Vec<SendStep>> {
     let stdin_requested = arguments.stdin || arguments.atoms.iter().any(|atom| return atom == "-");
+
     let mut stdin_bytes = Vec::new();
     if stdin_requested {
         io::stdin()
@@ -120,14 +121,15 @@ fn send_steps(arguments: &SendArgs) -> Result<Vec<SendStep>> {
             Some((parse_resize_str(geometry)?, "resize"))
         } else if let Some(signal) = atom.strip_prefix("signal:") {
             let signal = parse_signal_str(signal)?;
+
             Some((ControlCommand::Signal { signal }, "signal"))
         } else if let Some(label) = atom.strip_prefix("mark:") {
             let label = label.to_owned();
+
             Some((ControlCommand::Mark { label }, "mark"))
         } else {
             None
         };
-
         match control {
             Some((command, label)) => {
                 if !atoms.is_empty() {
@@ -156,6 +158,7 @@ fn send_steps(arguments: &SendArgs) -> Result<Vec<SendStep>> {
     if !atoms.is_empty() {
         steps.push(SendStep::Act(atoms));
     }
+
     return Ok(steps);
 }
 
@@ -174,8 +177,8 @@ pub(in crate::cli) fn run_send(
         request_id: Some(request_id),
         if_state: arguments.if_state.clone(),
     };
-    let steps = send_steps(&arguments)?;
 
+    let steps = send_steps(&arguments)?;
     if steps.is_empty() {
         return Err(miette::miette!(
             "send requires at least one input atom or flag"
@@ -227,7 +230,6 @@ pub(in crate::cli) fn run_send(
                     projection: action_projection(&arguments),
                     allow_incomplete: true,
                 };
-
                 let outcome = match session.act(action) {
                     Ok(outcome) => outcome,
                     Err(error) => {
@@ -673,6 +675,7 @@ mod action_response_tests {
             }]
         }))
         .expect("action input");
+
         let postcondition: ActionPostconditionResult = serde_json::from_value(serde_json::json!({
             "kind": "screen",
             "matched": false,
@@ -680,13 +683,13 @@ mod action_response_tests {
             "frame": frame
         }))
         .expect("postcondition");
+
         let outcome = ActOutcome {
             request_id,
             input,
             postcondition,
             boundaries: boundaries(),
         };
-
         let response = action_applied_response(&outcome).expect("action response");
         assert_eq!(response["ok"], false);
         assert_eq!(response["code"], "postcondition_failed");
@@ -730,6 +733,7 @@ mod action_response_tests {
             }
         }))
         .expect("failure details");
+
         let error = Error::Control(termtrace_control::Error::Rejected {
             code: "input_sequence_incomplete".to_owned(),
             message: "input stopped".to_owned(),

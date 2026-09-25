@@ -84,6 +84,7 @@ pub(super) fn consume_runtime(
 
         let started_at = Instant::now();
         let mut last_activity_at = Instant::now();
+
         loop {
             let receive_timeout = actor.pending_input_sequence.as_ref().map_or(
                 Duration::from_millis(10),
@@ -141,15 +142,14 @@ pub(super) fn consume_runtime(
             actor.ensure_presented_snapshot()?;
             actor.evaluate_screen_waiters(child_exited, output_closed)?;
             actor.enforce_resource_limits(started_at, last_activity_at)?;
-
             let effects = actor.termination.step(Tick {
                 now: Instant::now(),
                 received_output,
                 output_bytes: actor.progress.output_bytes,
                 input_sequence_pending: actor.pending_input_sequence.is_some(),
             });
-            let mut control_shutdown_finished = false;
 
+            let mut control_shutdown_finished = false;
             for effect in effects {
                 match effect {
                     Effect::AppendHostError { code, message } => {
@@ -327,6 +327,7 @@ impl SessionActor<'_> {
             limit: outcome.limit,
             at: Instant::now(),
         });
+
         self.progress.resource_limit = Some(outcome);
 
         return Ok(());
@@ -394,7 +395,6 @@ impl SessionActor<'_> {
                     data
                 };
                 self.mirror_bytes(&mirrored)?;
-
                 self.live_needs_snapshot = true;
 
                 if !self.screen_waiters.is_empty() || self.pending_input_sequence.is_some() {

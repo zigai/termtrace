@@ -9,7 +9,7 @@ use crate::cli::{
     tooling::args::{CompletionsArgs, DoctorArgs, SchemaArgs, VersionArgs},
 };
 use clap_complete::generate;
-use miette::{IntoDiagnostic as _, Result};
+use miette::{IntoDiagnostic as _, Report, Result};
 use std::{
     env,
     fmt::Write as _,
@@ -17,82 +17,43 @@ use std::{
     os::unix::ffi::OsStrExt as _,
     process::ExitCode,
 };
-use termtrace_engine::{
-    analysis::capability::{
-        probe_capabilities as probe_engine_capabilities, require as require_engine_capability,
-    },
-    Error as EngineError,
-};
-use termtrace_evidence::receipt::receipt_signing_capability;
-use termtrace_media::{
-    capability::{presentation_capability, semantic_video_capability},
-    native_capture::native_capabilities,
-};
+use termtrace_engine::Error as EngineError;
 use termtrace_model::{
     execution::event::EVENT_LOG_VERSION,
-    protocol::capability::{
-        CapabilityReport, CapabilityStatus, NATIVE_SCREENSHOT_CAPABILITY, NATIVE_VIDEO_CAPABILITY,
-        PRESENTATION_CAPABILITY, RECEIPT_SIGNING_CAPABILITY, SEMANTIC_VIDEO_CAPABILITY,
-    },
+    protocol::capability::{CapabilityReport, CapabilityStatus},
     protocol::control::CONTROL_PROTOCOL_VERSION,
     terminal::replay::{GHOSTTY_REVISION, STATE_FORMAT_VERSION},
     value::ByteString,
 };
-use termtrace_service::system::SystemService;
+use termtrace_service::{system::SystemService, Error as ServiceError};
 
 #[must_use]
 pub(super) fn probe_capabilities() -> CapabilityReport {
     return SystemService::probe_capabilities();
 }
 
-fn require_selected_capability(id: &str) -> termtrace_engine::Result<()> {
-    let capability = match id {
-        SEMANTIC_VIDEO_CAPABILITY => Some(semantic_video_capability()),
-        PRESENTATION_CAPABILITY => Some(presentation_capability()),
-        RECEIPT_SIGNING_CAPABILITY => Some(receipt_signing_capability()),
-        NATIVE_SCREENSHOT_CAPABILITY | NATIVE_VIDEO_CAPABILITY => native_capabilities(
-            id == NATIVE_SCREENSHOT_CAPABILITY,
-            id == NATIVE_VIDEO_CAPABILITY,
-        )
-        .next(),
-        _ => None,
-    };
-    let Some(capability) = capability else {
-        return require_engine_capability(&probe_engine_capabilities([]), id);
-    };
-
-    if capability.status == CapabilityStatus::Ready {
-        return Ok(());
-    }
-    return Err(EngineError::CapabilityBlocked {
-        id: capability.id,
-        code: capability.code,
-        detail: capability.detail,
-        remediation: capability
-            .remediation
-            .unwrap_or_else(|| return "no automatic remediation is available".to_owned()),
-    });
-}
-
 pub(super) fn require_capability(id: &str) -> termtrace_sdk::Result<()> {
-    return require_selected_capability(id).map_err(termtrace_sdk::Error::from);
+    return SystemService::require(id);
 }
 
 pub(super) fn require_cli_capability(id: &str) -> Result<()> {
-    match require_selected_capability(id) {
-        Ok(()) => return Ok(()),
-        Err(EngineError::CapabilityBlocked {
-            id,
-            code,
-            detail,
-            remediation,
-        }) => {
-            return Err(miette::miette!(
-                "required capability `{id}` is blocked ({code}): {detail}; fix: {remediation}; inspect with `termtrace doctor --require {id} --explain`"
-            ));
-        }
-        Err(error) => return Err(error).into_diagnostic(),
+    return SystemService::require(id).map_err(capability_report);
+}
+
+/// Render a service failure, naming the doctor command when a capability is blocked.
+pub(super) fn capability_report(error: ServiceError) -> Report {
+    if let ServiceError::Engine(EngineError::CapabilityBlocked {
+        id,
+        code,
+        detail,
+        remediation,
+    }) = &error
+    {
+        return miette::miette!(
+            "required capability `{id}` is blocked ({code}): {detail}; fix: {remediation}; inspect with `termtrace doctor --require {id} --explain`"
+        );
     }
+    return Report::from_err(error);
 }
 
 pub(super) fn run_version(

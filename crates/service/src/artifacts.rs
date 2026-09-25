@@ -13,6 +13,12 @@ use termtrace_model::{
     terminal::observation::StatePoint,
 };
 
+mod video;
+
+pub use video::{
+    source_name, CursorStyle, VideoMode, VideoOutcome, VideoPreset, VideoRenderer, VideoRequest,
+};
+
 /// High-level service orchestrating artifact export, bundles, and save formats.
 pub struct ArtifactService;
 

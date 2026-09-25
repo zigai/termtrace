@@ -20,6 +20,9 @@ presented in the viewport.
 curl -LsSf https://github.com/zigai/termtrace/raw/main/install.sh | bash
 ```
 
+Generate shell completions with `termtrace completion zsh` (or `bash`, `fish`,
+`elvish`, `powershell`).
+
 ## Quick start
 
 Record a command, inspect its final presented screen, browse its timeline, and
@@ -40,7 +43,10 @@ replaced.
 ```sh
 termtrace record -d app --cols 120 --rows 36 --until-screen Ready -- my-terminal-app
 termtrace send app text:help enter --until-idle=250ms
+termtrace wait app --screen Saved
 termtrace screen app --since STATE
+termtrace status app
+termtrace restart app
 termtrace stop app --wait
 ```
 
@@ -48,9 +54,12 @@ termtrace stop app --wait
 its initial screen. `send` applies input and checks its postcondition in one
 request; the reported input application remains authoritative even if the
 postcondition fails. Pass the state returned by one observation to
-`screen --since` to avoid retransmitting an unchanged screen. Use a
-[language client](skills/termtrace/references/client-workflows.md) when more
-than two or three actions are expected.
+`screen --since` to avoid retransmitting an unchanged screen. `wait` blocks on
+screen text, output bytes, or idle stability without sending input; `status`
+reports live counters (or lists registered sessions when no name is given); and
+`restart` stops a named session and starts its successor under the same name.
+Use a [language client](skills/termtrace/references/client-workflows.md) when
+more than two or three actions are expected.
 
 ## Record a complete tmux session
 

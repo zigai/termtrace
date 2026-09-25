@@ -2,6 +2,7 @@ use super::{
     engine::validate_generated_replay_seed, invalid_replay, json_error, replay_for_index,
     state_delta, trust::SourceIdentity, ReplaySeed,
 };
+use crate::completion;
 use crate::{timeline::resolve_source_range, Error, Result};
 use serde::Serialize;
 use std::{
@@ -26,7 +27,7 @@ use termtrace_model::{
     terminal::replay::{
         IndexOptions, IndexOutcome, ReplayArtifacts, ReplayManifest, SemanticReplayCheckpoint,
         SourceRange, StateIndexEntry, StateInspection, StateRecord, StateSelection, StateSelector,
-        GHOSTTY_REVISION, STATE_FORMAT_VERSION,
+        GHOSTTY_REVISION, STATE_FORMAT_VERSION, STATE_INDEX,
     },
     terminal::state::SemanticState,
     value::ByteString,
@@ -46,7 +47,6 @@ use source::IndexSource;
 
 const REPLAY_CHECKPOINT_STATE_INTERVAL: u64 = 128;
 const INDEX_MANIFEST: &str = "manifest.json";
-pub(crate) const STATE_INDEX: &str = "state-index.jsonl";
 const CHECKPOINTS: &str = "checkpoints.jsonl.zst";
 pub(crate) const CONTROL_INDEX: &str = "control-index.jsonl";
 pub(crate) const CONTROL_SOURCE_INDEX: &str = "control-source-index.jsonl";
@@ -122,7 +122,7 @@ pub fn index_session_with_options(
 ) -> Result<IndexOutcome> {
     let session_directory = session_directory.as_ref();
     let session_layout = SessionLayout::new(session_directory);
-    let completion_exists = session_layout.completion().is_file();
+    let completion_exists = completion::published(session_directory)?.is_some();
 
     if !completion_exists && !options.live_snapshot {
         return Err(Error::SessionIncomplete {

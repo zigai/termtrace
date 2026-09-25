@@ -1,4 +1,5 @@
 use crate::cli::output::ResponseWriter;
+use termtrace_model::execution::layout::SessionLayout;
 
 pub(super) mod args;
 mod native_screenshot;
@@ -7,35 +8,28 @@ use crate::cli::{
     analysis::args::ShowRenderer,
     artifacts::args::{
         BundleArgs, BundleProfileArg, BundleVerifyArgs, CaptureArgs, ExportArgs, ImportArgs,
-        SaveArgs, ScreenshotArgs, ScreenshotFormat, SemanticRasterProfileArg, VideoCursorStyleArg,
-        VideoFacadeArgs, VideoPresetArg, VideoSourceArg,
+        SaveArgs, ScreenshotArgs, ScreenshotFormat, VideoFacadeArgs,
     },
     output::{write_json_line, write_progress, write_stdout},
     session_helpers::{
         resolve_cli_range, resolve_session, resolve_session_path, resolve_state_point,
         write_session_lifecycle,
     },
-    tooling::require_cli_capability,
+    tooling::{capability_report, require_cli_capability},
 };
 use args::ArtifactSubcommand;
 use miette::{IntoDiagnostic as _, Result};
 use std::{
     env,
-    ffi::OsStr,
     io::{self, Read as _},
     os::unix::ffi::OsStrExt as _,
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command as ProcessCommand, ExitCode, Stdio},
-    time::Duration,
 };
-use termtrace_engine::{
-    replay::index_session_for_video,
-    timeline::{resolve_session_source_selection, SourceRange},
-    Error,
-};
+use termtrace_engine::Error;
 use termtrace_evidence::{
     artifact::write_secure,
-    event_log::{EventLogCursor, EventLogSummary},
+    event_log::EventLogCursor,
     session::{read_manifest, validate_completed_session},
 };
 use termtrace_export::{
@@ -45,27 +39,18 @@ use termtrace_export::{
     bundle::{create as create_bundle, plan as plan_bundle, verify_profile},
 };
 use termtrace_media::native_capture::{
-    capture, native_capture_target, CaptureKind, CaptureOptions, VISUAL_DIRECTORY,
+    capture, native_capture_target, CaptureKind, CaptureOptions,
 };
-use termtrace_media::presentation::{
-    export as export_presentation, plan_with_source as plan_presentation,
-    preview as preview_presentation, read_edit_plan, video_clip_ranges_session, video_clips,
-    EditPlan, PixelTransform, PresentationDelivery, PresentationSource, PresentationSourceRequest,
-    PreviewOptions, VideoIdlePolicy, VideoRenderConfig, EDIT_PLAN_VERSION,
-};
+use termtrace_media::presentation::PreviewOptions;
 use termtrace_media::save::{save, save_screenshot_batch};
 use termtrace_model::{
-    artifact::bundle::BundleVerificationPolicy,
-    artifact::save::{SaveFormat, SemanticRasterProfile},
-    execution::event::Event,
-    execution::session::CaptureTarget,
-    execution::session::SessionPhase,
-    protocol::capability::{
-        NATIVE_VIDEO_CAPABILITY, PRESENTATION_CAPABILITY, SEMANTIC_VIDEO_CAPABILITY,
-    },
-    terminal::observation::StatePoint,
-    terminal::replay::StateSelection,
-    value::ByteString,
+    artifact::bundle::BundleVerificationPolicy, artifact::save::SaveFormat,
+    execution::event::Event, execution::session::CaptureTarget, execution::session::SessionPhase,
+    protocol::capability::NATIVE_VIDEO_CAPABILITY, terminal::observation::StatePoint,
+    terminal::replay::StateSelection, value::ByteString,
+};
+use termtrace_service::artifacts::{
+    source_name, ArtifactService, VideoMode, VideoOutcome, VideoRequest,
 };
 
 pub(super) fn run_export_asciicast(
@@ -165,9 +150,10 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
 
     validate_completed_session(&arguments.out).into_diagnostic()?;
 
-    let mut cursor = EventLogCursor::open(arguments.out.join("events.jsonl")).into_diagnostic()?;
-    let mut offset = 0_usize;
+    let mut cursor =
+        EventLogCursor::open(SessionLayout::new(&arguments.out).event_log()).into_diagnostic()?;
 
+    let mut offset = 0_usize;
     while let Some(record) = cursor.next_record().into_diagnostic()? {
         if let Event::Output { data } = record.event {
             let end = offset.saturating_add(data.as_bytes().len());
@@ -212,470 +198,95 @@ pub(super) fn run_import(response: &mut ResponseWriter, arguments: ImportArgs) -
     );
 }
 
-const VIDEO_IDLE_THRESHOLD_NS: u64 = 2_000_000_000;
-const VIDEO_IDLE_CONTEXT_NS: u64 = 500_000_000;
-
 pub(super) fn run_video_facade(
     response: &mut ResponseWriter,
     arguments: VideoFacadeArgs,
 ) -> Result<ExitCode> {
-    let sidecar = if let Some(out) = arguments.out.as_ref() {
-        if out.extension() != Some(OsStr::new("mp4")) {
-            return Err(miette::miette!(
-                "video output must use the `.mp4` extension"
-            ));
-        }
-
-        Some(video_sidecar_path(out))
-    } else {
-        None
-    };
-
     let resolved = resolve_session(arguments.session.clone())?;
     if resolved.phase != SessionPhase::Completed {
         return write_session_lifecycle(response, &resolved, "video", ExitCode::FAILURE);
     }
 
-    let session = resolved.path;
-
-    if arguments.renderer == VideoSourceArg::Native && arguments.semantic_raster_profile.is_some() {
-        return Err(miette::miette!(
-            "--semantic-raster-profile configures semantic video only"
-        ));
-    }
-
-    let preset_config = VideoPresetConfig::from_preset(arguments.preset);
-    let requested_fps = arguments.fps;
-    let provisional_fps = requested_fps.unwrap_or(preset_config.fps);
-
-    if arguments.renderer == VideoSourceArg::Native
-        && !session.join("visual/manifest.json").is_file()
-    {
-        require_cli_capability(NATIVE_VIDEO_CAPABILITY)?;
-
-        match index_session_for_video(&session, u32::from(provisional_fps)) {
-            Ok(_) | Err(Error::ArtifactExists { .. }) => {}
-            Err(error) => return Err(error).into_diagnostic(),
-        }
-
-        let visual_dir = session.join(VISUAL_DIRECTORY);
-        if visual_dir.exists() && !visual_dir.join("manifest.json").is_file() {
-            let _ = fs_err::remove_dir_all(&visual_dir);
-        }
-
-        write_progress(
-            response,
-            format_args!("Capturing native video for {}...", session.display()),
-        );
-
-        let helper = env::current_exe().into_diagnostic()?;
-        let (target, geometry_solver) =
-            native_capture_target(&helper, &session, arguments.resolution).into_diagnostic()?;
-
-        capture(
-            &helper,
-            &CaptureOptions {
-                session_directory: session.clone(),
-                width: target.width,
-                height: target.height,
-                fps: provisional_fps,
-                start_monotonic_ns: None,
-                end_monotonic_ns: None,
-                state_selection: StateSelection::All,
-                geometry_solver,
-                kind: CaptureKind::Video,
-                destination: None,
-                scale: None,
-                dpi: None,
-            },
-        )
-        .into_diagnostic()?;
-    }
-
-    let raster_profile = preset_config.raster_profile(arguments.semantic_raster_profile);
-    let source = match arguments.renderer {
-        VideoSourceArg::Native => PresentationSourceRequest::Native,
-        VideoSourceArg::Semantic => PresentationSourceRequest::Semantic {
-            fps: provisional_fps,
-            raster_profile,
-        },
-    };
-
-    let hold_start = arguments.hold_start.unwrap_or(preset_config.hold_start);
-    let hold_end = arguments.hold_end.unwrap_or(preset_config.hold_end);
-
-    write_progress(
-        response,
-        format_args!("Planning video from {}...", session.display()),
-    );
-
-    let plan = if let Some(edit_path) = arguments.edit.as_ref() {
-        let edit = read_edit_plan(edit_path).into_diagnostic()?;
-
-        plan_presentation(&session, &edit, source).into_diagnostic()?
-    } else {
-        validate_completed_session(&session).into_diagnostic()?;
-        let summary = EventLogSummary::read(session.join("events.jsonl")).into_diagnostic()?;
-        let final_monotonic_ns = summary
-            .terminal
-            .as_ref()
-            .map_or(0, |record| return record.monotonic_ns);
-
-        let mut selected = resolve_session_source_selection(
-            &session,
-            None,
-            None,
-            arguments.start_marker.as_deref(),
-            arguments.end_marker.as_deref(),
-        )
-        .into_diagnostic()?
-        .unwrap_or(SourceRange {
-            start_monotonic_ns: 0,
-            end_monotonic_ns: final_monotonic_ns,
-        });
-        selected.end_monotonic_ns = selected.end_monotonic_ns.min(final_monotonic_ns);
-
-        if selected.start_monotonic_ns >= selected.end_monotonic_ns {
-            return Err(miette::miette!(
-                "video range must contain positive recorded time"
-            ));
-        }
-
-        let ranges = video_clip_ranges_session(
-            &session,
-            selected,
-            arguments.trim_idle.then_some(VideoIdlePolicy {
-                threshold_ns: VIDEO_IDLE_THRESHOLD_NS,
-                context_ns: VIDEO_IDLE_CONTEXT_NS,
-            }),
-        )
-        .into_diagnostic()?;
-
-        let provisional =
-            facade_edit_plan(&arguments, &ranges, provisional_fps, hold_start, hold_end)?;
-        let first_plan = plan_presentation(&session, &provisional, source).into_diagnostic()?;
-        let edit = facade_edit_plan(&arguments, &ranges, first_plan.fps, hold_start, hold_end)?;
-
-        if edit == provisional {
-            first_plan
-        } else {
-            plan_presentation(&session, &edit, source).into_diagnostic()?
-        }
-    };
-
-    if requested_fps.is_some_and(|fps| return fps != plan.fps) {
-        return Err(miette::miette!(
-            "requested {} FPS but the verified native capture is {} FPS; recapture at the requested rate",
-            requested_fps.unwrap_or(plan.fps),
-            plan.fps
-        ));
-    }
-
-    if arguments.dry_run {
-        return write_json_line(response, &plan);
-    }
-
-    require_video_render_capabilities(source)?;
-
-    if let Some(preview_out) = arguments.preview_out {
-        let outcome = preview_presentation(
-            &plan,
-            preview_out,
-            PreviewOptions {
+    let mode = match (arguments.out, arguments.preview_out) {
+        (Some(out), _) => VideoMode::Render { out },
+        (None, Some(directory)) => VideoMode::Preview {
+            directory,
+            options: PreviewOptions {
                 columns: arguments.columns,
                 tile_width: arguments.tile_width,
                 max_frames: arguments.max_frames,
                 change_only: arguments.change_only,
                 preview_width: arguments.preview_width,
             },
-        )
-        .into_diagnostic()?;
+        },
+        (None, None) => VideoMode::Plan,
+    };
 
-        return write_json_line(
+    let request = VideoRequest {
+        edit: arguments.edit,
+        preset: arguments.preset.into(),
+        fps: arguments.fps,
+        renderer: arguments.renderer.into(),
+        semantic_raster_profile: arguments.semantic_raster_profile.map(Into::into),
+        resolution: arguments.resolution,
+        scale: arguments.scale,
+        start_marker: arguments.start_marker,
+        end_marker: arguments.end_marker,
+        trim_idle: arguments.trim_idle,
+        hold_start: arguments.hold_start,
+        hold_end: arguments.hold_end,
+        cursor_style: arguments.cursor_style.into(),
+        ..VideoRequest::new(resolved.path, mode)
+    };
+
+    return render_video(response, &request);
+}
+
+/// Run a video request and write its outcome.
+pub(super) fn render_video(
+    response: &mut ResponseWriter,
+    request: &VideoRequest,
+) -> Result<ExitCode> {
+    let helper = env::current_exe().into_diagnostic()?;
+    let outcome = ArtifactService::video(request, &helper, &mut |message| {
+        return write_progress(response, message);
+    })
+    .map_err(capability_report)?;
+
+    return match outcome {
+        VideoOutcome::Planned(plan) => write_json_line(response, &plan),
+        VideoOutcome::Previewed { plan, preview } => write_json_line(
             response,
             &serde_json::json!({
                 "kind": "presentation_preview",
-                "directory": outcome.directory,
-                "contact_sheet": outcome.contact_sheet,
-                "video": outcome.video,
+                "directory": preview.directory,
+                "contact_sheet": preview.contact_sheet,
+                "video": preview.video,
                 "edit_plan_hash": plan.edit_plan_hash,
-                "source": match &plan.source {
-                    PresentationSource::Native { .. } => "native",
-                    PresentationSource::Semantic { .. } => "semantic",
-                },
+                "source": source_name(&plan.source),
             }),
-        );
-    }
-
-    let output = arguments
-        .out
-        .ok_or_else(|| miette::miette!("video export requires --out"))?;
-
-    let sidecar = sidecar.ok_or_else(|| miette::miette!("video export sidecar is missing"))?;
-
-    write_progress(
-        response,
-        format_args!(
-            "Rendering {} frames at {} FPS with the {} renderer...",
-            plan.output_frame_count,
-            plan.fps,
-            match &plan.source {
-                PresentationSource::Native { .. } => "native",
-                PresentationSource::Semantic { .. } => "semantic",
-            }
         ),
-    );
-
-    let outcome = export_presentation(&plan, &sidecar).into_diagnostic()?;
-
-    if output.exists() || output.symlink_metadata().is_ok() {
-        if output.is_dir() {
-            fs_err::remove_dir_all(&output)
-                .map_err(|source| {
-                    return Error::Filesystem {
-                        path: output.clone(),
-                        source,
-                    };
-                })
-                .into_diagnostic()?;
-        } else {
-            fs_err::remove_file(&output)
-                .map_err(|source| {
-                    return Error::Filesystem {
-                        path: output.clone(),
-                        source,
-                    };
-                })
-                .into_diagnostic()?;
-        }
-    }
-
-    if let Err(source) = fs_err::hard_link(&outcome.video, &output) {
-        if source.kind() == io::ErrorKind::CrossesDevices || source.raw_os_error() == Some(18) {
-            fs_err::copy(&outcome.video, &output)
-                .map_err(|source| {
-                    return Error::Filesystem {
-                        path: output.clone(),
-                        source,
-                    };
-                })
-                .into_diagnostic()?;
-        } else {
-            return Err(Error::Filesystem {
-                path: output,
-                source,
-            })
-            .into_diagnostic();
-        }
-    }
-
-    write_progress(
-        response,
-        "Published video and manifested render configuration.",
-    );
-
-    return write_json_line(
-        response,
-        &serde_json::json!({
-            "kind": "video",
-            "output": ByteString::from(output.as_os_str().as_bytes()),
-            "output_display": output.display().to_string(),
-            "manifest": sidecar.join("manifest.json"),
-            "artifact_directory": sidecar,
-            "renderer": match &plan.source {
-                PresentationSource::Native { .. } => "native",
-                PresentationSource::Semantic { .. } => "semantic",
-            },
-            "fps": plan.fps,
-            "width": plan.output_width,
-            "height": plan.output_height,
-            "frame_count": plan.output_frame_count,
-            "edit_plan_hash": plan.edit_plan_hash,
-        }),
-    );
-}
-
-fn facade_edit_plan(
-    arguments: &VideoFacadeArgs,
-    ranges: &[SourceRange],
-    fps: u16,
-    hold_start: Duration,
-    hold_end: Duration,
-) -> Result<EditPlan> {
-    let hold_start_ms = duration_millis(hold_start, "--hold-start")?;
-    let hold_end_ms = duration_millis(hold_end, "--hold-end")?;
-    let clips = video_clips(ranges, fps, hold_start_ms, hold_end_ms).into_diagnostic()?;
-
-    let mut transforms: Vec<PixelTransform> = Vec::new();
-
-    if arguments.cursor_style == VideoCursorStyleArg::Hidden {
-        transforms.push(PixelTransform::CursorMask);
-    }
-
-    if let Some(resolution) = arguments.resolution {
-        transforms.push(PixelTransform::Resize {
-            width: resolution.width,
-            height: resolution.height,
-        });
-    }
-
-    if let Some(scale) = arguments.scale
-        && scale != 1
-    {
-        transforms.push(PixelTransform::Zoom {
-            numerator: scale,
-            denominator: 1,
-        });
-    }
-
-    let preset_config = VideoPresetConfig::from_preset(arguments.preset);
-    let delivery = preset_config.delivery;
-
-    return Ok(EditPlan {
-        version: EDIT_PLAN_VERSION,
-        clips,
-        delivery,
-        transforms,
-        render_config: Some(VideoRenderConfig {
-            preset: preset_config.name.to_owned(),
-            renderer: match arguments.renderer {
-                VideoSourceArg::Native => "native",
-                VideoSourceArg::Semantic => "semantic",
-            }
-            .to_owned(),
-            fps,
-            resolution: arguments
-                .resolution
-                .map(|resolution| return [resolution.width, resolution.height]),
-            scale: arguments.scale,
-            start_marker: arguments.start_marker.clone(),
-            end_marker: arguments.end_marker.clone(),
-            trim_idle: arguments.trim_idle,
-            idle_threshold_ms: arguments
-                .trim_idle
-                .then_some(VIDEO_IDLE_THRESHOLD_NS / 1_000_000),
-            hold_start_ms,
-            hold_end_ms,
-            cursor_style: match arguments.cursor_style {
-                VideoCursorStyleArg::Recorded => "recorded",
-                VideoCursorStyleArg::Hidden => "hidden",
-            }
-            .to_owned(),
-        }),
-        ..EditPlan::default()
-    });
-}
-
-struct VideoPresetConfig {
-    name: &'static str,
-    fps: u16,
-    hold_start: Duration,
-    hold_end: Duration,
-    delivery: PresentationDelivery,
-    default_raster_profile: SemanticRasterProfile,
-}
-
-impl VideoPresetConfig {
-    fn from_preset(preset: VideoPresetArg) -> Self {
-        match preset {
-            VideoPresetArg::Docs => {
-                return Self {
-                    name: "docs",
-                    fps: 30,
-                    hold_start: Duration::from_millis(500),
-                    hold_end: Duration::from_millis(1_000),
-                    delivery: PresentationDelivery {
-                        codec: "h264".to_owned(),
-                        pixel_format: "yuv420p".to_owned(),
-                        crf: 18,
-                        encoder_preset: "slow".to_owned(),
-                    },
-                    default_raster_profile: SemanticRasterProfile::Direct,
-                };
-            }
-            VideoPresetArg::Social => {
-                return Self {
-                    name: "social",
-                    fps: 60,
-                    hold_start: Duration::from_millis(250),
-                    hold_end: Duration::from_millis(750),
-                    delivery: PresentationDelivery {
-                        codec: "h264".to_owned(),
-                        pixel_format: "yuv420p".to_owned(),
-                        crf: 20,
-                        encoder_preset: "medium".to_owned(),
-                    },
-                    default_raster_profile: SemanticRasterProfile::Direct,
-                };
-            }
-            VideoPresetArg::Lossless => {
-                return Self {
-                    name: "lossless",
-                    fps: 60,
-                    hold_start: Duration::ZERO,
-                    hold_end: Duration::ZERO,
-                    delivery: PresentationDelivery {
-                        codec: "h264_rgb".to_owned(),
-                        pixel_format: "rgb24".to_owned(),
-                        crf: 0,
-                        encoder_preset: "veryslow".to_owned(),
-                    },
-                    default_raster_profile: SemanticRasterProfile::Supersampled2x,
-                };
-            }
-        }
-    }
-
-    fn raster_profile(&self, explicit: Option<SemanticRasterProfileArg>) -> SemanticRasterProfile {
-        return explicit.map_or(self.default_raster_profile, Into::into);
-    }
-}
-
-#[cfg(test)]
-fn semantic_raster_profile(
-    preset: VideoPresetArg,
-    explicit: Option<SemanticRasterProfileArg>,
-) -> SemanticRasterProfile {
-    return VideoPresetConfig::from_preset(preset).raster_profile(explicit);
-}
-
-fn duration_millis(duration: Duration, flag: &str) -> Result<u64> {
-    return u64::try_from(duration.as_millis())
-        .map_err(|_error| return miette::miette!("{flag} is too large"));
-}
-
-fn video_sidecar_path(output: &Path) -> PathBuf {
-    let mut sidecar = output.as_os_str().to_os_string();
-    sidecar.push(".termtrace");
-    let sidecar = PathBuf::from(sidecar);
-    if sidecar
-        .parent()
-        .is_some_and(|parent| return !parent.as_os_str().is_empty())
-    {
-        return sidecar;
-    }
-    return Path::new(".").join(sidecar);
-}
-
-fn video_render_capability_ids(
-    source: PresentationSourceRequest,
-) -> (Option<&'static str>, &'static str) {
-    return (
-        match source {
-            PresentationSourceRequest::Native => None,
-            PresentationSourceRequest::Semantic { .. } => Some(SEMANTIC_VIDEO_CAPABILITY),
-        },
-        PRESENTATION_CAPABILITY,
-    );
-}
-
-fn require_video_render_capabilities(source: PresentationSourceRequest) -> Result<()> {
-    let (source_capability, presentation_capability) = video_render_capability_ids(source);
-    if let Some(source_capability) = source_capability {
-        require_cli_capability(source_capability)?;
-    }
-
-    return require_cli_capability(presentation_capability);
+        VideoOutcome::Rendered {
+            plan,
+            output,
+            sidecar,
+        } => write_json_line(
+            response,
+            &serde_json::json!({
+                "kind": "video",
+                "output": ByteString::from(output.as_os_str().as_bytes()),
+                "output_display": output.display().to_string(),
+                "manifest": sidecar.join("manifest.json"),
+                "artifact_directory": sidecar,
+                "renderer": source_name(&plan.source),
+                "fps": plan.fps,
+                "width": plan.output_width,
+                "height": plan.output_height,
+                "frame_count": plan.output_frame_count,
+                "edit_plan_hash": plan.edit_plan_hash,
+            }),
+        ),
+    };
 }
 
 pub(super) fn run_capture(
@@ -1014,39 +625,4 @@ pub(super) fn dispatch(
         ArtifactSubcommand::Save(arguments) => run_save(response, arguments),
         ArtifactSubcommand::Asciicast(arguments) => run_export_asciicast(response, arguments),
     };
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn semantic_raster_profiles_follow_source_and_preset_precedence() {
-        assert_eq!(
-            semantic_raster_profile(VideoPresetArg::Docs, None),
-            SemanticRasterProfile::Direct
-        );
-        assert_eq!(
-            semantic_raster_profile(VideoPresetArg::Social, None),
-            SemanticRasterProfile::Direct
-        );
-        assert_eq!(
-            semantic_raster_profile(VideoPresetArg::Lossless, None),
-            SemanticRasterProfile::Supersampled2x
-        );
-        assert_eq!(
-            semantic_raster_profile(
-                VideoPresetArg::Lossless,
-                Some(SemanticRasterProfileArg::Direct),
-            ),
-            SemanticRasterProfile::Direct
-        );
-        assert_eq!(
-            semantic_raster_profile(
-                VideoPresetArg::Docs,
-                Some(SemanticRasterProfileArg::Supersampled2x),
-            ),
-            SemanticRasterProfile::Supersampled2x
-        );
-    }
 }

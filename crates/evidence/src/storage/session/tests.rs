@@ -12,6 +12,7 @@ use std::{
     path::Path,
 };
 use tempfile::TempDir;
+use termtrace_model::execution::layout;
 use termtrace_model::{
     execution::environment::ChildEnvironmentPolicy,
     execution::event::{Event, EventLogHeader, InputDescriptor, InputKind, InputSource},
@@ -145,7 +146,7 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
     manifest.ghostty_visual = Some(GhosttyVisualProvenance {
         source_config: None,
         overrides: GhosttyVisualOverrides::default(),
-        replay_profile: GHOSTTY_REPLAY_PROFILE_NAME.to_owned(),
+        replay_profile: layout::GHOSTTY_REPLAY_PROFILE.to_owned(),
         replay_profile_hash: "a".repeat(64),
         effective_config_hash: "0".repeat(64),
     });
@@ -217,7 +218,7 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
 fn completed_content_validation_binds_the_replay_profile_file() {
     let (temporary, _) = completed_fixture(Vec::new());
     let session = temporary.path().join("session");
-    let profile_path = session.join(GHOSTTY_REPLAY_PROFILE_NAME);
+    let profile_path = session.join(layout::GHOSTTY_REPLAY_PROFILE);
     let profile_bytes = b"font-size = 13\n";
     fs_err::write(&profile_path, profile_bytes).expect("replay profile");
 
@@ -225,7 +226,7 @@ fn completed_content_validation_binds_the_replay_profile_file() {
     manifest.ghostty_visual = Some(GhosttyVisualProvenance {
         source_config: None,
         overrides: GhosttyVisualOverrides::default(),
-        replay_profile: GHOSTTY_REPLAY_PROFILE_NAME.to_owned(),
+        replay_profile: layout::GHOSTTY_REPLAY_PROFILE.to_owned(),
         replay_profile_hash: blake3::hash(profile_bytes).to_hex().to_string(),
         effective_config_hash: "0".repeat(64),
     });

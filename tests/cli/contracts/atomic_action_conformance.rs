@@ -134,6 +134,7 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
     let error = session
         .act(request.clone())
         .expect_err("oversized action projection must fail loudly");
+
     let details = error.details().expect("terminating-frame failure details");
     let limit = details
         .screen_frame
@@ -149,7 +150,6 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
     let retry = session
         .act(request)
         .expect_err("cached oversized action retry must retain its failure");
-
     assert_eq!(retry.code(), error.code());
     assert_eq!(retry.effect(), error.effect());
     assert_eq!(retry.details(), error.details());

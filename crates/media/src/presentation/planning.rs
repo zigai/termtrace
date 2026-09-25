@@ -25,6 +25,7 @@ use termtrace_evidence::{
     event_log::{EventLog, EventLogCursor},
     session::{read_manifest, validate_completed_session},
 };
+use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::{
     artifact::presentation::{
         AnnotationScope, CaptionLayout, ChangeMode, ChangeRegion, ChangeSource,
@@ -75,7 +76,7 @@ pub fn video_clip_ranges_session(
     idle: Option<VideoIdlePolicy>,
 ) -> Result<Vec<SourceRange>> {
     let mut ranges = IdleRanges::new(selected, idle);
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
 
     while let Some(record) = cursor.next_record()? {
         if matches!(record.event, Event::Output { .. }) {
@@ -238,7 +239,7 @@ fn marker_records(session: &Path, fps: u16, capture_start_ns: u64) -> Result<Vec
 
     let mut occurrence_counts = HashMap::<String, u64>::new();
     let mut records = Vec::new();
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
 
     while let Some(record) = cursor.next_record()? {
         if let Event::Marker { label, .. } = record.event {
@@ -453,7 +454,7 @@ fn resolve_source(
     source_request: PresentationSourceRequest,
     session_manifest: &SessionManifest,
 ) -> Result<ResolvedSource> {
-    let cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     let header = cursor.header();
 
     return match source_request {
@@ -1163,7 +1164,7 @@ fn resolve_edit_selector(
     }
 
     if let Some(event_seq) = selector.event_seq {
-        let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+        let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
         while let Some(record) = cursor.next_record()? {
             if record.seq == event_seq {
                 return Ok(record.monotonic_ns);
@@ -1195,7 +1196,7 @@ fn resolve_edit_selector(
         .ok_or_else(|| return plan_error("selector has no coordinate"))?;
 
     let mut found = None;
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
 
     while let Some(record) = cursor.next_record()? {
         if matches!(&record.event, Event::Marker { label, .. } if label == marker)

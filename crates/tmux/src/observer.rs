@@ -83,6 +83,7 @@ impl ObserverRole {
         let socket = Path::new(OsStr::from_bytes(server.socket_path.as_bytes()));
         let metadata = fs_err::symlink_metadata(socket)
             .map_err(|error| return Error::filesystem(socket, error))?;
+
         if metadata.uid() != geteuid().as_raw() {
             return Err(Error::invalid(
                 "observer requires a tmux socket owned by the current user",
@@ -95,7 +96,6 @@ impl ObserverRole {
         else {
             return Ok(None);
         };
-
         let mut file = lock.file();
         file.set_len(0)
             .and_then(|()| return file.seek(SeekFrom::Start(0)).map(drop))
@@ -160,6 +160,7 @@ pub fn audit(
         .iter()
         .map(|pane| return pane.row.snapshot.pane_id.clone())
         .collect::<BTreeSet<_>>();
+
     suspects.retain(|pane, _| return present.contains(pane));
 
     let mut enforcement = Vec::new();
@@ -236,6 +237,7 @@ pub fn guard(client: &TmuxClient, pane: &str) -> Result<()> {
     let Some(integration) = Integration::read(client)? else {
         return Ok(());
     };
+
     let Ok(row) = client.pane_row(pane) else {
         return Ok(());
     };
@@ -248,6 +250,7 @@ pub fn guard(client: &TmuxClient, pane: &str) -> Result<()> {
     }
 
     let deadline = Instant::now() + UNRECORDED_GRACE;
+
     loop {
         match client.pane_number::<u32>(pane, "#{pane_pid}") {
             Err(_) => return Ok(()),
@@ -298,6 +301,7 @@ fn enforce(
                 "Termtrace found unrecorded pane {pane_id}{when} (coverage={})",
                 coverage.as_str()
             );
+
             let _display = client.run(["display-message", "-d", "5000", message.as_str()]);
             let _kill = client.run(["kill-pane", "-t", pane_id.as_str()]);
         }
@@ -315,6 +319,7 @@ pub fn supervise(client: &TmuxClient) -> Result<()> {
     let Some(integration) = Integration::read(client)? else {
         return Ok(());
     };
+
     let identity = client.server_identity()?;
     let Some(_lock) = ObserverRole::Supervisor.claim(&integration.output_root, &identity)? else {
         return Ok(());
@@ -331,6 +336,7 @@ pub fn supervise(client: &TmuxClient) -> Result<()> {
         let Ok(Some(integration)) = Integration::read(client) else {
             return Ok(());
         };
+
         let Ok(rows) = client.list_panes() else {
             return Ok(());
         };
@@ -357,8 +363,10 @@ pub fn supervise(client: &TmuxClient) -> Result<()> {
         let watchdog_alive = ObserverRole::Watchdog
             .holder(&integration.output_root, &identity)
             .is_some();
+
         if watchdog_restart_due(watchdog_alive, watchdog_restarted, now) {
             watchdog_restarted = Some(now);
+
             match PreparedTmuxSetup::from_options(client) {
                 Ok(setup) => {
                     if let Err(error) = client.run_shell_background(&setup.watchdog_command()) {
@@ -381,6 +389,7 @@ pub fn watchdog(client: &TmuxClient) -> Result<()> {
     let Some(integration) = Integration::read(client)? else {
         return Ok(());
     };
+
     let identity = client.server_identity()?;
     let Some(_lock) = ObserverRole::Watchdog.claim(&integration.output_root, &identity)? else {
         return Ok(());

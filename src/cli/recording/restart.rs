@@ -1,4 +1,5 @@
 use super::*;
+use termtrace_model::execution::layout;
 
 pub(in crate::cli) fn run_restart(
     response: &mut ResponseWriter,
@@ -18,6 +19,7 @@ pub(in crate::cli) fn run_restart(
             "predecessor stop did not wait for completion"
         ));
     };
+
     let predecessor_manifest_bytes =
         fs_err::read(SessionLayout::new(&predecessor).manifest()).into_diagnostic()?;
 
@@ -29,25 +31,20 @@ pub(in crate::cli) fn run_restart(
     };
 
     let paths = registry.allocate_detached_paths().into_diagnostic()?;
-    let stdout = open_detached_log(&paths.stdout_log)?;
-    let stderr = open_detached_log(&paths.stderr_log)?;
     let executable = env::current_exe().into_diagnostic()?;
-
-    let mut recorder = ProcessCommand::new("setsid")
-        .arg(executable)
-        .args(restart_record_arguments(
+    let mut recorder = spawn_detached(
+        &executable,
+        restart_record_arguments(
             &arguments.name,
             &paths.session,
             &predecessor,
             &encoded_overrides,
             arguments.environment_spec.as_deref(),
-        ))
-        .env_remove("TERMTRACE_RESPONSE")
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
-        .spawn()
-        .into_diagnostic()?;
+        ),
+        &paths,
+        None,
+    )
+    .into_diagnostic()?;
 
     let deadline = Instant::now() + timeout;
 
@@ -163,6 +160,7 @@ pub(super) fn restarted_record_options(
 ) -> Result<RecordOptions> {
     let manifest_bytes =
         fs_err::read(SessionLayout::new(predecessor).manifest()).into_diagnostic()?;
+
     let manifest = read_manifest(predecessor).into_diagnostic()?;
     let completion = wait_for_completion(predecessor, Duration::ZERO).into_diagnostic()?;
     let event_log =
@@ -188,13 +186,13 @@ pub(super) fn restarted_record_options(
         .ghostty_visual
         .as_ref()
         .map(|provenance| {
-            if provenance.replay_profile != GHOSTTY_REPLAY_PROFILE_NAME {
+            if provenance.replay_profile != layout::GHOSTTY_REPLAY_PROFILE {
                 return Err(miette::miette!(
                     "unsupported recorded Ghostty profile path `{}`",
                     provenance.replay_profile
                 ));
             }
-            return fs_err::read(predecessor.join(GHOSTTY_REPLAY_PROFILE_NAME))
+            return fs_err::read(SessionLayout::new(predecessor).ghostty_replay_profile())
                 .map(|replay_profile| {
                     return restore_ghostty_profile(replay_profile, provenance.clone());
                 })

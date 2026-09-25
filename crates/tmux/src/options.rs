@@ -12,7 +12,6 @@ pub const WRAPPER_BINARY_ENV: &str = "TERMTRACE_TMUX_BINARY";
 pub const SUPERVISOR_INTERVAL: Duration = Duration::from_millis(250);
 /// Time a selected pane may run without a wrapper before enforcement.
 pub const UNRECORDED_GRACE: Duration = Duration::from_millis(500);
-
 /// Global: integration version.
 pub const VERSION: &str = "@termtrace-recording-version";
 /// Global: Termtrace executable.
@@ -53,14 +52,12 @@ pub const GRANDFATHERED_PID: &str = "@termtrace-grandfathered-pid";
 pub const SELECTED_PID: &str = "@termtrace-selected-pid";
 /// Pane: process excluded from recording.
 pub const EXCLUDED_PID: &str = "@termtrace-excluded-pid";
-
 /// Hooks that run the pane guard.
 pub const GUARDED_HOOKS: &[&str] = &[
     "after-new-session",
     "after-new-window",
     "after-split-window",
 ];
-
 /// Global options owned by the integration and removed by disable.
 pub const RESERVED: &[&str] = &[
     VERSION,
@@ -80,6 +77,5 @@ pub const RESERVED: &[&str] = &[
     TERM,
     SCOPE,
 ];
-
 /// Pane options owned by the integration and removed by disable.
 pub const PANE_MARKS: &[&str] = &[GRANDFATHERED_PID, SELECTED_PID, EXCLUDED_PID];

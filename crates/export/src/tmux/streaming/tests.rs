@@ -43,6 +43,7 @@ fn source_traversal_reads_complete_history_and_ignores_an_untrusted_index() {
         lifecycle_journal: TmuxJournalBoundary::empty(),
         catalog: TmuxCatalogSummary::default(),
     };
+
     let events = (0..2500_u64)
         .map(|index| {
             return TmuxEvent::PaneTrackLinked {
@@ -55,11 +56,11 @@ fn source_traversal_reads_complete_history_and_ignores_an_untrusted_index() {
             };
         })
         .collect();
+
     store
         .initialize(aggregate, events, 2)
         .expect("canonical history");
     let aggregate = store.read().expect("snapshot");
-
     fs_err::write(
         store.directory().join(CATALOG_NAME),
         b"untrusted derived index",

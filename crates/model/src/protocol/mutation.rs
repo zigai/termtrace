@@ -119,7 +119,6 @@ mod tests {
             MutationEffect::Unknown,
         ])
         .expect("effects serialize");
-
         assert_eq!(
             encoded,
             serde_json::json!([
@@ -129,7 +128,6 @@ mod tests {
                 {"kind": "unknown"},
             ])
         );
-
         let encoded = serde_json::to_value([
             Retry::NewRequest,
             Retry::SameRequestId,
@@ -137,7 +135,6 @@ mod tests {
             Retry::DoNotRetry,
         ])
         .expect("retries serialize");
-
         assert_eq!(
             encoded,
             serde_json::json!([

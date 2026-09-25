@@ -276,6 +276,7 @@ pub(in crate::cli) fn run_events(
 
     let mut cursor =
         EventLogCursor::open(SessionLayout::new(&session).event_log()).into_diagnostic()?;
+
     let mut staged = tempfile::tempfile().into_diagnostic()?;
     let mut total = 0_usize;
     let mut returned = 0_usize;
@@ -383,6 +384,7 @@ fn follow_records(
 ) -> Result<ExitCode> {
     let mut cursor =
         EventLogCursor::open(SessionLayout::new(session).event_log()).into_diagnostic()?;
+
     let mut initialized = false;
     let mut staged = tempfile::tempfile().into_diagnostic()?;
     let mut line = Vec::new();
@@ -394,7 +396,6 @@ fn follow_records(
             defaults::COMPLETION_GRACE,
         )
         .into_diagnostic()?;
-
         let (available, live_boundary, completed_hash) = if let Reached::Live(data) = reached {
             let ControlData::EventCursor {
                 device,

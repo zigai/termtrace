@@ -92,7 +92,6 @@ fn composite_link_makes_a_starting_recording_live() {
         2,
     )
     .expect("link");
-
     assert_eq!(step.state.lifecycle, TmuxRecordingLifecycle::Live);
     assert!(step.state.composite_track.link.is_some());
     assert_eq!(kinds(&step.events), ["composite_track_linked"]);
@@ -116,7 +115,6 @@ fn composite_completion_while_live_does_not_complete_the_recording() {
         2,
     )
     .expect("settle");
-
     assert_eq!(step.state, live);
     assert!(step.events.is_empty());
 }
@@ -131,9 +129,9 @@ fn stopping_completes_only_when_every_track_completed() {
     )
     .expect("stop")
     .state;
+
     let repeated = reduce("test", &stopping, Input::StopRequested, 3).expect("repeat stop");
     assert!(repeated.events.is_empty(), "a repeated stop is idempotent");
-
     let pending = reduce(
         "test",
         &stopping,
@@ -173,7 +171,6 @@ fn late_track_link_cannot_reopen_a_completed_recording() {
         2,
     )
     .expect_err("sealed");
-
     assert!(matches!(error, Error::Sealed(_)));
 }
 
@@ -253,6 +250,7 @@ fn observations_emit_pane_container_and_coverage_transitions() {
     )
     .expect("second snapshot");
     assert_eq!(kinds(&second.events), ["layout_changed"]);
+
     let gap = second
         .state
         .coverage_gaps
@@ -263,7 +261,6 @@ fn observations_emit_pane_container_and_coverage_transitions() {
         (gap.first_observed_unix_ns, gap.last_observed_unix_ns),
         (2, 3)
     );
-
     let third = reduce(
         "test",
         &second.state,
@@ -281,9 +278,11 @@ fn observations_emit_pane_container_and_coverage_transitions() {
             "coverage_gap_resolved"
         ]
     );
+
     let Some(TmuxEvent::CoverageGapResolved { gap }) = third.events.last() else {
         panic!("resolution event");
     };
+
     assert_eq!(gap.resolved_unix_ns, Some(4));
     assert_eq!(gap.first_observed_unix_ns, 2);
     assert!(
@@ -330,7 +329,6 @@ fn published_recordings_link_once_and_follow_their_pane() {
     )
     .expect("wrapper registration after observation");
     assert!(repeated.events.is_empty());
-
     let gone = reduce("test", &linked.state, observe(Vec::new(), &[]), 4).expect("pane gone");
     assert!(gone.state.pane_tracks.is_empty());
 }
@@ -344,7 +342,6 @@ fn observer_start_records_a_resolved_observation_gap() {
         5,
     )
     .expect("observer");
-
     assert_eq!(
         kinds(&step.events),
         [
@@ -353,9 +350,11 @@ fn observer_start_records_a_resolved_observation_gap() {
             "observer_started"
         ]
     );
+
     let Some(TmuxEvent::CoverageGapResolved { gap }) = step.events.get(1) else {
         panic!("resolved gap");
     };
+
     assert_eq!(gap.kind, TmuxGapKind::ObserverStart);
     assert_eq!(
         (gap.first_observed_unix_ns, gap.resolved_unix_ns),

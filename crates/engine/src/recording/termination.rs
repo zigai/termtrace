@@ -155,7 +155,6 @@ impl Termination {
                 let Stage::Running { output_closed } = self.stage else {
                     return;
                 };
-
                 self.stage = if output_closed {
                     Stage::Settling { status }
                 } else {
@@ -249,7 +248,6 @@ impl Termination {
                 output_closed: false,
             },
         );
-
         self.stage = next(current);
     }
 
@@ -257,7 +255,6 @@ impl Termination {
         let Kill::Pending { resource, signal } = self.kill else {
             return None;
         };
-
         if let Some(escalation) = resource
             && (tick.now >= escalation.at || escalation.runaway(tick.output_bytes))
         {
@@ -283,7 +280,6 @@ impl Termination {
                 "child did not exit after a signal delivered to the recorder; process group was killed",
             ));
         }
-
         return None;
     }
 }

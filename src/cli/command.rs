@@ -15,6 +15,7 @@ use crate::cli::{
 };
 use clap::{error::ErrorKind as ClapErrorKind, CommandFactory as _, Parser, Subcommand};
 use std::env;
+use termtrace_media::helper;
 use termtrace_process::owned;
 #[derive(Debug, Parser)]
 #[command(
@@ -87,16 +88,16 @@ pub(super) enum Command {
     Version(VersionArgs),
 
     /// Internal timed event playback used as Ghostty's child process.
-    #[command(hide = true)]
+    #[command(hide = true, name = helper::playback::SUBCOMMAND)]
     Playback(PlaybackArgs),
     /// Internal persistent endpoint replay used as Ghostty's child process.
-    #[command(hide = true)]
+    #[command(hide = true, name = helper::playback_worker::SUBCOMMAND)]
     PlaybackWorker(PlaybackWorkerArgs),
     /// Supervise one private native process group against parent process identity.
     #[command(hide = true, name = owned::SUBCOMMAND)]
     OwnedProcess(OwnedProcessArgs),
     /// Internal live terminal geometry probe.
-    #[command(hide = true)]
+    #[command(hide = true, name = helper::geometry_probe::SUBCOMMAND)]
     GeometryProbe(GeometryProbeArgs),
     /// Internal artifact operations.
     #[command(hide = true)]

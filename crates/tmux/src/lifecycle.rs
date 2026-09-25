@@ -67,6 +67,7 @@ mod tests {
             (Stopping, CompositeLinked, Stopping),
             (Stopping, TracksSettled, Completed),
         ];
+
         for (from, trigger, to) in legal {
             assert_eq!(from.advance(trigger).ok(), Some(to), "{from:?} {trigger:?}");
         }

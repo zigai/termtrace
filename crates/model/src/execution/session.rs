@@ -18,8 +18,6 @@ pub const SESSION_MANIFEST_FORMAT: &str = "termtrace-session";
 pub const SESSION_MANIFEST_VERSION: u32 = 12;
 /// Current tmux-owned-pane provenance contract.
 pub const TMUX_PANE_PROVENANCE_VERSION: u32 = 1;
-/// Canonical root-level Ghostty replay-profile artifact.
-pub const GHOSTTY_REPLAY_PROFILE_NAME: &str = "ghostty-profile.ghostty";
 /// Completion manifest format identifier.
 pub const SESSION_COMPLETION_FORMAT: &str = "termtrace-completion";
 /// Completion manifest schema version.
@@ -494,23 +492,23 @@ pub struct TmuxPaneProvenance {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execution::layout;
 
     #[test]
     fn ghostty_profile_provenance_retains_the_split_hash_contract() {
         assert_eq!(SESSION_MANIFEST_VERSION, 12);
-        assert_eq!(GHOSTTY_REPLAY_PROFILE_NAME, "ghostty-profile.ghostty");
 
         let provenance = GhosttyVisualProvenance {
             source_config: None,
             overrides: GhosttyVisualOverrides::default(),
-            replay_profile: GHOSTTY_REPLAY_PROFILE_NAME.to_owned(),
+            replay_profile: layout::GHOSTTY_REPLAY_PROFILE.to_owned(),
             replay_profile_hash: "replay-hash".to_owned(),
             effective_config_hash: "effective-hash".to_owned(),
         };
         let encoded = serde_json::to_value(&provenance).expect("profile provenance JSON");
         assert_eq!(
             encoded.get("replay_profile"),
-            Some(&serde_json::json!(GHOSTTY_REPLAY_PROFILE_NAME))
+            Some(&serde_json::json!(layout::GHOSTTY_REPLAY_PROFILE))
         );
         assert_eq!(
             encoded.get("replay_profile_hash"),
@@ -541,7 +539,7 @@ mod tests {
                 "foreground": null,
                 "backround": "#000000"
             },
-            "replay_profile": GHOSTTY_REPLAY_PROFILE_NAME,
+            "replay_profile": layout::GHOSTTY_REPLAY_PROFILE,
             "replay_profile_hash": "a".repeat(64),
             "effective_config_hash": "b".repeat(64)
         });

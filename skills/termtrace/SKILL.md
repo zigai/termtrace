@@ -73,7 +73,7 @@ from an older command name.
 5. Mark meaningful workflow milestones only: `send my-app mark:checkpoint`.
 6. Check exit codes and `--json` error structures. Exit code 0 indicates success;
    non-zero indicates failure. Diagnostic logs go to stderr via `TERMTRACE_LOG`.
-7. Stop with completion waiting (`stop my-app`). Triage the last action with `analyze my-app`,
+7. Stop with completion waiting (`stop my-app --wait`). Triage the last action with `analyze my-app`,
    then publish the smallest sufficient `screenshot`, `video`, or `bundle`.
    Preserve failed and incomplete evidence.
 

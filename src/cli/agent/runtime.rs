@@ -194,7 +194,6 @@ pub(super) fn bounded_response_with_bytes(response: DriverResponse) -> (DriverRe
                 None,
             ),
         };
-
         let err_bytes = serde_json::to_vec(&err).unwrap_or_default();
 
         return (err, err_bytes);

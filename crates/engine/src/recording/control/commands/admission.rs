@@ -102,6 +102,7 @@ impl SessionActor<'_> {
                         &reason,
                         MutationEffect::NotApplied,
                     );
+
                     let _ = response_sender.send(response);
 
                     return Ok(());
@@ -383,6 +384,7 @@ impl SessionActor<'_> {
             }
             _ => MutationEffect::NotApplied,
         };
+
         let response = match (&outcome, stale) {
             (Err(Error::ControlRejected { code, message }), true) => ControlResponse {
                 version: CONTROL_PROTOCOL_VERSION,

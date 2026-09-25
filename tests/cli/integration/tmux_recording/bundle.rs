@@ -44,7 +44,6 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
     fs::set_permissions(&state, Permissions::from_mode(0o700)).expect("private state root");
     let store = RecordingStore::create(&state, "work").expect("aggregate directory");
     let aggregate = store.directory().to_path_buf();
-
     let composite_manifest = read_manifest(&composite).expect("composite manifest");
     let manifest = TmuxRecordingManifest {
         format: TMUX_RECORDING_FORMAT.to_owned(),
@@ -76,6 +75,7 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
         lifecycle_journal: TmuxJournalBoundary::empty(),
         catalog: TmuxCatalogSummary::default(),
     };
+
     let linked = [&previous, &pane]
         .into_iter()
         .map(|path| {
@@ -89,6 +89,7 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
             };
         })
         .collect();
+
     store
         .initialize(manifest, linked, 1)
         .expect("linked tracks");
@@ -343,6 +344,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
 
     for entry in history {
         let track = &entry["track"];
+
         assert_eq!(
             linked["pane_tracks"][track["pane_id"].as_str().expect("pane ID")],
             track["session"]
@@ -362,8 +364,8 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
             "-L",
             socket.as_str(),
         ]);
-        let events = tmux_events(root, "work");
 
+        let events = tmux_events(root, "work");
         if let Some(pid) = status["observers"]["supervisor"].as_i64()
             && events
                 .iter()
@@ -552,6 +554,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
 
     assert!(final_last_observed >= initial_last_observed);
     assert!(resolved_unix_ns >= final_last_observed);
+
     let events = tmux_events(root, "work");
     assert!(["coverage_gap_opened", "coverage_gap_resolved"]
         .iter()

@@ -146,6 +146,7 @@ pub(in crate::cli) fn run_screen(
             Err(error) => return Err(error).into_diagnostic(),
         }
     };
+
     let lifecycle =
         if observation.source_completed { SessionPhase::Completed } else { resolved.phase };
 

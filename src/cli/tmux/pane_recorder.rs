@@ -68,6 +68,7 @@ fn record_pane(mut recording: PaneRecording) -> Result<ExitCode> {
         .pixel_width
         .checked_div(geometry.cols)
         .ok_or_else(|| return miette::miette!("inherited tmux pane has no terminal columns"))?;
+
     let cell_height_px = geometry
         .pixel_height
         .checked_div(geometry.rows)

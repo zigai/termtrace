@@ -342,6 +342,7 @@ fn rust_facade_bridges_actor_shutdown_to_completion_publication() {
 
     let attached = termtrace_sdk::Session::attach(&session, env!("CARGO_BIN_EXE_termtrace"))
         .expect("attach short-lived session");
+
     let observation = attached
         .observe(StatePoint::LatestPresented, false)
         .expect("bridge observation across completion publication");

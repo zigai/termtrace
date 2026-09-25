@@ -45,12 +45,12 @@ pub(super) fn run_detached_record(
         until_screen_regex,
         timeout: timeout.unwrap_or(defaults::WAIT_TIMEOUT),
     };
-    let startup_timeout = millis_or(startup_timeout_ms, defaults::STARTUP_TIMEOUT);
 
+    let startup_timeout = millis_or(startup_timeout_ms, defaults::STARTUP_TIMEOUT);
     let _durability_policy = durability_policy_for(&recording)?;
-    let registry = SessionRegistry::open_default().into_diagnostic()?;
+    let registry = RegistryService::open_default().into_diagnostic()?;
     let executable = env::current_exe().into_diagnostic()?;
-    let environment_stdin = if recording.environment_spec_stdin {
+    let stdin = if recording.environment_spec_stdin {
         let mut bytes = Vec::new();
         io::stdin()
             .take(4 * 1024 * 1024 + 1)
@@ -62,112 +62,27 @@ pub(super) fn run_detached_record(
         None
     };
 
-    let mut paths = registry.allocate_detached_paths().into_diagnostic()?;
-    if let Some(out) = out {
-        paths.session = out;
-    }
-
-    let lease = startup_timeout.saturating_add(Duration::from_secs(5));
-    let reservation = registry
-        .reserve(&name, &paths.session, lease)
+    let started = registry
+        .start_detached(
+            &executable,
+            DetachedStart {
+                alias: name.clone(),
+                session: out,
+                startup_timeout,
+                stdin,
+            },
+            |session| return detached_record_arguments(&name, session, &recording),
+        )
         .into_diagnostic()?;
 
-    let stdout = match open_detached_log(&paths.stdout_log) {
-        Ok(stdout) => stdout,
-        Err(error) => {
-            release_start_reservation(&registry, &reservation);
-
-            return Err(error);
-        }
-    };
-
-    let stderr = match open_detached_log(&paths.stderr_log) {
-        Ok(stderr) => stderr,
-        Err(error) => {
-            release_start_reservation(&registry, &reservation);
-
-            return Err(error);
-        }
-    };
-
-    let record_arguments = detached_record_arguments(&name, &paths.session, &recording);
-    let mut command = ProcessCommand::new("setsid");
-    command
-        .arg(executable)
-        .args(record_arguments)
-        .env_remove("TERMTRACE_RESPONSE")
-        .stdin(if environment_stdin.is_some() { Stdio::piped() } else { Stdio::null() })
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr));
-    let mut recorder = match command.spawn() {
-        Ok(recorder) => recorder,
-        Err(source) => {
-            release_start_reservation(&registry, &reservation);
-
-            return Err(source).into_diagnostic();
-        }
-    };
-
-    if let Some(bytes) = environment_stdin {
-        let mut stdin = recorder
-            .stdin
-            .take()
-            .ok_or_else(|| miette::miette!("detached environment pipe was not created"))?;
-        stdin.write_all(&bytes).into_diagnostic()?;
-        drop(stdin);
-    }
-
-    let deadline = Instant::now() + startup_timeout;
-
-    return match await_ready(&paths.session, &mut recorder, deadline).into_diagnostic()? {
-        Readiness::Live => {
-            let entry = registry.promote(&reservation).map_err(|error| {
-                return miette::miette!(
-                    "recorder became ready but owned alias promotion failed; reservation remains for {}; stdout log: {}; stderr log: {}; {error}",
-                    paths.session.display(),
-                    paths.stdout_log.display(),
-                    paths.stderr_log.display(),
-                );
-            })?;
-
-            report_start_outcome(response, &entry, &paths, None, &synchronization, json)
-        }
-        Readiness::Completed(completion) => promote_completed_start(
-            response,
-            &registry,
-            &reservation,
-            &paths,
-            &completion,
-            &synchronization,
-            json,
-        ),
-        Readiness::Exited(status) => {
-            release_start_reservation(&registry, &reservation);
-
-            Err(miette::miette!(
-                "detached recorder exited before publishing valid completion evidence with {status}; session candidate: {}; stdout log: {}; stderr log: {}",
-                paths.session.display(),
-                paths.stdout_log.display(),
-                paths.stderr_log.display(),
-            ))
-        }
-        Readiness::TimedOut => Err(miette::miette!(
-            "detached recorder did not become ready within {} ms; its owned alias reservation and pending session remain recoverable: {}; stdout log: {}; stderr log: {}",
-            startup_timeout.as_millis(),
-            paths.session.display(),
-            paths.stdout_log.display(),
-            paths.stderr_log.display(),
-        )),
-    };
-}
-
-pub(super) fn release_start_reservation(
-    registry: &SessionRegistry,
-    reservation: &AliasReservation,
-) {
-    if let Err(error) = registry.release(reservation) {
-        tracing::warn!(%error, alias = %reservation.alias, "failed to release startup reservation");
-    }
+    return report_start_outcome(
+        response,
+        &started.entry,
+        &started.paths,
+        started.completion.as_deref(),
+        &synchronization,
+        json,
+    );
 }
 
 #[derive(Debug)]
@@ -184,34 +99,6 @@ impl StartSynchronization {
             || self.until_screen.is_some()
             || self.until_screen_regex.is_some();
     }
-}
-
-fn promote_completed_start(
-    response: &mut ResponseWriter,
-    registry: &SessionRegistry,
-    reservation: &AliasReservation,
-    paths: &DetachedSessionPaths,
-    completion: &SessionCompletion,
-    synchronization: &StartSynchronization,
-    json: bool,
-) -> Result<ExitCode> {
-    let entry = registry.promote(reservation).map_err(|error| {
-        return miette::miette!(
-            "recorder completed but owned alias promotion failed; reservation remains for {}; stdout log: {}; stderr log: {}; {error}",
-            paths.session.display(),
-            paths.stdout_log.display(),
-            paths.stderr_log.display(),
-        );
-    })?;
-
-    return report_start_outcome(
-        response,
-        &entry,
-        paths,
-        Some(completion),
-        synchronization,
-        json,
-    );
 }
 
 fn report_start_outcome(
@@ -320,6 +207,7 @@ fn start_postcondition(
                 allow_incomplete: true,
             })
             .into_diagnostic()?;
+
         let matched = capture.quality.is_settled();
 
         return Ok((
@@ -356,6 +244,7 @@ fn start_postcondition(
     let waited = session
         .wait_screen(predicate, Duration::ZERO, synchronization.timeout)
         .into_diagnostic()?;
+
     let matched = waited.satisfied();
 
     return Ok((
@@ -378,7 +267,7 @@ fn start_postcondition(
     ));
 }
 
-pub(super) fn detached_record_arguments(
+pub(in crate::cli) fn detached_record_arguments(
     alias: &str,
     session: &Path,
     recording: &RecordingArgs,
@@ -600,18 +489,4 @@ pub(super) fn push_optional_u16(arguments: &mut Vec<OsString>, name: &str, value
     if let Some(value) = value {
         push_record_option(arguments, name, OsStr::new(&value.to_string()));
     }
-}
-
-pub(in crate::cli) fn open_detached_log(path: &Path) -> Result<File> {
-    return OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|source| {
-            return miette::miette!(
-                "could not create detached recorder log {}: {source}",
-                path.display()
-            );
-        });
 }

@@ -62,6 +62,7 @@ impl Terminal {
         let log_path = self
             .evidence_root
             .join(format!(".{}.driver.log", Uuid::now_v7()));
+
         let environment = serde_json::to_vec(&spec.environment).map_err(|source| {
             return Error::InvalidJson {
                 path: PathBuf::from("<environment-spec-stdin>"),
@@ -69,6 +70,7 @@ impl Terminal {
                 source,
             };
         })?;
+
         let log_error = |source| {
             return Error::Filesystem {
                 path: log_path.clone(),
@@ -122,6 +124,7 @@ impl Terminal {
                     return client_error(format!("write environment pipe: {error}"));
                 });
             });
+
         let deadline = Instant::now() + spec.startup_timeout;
         let readiness = written.and_then(|()| return await_ready(&path, &mut recorder, deadline));
 
@@ -130,15 +133,19 @@ impl Terminal {
                 return Session::open(path, self.binary.clone(), Some(recorder));
             }
             Ok(Readiness::Exited(status)) => {
-                return Err(client_error(format!(
-                    "recorder exited before readiness with {status}; diagnostics: {}",
-                    log_path.display()
-                )));
+                return Err(Error::RecorderStartup {
+                    reason: format!(
+                        "recorder exited before readiness with {status}; diagnostics: {}",
+                        log_path.display()
+                    ),
+                });
             }
-            Ok(Readiness::TimedOut) => client_error(format!(
-                "recorder readiness timed out; diagnostics: {}",
-                log_path.display()
-            )),
+            Ok(Readiness::TimedOut) => Error::RecorderStartup {
+                reason: format!(
+                    "recorder readiness timed out; diagnostics: {}",
+                    log_path.display()
+                ),
+            },
             Err(error) => error,
         };
 

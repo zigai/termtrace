@@ -17,6 +17,7 @@ use termtrace_evidence::{
     provenance::{collect_execution_provenance, RecorderBuildIdentity},
     session::{canonical_manifest_bytes, manifest_hash, validate_completed_session},
 };
+use termtrace_model::execution::layout::{self, SessionLayout};
 use termtrace_model::{
     execution::environment::EnvironmentSpec,
     execution::event::{Event, EventLogHeader},
@@ -157,15 +158,19 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         termtrace_version: env!("CARGO_PKG_VERSION").to_owned(),
         operating_system: env::consts::OS.to_owned(),
         architecture: env::consts::ARCH.to_owned(),
-        event_log: "events.jsonl".to_owned(),
+        event_log: layout::EVENT_LOG.to_owned(),
         control_socket: control_socket_name(session_id),
-        request_journal: "requests.jsonl".to_owned(),
+        request_journal: layout::MUTATION_JOURNAL.to_owned(),
         contains_sensitive_terminal_data: true,
         durability_policy: durability.clone(),
         resource_limits: ResourceLimits::default(),
     };
     let manifest_bytes = canonical_manifest_bytes(&manifest).into_diagnostic()?;
-    write_secure(&arguments.out.join("session.json"), &manifest_bytes).into_diagnostic()?;
+    write_secure(
+        &SessionLayout::new(&arguments.out).manifest(),
+        &manifest_bytes,
+    )
+    .into_diagnostic()?;
 
     let session_manifest_hash = manifest_hash(&manifest_bytes);
     let header = EventLogHeader::new(
@@ -182,7 +187,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
     let header_bytes = serde_json::to_vec(&header).into_diagnostic()?;
 
     let mut writer = EventLogWriter::create_with_policy(
-        arguments.out.join("events.jsonl"),
+        SessionLayout::new(&arguments.out).event_log(),
         &header,
         clock,
         durability,
@@ -218,7 +223,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
     drop(writer);
 
     write_secure(
-        &arguments.out.join("completion.json"),
+        &SessionLayout::new(&arguments.out).completion(),
         &serde_json::to_vec(&completion).into_diagnostic()?,
     )
     .into_diagnostic()?;

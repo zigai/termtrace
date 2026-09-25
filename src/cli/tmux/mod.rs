@@ -1,7 +1,8 @@
 //! `termtrace tmux`: argument parsing and rendering over `termtrace-tmux`.
 
-use crate::cli::output::{
-    optional_display, write_json_line, write_json_pretty, write_stdout, ResponseWriter,
+use crate::cli::{
+    artifacts,
+    output::{optional_display, write_json_line, write_json_pretty, write_stdout, ResponseWriter},
 };
 use adapter::CliTracks;
 use miette::{IntoDiagnostic as _, Result};
@@ -95,6 +96,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
                 },
             )
             .into_diagnostic()?;
+
             let store =
                 RecordingStore::locate(tracks.state_root(), &arguments.name).into_diagnostic()?;
 
@@ -103,7 +105,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
         TmuxSubcommand::Video(arguments) => {
             let tracks = CliTracks::open(arguments.output_root.as_deref())?;
 
-            adapter::render_video(response, &tracks, arguments)
+            artifacts::render_video(response, &adapter::video_request(&tracks, arguments)?)
         }
         TmuxSubcommand::Bundle(arguments) => {
             let tracks = CliTracks::open(arguments.output_root.as_deref())?;
@@ -198,6 +200,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
                 },
             )
             .into_diagnostic()?;
+
             let changed = requested.is_some();
             let policy = match requested {
                 Some(policy) => {
@@ -256,6 +259,7 @@ fn run_catalog(
         arguments.active_only,
     )
     .into_diagnostic()?;
+
     let (entries, last) = match page {
         CatalogPage::Tracks(entries) => (
             serde_json::to_value(&entries).into_diagnostic()?,
@@ -266,9 +270,11 @@ fn run_catalog(
             entries.last().map(|entry| return entry.sequence),
         ),
     };
+
     let full = entries
         .as_array()
         .is_some_and(|entries| return entries.len() == usize::from(limit));
+
     let next_sequence = last
         .filter(|_| return full)
         .and_then(|sequence| return sequence.checked_add(1));

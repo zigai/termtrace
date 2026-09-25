@@ -15,6 +15,7 @@ use termtrace_model::{
     },
     execution::session::CaptureTarget,
 };
+use termtrace_service::artifacts::{CursorStyle, VideoPreset, VideoRenderer};
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct ArtifactArgs {
@@ -302,6 +303,34 @@ pub(in crate::cli) enum VideoCursorStyleArg {
     Recorded,
     /// Mask the cursor using canonical cursor geometry.
     Hidden,
+}
+
+impl From<VideoPresetArg> for VideoPreset {
+    fn from(value: VideoPresetArg) -> Self {
+        return match value {
+            VideoPresetArg::Docs => Self::Docs,
+            VideoPresetArg::Social => Self::Social,
+            VideoPresetArg::Lossless => Self::Lossless,
+        };
+    }
+}
+
+impl From<VideoSourceArg> for VideoRenderer {
+    fn from(value: VideoSourceArg) -> Self {
+        return match value {
+            VideoSourceArg::Native => Self::Native,
+            VideoSourceArg::Semantic => Self::Semantic,
+        };
+    }
+}
+
+impl From<VideoCursorStyleArg> for CursorStyle {
+    fn from(value: VideoCursorStyleArg) -> Self {
+        return match value {
+            VideoCursorStyleArg::Recorded => Self::Recorded,
+            VideoCursorStyleArg::Hidden => Self::Hidden,
+        };
+    }
 }
 
 #[derive(Debug, Args)]

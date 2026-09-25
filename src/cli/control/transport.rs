@@ -354,9 +354,11 @@ pub(in crate::cli) fn run_stop(
         },
         policy: StopPolicy::Request,
     };
+
     let wait = arguments
         .wait
         .then(|| return millis_or(arguments.timeout_ms, defaults::STOP_TIMEOUT));
+
     let outcome = match attach_session(&resolved.path)?.stop(request, wait) {
         Ok(outcome) => outcome,
         Err(error) => {

@@ -1,5 +1,6 @@
 //! Save-independent state inspection and bounded evidence waits.
 
+use crate::completion;
 use crate::replay::{inspect_prefix_stream, inspect_session_stream, ValidatedSession};
 use crate::{Error, Result};
 use std::{
@@ -25,7 +26,7 @@ pub fn inspect_session(
     selector: StateSelector,
 ) -> Result<StateInspection> {
     let session = session_directory.as_ref();
-    if SessionLayout::new(session).completion().is_file() {
+    if completion::published(session)?.is_some() {
         let validated = ValidatedSession::open(session)?;
         let inspection = inspect_session_stream(session, selector, None)?;
         validated.check()?;

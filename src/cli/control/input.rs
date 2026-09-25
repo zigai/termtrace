@@ -26,7 +26,6 @@ pub(super) fn input_atom_for_cli(atom: &str) -> Result<InputAtom> {
     if atom.chars().count() == 1 && atom.chars().all(|character| return !character.is_control()) {
         return Ok(InputAtom::Text(atom.to_owned()));
     }
-
     return Err(miette::miette!(
         "unknown input atom; run `termtrace send --help` or use text:VALUE, paste:VALUE, raw:VALUE, or raw-file:PATH"
     ));

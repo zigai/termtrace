@@ -1,4 +1,5 @@
 use super::{invalid_replay, json_error};
+use crate::completion;
 use crate::{registry::SessionRegistry, Error, Result};
 use nix::{libc::O_NOFOLLOW, unistd::geteuid};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -15,6 +16,9 @@ use termtrace_evidence::{
     session::{read_manifest, validate_completed_session_with_check},
 };
 use termtrace_model::execution::{layout::SessionLayout, session::SessionCompletion};
+
+/// Owner-only key authenticating the local verification cache, kept outside session evidence.
+const VERIFICATION_CACHE_KEY: &str = "verification-cache.key";
 
 pub(crate) fn check_cancelled(cancelled: Option<&AtomicBool>) -> Result<()> {
     if cancelled.is_some_and(|flag| return flag.load(Ordering::Relaxed)) {
@@ -45,7 +49,7 @@ impl ValidatedSession {
     }
 
     pub(crate) fn open_cancellable(session: &Path, cancelled: Option<&AtomicBool>) -> Result<Self> {
-        if !SessionLayout::new(session).completion().is_file() {
+        if completion::published(session)?.is_none() {
             return Err(Error::SessionIncomplete {
                 session: session.to_path_buf(),
             });
@@ -277,7 +281,7 @@ fn verification_key(session: &Path) -> Result<[u8; 32]> {
         ));
     }
 
-    let path = root.join("verification-cache.key");
+    let path = root.join(VERIFICATION_CACHE_KEY);
 
     if !path.try_exists().map_err(|source| {
         return Error::Filesystem {

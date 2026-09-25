@@ -143,7 +143,6 @@ impl LaunchSpec {
         if self.cols == 0 || self.rows == 0 {
             return Err(client_error("launch geometry must be nonzero"));
         }
-
         return self
             .environment
             .validate()

@@ -67,8 +67,8 @@ fn unrecorded_selected_panes_are_enforced_after_the_grace_period() {
             false,
         ),
     ];
-    let mut suspects = BTreeMap::new();
 
+    let mut suspects = BTreeMap::new();
     assert_eq!(
         audit(&panes, TmuxRecordingCoverage::Strict, &mut suspects, start),
         [Enforcement::MarkExcluded {
@@ -86,6 +86,7 @@ fn unrecorded_selected_panes_are_enforced_after_the_grace_period() {
     assert!(suspects.is_empty());
 
     audit(&panes, TmuxRecordingCoverage::Warn, &mut suspects, later);
+
     assert!(audit(
         &panes,
         TmuxRecordingCoverage::Warn,
@@ -98,13 +99,13 @@ fn unrecorded_selected_panes_are_enforced_after_the_grace_period() {
 
     audit(&panes, TmuxRecordingCoverage::Warn, &mut suspects, later);
     audit(&[], TmuxRecordingCoverage::Warn, &mut suspects, later);
+
     assert!(suspects.is_empty(), "vanished panes are forgotten");
 }
 
 #[test]
 fn a_dead_watchdog_is_restarted_with_backoff() {
     let now = Instant::now();
-
     assert!(!watchdog_restart_due(true, None, now));
     assert!(watchdog_restart_due(false, None, now));
     assert!(!watchdog_restart_due(

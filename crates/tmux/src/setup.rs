@@ -148,6 +148,7 @@ impl PreparedTmuxSetup {
             return fs_err::canonicalize(path)
                 .map_err(|error| return Error::filesystem(path, error));
         };
+
         let executable = env::current_exe()
             .map_err(|error| return Error::filesystem("/proc/self/exe", error))?;
 
@@ -347,6 +348,7 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
                 client.option(options::COVERAGE)?,
                 client.option(options::AGGREGATE_MANIFEST)?,
             );
+
             client.set_option(options::COVERAGE, OsStr::new(self.coverage.as_str()))?;
             client.set_option(
                 options::AGGREGATE_MANIFEST,
@@ -440,6 +442,7 @@ impl Enabled {
         return match self.previous {
             Some((coverage, aggregate)) => {
                 client.set_option(options::COVERAGE, OsStr::from_bytes(&coverage))?;
+
                 client.set_option(options::AGGREGATE_MANIFEST, OsStr::from_bytes(&aggregate))
             }
             None => disable(client).map(drop),

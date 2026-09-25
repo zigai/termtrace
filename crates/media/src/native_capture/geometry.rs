@@ -15,12 +15,10 @@ use termtrace_evidence::{
     artifact::{create_private_directory, write_secure},
     session::read_manifest,
 };
+use termtrace_model::execution::layout::{self, SessionLayout};
 use termtrace_model::{
     artifact::visual::{GeometryProbeAttempt, GeometrySolveReport, GHOSTTY_EFFECTIVE_CONFIG_NAME},
-    execution::session::{
-        CaptureTarget, GeometrySource, GhosttyVisualOverrides, SessionGeometry,
-        GHOSTTY_REPLAY_PROFILE_NAME,
-    },
+    execution::session::{CaptureTarget, GeometrySource, GhosttyVisualOverrides, SessionGeometry},
     value::geometry::TerminalGeometryReport,
 };
 
@@ -50,7 +48,7 @@ pub fn native_capture_target(
         });
 
     let profile = if let Some(provenance) = &manifest.ghostty_visual {
-        if provenance.replay_profile != GHOSTTY_REPLAY_PROFILE_NAME {
+        if provenance.replay_profile != layout::GHOSTTY_REPLAY_PROFILE {
             return Err(Error::InvalidReplay {
                 reason: format!(
                     "unsupported recorded Ghostty profile path `{}`",
@@ -59,7 +57,7 @@ pub fn native_capture_target(
             });
         }
 
-        let path = session.join(GHOSTTY_REPLAY_PROFILE_NAME);
+        let path = SessionLayout::new(session).ghostty_replay_profile();
         let bytes = fs::read(&path).map_err(|source| return Error::Filesystem { path, source })?;
 
         restore_ghostty_profile(bytes, provenance.clone())?

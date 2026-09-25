@@ -21,7 +21,7 @@ use nix::{
 use std::{
     env,
     ffi::{OsStr, OsString},
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     io::{self, Read as _, Write as _},
     os::{
         fd::AsFd as _,
@@ -31,7 +31,7 @@ use std::{
         },
     },
     path::{Path, PathBuf},
-    process::{Command as ProcessCommand, ExitCode, Stdio},
+    process::ExitCode,
     result::Result as StdResult,
     time::{Duration, Instant},
 };
@@ -59,10 +59,9 @@ use termtrace_model::{
     execution::session::{
         GeometryProvenance, GeometrySource, GhosttyVisualOverrides, ImportProvenance,
         ResourceLimits, SessionCompletion, SessionGeometry, SessionLineage, SessionManifest,
-        GHOSTTY_REPLAY_PROFILE_NAME,
     },
     protocol::control::{ScreenPredicate, ScreenWaitQuality},
-    registry::{AliasReservation, DetachedSessionPaths, RegistryEntry},
+    registry::{DetachedSessionPaths, RegistryEntry},
     terminal::screen::ScreenProjectionRequest,
     value::geometry::TerminalGeometryReport,
     value::ByteString,
@@ -72,6 +71,7 @@ use termtrace_sdk::{
     session::{await_ready, Readiness, StopOutcome, StopRequest},
     StableCaptureOptions,
 };
+use termtrace_service::registry::{spawn_detached, DetachedStart, RegistryService};
 
 const DEFAULT_DURABILITY_MAX_INTERVAL_MS: u64 = 50;
 const DEFAULT_DURABILITY_MAX_UNCOMMITTED_BYTES: u64 = 65_536;
@@ -89,4 +89,4 @@ use record::durability_policy_for;
 pub(super) use record::run_record;
 use restart::restarted_record_options;
 pub(super) use restart::run_restart;
-pub(super) use start::open_detached_log;
+pub(in crate::cli) use start::detached_record_arguments;

@@ -21,10 +21,11 @@ use std::{
 use tempfile::TempDir;
 use termtrace_evidence::{
     event_log::{CanonicalBoundary, DurabilityPolicy, EventLog},
-    request_journal::{guarded_command_hash, MUTATION_JOURNAL_NAME},
+    request_journal::guarded_command_hash,
     session::{read_completion, validate_completed_session},
     Error as EvidenceError,
 };
+use termtrace_model::execution::layout;
 use termtrace_model::execution::session::RecordingFailurePolicy;
 use termtrace_model::{
     execution::environment::{EnvironmentBase, EnvironmentSpec},
@@ -241,7 +242,7 @@ fn fatal_actor_exit_writes_durable_failure_completion() {
     let failure = completion.failure.as_ref().expect("recorder failure");
     assert_eq!(failure.code, "recorder_actor_failed");
     assert!(completion.durability.final_sync_completed);
-    assert!(!session.join(SESSION_FAILURE_NAME).exists());
+    assert!(!session.join(layout::FAILURE_DIAGNOSTIC).exists());
 
     let log = EventLog::read(session.join("events.jsonl")).expect("failure event log");
     let recorded_output: Vec<u8> = log
@@ -297,7 +298,7 @@ fn poisoned_terminal_exit_append_preserves_incomplete_failure_without_completion
     );
 
     let diagnostic: IncompleteSessionDiagnosticRecord = serde_json::from_slice(
-        &fs_err::read(session.join(SESSION_FAILURE_NAME)).expect("failure diagnostic"),
+        &fs_err::read(session.join(layout::FAILURE_DIAGNOSTIC)).expect("failure diagnostic"),
     )
     .expect("failure diagnostic JSON");
     assert_eq!(diagnostic.lifecycle, "incomplete");
@@ -368,7 +369,7 @@ fn spawn_failure_after_manifest_creation_writes_valid_fatal_closure() {
 
     validate_completed_session(&session).expect("valid spawn failure completion");
 
-    assert!(!session.join(SESSION_FAILURE_NAME).exists());
+    assert!(!session.join(layout::FAILURE_DIAGNOSTIC).exists());
 }
 
 #[test]
@@ -662,7 +663,7 @@ fn evicted_mutation_outcomes_are_loaded_from_the_persistent_journal() {
         )
         .expect("remember second mutation");
 
-    let journal_path = temporary.path().join(MUTATION_JOURNAL_NAME);
+    let journal_path = temporary.path().join(layout::MUTATION_JOURNAL);
     let moved_journal_path = temporary.path().join("temporarily-moved-requests.jsonl");
     fs_err::rename(&journal_path, &moved_journal_path).expect("move mutation journal");
 

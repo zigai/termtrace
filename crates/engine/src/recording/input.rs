@@ -97,11 +97,13 @@ pub(super) fn interpolate_cell(start: u16, end: u16, step: u32, steps: u32) -> u
     if steps == 0 || step >= steps {
         return end;
     }
+
     let start = u64::from(start);
     let end_val = u64::from(end);
     let step = u64::from(step);
     let steps = u64::from(steps);
     let interpolated = (start * (steps - step) + end_val * step + steps / 2) / steps;
+
     return u16::try_from(interpolated).unwrap_or(end);
 }
 
@@ -625,13 +627,11 @@ mod tests {
                 .max_writes_before_timeout
                 .is_some_and(|max| return self.chunks.len() >= max)
             {
-                return Err(IoError::new(
-                    ErrorKind::TimedOut,
-                    "mock timeout",
-                ));
+                return Err(IoError::new(ErrorKind::TimedOut, "mock timeout"));
             }
 
             self.chunks.push(buf.len());
+
             return Ok(buf.len());
         }
 
@@ -649,10 +649,10 @@ mod tests {
 
         let large_data = vec![b'a'; 16 * 1024];
         let (bytes_written, error) = write_input(&mut writer, &large_data);
-
         assert!(error.is_none());
         assert_eq!(bytes_written, 16 * 1024);
         assert_eq!(writer.chunks.len(), 4);
+
         for chunk_size in writer.chunks {
             assert!(chunk_size <= WRITE_CHUNK_BYTES);
         }
@@ -667,10 +667,12 @@ mod tests {
 
         let large_data = vec![b'b'; 16 * 1024];
         let (bytes_written, error) = write_input(&mut writer, &large_data);
-
         assert!(error.is_some());
         assert_eq!(error.expect("timeout error").kind(), ErrorKind::TimedOut);
-        assert_eq!(bytes_written, u64::try_from(WRITE_CHUNK_BYTES).expect("chunk size fits"));
+        assert_eq!(
+            bytes_written,
+            u64::try_from(WRITE_CHUNK_BYTES).expect("chunk size fits")
+        );
         assert_eq!(writer.chunks.len(), 1);
     }
 
@@ -680,7 +682,6 @@ mod tests {
             .map(|step| return interpolate_cell(0, 10, step, 10))
             .collect();
         assert_eq!(values, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-
         assert_eq!(interpolate_cell(10, 20, 0, 4), 10);
         assert_eq!(interpolate_cell(10, 20, 1, 4), 13);
         assert_eq!(interpolate_cell(10, 20, 2, 4), 15);
@@ -699,7 +700,6 @@ mod tests {
         // Explicit check for TT-13: reverse drag from 10 to 0 on final step is 0, not 1
         assert_eq!(interpolate_cell(10, 0, 10, 10), 0);
         assert_eq!(interpolate_cell(10, 0, 11, 10), 0);
-
         assert_eq!(interpolate_cell(20, 10, 0, 4), 20);
         assert_eq!(interpolate_cell(20, 10, 1, 4), 18);
         assert_eq!(interpolate_cell(20, 10, 2, 4), 15);
@@ -730,7 +730,6 @@ mod tests {
         assert_eq!(interpolate_cell(5, 20, 0, 1), 5);
         assert_eq!(interpolate_cell(5, 20, 1, 1), 20);
         assert_eq!(interpolate_cell(5, 20, 2, 1), 20);
-
         assert_eq!(interpolate_cell(20, 5, 0, 1), 20);
         assert_eq!(interpolate_cell(20, 5, 1, 1), 5);
         assert_eq!(interpolate_cell(20, 5, 2, 1), 5);
@@ -754,7 +753,6 @@ mod tests {
         assert_eq!(interpolate_cell(0, u16::MAX, 0, 5), 0);
         assert_eq!(interpolate_cell(0, u16::MAX, 5, 5), u16::MAX);
         assert_eq!(interpolate_cell(0, u16::MAX, 6, 5), u16::MAX);
-
         assert_eq!(interpolate_cell(u16::MAX, 0, 0, 5), u16::MAX);
         assert_eq!(interpolate_cell(u16::MAX, 0, 5, 5), 0);
         assert_eq!(interpolate_cell(u16::MAX, 0, 10, 5), 0);

@@ -1104,121 +1104,74 @@ fn assert_no_entry_with_prefix(directory: &Path, prefix: &str) {
 }
 
 #[test]
-fn command_parity_ledger_covers_all_command_leaves() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let ledger_path = root.join("docs/refactor/sdk-parity.md");
-    if !ledger_path.exists() {
-        return;
-    }
-    let content = fs_err::read_to_string(&ledger_path).expect("read sdk-parity.md");
+fn readme_command_references_match_the_visible_command_tree() {
+    let help_subcommands = |path: &[&str]| -> BTreeSet<String> {
+        let output = Command::cargo_bin("termtrace")
+            .expect("binary should build")
+            .args(path)
+            .arg("--help")
+            .output()
+            .expect("help should run");
 
-    let required_leaves = [
-        "record",
-        "screen",
-        "send",
-        "wait",
-        "status",
-        "stop",
-        "restart",
-        "last-action",
-        "analyze last-action",
-        "analyze index",
-        "analyze inspect",
-        "analyze timeline",
-        "analyze diff",
-        "analyze explain",
-        "analyze diagnose",
-        "analyze review",
-        "analyze output",
-        "analyze events",
-        "analyze markers",
-        "analyze cache status",
-        "analyze cache prune",
-        "analyze verify",
-        "analyze recover",
-        "screenshot",
-        "video",
-        "bundle",
-        "test",
-        "doctor",
-        "completion",
-        "agent",
-        "schema",
-        "version",
-        "playback",
-        "playback-worker",
-        "owned-process",
-        "geometry-probe",
-        "artifact import",
-        "artifact capture",
-        "artifact save",
-        "artifact asciicast",
-        "tmux record",
-        "tmux status",
-        "tmux events",
-        "tmux tracks",
-        "tmux gaps",
-        "tmux stop",
-        "tmux video",
-        "tmux bundle",
-        "tmux config",
-        "tmux enable",
-        "tmux disable",
-        "tmux scope",
-        "tmux run",
-        "tmux exec-pane",
-        "tmux guard",
-        "tmux supervise",
-        "tmux watchdog",
-        "session register",
-        "session resolve",
-        "session list",
-        "session remove",
-        "session gc",
-        "integrity verify",
-        "integrity verify-bundle",
-        "integrity sign",
-        "integrity recover",
-        "client",
-    ];
+        let help = String::from_utf8(output.stdout).expect("help is UTF-8");
 
-    let valid_classifications = [
-        "Domain operation",
-        "CLI presentation",
-        "Internal bootstrap",
-        "Removed language SDK",
-    ];
+        return help
+            .lines()
+            .skip_while(|line| return *line != "Commands:")
+            .skip(1)
+            .take_while(|line| return !line.trim().is_empty())
+            .filter_map(|line| return line.split_whitespace().next())
+            .filter(|name| return *name != "help")
+            .map(str::to_owned)
+            .collect();
+    };
 
-    for leaf in required_leaves {
-        let pattern = format!("| `{leaf}` |");
+    let starts_lowercase = |word: &str| {
+        return word
+            .chars()
+            .next()
+            .is_some_and(|first| return first.is_ascii_lowercase());
+    };
 
-        assert!(
-            content.contains(&pattern),
-            "command leaf `{leaf}` must be present in sdk-parity.md"
-        );
-    }
+    let readme = fs_err::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md"))
+        .expect("read README.md");
 
-    let mut table_rows = 0;
-    for line in content.lines() {
-        if line.starts_with("| `") {
-            table_rows += 1;
-            let parts: Vec<&str> = line.split('|').map(str::trim).collect();
-            assert!(parts.len() >= 6, "malformed table row: {line}");
+    let references: Vec<[String; 2]> = readme
+        .split("termtrace ")
+        .skip(1)
+        .map(|rest| {
+            let mut words = rest
+                .split(|character: char| return character.is_whitespace() || character == '`')
+                .map(str::to_owned);
 
-            let classification = parts[2];
+            return [
+                words.next().unwrap_or_default(),
+                words.next().unwrap_or_default(),
+            ];
+        })
+        .filter(|[command, _]| return starts_lowercase(command))
+        .collect();
 
+    let visible = help_subcommands(&[]);
+    let referenced: BTreeSet<String> = references
+        .iter()
+        .map(|[command, _]| return command.clone())
+        .collect();
+
+    assert!(visible.contains("record"), "help parsing found {visible:?}");
+    assert_eq!(
+        referenced, visible,
+        "README must reference exactly the visible top-level commands"
+    );
+
+    for [command, next] in &references {
+        let subcommands = help_subcommands(&[command.as_str()]);
+
+        if !subcommands.is_empty() && starts_lowercase(next) {
             assert!(
-                valid_classifications
-                    .iter()
-                    .any(|valid| return classification.contains(valid)),
-                "invalid classification `{classification}` in row: {line}"
+                subcommands.contains(next),
+                "README references `termtrace {command} {next}`, but `{command}` has only {subcommands:?}"
             );
         }
     }
-
-    assert!(
-        table_rows >= required_leaves.len(),
-        "expected at least {} rows, found {table_rows}",
-        required_leaves.len()
-    );
 }

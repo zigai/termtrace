@@ -95,7 +95,6 @@ fn an_unreachable_incomplete_session_reports_unavailable_without_mutation() {
     let temporary = TempDir::new().expect("temporary directory");
     let session_id = write_manifest(temporary.path());
     let mut session = Session::attach(temporary.path(), "termtrace").expect("attach");
-
     assert_eq!(session.session_id(), session_id);
     assert!(!session.launched());
     assert_eq!(session.phase().phase, SessionPhase::Incomplete);
@@ -127,7 +126,6 @@ fn actor_rejection_codes_classify_without_losing_the_code() {
             details: None,
         });
     };
-
     let stale = rejected("stale_observation", MutationEffect::NotApplied);
     assert_eq!(stale.kind(), ErrorKind::StaleState);
     assert_eq!(stale.code(), "stale_observation");
@@ -146,7 +144,6 @@ fn actor_rejection_codes_classify_without_losing_the_code() {
 
     let busy = rejected("action_busy", MutationEffect::NotApplied);
     assert_eq!(busy.kind(), ErrorKind::ActionBusy);
-
     let other = rejected("invalid_input", MutationEffect::NotApplied);
     assert_eq!(other.kind(), ErrorKind::ControlRejected);
     assert_eq!(other.code(), "invalid_input");
@@ -154,6 +151,7 @@ fn actor_rejection_codes_classify_without_losing_the_code() {
     let local = Error::InvalidOperation {
         reason: "caller contract".to_owned(),
     };
+
     assert_eq!(local.code(), "invalid_operation");
     assert!(local.details().is_none());
 }

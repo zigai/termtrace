@@ -205,7 +205,6 @@ impl ActRequest {
     #[must_use]
     pub fn wire_atoms(&self, request_id: Uuid) -> Vec<InputSequenceAtom> {
         let mut wire = Vec::with_capacity(self.atoms.len());
-
         for atom in &self.atoms {
             match atom {
                 InputAtom::Text(text) if !self.pace.is_zero() => {

@@ -100,6 +100,7 @@ pub(crate) fn human_action_summary(value: &serde_json::Value) -> String {
         .get("effect")
         .and_then(|effect| return value_string(effect, "kind"))
         .unwrap_or_else(|| return "unknown".to_owned());
+
     let atoms = value_u64(input, "atoms");
     let bytes = value_u64(input, "bytes");
 

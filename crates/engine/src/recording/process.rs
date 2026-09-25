@@ -54,6 +54,7 @@ fn spawn_reader(
                         reason = "master PTY raw file descriptor remains valid for the recording session"
                     )]
                     let borrowed = unsafe { std::os::fd::BorrowedFd::borrow_raw(raw_fd) };
+
                     let mut descriptors = [
                         PollFd::new(borrowed, PollFlags::POLLIN),
                         PollFd::new(cancel_read.as_fd(), PollFlags::POLLIN),
@@ -380,6 +381,7 @@ impl Write for PtyWriter {
             let borrowed = unsafe { std::os::fd::BorrowedFd::borrow_raw(raw_fd) };
             let mut descriptors = [PollFd::new(borrowed, PollFlags::POLLOUT)];
             let timeout = PollTimeout::try_from(250).unwrap_or(PollTimeout::NONE);
+
             match poll(&mut descriptors, timeout) {
                 Ok(0) => {
                     return Err(io::Error::new(
@@ -413,6 +415,7 @@ impl Write for PtyWriter {
         }
 
         let to_write = buf.get(..buf.len().min(READ_BUFFER_BYTES)).unwrap_or(buf);
+
         return self.inner.write(to_write);
     }
 
@@ -454,6 +457,7 @@ pub(super) fn spawn_command(
         .master
         .take_writer()
         .map_err(|error| return terminal_error("take PTY writer", error.to_string()))?;
+
     let pty_writer = PtyWriter::new(writer, raw_fd);
 
     let child = pair
@@ -473,6 +477,7 @@ pub(super) fn spawn_command(
         pid,
     });
 }
+
 pub(super) fn resolve_working_directory(requested: Option<&Path>) -> Result<PathBuf> {
     let candidate = match requested {
         Some(path) if path.is_absolute() => path.to_path_buf(),
@@ -650,6 +655,7 @@ impl RuntimeWorkers {
             Ok(_) | Err(Errno::EPIPE) => Ok(()),
             Err(error) => Err(terminal_error("cancel PTY reader", error.to_string())),
         };
+
         let reader_join = self
             .reader
             .join()
@@ -867,10 +873,11 @@ mod tests {
 
         let (read_pipe, write_pipe) = pipe().expect("create pipe");
         let write_fd = write_pipe.as_raw_fd();
-
         let fill_data = [b'x'; 4096];
+
         loop {
             let mut descriptors = [PollFd::new(write_pipe.as_fd(), PollFlags::POLLOUT)];
+
             if let Ok(1) = poll(&mut descriptors, PollTimeout::from(0_u16)) {
                 let _ = fd_write(&write_pipe, &fill_data);
             } else {
@@ -880,7 +887,6 @@ mod tests {
 
         let write_file = File::from(write_pipe);
         let mut pty_writer = PtyWriter::new(Box::new(write_file), Some(write_fd));
-
         let write_result = pty_writer.write(b"blocked data");
         assert!(write_result.is_err());
         assert_eq!(write_result.unwrap_err().kind(), ErrorKind::TimedOut,);
@@ -898,9 +904,9 @@ mod tests {
             .expect("spawn reader");
 
         let _ = fd_write(&cancel_write, b"x");
-
         let join_result = thread.join();
         assert!(join_result.is_ok());
+
         drop(cancel_write);
         drop(receiver);
     }

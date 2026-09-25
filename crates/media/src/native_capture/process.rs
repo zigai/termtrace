@@ -2,6 +2,7 @@ use super::{
     util::{external_error, read_json, status_error_with_logs},
     Error, Result,
 };
+use crate::helper::{flag, geometry_probe, playback};
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use serde::de::DeserializeOwned;
 use std::{
@@ -204,8 +205,8 @@ pub(super) fn spawn_geometry_probe(
         .args(overrides)
         .arg("-e")
         .arg(helper)
-        .arg("geometry-probe")
-        .arg("--out")
+        .arg(geometry_probe::SUBCOMMAND)
+        .arg(flag(geometry_probe::OUT))
         .arg(report)
         .env("DISPLAY", display)
         .env("XDG_CONFIG_HOME", profile)
@@ -261,28 +262,28 @@ pub(super) fn spawn_ghostty(
         .args(overrides)
         .arg("-e")
         .arg(helper)
-        .arg("playback")
-        .arg("--session")
+        .arg(playback::SUBCOMMAND)
+        .arg(flag(playback::SESSION))
         .arg(&options.session_directory)
-        .arg("--timing-file")
+        .arg(flag(playback::TIMING_FILE))
         .arg(timing)
-        .arg("--error-file")
+        .arg(flag(playback::ERROR_FILE))
         .arg(error)
-        .arg("--geometry-file")
+        .arg(flag(playback::GEOMETRY_FILE))
         .arg(geometry)
-        .arg("--ready-file")
+        .arg(flag(playback::READY_FILE))
         .arg(ready)
-        .arg("--start-delay-ms")
+        .arg(flag(playback::START_DELAY_MS))
         .arg(if matches!(&options.kind, CaptureKind::Video) { "1500" } else { "0" })
-        .arg("--final-hold-ms")
+        .arg(flag(playback::FINAL_HOLD_MS))
         .arg("1500");
 
     if let Some(value) = options.start_monotonic_ns {
-        command.arg("--from-ns").arg(value.to_string());
+        command.arg(flag(playback::FROM_NS)).arg(value.to_string());
     }
 
     if let Some(value) = options.end_monotonic_ns {
-        command.arg("--to-ns").arg(value.to_string());
+        command.arg(flag(playback::TO_NS)).arg(value.to_string());
     }
 
     if let CaptureKind::Screenshot {
@@ -292,13 +293,13 @@ pub(super) fn spawn_ghostty(
     } = &options.kind
     {
         command
-            .arg("--endpoint-event-seq")
+            .arg(flag(playback::ENDPOINT_EVENT_SEQ))
             .arg(event_seq.to_string())
-            .arg("--instant");
+            .arg(flag(playback::INSTANT));
 
         if let Some(value) = event_byte_offset {
             command
-                .arg("--endpoint-event-byte-offset")
+                .arg(flag(playback::ENDPOINT_EVENT_BYTE_OFFSET))
                 .arg(value.to_string());
         }
     }

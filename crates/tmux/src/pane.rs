@@ -112,6 +112,7 @@ pub fn prepare(request: PaneRunRequest) -> Result<PaneLaunch> {
     let configured = PathBuf::from(OsString::from_vec(client.option(options::TERMTRACE)?));
     let current =
         env::current_exe().map_err(|error| return Error::filesystem("/proc/self/exe", error))?;
+
     if !same_executable(&current, &configured) {
         return Err(Error::invalid(format!(
             "the active tmux integration points to a different Termtrace executable: {}",
@@ -124,13 +125,12 @@ pub fn prepare(request: PaneRunRequest) -> Result<PaneLaunch> {
 
     let (command, launch_kind) = child_command(&client, request, &current)?;
     client.unset_pane_option(&pane, options::PANE_SESSION)?;
-
     let row = client.pane_row(&pane)?;
     let pid = row
         .pid
         .ok_or_else(|| return Error::Tmux(format!("tmux pane {pane} has no process")))?;
-    let scope = TmuxScopePolicy::from_options(&client)?;
 
+    let scope = TmuxScopePolicy::from_options(&client)?;
     if !explicitly_selected && !scope.matches(&row) {
         mark_decision(&client, &pane, pid, false)?;
 
@@ -173,6 +173,7 @@ fn child_command(
 ) -> Result<(Vec<OsString>, TmuxPaneLaunchKind)> {
     if request.pane_launch {
         let launch_kind = validate_pane_launch(&request.command)?;
+
         let mut command = vec![
             current_exe.as_os_str().to_owned(),
             OsString::from("tmux"),
@@ -215,7 +216,6 @@ fn child_command(
             TmuxPaneLaunchKind::DefaultCommand,
         ));
     }
-
     return Ok((
         vec![OsString::from_vec(shell), OsString::from("-l")],
         TmuxPaneLaunchKind::DefaultShell,
@@ -264,6 +264,7 @@ pub fn exec_pane_launch(arguments: &[OsString]) -> Error {
         Ok(kind) => kind,
         Err(error) => return error,
     };
+
     let [_, shell, rest @ ..] = arguments else {
         return Error::invalid("pane launch requires a mode and shell");
     };
@@ -276,6 +277,7 @@ pub fn exec_pane_launch(arguments: &[OsString]) -> Error {
         (TmuxPaneLaunchKind::DefaultShell, []) => {
             let mut argv0 = OsString::from("-");
             argv0.push(Path::new(shell).file_name().unwrap_or(shell));
+
             let mut command = Command::new(shell);
             command.arg0(argv0);
             command

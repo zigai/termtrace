@@ -20,6 +20,7 @@ use termtrace_evidence::{
     event_log::EventLogCursor,
     session::{canonical_manifest_bytes, manifest_hash, read_manifest},
 };
+use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::{
     execution::event::Event, terminal::replay::ReplayEndpoint,
     value::geometry::TerminalGeometryReport,
@@ -226,7 +227,7 @@ fn advance_events(
     last: Option<&PlaybackPosition>,
     resizes: &mut HashMap<Uuid, (u16, u16)>,
 ) -> Result<PlaybackPosition> {
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     if cursor.header().session_id != endpoint.session_id
         || cursor.header().session_manifest_hash != endpoint.session_manifest_hash
     {

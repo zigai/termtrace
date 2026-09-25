@@ -335,6 +335,7 @@ mod tests {
 
     fn test_pending(phase: InputSequencePhase) -> PendingInputSequence {
         let (sender, _) = mpsc::sync_channel(1);
+
         return PendingInputSequence {
             request: ControlRequest::new(ControlCommand::Snapshot),
             response_sender: sender,
@@ -355,7 +356,6 @@ mod tests {
             started_at,
             None,
         )));
-
         assert_eq!(pending.next_deadline(), started_at);
     }
 
@@ -374,7 +374,6 @@ mod tests {
             started_at,
             Some(("hash_a".to_owned(), since)),
         )));
-
         assert_eq!(
             pending.next_deadline(),
             since + Duration::from_nanos(stable_for_ns)
@@ -389,7 +388,6 @@ mod tests {
             started_at,
             Some(("hash_b".to_owned(), late_since)),
         )));
-
         assert_eq!(
             pending_capped.next_deadline(),
             started_at + Duration::from_nanos(timeout_ns)
@@ -404,6 +402,7 @@ mod tests {
             text: "done".to_owned(),
         })
         .expect("valid test predicate");
+
         let pending = test_pending(InputSequencePhase::Waiting(test_waiting_action(
             AdmittedPostcondition::Screen {
                 predicate,
@@ -412,7 +411,6 @@ mod tests {
             started_at,
             None,
         )));
-
         assert_eq!(
             pending.next_deadline(),
             started_at + Duration::from_nanos(timeout_ns)

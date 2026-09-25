@@ -185,7 +185,6 @@ mod tests {
             code: "signal_failed".to_owned(),
             message: "no such process".to_owned(),
         };
-
         assert_eq!(
             mutation_failure_effect(&rejected, true),
             MutationEffect::NotApplied
@@ -218,7 +217,6 @@ mod tests {
             operation: "resize child PTY",
             reason: "failed".to_owned(),
         };
-
         assert_eq!(
             mutation_failure_effect(&failure, false),
             MutationEffect::NotApplied

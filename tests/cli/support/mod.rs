@@ -158,6 +158,7 @@ pub(crate) const ENTER: KeyChord = KeyChord {
         super_key: false,
     },
 };
+
 pub(crate) use zstd::stream::read::Decoder;
 
 pub(crate) fn canonical_output_bytes(log: &EventLog) -> Vec<u8> {

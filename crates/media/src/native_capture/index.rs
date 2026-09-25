@@ -14,7 +14,7 @@ use termtrace_model::{
     artifact::visual::VideoMapEntry,
     terminal::replay::{
         ReplayManifest, SourceRange, StateIndexEntry, StateSelection, GHOSTTY_REVISION,
-        STATE_FORMAT_VERSION,
+        STATE_FORMAT_VERSION, STATE_INDEX,
     },
 };
 
@@ -147,11 +147,11 @@ pub(super) fn validate_replay_manifest(
     let source = StateIndexSource {
         path: session
             .join(derived_directory_name_for(range, selection))
-            .join("state-index.jsonl"),
+            .join(STATE_INDEX),
         member: manifest
             .members
             .iter()
-            .find(|member| return member.path == "state-index.jsonl")
+            .find(|member| return member.path == STATE_INDEX)
             .ok_or_else(|| {
                 return Error::InvalidReplay {
                     reason: "semantic manifest has no state-index member".to_owned(),
@@ -447,12 +447,12 @@ mod state_cursor_tests {
     use termtrace_evidence::artifact::collect_artifact_members;
 
     fn source(directory: &Path, bytes: &[u8]) -> StateIndexSource {
-        let path = directory.join("state-index.jsonl");
+        let path = directory.join(STATE_INDEX);
         fs::write(&path, bytes).expect("state index fixture");
         let member = collect_artifact_members(directory)
             .expect("members")
             .into_iter()
-            .find(|member| return member.path == "state-index.jsonl")
+            .find(|member| return member.path == STATE_INDEX)
             .expect("state index member");
 
         return StateIndexSource { path, member };

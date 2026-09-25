@@ -114,6 +114,7 @@ pub(crate) fn append(
         next.bytes = offset
             .checked_add(length)
             .ok_or_else(|| return Error::invalid("tmux lifecycle byte offset overflow"))?;
+
         next.sequence = record.event.sequence;
         next.hash.clone_from(&record.hash);
         written.push(Written {
@@ -157,6 +158,7 @@ pub(crate) fn visit_records(
         .read(true)
         .custom_flags(O_NOFOLLOW | O_NONBLOCK)
         .open(path);
+
     let file = match file {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound && boundary.bytes == 0 => {
@@ -164,6 +166,7 @@ pub(crate) fn visit_records(
         }
         Err(error) => return Err(Error::filesystem(path, error)),
     };
+
     let metadata = file
         .metadata()
         .map_err(|error| return Error::filesystem(path, error))?;
@@ -214,6 +217,7 @@ pub(crate) fn visit_records(
             offset,
             length,
         })?;
+
         offset = offset
             .checked_add(length)
             .ok_or_else(|| return Error::invalid("tmux journal offset overflow"))?;

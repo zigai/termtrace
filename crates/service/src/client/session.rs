@@ -245,7 +245,6 @@ impl Session {
         });
         wire.request_id = request_id;
         wire.expected_presented_state_hash = request.guard.if_state;
-
         let ControlData::ActionApplied {
             input,
             postcondition,
@@ -333,6 +332,7 @@ impl Session {
         let compiled = compile_screen_predicate(&predicate).map_err(client_error)?;
         let (state, source, presented) =
             resolved_screen_state_for_session(&self.path, StatePoint::LatestPresented, false)?;
+
         let frame = project_screen_frame(
             &state,
             &ScreenProjectionRequest::default(),
@@ -341,8 +341,10 @@ impl Session {
             CaptureQuality::Completed,
         )
         .map_err(Error::ScreenFrame)?;
+
         let matched =
             evaluate_screen_predicate(&compiled, &state, &state_text(&state), &frame.state_hash);
+
         let observed_monotonic_ns = frame_monotonic_ns(&frame);
 
         return Ok(ScreenWaitOutcome {
@@ -378,6 +380,7 @@ impl Session {
             timeout_ns: duration_ns(options.timeout),
             projection: options.projection,
         });
+
         let timing = deadline.map_or_else(
             || return ExchangeTiming::Timeout(request.command.client_response_timeout()),
             ExchangeTiming::Deadline,
@@ -558,10 +561,12 @@ impl Session {
             StopPolicy::Request => ControlCommand::Stop,
             StopPolicy::Signal(signal) => ControlCommand::Signal { signal },
         };
+
         let mut wire = ControlRequest::new(command);
         if let Some(request_id) = request.guard.request_id {
             wire.request_id = request_id;
         }
+
         wire.expected_presented_state_hash = request.guard.if_state;
 
         return match (self.reach(&wire)?, wait) {
@@ -604,6 +609,7 @@ impl Session {
         let Some(mut recorder) = self.take_recorder() else {
             return Ok(());
         };
+
         let filesystem = |source| {
             return Error::Filesystem {
                 path: self.path.clone(),
@@ -615,6 +621,7 @@ impl Session {
             .recorded_group
             .map_or(Ok(()), |group| return group.kill())
             .map_err(|error| return filesystem(io::Error::from(error)));
+
         let kill_result = recorder.process.kill().map_err(filesystem);
         let wait_result = recorder.process.wait().map(|_| ()).map_err(filesystem);
 
@@ -726,7 +733,6 @@ mod tests {
             session_id: Uuid::now_v7(),
             ownership: Ownership::Attached,
         };
-
         assert!(session
             .stop(StopRequest::default(), Some(Duration::from_millis(50)))
             .is_err());

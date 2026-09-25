@@ -155,7 +155,6 @@ impl TmuxCatalog {
             .map_err(|error| return sql_error(&self.path, error))?;
 
         let mut head = empty_head();
-
         let boundary = &manifest.lifecycle_journal;
         visit_records(&self.journal, boundary, |written| {
             return apply_record(&transaction, &self.path, written, &mut head.counts);
@@ -334,6 +333,7 @@ impl TmuxCatalog {
                     "tmux gap index points at a non-gap journal record",
                 ));
             };
+
             if canonical != gap {
                 return Err(Error::invalid(
                     "tmux gap index differs from its journal record",
@@ -423,6 +423,7 @@ impl TmuxCatalog {
             self.event(sequence)?.event,
             TmuxEvent::PaneTrackLinked { track: canonical } if canonical == track
         );
+
         if !linked {
             return Err(Error::invalid(
                 "tmux track index differs from its canonical link",
@@ -529,6 +530,7 @@ fn apply_record(
                     ],
                 )
                 .map_err(|error| return sql_error(path, error))?;
+
             if changed != 1 {
                 return Err(Error::invalid(
                     "resolved tmux gap has no unique open interval",

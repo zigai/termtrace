@@ -43,7 +43,7 @@ pub use index::{
     derived_directory_name, derived_directory_name_for, index_session, index_session_for_video,
     index_session_range, index_session_with_options, index_session_with_stride,
 };
-pub(crate) use index::{DerivedIndex, CONTROL_INDEX, CONTROL_SOURCE_INDEX, STATE_INDEX};
+pub(crate) use index::{DerivedIndex, CONTROL_INDEX, CONTROL_SOURCE_INDEX};
 pub use trust::ValidatedSession;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

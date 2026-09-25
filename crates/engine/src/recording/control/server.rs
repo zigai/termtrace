@@ -226,6 +226,7 @@ fn handle_control_connection(
     } else {
         MutationEffect::NotApplied
     };
+
     let (response_sender, response_receiver) = mpsc::sync_channel(1);
     let mut message = RuntimeMessage::Control {
         request,

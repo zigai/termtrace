@@ -18,8 +18,8 @@ use uuid::Uuid;
 pub const GHOSTTY_REVISION: &str = "55a3e33ab26a23d75b274b23c7f76d837db00578";
 /// Derived artifact format version.
 pub const STATE_FORMAT_VERSION: u32 = 5;
-/// Relative directory containing replay-derived artifacts.
-pub const DERIVED_DIRECTORY: &str = "derived";
+/// Replay-index member listing every semantic state.
+pub const STATE_INDEX: &str = "state-index.jsonl";
 
 /// An exact presentation-eligible endpoint within a validated canonical prefix.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

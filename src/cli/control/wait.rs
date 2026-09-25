@@ -26,6 +26,7 @@ pub(in crate::cli) fn run_wait(
 
         let outcome =
             wait_for_output(&resolved.path, output.as_bytes(), timeout).into_diagnostic()?;
+
         if arguments.json {
             write_json_pretty(response, &outcome)?;
         } else {
@@ -42,6 +43,7 @@ pub(in crate::cli) fn run_wait(
     let outcome = attach_session(&resolved.path)?
         .wait_screen(predicate, arguments.stable_for, timeout)
         .into_diagnostic()?;
+
     let satisfied = outcome.satisfied();
 
     if arguments.json {

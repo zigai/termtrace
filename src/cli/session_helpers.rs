@@ -18,9 +18,8 @@ use termtrace_model::{
     terminal::{observation::StatePoint, replay::SourceRange},
     value::ByteString,
 };
-use termtrace_sdk::session::{Session, SessionTarget};
-
 pub(super) use termtrace_sdk::session::LocatedSession as ResolvedSessionRef;
+use termtrace_sdk::session::{Session, SessionTarget};
 
 /// Locate a session reference and observe its phase without requiring it to be healthy.
 pub(super) fn resolve_session(target: PathBuf) -> Result<ResolvedSessionRef> {

@@ -244,6 +244,7 @@ impl SessionActor<'_> {
                 message,
                 MutationEffect::NotApplied,
             );
+
             let _ = waiter.response.send(response);
         }
     }

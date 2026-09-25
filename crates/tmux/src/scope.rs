@@ -451,7 +451,6 @@ mod tests {
             },
         )
         .expect("window names");
-
         assert!(names.selects(&row(7, PaneMarks::default())));
         assert!(!names.selects(&row(
             7,

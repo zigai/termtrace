@@ -61,10 +61,10 @@ fn thousands_of_incarnations_have_bounded_snapshots_and_rebuildable_pages() {
             };
         })
         .collect();
+
     store
         .initialize(manifest(), events, 2)
         .expect("durable inventory");
-
     let snapshot = store.read().expect("snapshot");
     assert_eq!(snapshot.catalog.tracks, 2500);
     assert!(
@@ -107,10 +107,9 @@ fn thousands_of_incarnations_have_bounded_snapshots_and_rebuildable_pages() {
             )
             .expect("append completion");
     }
+
     let snapshot = store.read().expect("snapshot");
-
     assert_eq!(snapshot.catalog.unfinished_tracks, 2499);
-
     let older = TmuxCatalog::read(store.directory(), &old).expect("private older snapshot");
     assert!(
         !older
@@ -178,7 +177,6 @@ fn resolved_coverage_intervals_remain_queryable() {
     store
         .initialize(manifest(), events, 2)
         .expect("coverage history");
-
     let snapshot = store.read().expect("snapshot");
     let catalog = TmuxCatalog::read(store.directory(), &snapshot).expect("catalog");
     assert_eq!(catalog.summary().coverage_gaps, 300);
@@ -199,6 +197,7 @@ fn an_interrupted_publication_suffix_is_discarded() {
     store
         .initialize(manifest(), vec![TmuxEvent::RecordingStopping], 2)
         .expect("history");
+
     let boundary = store.read().expect("snapshot").lifecycle_journal;
 
     {
@@ -233,5 +232,6 @@ fn a_released_recording_frees_its_name() {
     ));
 
     created.release().expect("release");
+
     store(&temporary);
 }

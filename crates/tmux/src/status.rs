@@ -43,7 +43,6 @@ impl Integration {
         if client.option_text(options::VERSION)? != options::INTEGRATION_VERSION {
             return Ok(None);
         }
-
         return Ok(Some(Self {
             termtrace: PathBuf::from(OsString::from_vec(client.option(options::TERMTRACE)?)),
             coverage: client
@@ -214,6 +213,7 @@ pub fn observe(client: &TmuxClient) -> Result<TmuxStatusReport> {
         }
         None => false,
     };
+
     let observers = match &integration {
         Some(integration) => {
             let identity = client.server_identity()?;

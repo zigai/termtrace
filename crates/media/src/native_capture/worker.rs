@@ -11,6 +11,7 @@ use super::{
     },
     validate_visual_manifest, Error, Result,
 };
+use crate::helper::{flag, playback_worker};
 use crate::playback::worker::{WorkerRequest, WorkerResponse};
 use serde::Serialize;
 use std::{
@@ -35,11 +36,12 @@ use termtrace_evidence::{
     event_log::{CanonicalBoundary, EventLogCursor},
     session::read_manifest,
 };
+use termtrace_model::execution::layout::{self, SessionLayout};
 use termtrace_model::{
     artifact::visual::{
         CaptureOutcome, VisualManifest, GHOSTTY_EFFECTIVE_CONFIG_NAME, VISUAL_MANIFEST_VERSION,
     },
-    execution::session::{CaptureTarget, GHOSTTY_REPLAY_PROFILE_NAME},
+    execution::session::CaptureTarget,
     terminal::{
         observation::StatePoint,
         replay::{ReplayEndpoint, StateSelection},
@@ -109,11 +111,11 @@ impl NativeReplayWorker {
             WorkDirectory(temp_dir().join(format!("termtrace-worker-{}", uuid::Uuid::now_v7())));
         create_private_directory(&work.0)?;
         let profile = if let Some(provenance) = &manifest.ghostty_visual {
-            if provenance.replay_profile != GHOSTTY_REPLAY_PROFILE_NAME {
+            if provenance.replay_profile != layout::GHOSTTY_REPLAY_PROFILE {
                 return Err(failure("unsupported recorded replay profile path"));
             }
 
-            let path = session.join(GHOSTTY_REPLAY_PROFILE_NAME);
+            let path = SessionLayout::new(&session).ghostty_replay_profile();
             let bytes = fs::read(&path).map_err(|source| return filesystem(&path, source))?;
             if blake3::hash(&bytes).to_hex().as_str() != provenance.replay_profile_hash {
                 return Err(failure("recorded replay profile hash differs"));
@@ -127,7 +129,7 @@ impl NativeReplayWorker {
         let effective =
             command_output_in_profile("ghostty", &["+show-config"], profile.as_deref())?;
 
-        let canonical = EventLogCursor::open(session.join("events.jsonl"))?;
+        let canonical = EventLogCursor::open(SessionLayout::new(&session).event_log())?;
         let expected = manifest
             .ghostty_visual
             .as_ref()
@@ -168,12 +170,12 @@ impl NativeReplayWorker {
             .args(ghostty_overrides())
             .arg("-e")
             .arg(helper)
-            .arg("playback-worker")
-            .arg("--session")
+            .arg(playback_worker::SUBCOMMAND)
+            .arg(flag(playback_worker::SESSION))
             .arg(&session)
-            .arg("--socket")
+            .arg(flag(playback_worker::SOCKET))
             .arg(&socket)
-            .arg("--geometry-file")
+            .arg(flag(playback_worker::GEOMETRY_FILE))
             .arg(&geometry)
             .env("DISPLAY", display)
             .env("GDK_BACKEND", "x11")

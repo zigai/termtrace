@@ -59,8 +59,7 @@ pub mod receipt {
 pub mod request_journal {
     pub use crate::auxiliary::request_journal::{
         guarded_command_hash, read_mutation_journal, validate_mutation_journal, MutationJournal,
-        MutationJournalCursor, MUTATION_JOURNAL_FORMAT, MUTATION_JOURNAL_NAME,
-        MUTATION_JOURNAL_VERSION,
+        MutationJournalCursor, MUTATION_JOURNAL_FORMAT, MUTATION_JOURNAL_VERSION,
     };
 }
 

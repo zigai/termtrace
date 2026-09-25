@@ -6,6 +6,7 @@ use crate::cli::{
 use clap::{ArgGroup, Args, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use termtrace_engine::timeline::parse_time_offset_ns;
+use termtrace_media::helper;
 use termtrace_model::terminal::analysis::DiagnosticCheck;
 
 #[derive(Debug, Args)]
@@ -437,58 +438,67 @@ pub(in crate::cli) struct IndexArgs {
 }
 
 #[derive(Debug, Args)]
-#[command(
-    override_usage = "termtrace playback [OPTIONS] --session <SESSION>\n       --timing-file <TIMING_FILE> --error-file <ERROR_FILE>\n       --geometry-file <GEOMETRY_FILE> --ready-file <READY_FILE>"
-)]
+#[command(override_usage = playback_usage())]
 pub(in crate::cli) struct PlaybackArgs {
     /// Source session directory.
-    #[arg(long)]
+    #[arg(long = helper::playback::SESSION)]
     pub(in crate::cli) session: PathBuf,
     /// Playback clock handshake path.
-    #[arg(long)]
+    #[arg(long = helper::playback::TIMING_FILE)]
     pub(in crate::cli) timing_file: PathBuf,
     /// Structured failure handshake path.
-    #[arg(long)]
+    #[arg(long = helper::playback::ERROR_FILE)]
     pub(in crate::cli) error_file: PathBuf,
     /// Playback-terminal geometry handshake path.
-    #[arg(long)]
+    #[arg(long = helper::playback::GEOMETRY_FILE)]
     pub(in crate::cli) geometry_file: PathBuf,
     /// Final-frame readiness path.
-    #[arg(long)]
+    #[arg(long = helper::playback::READY_FILE)]
     pub(in crate::cli) ready_file: PathBuf,
     /// Delay before event time zero.
-    #[arg(long)]
+    #[arg(long = helper::playback::START_DELAY_MS)]
     pub(in crate::cli) start_delay_ms: u64,
     /// Final-frame hold duration.
-    #[arg(long)]
+    #[arg(long = helper::playback::FINAL_HOLD_MS)]
     pub(in crate::cli) final_hold_ms: u64,
     /// Inclusive source offset used by ranged native capture.
-    #[arg(long)]
+    #[arg(long = helper::playback::FROM_NS)]
     pub(in crate::cli) from_ns: Option<u64>,
     /// Exclusive source offset used by ranged native capture.
-    #[arg(long)]
+    #[arg(long = helper::playback::TO_NS)]
     pub(in crate::cli) to_ns: Option<u64>,
     /// Exact endpoint event used by native single-state capture.
-    #[arg(long)]
+    #[arg(long = helper::playback::ENDPOINT_EVENT_SEQ)]
     pub(in crate::cli) endpoint_event_seq: Option<u64>,
     /// Inclusive byte offset within the endpoint output event.
-    #[arg(long)]
+    #[arg(long = helper::playback::ENDPOINT_EVENT_BYTE_OFFSET)]
     pub(in crate::cli) endpoint_event_byte_offset: Option<u64>,
     /// Disable source-time sleeps while replaying an exact endpoint.
-    #[arg(long)]
+    #[arg(long = helper::playback::INSTANT)]
     pub(in crate::cli) instant: bool,
+}
+
+/// Playback usage wrapped to stay within narrow help widths.
+fn playback_usage() -> String {
+    use helper::playback::{
+        ERROR_FILE, GEOMETRY_FILE, READY_FILE, SESSION, SUBCOMMAND, TIMING_FILE,
+    };
+
+    return format!(
+        "termtrace {SUBCOMMAND} [OPTIONS] --{SESSION} <SESSION>\n       --{TIMING_FILE} <TIMING_FILE> --{ERROR_FILE} <ERROR_FILE>\n       --{GEOMETRY_FILE} <GEOMETRY_FILE> --{READY_FILE} <READY_FILE>"
+    );
 }
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct PlaybackWorkerArgs {
     /// Canonical source session.
-    #[arg(long)]
+    #[arg(long = helper::playback_worker::SESSION)]
     pub(in crate::cli) session: PathBuf,
     /// Private parent protocol socket.
-    #[arg(long)]
+    #[arg(long = helper::playback_worker::SOCKET)]
     pub(in crate::cli) socket: PathBuf,
     /// Initial measured terminal geometry.
-    #[arg(long)]
+    #[arg(long = helper::playback_worker::GEOMETRY_FILE)]
     pub(in crate::cli) geometry_file: PathBuf,
 }
 

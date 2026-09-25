@@ -1,7 +1,7 @@
 use super::selection::range_error;
 use crate::replay::{
     timeline_event, visit_states_range, visit_states_range_while, visit_states_seeded_while,
-    DerivedIndex, ReplaySeed, CONTROL_INDEX, CONTROL_SOURCE_INDEX, STATE_INDEX,
+    DerivedIndex, ReplaySeed, CONTROL_INDEX, CONTROL_SOURCE_INDEX,
 };
 use crate::{Error, Result};
 #[cfg(test)]
@@ -15,7 +15,9 @@ use std::{
 use termtrace_evidence::event_log::EventLog;
 use termtrace_model::{
     execution::event::Event,
-    terminal::replay::{ControlSourceIndexEntry, StateIndexEntry, StateRecord, StateSelector},
+    terminal::replay::{
+        ControlSourceIndexEntry, StateIndexEntry, StateRecord, StateSelector, STATE_INDEX,
+    },
     terminal::state::SemanticState,
     terminal::vt::VtToken,
 };

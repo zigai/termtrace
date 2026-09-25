@@ -2,6 +2,7 @@ use super::{
     frame_from_state, frame_hash, load_checkpoint, observation_error, publish_checkpoint,
     publish_endpoint_checkpoint, CachedSemanticState,
 };
+use crate::completion;
 use crate::replay::{
     inspect_latest_presented_prefix, inspect_latest_presented_stream, inspect_prefix_stream,
     inspect_session_stream, inspect_session_stream_with_formats,
@@ -157,7 +158,7 @@ pub fn observe_session_with_options(
         };
     })?;
 
-    if !SessionLayout::new(&canonical).completion().is_file() {
+    if completion::published(&canonical)?.is_none() {
         return Err(observation_error(
             "session is live; engine observation requires completed evidence or explicit validated-prefix observation",
         ));
@@ -300,7 +301,8 @@ pub fn observe_validated_prefix(
     })?;
 
     let layout = SessionLayout::new(&canonical);
-    if layout.completion().exists() {
+
+    if completion::published(&canonical)?.is_some() {
         return Err(observation_error(
             "validated-prefix observation requires incomplete evidence",
         ));
@@ -314,7 +316,9 @@ pub fn observe_validated_prefix(
         state_selector_for_session(&canonical, &point, None)?,
     )?;
 
-    if source != SourceIdentity::capture_candidate(&canonical)? || layout.completion().exists() {
+    if source != SourceIdentity::capture_candidate(&canonical)?
+        || completion::published(&canonical)?.is_some()
+    {
         return Err(observation_error(
             "canonical prefix changed during observation",
         ));
@@ -678,7 +682,7 @@ fn semantic_state_with_hash_for_session_inner(
         };
     })?;
 
-    if !SessionLayout::new(&canonical).completion().is_file() {
+    if completion::published(&canonical)?.is_none() {
         return Err(observation_error(
             "session is live; semantic state resolution requires completed evidence",
         ));

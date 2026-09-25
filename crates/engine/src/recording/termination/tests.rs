@@ -50,7 +50,6 @@ fn draining_since(start: Instant) -> Termination {
 fn running_child_needs_no_effects() {
     let start = Instant::now();
     let mut termination = Termination::new();
-
     assert!(termination.step(tick(start + 10 * MS)).is_empty());
     assert!(!termination.child_exited());
     assert!(!termination.output_closed());
@@ -61,7 +60,6 @@ fn running_child_needs_no_effects() {
 fn exit_with_open_output_kills_retained_descendants_after_grace() {
     let start = Instant::now();
     let mut termination = draining_since(start);
-
     assert!(termination.child_exited());
     assert!(!termination.output_closed());
     assert!(termination.step(tick(start + 249 * MS)).is_empty());
@@ -77,7 +75,6 @@ fn exit_with_open_output_kills_retained_descendants_after_grace() {
 fn late_output_extends_drain_up_to_the_ceiling() {
     let start = Instant::now();
     let mut termination = draining_since(start);
-
     assert!(termination.step(output_tick(start + 200 * MS)).is_empty());
     assert!(termination.step(tick(start + 449 * MS)).is_empty());
     assert!(termination.step(output_tick(start + 1900 * MS)).is_empty());
@@ -198,7 +195,6 @@ fn resource_escalations_name_their_limit() {
             limit: 1_000_000,
             at: start,
         });
-
         assert!(termination.step(tick(start + 249 * MS)).is_empty());
         assert_eq!(
             termination.step(tick(start + 250 * MS)),
@@ -268,7 +264,6 @@ fn only_output_budgets_run_away() {
         limit: 1,
         at: start,
     });
-
     assert!(termination
         .step(Tick {
             output_bytes: u64::MAX,

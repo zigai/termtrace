@@ -5,8 +5,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Relative persistent mutation journal path in a session.
-pub const MUTATION_JOURNAL_NAME: &str = "requests.jsonl";
 /// Mutation journal record format identifier.
 pub const MUTATION_JOURNAL_FORMAT: &str = "termtrace-mutation-request";
 /// Mutation journal schema version.

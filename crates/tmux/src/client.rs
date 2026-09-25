@@ -485,6 +485,7 @@ fn parse_row(row: &[u8]) -> Result<PaneRow> {
         return String::from_utf8(field.to_vec())
             .map_err(|_| return Error::Tmux("tmux returned a non-UTF-8 pane field".to_owned()));
     };
+
     let number = |field: &[u8]| -> Option<u32> {
         return str::from_utf8(field).ok()?.parse().ok();
     };
@@ -611,7 +612,6 @@ mod tests {
         };
         let mut output = row("%1", b"/state/a\nb");
         output.extend(row("%2", b""));
-
         let rows = parse_rows(&output).expect("framed rows");
         assert_eq!(rows.len(), 2);
         assert_eq!(

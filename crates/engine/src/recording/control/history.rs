@@ -131,6 +131,7 @@ impl MutationHistory {
                         atoms_applied =
                             usize::try_from(sequence.atoms_applied).unwrap_or(usize::MAX);
                     }
+
                     atoms_applied
                 }
             };
@@ -197,7 +198,8 @@ fn mutation_retry_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use termtrace_evidence::request_journal::{MutationJournalCursor, MUTATION_JOURNAL_NAME};
+    use termtrace_evidence::request_journal::MutationJournalCursor;
+    use termtrace_model::execution::layout::SessionLayout;
     use termtrace_model::{
         execution::{event::InputKind, event_log::CanonicalBoundary},
         protocol::control::{
@@ -207,6 +209,7 @@ mod tests {
         terminal::{observation::ActorBoundaries, screen::ScreenProjectionRequest},
         value::ByteString,
     };
+
     #[test]
     fn duplicate_operation_rejects_whole_batch_without_reserving_new_ids() {
         let temporary = tempfile::TempDir::new().expect("temporary directory");
@@ -259,6 +262,7 @@ mod tests {
             output_bytes: 0,
             event_hash: "a".repeat(64),
         };
+
         return ActorBoundaries {
             durable: boundary.clone(),
             observed: boundary,
@@ -270,7 +274,6 @@ mod tests {
         let temporary = tempfile::TempDir::new().expect("temporary directory");
         let journal = MutationJournal::create(temporary.path()).expect("journal");
         let mut history = MutationHistory::new(journal, 1);
-
         let op1 = Uuid::from_u128(1);
         let op2 = Uuid::from_u128(2);
         let op3 = Uuid::from_u128(3);
@@ -289,6 +292,7 @@ mod tests {
             pace_ns: 0,
             include_atom_outcomes: false,
         };
+
         let request_id = Uuid::now_v7();
         let response = ControlResponse {
             version: CONTROL_PROTOCOL_VERSION,
@@ -321,8 +325,9 @@ mod tests {
             )
             .expect("remember succeeds");
 
-        let mut cursor = MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
-            .expect("cursor");
+        let mut cursor =
+            MutationJournalCursor::open(&SessionLayout::new(temporary.path()).mutation_journal())
+                .expect("cursor");
         let record = cursor
             .next_record()
             .expect("read")
@@ -335,7 +340,6 @@ mod tests {
         let temporary = tempfile::TempDir::new().expect("temporary directory");
         let journal = MutationJournal::create(temporary.path()).expect("journal");
         let mut history = MutationHistory::new(journal, 1);
-
         let op1 = Uuid::from_u128(1);
         let op2 = Uuid::from_u128(2);
         let command = ControlCommand::Act {
@@ -355,6 +359,7 @@ mod tests {
             pace_ns: 0,
             include_atom_outcomes: false,
         };
+
         let request_id = Uuid::now_v7();
         let response = ControlResponse {
             version: CONTROL_PROTOCOL_VERSION,
@@ -379,7 +384,6 @@ mod tests {
                 },
             },
         };
-
         history
             .remember(
                 request_id,
@@ -392,8 +396,9 @@ mod tests {
             )
             .expect("remember succeeds");
 
-        let mut cursor = MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
-            .expect("cursor");
+        let mut cursor =
+            MutationJournalCursor::open(&SessionLayout::new(temporary.path()).mutation_journal())
+                .expect("cursor");
         let record = cursor
             .next_record()
             .expect("read")
@@ -406,7 +411,6 @@ mod tests {
         let temporary = tempfile::TempDir::new().expect("temporary directory");
         let journal = MutationJournal::create(temporary.path()).expect("journal");
         let mut history = MutationHistory::new(journal, 1);
-
         let op1 = Uuid::from_u128(1);
         let op2 = Uuid::from_u128(2);
         let command = ControlCommand::InputSequence {
@@ -424,6 +428,7 @@ mod tests {
             pace_ns: 0,
             include_atom_outcomes: false,
         };
+
         let request_id = Uuid::now_v7();
         let response = ControlResponse {
             version: CONTROL_PROTOCOL_VERSION,
@@ -452,7 +457,6 @@ mod tests {
                 }),
             },
         };
-
         history
             .remember(
                 request_id,
@@ -465,8 +469,9 @@ mod tests {
             )
             .expect("remember succeeds");
 
-        let mut cursor = MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
-            .expect("cursor");
+        let mut cursor =
+            MutationJournalCursor::open(&SessionLayout::new(temporary.path()).mutation_journal())
+                .expect("cursor");
         let record = cursor
             .next_record()
             .expect("read")
@@ -479,7 +484,6 @@ mod tests {
         let temporary = tempfile::TempDir::new().expect("temporary directory");
         let journal = MutationJournal::create(temporary.path()).expect("journal");
         let mut history = MutationHistory::new(journal, 1);
-
         let op1 = Uuid::from_u128(1);
         let op2 = Uuid::from_u128(2);
         let command = ControlCommand::InputSequence {
@@ -497,6 +501,7 @@ mod tests {
             pace_ns: 0,
             include_atom_outcomes: false,
         };
+
         let request_id = Uuid::now_v7();
         let response = ControlResponse {
             version: CONTROL_PROTOCOL_VERSION,
@@ -508,7 +513,6 @@ mod tests {
                 details: None,
             },
         };
-
         history
             .remember(
                 request_id,
@@ -521,8 +525,9 @@ mod tests {
             )
             .expect("remember succeeds");
 
-        let mut cursor = MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
-            .expect("cursor");
+        let mut cursor =
+            MutationJournalCursor::open(&SessionLayout::new(temporary.path()).mutation_journal())
+                .expect("cursor");
         let record = cursor
             .next_record()
             .expect("read")

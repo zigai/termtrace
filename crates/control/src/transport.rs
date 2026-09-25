@@ -371,6 +371,7 @@ fn exchange_stream(
         "write request",
         MutationEffect::NotApplied,
     )?;
+
     stream.set_nonblocking(false).map_err(|source| {
         return transport_error(
             session_directory,

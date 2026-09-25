@@ -85,6 +85,7 @@ impl RecordingStore {
 
         fs_err::create_dir_all(&parent)
             .map_err(|error| return Error::filesystem(&parent, error))?;
+
         set_private(&parent)?;
 
         if let Err(error) = fs_err::create_dir(&store.directory) {
@@ -142,6 +143,7 @@ impl RecordingStore {
         let bytes = fs_err::read(&path).map_err(|error| return Error::filesystem(&path, error))?;
         let manifest: TmuxRecordingManifest =
             serde_json::from_slice(&bytes).map_err(|error| return Error::json(&path, error))?;
+
         if manifest.format != TMUX_RECORDING_FORMAT || manifest.version != TMUX_RECORDING_VERSION {
             return Err(Error::invalid(
                 "unsupported aggregate tmux recording manifest",
@@ -165,7 +167,6 @@ impl RecordingStore {
             _lock: self.acquire()?,
             manifest,
         };
-
         let state = locked.manifest.state.clone();
 
         return locked.commit(state, events, now);
@@ -214,13 +215,12 @@ impl RecordingStore {
             events: Vec::new(),
             next_sequence: None,
         };
-        let mut bytes = 0_usize;
 
+        let mut bytes = 0_usize;
         for sequence in from_sequence.max(1)..=manifest.lifecycle_journal.sequence {
             let event = catalog.event(sequence)?;
             let encoded = serde_json::to_vec(&event)
                 .map_err(|error| return Error::json(self.journal_path(), error))?;
-
             if page.events.len() >= usize::from(limit)
                 || bytes.saturating_add(encoded.len()) > MAX_EVENT_PAGE_BYTES
             {
@@ -339,6 +339,7 @@ impl LockedRecording<'_> {
         } else {
             Some(TmuxCatalog::for_append(directory, &self.manifest)?)
         };
+
         let (written, boundary) = journal::append(
             &self.store.journal_path(),
             &self.manifest.lifecycle_journal,
@@ -362,6 +363,7 @@ impl LockedRecording<'_> {
         write_private_file(&temporary, &bytes)?;
         fs_err::rename(&temporary, &path)
             .map_err(|error| return Error::filesystem(&path, error))?;
+
         sync_directory(directory)?;
 
         self.manifest = next;

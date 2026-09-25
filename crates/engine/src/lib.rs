@@ -12,6 +12,7 @@
 
 /// Evidence-backed semantic analysis and read-only review.
 pub mod analysis;
+mod completion;
 /// Semantic differences between replayed terminal states.
 pub mod diff;
 mod error;

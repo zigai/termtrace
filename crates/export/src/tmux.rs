@@ -71,9 +71,10 @@ fn visit_source_tracks(
     let directory = aggregate_manifest
         .parent()
         .ok_or_else(|| return Error::invalid("aggregate manifest has no parent"))?;
-    let catalog = TmuxCatalog::read_verified(directory, aggregate)?;
-    let mut next = 0;
 
+    let catalog = TmuxCatalog::read_verified(directory, aggregate)?;
+
+    let mut next = 0;
     loop {
         let page = catalog.tracks(next, 128, false)?;
         if page.is_empty() {

@@ -34,9 +34,9 @@ Choose the least-sensitive artifact that proves the requested outcome.
   This packages redacted metadata, the last screen, last-action analysis,
   diagnostics, and a canonical session reference without raw event streams.
   Add `--screenshot` to include a PNG screenshot of the last presented screen.
-- Use `termtrace bundle SESSION --profile forensic` for canonical sensitive evidence
+- Use `termtrace bundle SESSION --profile forensic -o DIRECTORY` for canonical sensitive evidence
   only when full byte-exact event streams are authorized. Verify with
-  `termtrace analyze verify BUNDLE --source SESSION --profile PROFILE`.
+  `termtrace integrity verify-bundle BUNDLE --source SESSION --profile PROFILE`.
 - Use bare `termtrace analyze SESSION` for immediate triage of the last action and diagnostic findings.
   Open the interactive reviewer (`termtrace analyze review SESSION`) for visual human navigation.
 - A handoff is complete only when its sensitivity profile is stated and its

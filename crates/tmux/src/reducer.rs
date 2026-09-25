@@ -163,6 +163,7 @@ pub fn reduce(name: &str, state: &TmuxRecordingState, input: Input, now: u64) ->
         }
         Input::CompositeLinked(link) => {
             next.lifecycle = next.lifecycle.advance(LifecycleTrigger::CompositeLinked)?;
+
             match &next.composite_track.link {
                 Some(existing) if *existing == link => {}
                 Some(_) => {
@@ -175,12 +176,14 @@ pub fn reduce(name: &str, state: &TmuxRecordingState, input: Input, now: u64) ->
                     events.push(TmuxEvent::CompositeTrackLinked { link });
                 }
             }
+
             next.updated_unix_ns = now;
         }
         Input::StopRequested => {
             if next.lifecycle.is_open() {
                 let from = next.lifecycle;
                 next.lifecycle = from.advance(LifecycleTrigger::StopRequested)?;
+
                 if next.lifecycle != from {
                     events.push(TmuxEvent::RecordingStopping);
                     next.updated_unix_ns = now;
@@ -250,6 +253,7 @@ fn observe(
         .iter()
         .map(|pane| return (pane.pane_id.as_str(), pane))
         .collect::<BTreeMap<_, _>>();
+
     let present = panes
         .iter()
         .map(|pane| return pane.pane_id.as_str())
@@ -297,6 +301,7 @@ fn observe(
     state
         .pane_tracks
         .retain(|pane, _| return present.contains(pane.as_str()));
+
     state.panes = panes;
     state.updated_unix_ns = now;
 
@@ -311,6 +316,7 @@ fn link_track(state: &mut TmuxRecordingState, events: &mut Vec<TmuxEvent>, track
     state
         .pane_tracks
         .insert(track.pane_id.clone(), track.session.clone());
+
     events.push(TmuxEvent::PaneTrackLinked { track });
 }
 
@@ -374,12 +380,14 @@ fn container_transitions(
             .map(|pane| return pane.session_id.clone())
             .collect::<BTreeSet<_>>();
     };
+
     let windows = |panes: &[TmuxPaneSnapshot]| {
         return panes
             .iter()
             .map(|pane| return pane.window_id.clone())
             .collect::<BTreeSet<_>>();
     };
+
     let (old_sessions, new_sessions) = (sessions(previous), sessions(current));
     let (old_windows, new_windows) = (windows(previous), windows(current));
 

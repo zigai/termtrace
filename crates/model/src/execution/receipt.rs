@@ -5,8 +5,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Detached receipt relative path.
-pub const EVIDENCE_RECEIPT_NAME: &str = "evidence-receipt.json";
 /// Receipt envelope format.
 pub const EVIDENCE_RECEIPT_FORMAT: &str = "termtrace-evidence-receipt";
 /// Receipt schema version.

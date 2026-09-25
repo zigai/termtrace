@@ -554,6 +554,7 @@ fn fingerprint_file(digest: &mut Hasher, path: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use termtrace_model::execution::layout::SessionLayout;
 
     fn writer(path: &Path) -> SegmentWriter {
         return SegmentWriter::with_segment_bytes(path, create_private(path).expect("root"), 1024)
@@ -563,7 +564,7 @@ mod tests {
     #[test]
     fn compressed_chunks_preserve_arbitrary_byte_boundaries_and_seeks() {
         let temporary = TempDir::new().expect("directory");
-        let path = temporary.path().join("events.jsonl");
+        let path = SessionLayout::new(temporary.path()).event_log();
         let bytes: Vec<u8> = (0_u32..6500)
             .map(|value| return u8::try_from(value % 251).expect("byte"))
             .collect();
@@ -601,7 +602,7 @@ mod tests {
     #[test]
     fn open_live_cursor_follows_new_chunks_and_boundary_eof() {
         let temporary = TempDir::new().expect("directory");
-        let path = temporary.path().join("events.jsonl");
+        let path = SessionLayout::new(temporary.path()).event_log();
         let mut writer = writer(&path);
         writer.write_all(&[b'a'; 1024]).expect("first chunk");
 
@@ -640,7 +641,7 @@ mod tests {
     #[test]
     fn corrupted_or_missing_compressed_chunks_are_rejected() {
         let temporary = TempDir::new().expect("directory");
-        let path = temporary.path().join("events.jsonl");
+        let path = SessionLayout::new(temporary.path()).event_log();
         let mut writer = writer(&path);
         writer.write_all(&[b'a'; 3500]).expect("chunks");
 

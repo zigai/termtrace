@@ -14,6 +14,7 @@ use termtrace_evidence::{
     event_log::{EventLog, EventLogCursor},
     session::validate_completed_session,
 };
+use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::{
     artifact::{
         save::SemanticRasterProfile,
@@ -79,7 +80,7 @@ pub fn plan_session(
     raster_profile: SemanticRasterProfile,
 ) -> Result<SemanticVideoSourcePlan> {
     let completion = validate_completed_session(session)?;
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     let mut maximum = (cursor.header().cols, cursor.header().rows);
 
     let mut final_monotonic_ns = 0;

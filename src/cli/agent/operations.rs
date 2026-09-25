@@ -149,7 +149,6 @@ impl Driver {
                 }
                 DriverMethod::DiscardCompleted { handle } => {
                     let session = self.session_mut(handle)?;
-
                     if !session.launched() {
                         return Err(driver_failure(
                             "evidence_not_driver_owned",
@@ -417,6 +416,7 @@ impl Driver {
                             None,
                         );
                     })?;
+
                     let _path = session.detach();
 
                     Ok(DriverData::Detached)
@@ -454,6 +454,7 @@ impl Driver {
         let binary = env::current_exe().map_err(|error| {
             return driver_failure("attach_failed", error.to_string(), None);
         })?;
+
         let session = SessionTarget::parse(reference.as_os_str())
             .and_then(|target| return target.path())
             .and_then(|path| return Session::attach(path, binary))
@@ -483,15 +484,16 @@ impl Driver {
         let binary = env::current_exe().map_err(|error| {
             return driver_failure("launch_failed", error.to_string(), None);
         })?;
+
         let command = command
             .iter()
             .map(|argument| return OsString::from_vec(argument.as_bytes().to_vec()));
+
         let mut spec = LaunchSpec::new(command)
             .geometry(cols, rows)
             .environment(environment);
         spec.output_byte_budget = resource_limits.output_bytes;
         spec.working_directory = working_directory.map(Path::to_path_buf);
-
         let session = Terminal::new(binary, evidence_root)
             .start(spec)
             .map_err(|error| {
@@ -509,6 +511,7 @@ impl Driver {
             completed: is_completed(session.path()),
             canonical_session: session.path().to_path_buf(),
         };
+
         self.sessions.insert(handle, session);
 
         return data;

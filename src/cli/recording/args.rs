@@ -2,8 +2,9 @@ use crate::cli::parsers::{
     parse_bounded_screen_regex, parse_capture_target, parse_font_size, parse_idle_interval,
     parse_provenance_rule, parse_rgb_color, parse_wait_deadline_duration,
 };
-use clap::{Args, ValueEnum};
+use clap::{Args, Parser, ValueEnum};
 use std::{ffi::OsString, path::PathBuf, time::Duration};
+use termtrace_media::helper;
 use termtrace_model::execution::session::RecordingFailurePolicy;
 use termtrace_model::{
     execution::environment::ColorPolicy,
@@ -17,7 +18,7 @@ use termtrace_sdk::defaults;
 #[derive(Debug, Args)]
 pub(in crate::cli) struct GeometryProbeArgs {
     /// New file receiving the measured terminal geometry.
-    #[arg(long)]
+    #[arg(long = helper::geometry_probe::OUT)]
     pub(in crate::cli) out: PathBuf,
 }
 
@@ -372,6 +373,23 @@ pub(in crate::cli) struct RecordingArgs {
         allow_hyphen_values = true
     )]
     pub(in crate::cli) command: Vec<OsString>,
+}
+
+impl RecordingArgs {
+    /// Recording settings for `command` exactly as `record` parses them with no options.
+    pub(in crate::cli) fn defaults_for(command: &[OsString]) -> Result<Self, clap::Error> {
+        #[derive(Parser)]
+        struct Defaults {
+            #[command(flatten)]
+            recording: RecordingArgs,
+        }
+
+        let arguments = [OsString::from("termtrace"), OsString::from("--")]
+            .into_iter()
+            .chain(command.iter().cloned());
+
+        return Defaults::try_parse_from(arguments).map(|defaults| return defaults.recording);
+    }
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]

@@ -29,6 +29,7 @@ use termtrace_evidence::{
     event_log::EventLogSummary,
     session::{read_manifest, validate_completion_summary_candidate},
 };
+use termtrace_model::execution::layout;
 use termtrace_model::{
     artifact::metadata::ArtifactSourceRange,
     artifact::playback::PlaybackTiming,
@@ -37,7 +38,7 @@ use termtrace_model::{
         GHOSTTY_EFFECTIVE_CONFIG_NAME, VISUAL_MANIFEST_VERSION,
     },
     execution::layout::SessionLayout,
-    execution::session::{GeometrySource, SessionManifest, GHOSTTY_REPLAY_PROFILE_NAME},
+    execution::session::{GeometrySource, SessionManifest},
     terminal::replay::SourceRange,
 };
 
@@ -253,7 +254,7 @@ fn capture_staged(
     }
 
     let profile_root = if let Some(provenance) = &manifest.ghostty_visual {
-        if provenance.replay_profile != GHOSTTY_REPLAY_PROFILE_NAME {
+        if provenance.replay_profile != layout::GHOSTTY_REPLAY_PROFILE {
             return Err(Error::InvalidReplay {
                 reason: format!(
                     "unsupported recorded Ghostty profile path `{}`",
@@ -262,7 +263,7 @@ fn capture_staged(
             });
         }
 
-        let path = options.session_directory.join(GHOSTTY_REPLAY_PROFILE_NAME);
+        let path = SessionLayout::new(&options.session_directory).ghostty_replay_profile();
         let replay = fs::read(&path).map_err(|source| return Error::Filesystem { path, source })?;
         if blake3::hash(&replay).to_hex().as_str() != provenance.replay_profile_hash {
             return Err(Error::InvalidReplay {

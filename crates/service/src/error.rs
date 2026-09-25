@@ -49,6 +49,8 @@ pub enum ErrorKind {
     PostconditionIncomplete,
     /// Strict stable capture was incomplete.
     StableCaptureIncomplete,
+    /// A recorder failed to start or become ready.
+    RecorderStartup,
     /// Caller contract or SDK invariant violation.
     InvalidOperation,
 }
@@ -106,6 +108,12 @@ pub enum Error {
         /// Complete incomplete capture retained for inspection.
         result: Box<StableScreenCapture>,
     },
+    /// A recorder failed to start, exited, or missed its readiness deadline.
+    #[error("{reason}")]
+    RecorderStartup {
+        /// What happened and where the recorder's diagnostics are.
+        reason: String,
+    },
     /// An SDK invariant or caller contract was invalid.
     #[error("invalid SDK operation: {reason}")]
     InvalidOperation {
@@ -149,6 +157,7 @@ impl Error {
             Self::ScreenFrame(_) => ErrorKind::ScreenFrame,
             Self::PostconditionIncomplete { .. } => ErrorKind::PostconditionIncomplete,
             Self::StableCaptureIncomplete { .. } => ErrorKind::StableCaptureIncomplete,
+            Self::RecorderStartup { .. } => ErrorKind::RecorderStartup,
             Self::InvalidOperation { .. } => ErrorKind::InvalidOperation,
         };
     }
@@ -187,6 +196,7 @@ impl Error {
             | Self::InvalidJson { .. }
             | Self::ScreenFrame(_)
             | Self::StableCaptureIncomplete { .. }
+            | Self::RecorderStartup { .. }
             | Self::InvalidOperation { .. } => MutationEffect::NotApplied,
         };
     }
@@ -220,6 +230,7 @@ impl ErrorKind {
             Self::PartialInput => "partial_input",
             Self::PostconditionIncomplete => "postcondition_incomplete",
             Self::StableCaptureIncomplete => "stable_capture_incomplete",
+            Self::RecorderStartup => "recorder_startup",
             Self::InvalidOperation => "invalid_operation",
         };
     }

@@ -7,6 +7,10 @@ use termtrace_model::registry::{
     GarbageCollectionReport, RegistryEntry, RegistryListEntry, RegistrySessionResolution,
 };
 
+mod detached;
+
+pub use detached::{spawn_detached, DetachedRecording, DetachedStart};
+
 /// Semantic override policy for restart orchestration.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum ValueOverride<T> {
@@ -56,6 +60,20 @@ impl RegistryService {
         let registry = SessionRegistry::open(state_root).map_err(Error::from)?;
 
         return Ok(Self { registry });
+    }
+
+    /// Managed state root holding sessions, the registry, and aggregate recordings.
+    #[must_use]
+    pub fn state_root(&self) -> &Path {
+        return self.registry.state_root();
+    }
+
+    /// Fail unless `alias` is valid and neither reserved nor registered.
+    ///
+    /// # Errors
+    /// Returns an error if the alias is invalid, taken, or the registry cannot be read.
+    pub fn ensure_available(&self, alias: &str) -> Result<()> {
+        return self.registry.ensure_available(alias).map_err(Error::from);
     }
 
     /// Register a friendly name for an existing canonical session directory.

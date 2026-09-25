@@ -74,14 +74,14 @@ pub(crate) fn run_validated(
         .startup_timeout(Duration::from_millis(scenario.launch.timeout_ms))
         .environment(to_environment_spec(&scenario.launch.environment)?);
     spec.output_byte_budget = scenario.launch.output_byte_budget;
+
     spec.working_directory
         .clone_from(&scenario.launch.working_directory);
-
     let mut session = terminal
         .start(spec)
         .map_err(|error| return operation("launch", error))?;
-    let stop_timeout = Some(Duration::from_millis(scenario.launch.timeout_ms));
 
+    let stop_timeout = Some(Duration::from_millis(scenario.launch.timeout_ms));
     let mut steps: Vec<ScenarioStepResult> = Vec::new();
 
     let mut stopped = false;

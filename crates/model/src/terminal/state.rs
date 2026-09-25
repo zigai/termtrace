@@ -107,11 +107,12 @@ impl KeyChord {
                 reason,
             };
         };
+
         let normalized = text.to_ascii_lowercase().replace(['+', '_'], "-");
         let mut remaining = normalized.as_str();
         let mut modifiers = KeyModifiers::default();
-        let mut modified = false;
 
+        let mut modified = false;
         loop {
             let (next, held) = if let Some(next) = remaining
                 .strip_prefix("ctrl-")
@@ -127,7 +128,6 @@ impl KeyChord {
             } else {
                 break;
             };
-
             if *held {
                 return Err(invalid("a modifier was supplied more than once"));
             }
