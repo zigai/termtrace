@@ -8,11 +8,11 @@ use super::super::{
     },
     model::TerminalGeometry,
     presentation::{find_text_regions, resize_semantic, LiveTerminal},
-    runtime::HOST_SIGNAL_GRACE_PERIOD,
     support::{
         actor_boundaries, control_error_response, control_rejected, finish_with_cleanup,
         terminal_error, validate_control_input,
     },
+    termination::Fact,
 };
 use super::screen::{
     compile_screen_predicate, evaluate_screen_predicate, presented_state_hash, valid_blake3_hash,

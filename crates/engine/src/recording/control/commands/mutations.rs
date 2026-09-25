@@ -3,10 +3,9 @@ use super::{
     finish_with_cleanup, interpolate_cell, killpg, mode_hash, mouse_button_name, prepare_bytes,
     prepare_key, prepare_paste, presented_state_hash, resize_semantic,
     supported_geometry_cell_count, terminal_error, validate_control_input, ByteString,
-    ControlCommand, ControlData, Errno, Error, Event, EventLogWriter, FocusEvent, InputDescriptor,
-    InputKind, InputSource, Instant, MouseAction, MouseButton, OperationStatus, Pid,
-    PointerOperation, ProcessSignal, Result, SessionActor, Signal, TerminalGeometry, Uuid,
-    HOST_SIGNAL_GRACE_PERIOD,
+    ControlCommand, ControlData, Errno, Error, Event, EventLogWriter, Fact, FocusEvent,
+    InputDescriptor, InputKind, InputSource, Instant, MouseAction, MouseButton, OperationStatus,
+    Pid, PointerOperation, ProcessSignal, Result, SessionActor, Signal, TerminalGeometry, Uuid,
 };
 
 impl SessionActor<'_> {
@@ -680,10 +679,8 @@ impl SessionActor<'_> {
                     true,
                 )?;
 
-                if self.host_signal_kill_deadline.is_none() {
-                    self.host_signal_kill_deadline =
-                        Some(Instant::now() + HOST_SIGNAL_GRACE_PERIOD);
-                }
+                self.termination
+                    .observe(Fact::SignalForwarded { at: Instant::now() });
 
                 return Ok(ControlData::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),

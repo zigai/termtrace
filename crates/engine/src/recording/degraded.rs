@@ -1,6 +1,10 @@
 //! Preserve an interactive PTY after a recorder failure without claiming complete evidence.
 
-use super::{actor::SessionActor, model::RuntimeMessage};
+use super::{
+    actor::SessionActor,
+    model::RuntimeMessage,
+    termination::{DESCENDANT_DRAIN_TIMEOUT, HOST_SIGNAL_GRACE_PERIOD},
+};
 use crate::Error;
 use nix::{
     sys::signal::{killpg, Signal},
@@ -83,9 +87,10 @@ pub(super) fn preserve_terminal(
         let _health = write_secure(&path, &bytes);
     }
 
-    let mut output_closed = actor.progress.output_closed;
+    let mut output_closed = actor.termination.output_closed();
+    let mut child_exited = actor.termination.child_exited();
     let mut exited_at = None;
-    let mut signal_deadline = actor.host_signal_kill_deadline;
+    let mut signal_deadline = actor.termination.signal_kill_deadline();
 
     loop {
         let message = match receiver.recv_timeout(Duration::from_millis(20)) {
@@ -129,9 +134,8 @@ pub(super) fn preserve_terminal(
                 let _resize = actor.spawned.master.resize(geometry.into());
             }
             Ok(RuntimeMessage::HostSignal(signal)) => {
-                signal_deadline.get_or_insert_with(|| {
-                    return Instant::now() + super::runtime::HOST_SIGNAL_GRACE_PERIOD;
-                });
+                signal_deadline
+                    .get_or_insert_with(|| return Instant::now() + HOST_SIGNAL_GRACE_PERIOD);
 
                 // This is an external user/lifecycle signal, not recorder-error cleanup.
                 if let Some(pid) = actor
@@ -174,13 +178,11 @@ pub(super) fn preserve_terminal(
             | Err(RecvTimeoutError::Timeout) => {}
         }
 
-        if actor.exit_status.is_none()
-            && let Ok(status) = actor.spawned.child.try_wait()
-        {
-            actor.exit_status = status;
+        if !child_exited && let Ok(status) = actor.spawned.child.try_wait() {
+            child_exited = status.is_some();
         }
 
-        if actor.exit_status.is_none()
+        if !child_exited
             && signal_deadline.is_some_and(|deadline| return Instant::now() >= deadline)
         {
             super::process::terminate_process_group(actor.spawned.pid);
@@ -188,10 +190,10 @@ pub(super) fn preserve_terminal(
             signal_deadline = None;
         }
 
-        if actor.exit_status.is_some() {
+        if child_exited {
             let exited = exited_at.get_or_insert_with(Instant::now);
 
-            if output_closed || exited.elapsed() >= Duration::from_secs(2) {
+            if output_closed || exited.elapsed() >= DESCENDANT_DRAIN_TIMEOUT {
                 // Descendants retaining the PTY after the root exits follow normal lifecycle cleanup.
                 if !output_closed {
                     super::process::terminate_process_group(actor.spawned.pid);

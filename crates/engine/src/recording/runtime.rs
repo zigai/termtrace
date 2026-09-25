@@ -8,6 +8,7 @@ use super::{
     presentation::{process_semantic_bytes, process_semantic_output, resize_semantic},
     process::{terminate_process_group, RuntimeWorkers},
     support::terminal_error,
+    termination::{Effect, Fact, Tick},
 };
 use crate::{Error, Result};
 use portable_pty::ExitStatus;
@@ -28,10 +29,6 @@ use termtrace_model::{
     value::ByteString,
 };
 use uuid::Uuid;
-
-const DESCENDANT_GRACE_PERIOD: Duration = Duration::from_millis(250);
-const DESCENDANT_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
-pub(in crate::recording) const HOST_SIGNAL_GRACE_PERIOD: Duration = Duration::from_secs(2);
 
 pub(super) struct RuntimeOutcome {
     pub(super) status: ExitStatus,
@@ -85,10 +82,8 @@ pub(super) fn consume_runtime(
             return Err(error);
         }
 
-        let mut control_shutdown_started = false;
         let started_at = Instant::now();
         let mut last_activity_at = Instant::now();
-        let mut hard_drain_deadline: Option<Instant> = None;
         loop {
             let receive_timeout = actor.pending_input_sequence.as_ref().map_or(
                 Duration::from_millis(10),
@@ -117,7 +112,7 @@ pub(super) fn consume_runtime(
 
                     actor.process_runtime_message(message)?;
                 }
-                Err(RecvTimeoutError::Disconnected) if !actor.progress.output_closed => {
+                Err(RecvTimeoutError::Disconnected) if !actor.termination.output_closed() => {
                     return Err(terminal_error(
                         "receive runtime event",
                         "PTY reader disconnected before reporting closure",
@@ -126,148 +121,70 @@ pub(super) fn consume_runtime(
                 Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => {}
             }
 
-            if actor.exit_status.is_none() {
-                actor.exit_status = actor
+            if !actor.termination.child_exited()
+                && let Some(status) = actor
                     .spawned
                     .child
                     .try_wait()
-                    .map_err(|error| return terminal_error("poll child", error.to_string()))?;
+                    .map_err(|error| return terminal_error("poll child", error.to_string()))?
+            {
+                actor.termination.observe(Fact::ChildExited {
+                    status,
+                    at: Instant::now(),
+                });
+            }
 
-                if actor.exit_status.is_some() {
-                    actor.host_signal_kill_deadline = None;
-                    if !actor.progress.output_closed {
-                        let now = Instant::now();
-                        actor.drain_deadline = Some(now + DESCENDANT_GRACE_PERIOD);
-                        if hard_drain_deadline.is_none() {
-                            hard_drain_deadline = Some(now + DESCENDANT_DRAIN_TIMEOUT);
-                        }
+            let child_exited = actor.termination.child_exited();
+            let output_closed = actor.termination.output_closed();
+            actor.advance_input_sequence(child_exited, output_closed)?;
+            actor.event_log.flush_due()?;
+            actor.ensure_presented_snapshot()?;
+            actor.evaluate_screen_waiters(child_exited, output_closed)?;
+            actor.enforce_resource_limits(started_at, last_activity_at)?;
+
+            let effects = actor.termination.step(Tick {
+                now: Instant::now(),
+                received_output,
+                output_bytes: actor.progress.output_bytes,
+                input_sequence_pending: actor.pending_input_sequence.is_some(),
+            });
+            let mut control_shutdown_finished = false;
+
+            for effect in effects {
+                match effect {
+                    Effect::AppendHostError { code, message } => {
+                        actor.event_log.append(Event::HostError {
+                            code: code.to_owned(),
+                            message: message.to_owned(),
+                        })?;
+                    }
+                    Effect::KillProcessGroup => terminate_process_group(actor.spawned.pid),
+                    Effect::Fail { operation, reason } => {
+                        return Err(terminal_error(operation, reason));
+                    }
+                    Effect::BeginControlShutdown => workers.begin_control_shutdown()?,
+                    Effect::AwaitControlShutdown => {
+                        control_shutdown_finished = workers.control_shutdown_finished();
                     }
                 }
             }
 
-            let child_exited = actor.exit_status.is_some();
-            actor.advance_input_sequence(child_exited, actor.progress.output_closed)?;
-            actor.event_log.flush_due()?;
-
-            if actor.live_needs_snapshot {
-                actor.ensure_presented_snapshot()?;
-            }
-
-            actor.evaluate_screen_waiters(child_exited, actor.progress.output_closed)?;
-            actor.enforce_resource_limits(started_at, last_activity_at)?;
-
-            if received_output && actor.exit_status.is_some() && !actor.progress.output_closed {
-                let candidate = Instant::now() + DESCENDANT_GRACE_PERIOD;
-                actor.drain_deadline = Some(
-                    hard_drain_deadline
-                        .map_or(candidate, |ceiling| return candidate.min(ceiling)),
-                );
-            }
-
-            let runaway_output = actor.progress.resource_limit.as_ref().is_some_and(|r| {
-                return r.kind == ResourceLimitKind::OutputBytes
-                    && actor.progress.output_bytes
-                        >= r.limit
-                            .saturating_mul(2)
-                            .max(r.limit.saturating_add(8 * 1024));
-            });
-
-            if (runaway_output
-                || actor
-                    .resource_kill_deadline
-                    .is_some_and(|deadline| return Instant::now() >= deadline))
-                && !actor.process_group_killed
-            {
-                let (code, message) = match actor
-                    .progress
-                    .resource_limit
-                    .as_ref()
-                    .map(|o| return o.kind)
-                {
-                    Some(ResourceLimitKind::MaxDuration) => (
-                        "max_duration_force_kill",
-                        "child did not exit after duration-limit termination; process group was killed",
-                    ),
-                    Some(ResourceLimitKind::IdleTimeout) => (
-                        "idle_timeout_force_kill",
-                        "child did not exit after idle-timeout termination; process group was killed",
-                    ),
-                    _ => (
-                        "output_budget_force_kill",
-                        "child did not exit after output-budget termination; process group was killed",
-                    ),
-                };
-                actor.event_log.append(Event::HostError {
-                    code: code.to_owned(),
-                    message: message.to_owned(),
-                })?;
-
-                terminate_process_group(actor.spawned.pid);
-                actor.process_group_killed = true;
-            }
-
-            if actor
-                .host_signal_kill_deadline
-                .is_some_and(|deadline| return Instant::now() >= deadline)
-                && !actor.process_group_killed
-            {
-                actor.event_log.append(Event::HostError {
-                    code: "recorder_signal_force_kill".to_owned(),
-                    message: "child did not exit after a signal delivered to the recorder; process group was killed"
-                        .to_owned(),
-                })?;
-
-                terminate_process_group(actor.spawned.pid);
-                actor.process_group_killed = true;
-            }
-
-            if actor
-                .drain_deadline
-                .is_some_and(|deadline| return Instant::now() >= deadline)
-                && !actor.progress.output_closed
-            {
-                if actor.process_group_killed {
-                    return Err(terminal_error(
-                        "drain PTY output",
-                        "PTY remained open after terminating retained process-group descendants",
-                    ));
-                }
-
-                terminate_process_group(actor.spawned.pid);
-                actor.process_group_killed = true;
-                let post_kill_deadline = Instant::now() + DESCENDANT_DRAIN_TIMEOUT;
-                actor.drain_deadline = Some(post_kill_deadline);
-                hard_drain_deadline = Some(post_kill_deadline);
-            }
-            if actor.progress.output_closed
-                && actor.exit_status.is_some()
-                && actor.pending_input_sequence.is_none()
-            {
-                if !control_shutdown_started {
-                    workers.begin_control_shutdown()?;
-
-                    control_shutdown_started = true;
-                }
-
-                if workers.control_shutdown_finished() {
-                    break;
-                }
+            if control_shutdown_finished {
+                break;
             }
         }
 
-        if actor.live_needs_snapshot {
-            actor.ensure_presented_snapshot()?;
-        }
-
-        actor.evaluate_screen_waiters(true, actor.progress.output_closed)?;
+        actor.ensure_presented_snapshot()?;
+        actor.evaluate_screen_waiters(true, actor.termination.output_closed())?;
         actor.fail_screen_waiters(
             "child_completed",
             "child completed before screen predicate matched",
         );
 
         return actor
-            .exit_status
-            .clone()
+            .termination
+            .exit_status()
+            .cloned()
             .ok_or_else(|| return terminal_error("wait for child", "missing exit status"));
     })();
 
@@ -300,8 +217,8 @@ impl SessionActor<'_> {
         code: &str,
         message: &str,
     ) -> Result<()> {
-        self.host_signal_kill_deadline
-            .get_or_insert_with(|| return Instant::now() + HOST_SIGNAL_GRACE_PERIOD);
+        self.termination
+            .observe(Fact::SignalForwarded { at: Instant::now() });
 
         self.event_log.append(Event::HostError {
             code: code.to_owned(),
@@ -405,8 +322,12 @@ impl SessionActor<'_> {
             true,
         )?;
 
+        self.termination.observe(Fact::ResourceLimitExceeded {
+            kind: outcome.kind,
+            limit: outcome.limit,
+            at: Instant::now(),
+        });
         self.progress.resource_limit = Some(outcome);
-        self.resource_kill_deadline = Some(Instant::now() + DESCENDANT_GRACE_PERIOD);
 
         return Ok(());
     }
@@ -474,10 +395,9 @@ impl SessionActor<'_> {
                 };
                 self.mirror_bytes(&mirrored)?;
 
-                if self.screen_waiters.is_empty() && self.pending_input_sequence.is_none() {
-                    self.live_needs_snapshot = true;
-                } else {
-                    self.live_needs_snapshot = true;
+                self.live_needs_snapshot = true;
+
+                if !self.screen_waiters.is_empty() || self.pending_input_sequence.is_some() {
                     self.ensure_presented_snapshot()?;
                 }
             }
@@ -505,7 +425,7 @@ impl SessionActor<'_> {
                     self.mirror_bytes(&mirrored)?;
                 }
 
-                self.progress.output_closed = true;
+                self.termination.observe(Fact::OutputClosed);
                 self.event_log.append(Event::Lifecycle {
                     lifecycle_kind: LifecycleKind::OutputClosed,
                     pid: self.spawned.pid,
