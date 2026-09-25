@@ -8,6 +8,7 @@ use termtrace_evidence::{
     event_log::{EventLogCursor, EventLogSummary},
 };
 use termtrace_model::execution::event::{Event, OperationStatus};
+use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::value::ByteString;
 use uuid::Uuid;
 
@@ -52,8 +53,8 @@ pub fn export_to_writer(
 ) -> Result<()> {
     let session = session_directory.as_ref();
     let path = display_path.as_ref();
-    let log = EventLogSummary::read(session.join("events.jsonl"))?;
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let log = EventLogSummary::read(SessionLayout::new(session).event_log())?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     write_line(
         &mut writer,
         &CastHeader {

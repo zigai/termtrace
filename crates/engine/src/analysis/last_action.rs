@@ -10,12 +10,10 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
 };
-use termtrace_evidence::{
-    event_log::EventLog,
-    request_journal::{MutationJournalCursor, MUTATION_JOURNAL_NAME},
-};
+use termtrace_evidence::{event_log::EventLog, request_journal::MutationJournalCursor};
 use termtrace_model::{
     execution::event::{Event, EventRecord, OperationStatus},
+    execution::layout::SessionLayout,
     execution::request_journal::MutationJournalRecord,
     terminal::analysis::{
         ActionModeChange, ActionOutputSummary, ActionWarning, DiagnosticCheck, DiagnosticFinding,
@@ -240,7 +238,7 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
 }
 
 fn last_input_action(session: &Path, log: &EventLog) -> Result<LastActionBoundary> {
-    let mut journal = MutationJournalCursor::open(&session.join(MUTATION_JOURNAL_NAME))?;
+    let mut journal = MutationJournalCursor::open(&SessionLayout::new(session).mutation_journal())?;
     let mut last_action = None;
 
     while let Some(request) = journal.next_record()? {

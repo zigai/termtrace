@@ -39,8 +39,7 @@ fn tmux_server_crash_closes_idle_recording_without_leaking_the_shell() {
     kill(Pid::from_raw(pid), Signal::SIGKILL).expect("crash owned tmux server");
 
     wait_for_path(&session.join("completion.json"));
-    let log = EventLog::read(session.join("events.jsonl")).expect("crash evidence");
-    validate_completed_log(&session, &log).expect("complete crash evidence");
+    validate_completed_session(&session).expect("complete crash evidence");
 }
 
 #[test]
@@ -57,7 +56,7 @@ fn tmux_kill_pane_closes_canonical_recording() {
 
     wait_for_path(&session.join("completion.json"));
     let log = EventLog::read(session.join("events.jsonl")).expect("killed pane log");
-    validate_completed_log(&session, &log).expect("killed pane completed evidence");
+    validate_completed_session(&session).expect("killed pane completed evidence");
 
     assert!(
         matches!(

@@ -1,5 +1,6 @@
 use super::*;
 use super::{tar::extract_archive, verify::read_bounded_regular_file};
+use crate::storage::artifact::create_private_directory;
 use std::{io, path::Path};
 use tar_archive::{Builder, EntryType, Header};
 use tempfile::TempDir;

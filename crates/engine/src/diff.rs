@@ -220,14 +220,7 @@ fn inspect_points(log: &EventLog, points: &[StatePoint]) -> Result<Vec<StateInsp
 }
 
 fn state_selector(log: &EventLog, point: &StatePoint) -> Result<StateSelector> {
-    return Ok(match point {
-        StatePoint::LatestPresented => StateSelector::LatestPresented,
-        StatePoint::StateId { state_id } => StateSelector::StateId(*state_id),
-        StatePoint::StateHash { state_hash } => StateSelector::StateHash(state_hash.clone()),
-        StatePoint::EventSeq { event_seq } => StateSelector::EventSeq(*event_seq),
-        StatePoint::MonotonicNs { monotonic_ns } => StateSelector::MonotonicNs(*monotonic_ns),
-        StatePoint::Marker { label } => StateSelector::EventSeq(unique_marker(log, label)?),
-    });
+    return point.selector(|label| return unique_marker(log, label));
 }
 
 fn unique_marker(log: &EventLog, label: &str) -> Result<u64> {

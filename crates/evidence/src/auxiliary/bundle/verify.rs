@@ -1,10 +1,12 @@
 use crate::{
     auxiliary::bundle::{
-        collect_regular_files, hash_regular_file, open_regular_nofollow, validate_relative_path,
-        BundleIdentity, BUNDLE_FORMAT, BUNDLE_MANIFEST_NAME, BUNDLE_VERSION,
-        MAX_BUNDLE_MANIFEST_BYTES, MAX_BUNDLE_MEMBERS,
+        collect_regular_files, validate_relative_path, BundleIdentity, BUNDLE_FORMAT,
+        BUNDLE_MANIFEST_NAME, BUNDLE_VERSION, MAX_BUNDLE_MANIFEST_BYTES, MAX_BUNDLE_MEMBERS,
     },
-    storage::{is_lowercase_blake3, Error, Result},
+    storage::{
+        artifact::{hash_regular_file, open_regular_file_nofollow},
+        is_lowercase_blake3, Error, Result,
+    },
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -111,7 +113,7 @@ fn verify_members(directory: &Path, expected: &[ArtifactMember]) -> Result<()> {
 }
 
 pub(crate) fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
-    let (mut file, size) = open_regular_nofollow(path)?;
+    let (mut file, size) = open_regular_file_nofollow(path)?;
     if size > maximum_bytes {
         return Err(Error::invalid(format!(
             "bundle member `{}` exceeds the {maximum_bytes} byte limit",

@@ -96,8 +96,7 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
             .expect("workflow completion output");
 
         wait_for_path(&session.join("completion.json"));
-        let log = EventLog::read(session.join("events.jsonl")).expect("completed event log");
-        validate_completed_log(&session, &log).expect("completion evidence");
+        validate_completed_session(&session).expect("completion evidence");
 
         let selected_hash = agent_value["state_hash"]
             .as_str()
@@ -196,8 +195,7 @@ fn assert_scenario_replayability(temporary: &TempDir, fixture: &WorkflowFixture)
             .expect("scenario canonical path"),
     );
 
-    let log = EventLog::read(canonical.join("events.jsonl")).expect("scenario event log");
-    validate_completed_log(&canonical, &log).expect("scenario replay closure");
+    validate_completed_session(&canonical).expect("scenario replay closure");
     inspect_session(&canonical, StateSelector::Final).expect("scenario final state");
 
     for step in attempt["steps"].as_array().expect("scenario steps") {

@@ -9,12 +9,12 @@ use std::{
     os::unix::fs::FileTypeExt as _,
     path::{Path, PathBuf},
 };
-use termtrace_engine::observation::observe_session;
+use termtrace_engine::{observation::observe_session, replay::ValidatedSession};
 use termtrace_evidence::{
-    artifact::hash_regular_file,
+    artifact::{hash_regular_file, member_media_type, member_schema_type},
     bundle::{verify as verify_bundle, BundleDraft, BundleIdentity, BundleMemberMetadata},
     event_log::{CanonicalLogFile, EventLogCursor},
-    session::{read_manifest, validate_completed_session, verify_session},
+    session::verify_session,
 };
 use termtrace_model::{
     artifact::bundle::{
@@ -23,15 +23,13 @@ use termtrace_model::{
     },
     artifact::metadata::{ArtifactMember, ArtifactSensitivity},
     execution::event::EventProjection,
-    execution::session::{
-        SessionCompletion, SessionManifest, VerificationLevel, VerificationReport,
-    },
+    execution::layout::{self, file_role, FileRole, SessionLayout},
+    execution::session::{VerificationLevel, VerificationReport},
     terminal::observation::{Observation, ObservationResolution, StatePoint},
     value::ByteString,
 };
 
 const MAX_STRUCTURED_MEMBER_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_CANONICAL_MEMBERS: usize = 10_000;
 
 /// Return deterministic content and sensitivity policy without writing.
 #[must_use]
@@ -69,7 +67,7 @@ pub fn plan(profile: BundleProfile) -> BundlePlan {
         members.push(planned(
             "canonical/",
             ArtifactSensitivity::SensitiveTerminalData,
-            "complete_top_level_canonical_payload",
+            "canonical_session_files",
         ));
     }
 
@@ -90,7 +88,7 @@ pub fn create(
     max_bytes: Option<u64>,
 ) -> Result<BundleManifest> {
     let trusted = TrustedSource::resolve(session)?;
-    if destination.starts_with(&trusted.canonical) {
+    if destination.starts_with(trusted.canonical()) {
         return Err(Error::invalid(
             "evidence export destination must be outside the canonical session",
         ));
@@ -98,7 +96,7 @@ pub fn create(
 
     let identity = trusted.identity(profile);
     let mut draft = BundleDraft::create(destination, identity, max_bytes)?;
-    let observation = observe_session(&trusted.canonical, StatePoint::LatestPresented)?;
+    let observation = observe_session(trusted.canonical(), StatePoint::LatestPresented)?;
     draft.add_member_bytes(
         "screen.txt",
         member_metadata(profile, "screen.txt")?,
@@ -112,7 +110,7 @@ pub fn create(
     )?;
 
     if matches!(profile, BundleProfile::Debug | BundleProfile::Forensic) {
-        let verification = verify_session(&trusted.canonical, VerificationLevel::Content);
+        let verification = verify_session(trusted.canonical(), VerificationLevel::Content);
         if !verification.valid {
             return Err(Error::invalid(
                 "canonical source failed content verification",
@@ -135,9 +133,9 @@ pub fn create(
     }
 
     if profile == BundleProfile::Forensic {
-        for name in top_level_regular_file_names(&trusted.canonical)? {
-            let source = trusted.canonical.join(&name);
-            let mut reader: Box<dyn Read> = if name == "events.jsonl" {
+        for name in canonical_file_names(trusted.canonical())? {
+            let source = trusted.canonical().join(&name);
+            let mut reader: Box<dyn Read> = if name == layout::EVENT_LOG {
                 Box::new(
                     CanonicalLogFile::open(&source)
                         .map_err(|error| return Error::filesystem(&source, error))?,
@@ -157,6 +155,8 @@ pub fn create(
             )?;
         }
     }
+
+    trusted.session.check()?;
 
     return Ok(draft.commit()?);
 }
@@ -194,7 +194,7 @@ pub fn verify_profile(
             ));
         }
 
-        verify_canonical_payload(directory, &manifest.members, &trusted.canonical)?;
+        verify_canonical_payload(directory, &manifest.members, trusted.canonical())?;
     }
 
     return Ok(manifest);
@@ -205,29 +205,28 @@ pub(super) fn identity_for_policy(policy: &BundleVerificationPolicy) -> Result<B
 }
 
 struct TrustedSource {
-    canonical: PathBuf,
-    manifest: SessionManifest,
-    completion: SessionCompletion,
+    session: ValidatedSession,
 }
 
 impl TrustedSource {
     fn resolve(session: &Path) -> Result<Self> {
-        let canonical = session
+        let canonical: PathBuf = session
             .canonicalize()
             .map_err(|source| return Error::filesystem(session, source))?;
 
-        let completion = validate_completed_session(&canonical)?;
-        let manifest = read_manifest(&canonical)?;
-
         return Ok(Self {
-            canonical,
-            manifest,
-            completion,
+            session: ValidatedSession::open(&canonical)?,
         });
     }
 
+    fn canonical(&self) -> &Path {
+        return self.session.root();
+    }
+
     fn write_event_projection(&self, writer: &mut impl Write) -> Result<()> {
-        let mut cursor = EventLogCursor::open(self.canonical.join("events.jsonl"))?;
+        let completion = self.session.completion();
+        let mut cursor = EventLogCursor::open(SessionLayout::new(self.canonical()).event_log())?;
+
         while let Some(record) = cursor.next_record()? {
             serde_json::to_writer(&mut *writer, &EventProjection::from_record(&record, true))
                 .map_err(|source| return Error::json("events-metadata.jsonl", source))?;
@@ -237,21 +236,20 @@ impl TrustedSource {
                 .map_err(|source| return Error::filesystem("events-metadata.jsonl", source))?;
         }
 
-        cursor.validate_boundary(
-            self.completion.event_count,
-            &self.completion.final_event_hash,
-        )?;
+        cursor.validate_boundary(completion.event_count, &completion.final_event_hash)?;
         let _pending = cursor.finish()?;
 
         return Ok(());
     }
 
     fn identity(&self, profile: BundleProfile) -> BundleIdentity {
+        let completion = self.session.completion();
+
         return BundleIdentity {
             profile,
-            session_id: self.manifest.session_id,
-            canonical_session: ByteString::from(self.canonical.as_os_str().as_encoded_bytes()),
-            source_final_event_hash: self.completion.final_event_hash.clone(),
+            session_id: completion.session_id,
+            canonical_session: ByteString::from(self.canonical().as_os_str().as_encoded_bytes()),
+            source_final_event_hash: completion.final_event_hash.clone(),
             includes_canonical_evidence: profile == BundleProfile::Forensic,
         };
     }
@@ -276,7 +274,7 @@ fn verify_bound_payloads(
         ));
     }
 
-    let mut expected = observe_session(&trusted.canonical, StatePoint::LatestPresented)?;
+    let mut expected = observe_session(trusted.canonical(), StatePoint::LatestPresented)?;
     expected.resolution = observation.resolution;
 
     if observation != expected {
@@ -301,7 +299,7 @@ fn verify_bound_payloads(
             MAX_STRUCTURED_MEMBER_BYTES,
         )?;
 
-        let expected_verification = verify_session(&trusted.canonical, VerificationLevel::Content);
+        let expected_verification = verify_session(trusted.canonical(), VerificationLevel::Content);
         if !expected_verification.valid || verification != expected_verification {
             return Err(Error::invalid(
                 "bundle verification report does not bind the expected canonical source",
@@ -364,12 +362,8 @@ fn verify_member_policy(profile: BundleProfile, members: &[ArtifactMember]) -> R
     }
 
     if profile == BundleProfile::Forensic {
-        for required in [
-            "canonical/session.json",
-            "canonical/events.jsonl",
-            "canonical/completion.json",
-        ] {
-            require_member(&paths, required)?;
+        for required in [layout::MANIFEST, layout::EVENT_LOG, layout::COMPLETION] {
+            require_member(&paths, &format!("canonical/{required}"))?;
         }
     }
 
@@ -398,7 +392,7 @@ pub(super) fn verify_archived_manifest(
 
     verify_member_policy(policy.profile, &manifest.members)?;
 
-    let mut observation = observe_session(&trusted.canonical, StatePoint::LatestPresented)?;
+    let mut observation = observe_session(trusted.canonical(), StatePoint::LatestPresented)?;
     let screen = observation.frame.viewport_text.as_bytes();
     verify_member_bytes(manifest, "screen.txt", screen)?;
 
@@ -426,7 +420,7 @@ pub(super) fn verify_archived_manifest(
         policy.profile,
         BundleProfile::Debug | BundleProfile::Forensic
     ) {
-        let verification = verify_session(&trusted.canonical, VerificationLevel::Content);
+        let verification = verify_session(trusted.canonical(), VerificationLevel::Content);
         if !verification.valid {
             return Err(Error::invalid(
                 "canonical source failed content verification",
@@ -452,7 +446,7 @@ pub(super) fn verify_archived_manifest(
     }
 
     if policy.profile == BundleProfile::Forensic {
-        let names = top_level_regular_file_names(&trusted.canonical)?;
+        let names = canonical_file_names(trusted.canonical())?;
         let expected: BTreeSet<String> = names
             .iter()
             .map(|name| format!("canonical/{name}"))
@@ -472,7 +466,7 @@ pub(super) fn verify_archived_manifest(
         }
 
         for name in names {
-            let source = trusted.canonical.join(&name);
+            let source = trusted.canonical().join(&name);
             let member = manifest_member(manifest, &format!("canonical/{name}"))?;
             let (byte_length, blake3) = hash_regular_file(&source)?;
             if member.byte_length != byte_length || member.blake3 != blake3 {
@@ -522,7 +516,7 @@ fn verify_canonical_payload(
     members: &[ArtifactMember],
     source: &Path,
 ) -> Result<()> {
-    let source_names = top_level_regular_file_names(source)?;
+    let source_names = canonical_file_names(source)?;
     let expected: BTreeSet<String> = source_names
         .iter()
         .map(|name| format!("canonical/{name}"))
@@ -541,7 +535,7 @@ fn verify_canonical_payload(
     }
 
     for name in source_names {
-        let expected_hash = if name == "events.jsonl" {
+        let expected_hash = if name == layout::EVENT_LOG {
             let path = source.join(&name);
             let mut file = CanonicalLogFile::open(&path)
                 .map_err(|error| return Error::filesystem(&path, error))?;
@@ -566,44 +560,38 @@ fn verify_canonical_payload(
     return Ok(());
 }
 
-fn top_level_regular_file_names(directory: &Path) -> Result<Vec<String>> {
+/// Names of the top-level entries the session layout classifies as canonical, sorted.
+fn canonical_file_names(directory: &Path) -> Result<Vec<String>> {
     let mut names: Vec<String> = Vec::new();
     for entry in
         fs_err::read_dir(directory).map_err(|source| return Error::filesystem(directory, source))?
     {
         let entry = entry.map_err(|source| return Error::filesystem(directory, source))?;
+        let Some(name) = entry
+            .file_name()
+            .to_str()
+            .filter(|name| return file_role(name) == Some(FileRole::Canonical))
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+
         let file_type = entry
             .file_type()
             .map_err(|source| return Error::filesystem(entry.path(), source))?;
-        if file_type.is_symlink() {
-            return Err(Error::invalid(
-                "canonical session contains a top-level symlink",
-            ));
-        }
-
-        if file_type.is_dir() {
-            continue;
-        }
-
-        if file_type.is_block_device()
+        if file_type.is_symlink()
+            || file_type.is_dir()
+            || file_type.is_block_device()
             || file_type.is_char_device()
             || file_type.is_fifo()
             || file_type.is_socket()
         {
-            return Err(Error::invalid(
-                "canonical session contains a top-level special file",
-            ));
-        }
-
-        let name = entry.file_name().into_string().map_err(|_| {
-            return Error::invalid("canonical top-level file names must be valid UTF-8");
-        })?;
-        names.push(name);
-        if names.len() > MAX_CANONICAL_MEMBERS {
             return Err(Error::invalid(format!(
-                "canonical source exceeds {MAX_CANONICAL_MEMBERS} top-level files"
+                "canonical session file `{name}` is not a regular file"
             )));
         }
+
+        names.push(name);
     }
 
     names.sort();
@@ -635,11 +623,9 @@ fn member_metadata(profile: BundleProfile, path: &str) -> Result<BundleMemberMet
             "metadata_only_event_projection",
             Some("event-projection.schema.json"),
         ),
-        value if profile == BundleProfile::Forensic && canonical_member_name(value).is_some() => (
-            sensitive,
-            "canonical_evidence",
-            canonical_schema_type(value),
-        ),
+        value if profile == BundleProfile::Forensic && canonical_member_name(value).is_some() => {
+            (sensitive, "canonical_evidence", member_schema_type(value))
+        }
         _ => {
             return Err(Error::invalid(format!(
                 "bundle member `{path}` is outside the selected profile"
@@ -648,7 +634,7 @@ fn member_metadata(profile: BundleProfile, path: &str) -> Result<BundleMemberMet
     };
 
     return Ok(BundleMemberMetadata {
-        media_type: media_type(path).to_owned(),
+        media_type: member_media_type(path).to_owned(),
         schema_type: schema_type.map(str::to_owned),
         sensitivity,
         relationship: relationship.to_owned(),
@@ -667,30 +653,6 @@ fn canonical_member_name(path: &str) -> Option<&str> {
     let name = path.strip_prefix("canonical/")?;
 
     return (!name.is_empty() && !name.contains('/')).then_some(name);
-}
-
-fn canonical_schema_type(path: &str) -> Option<&'static str> {
-    return match canonical_member_name(path)? {
-        "session.json" => Some("session.schema.json"),
-        "completion.json" => Some("completion.schema.json"),
-        "artifact-roots.jsonl" => Some("artifact-root-record.schema.json"),
-        _ => None,
-    };
-}
-
-fn media_type(path: &str) -> &'static str {
-    if path.ends_with(".jsonl") {
-        return "application/x-ndjson";
-    }
-
-    if path.ends_with(".json") {
-        return "application/json";
-    }
-
-    if path.ends_with(".zst") {
-        return "application/zstd";
-    }
-    return "text/plain";
 }
 
 fn add_json_member(

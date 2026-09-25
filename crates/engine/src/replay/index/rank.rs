@@ -31,7 +31,7 @@ impl<'source> TimelineRanks<'source> {
         canonical: Records<'source>,
         source_range: Option<SourceRange>,
     ) -> Result<Self> {
-        let path = directory.join("control-index.jsonl");
+        let path = directory.join(super::CONTROL_INDEX);
         let file = File::open(&path).map_err(|source| {
             return Error::Filesystem {
                 path: path.clone(),

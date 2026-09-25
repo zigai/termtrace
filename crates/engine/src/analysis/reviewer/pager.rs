@@ -4,7 +4,7 @@ use super::review_error;
 use crate::{
     observation::state_text,
     replay::{
-        trust::{check_cancelled, SourceIdentity},
+        trust::{check_cancelled, ValidatedSession},
         visit_session_states_while,
     },
     Result,
@@ -15,7 +15,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 use termtrace_evidence::event_log::EventLogCursor;
-use termtrace_evidence::session::validate_completed_session;
+use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::{
     execution::event::Event,
     terminal::{replay::StateRecord, state::SemanticState},
@@ -145,10 +145,9 @@ pub fn load_review_page(
     query: &ReviewQuery,
     cancelled: &AtomicBool,
 ) -> Result<Option<ReviewPage>> {
-    let source = SourceIdentity::capture(session)?;
     check_cancelled(Some(cancelled))?;
 
-    validate_completed_session(session)?;
+    let validated = ValidatedSession::open_cancellable(session, Some(cancelled))?;
 
     let target = match query {
         ReviewQuery::Final => None,
@@ -181,7 +180,7 @@ pub fn load_review_page(
             })?;
 
             if target.is_none() {
-                source.check(session)?;
+                validated.check()?;
 
                 return Ok(None);
             }
@@ -235,7 +234,7 @@ pub fn load_review_page(
 
             let target = target.or(wrap);
             if target.is_none() {
-                source.check(session)?;
+                validated.check()?;
 
                 return Ok(None);
             }
@@ -244,7 +243,7 @@ pub fn load_review_page(
         }
         ReviewQuery::Marker(_) | ReviewQuery::Event { .. } => {
             let Some(time) = event_target(session, query, cancelled)? else {
-                source.check(session)?;
+                validated.check()?;
 
                 return Ok(None);
             };
@@ -323,7 +322,7 @@ pub fn load_review_page(
         return Ok(true);
     })?;
 
-    source.check(session)?;
+    validated.check()?;
 
     let selected = target.or_else(|| return entries.back().map(|entry| return entry.state_id));
     let Some(selected) = selected else {
@@ -348,7 +347,7 @@ fn event_target(
     query: &ReviewQuery,
     cancelled: &AtomicBool,
 ) -> Result<Option<u64>> {
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     let mut selected = None;
 
     let mut matches = 0_u64;

@@ -12,14 +12,110 @@ use std::{
 use termtrace_evidence::{
     artifact::{secure_file, sync_directory},
     event_log::canonical_source_fingerprint,
-    session::read_manifest,
+    session::{read_manifest, validate_completed_session_with_check},
 };
+use termtrace_model::execution::{layout::SessionLayout, session::SessionCompletion};
 
 pub(crate) fn check_cancelled(cancelled: Option<&AtomicBool>) -> Result<()> {
     if cancelled.is_some_and(|flag| return flag.load(Ordering::Relaxed)) {
         return Err(invalid_replay("semantic source query cancelled"));
     }
     return Ok(());
+}
+
+/// A completed session whose canonical validation succeeded for its current source identity.
+///
+/// This is the only way to establish completed-session truth. Local trust records are minted
+/// only from a validated session, so a record whose identity still matches the source carries
+/// proof that canonical validation succeeded for exactly those bytes.
+pub struct ValidatedSession {
+    root: PathBuf,
+    completion: SessionCompletion,
+    source: SourceIdentity,
+}
+
+impl ValidatedSession {
+    /// Validate a completed session and pin the source identity the validation covered.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the session is incomplete, invalid, or changes during validation.
+    pub fn open(session: &Path) -> Result<Self> {
+        return Self::open_cancellable(session, None);
+    }
+
+    pub(crate) fn open_cancellable(session: &Path, cancelled: Option<&AtomicBool>) -> Result<Self> {
+        if !SessionLayout::new(session).completion().is_file() {
+            return Err(Error::SessionIncomplete {
+                session: session.to_path_buf(),
+            });
+        }
+
+        let source = SourceIdentity::capture(session)?;
+        let completion = validate_completed_session_with_check(session, || {
+            return check_cancelled(cancelled).map_err(|error| {
+                return termtrace_evidence::Error::InvalidEvidence {
+                    reason: error.to_string(),
+                };
+            });
+        })?;
+
+        source.check(session)?;
+
+        return Ok(Self {
+            root: session.to_path_buf(),
+            completion,
+            source,
+        });
+    }
+
+    /// Adopt a completion the recorder validated against `candidate` and then published.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the source changed during validation or publication.
+    pub(crate) fn published(
+        session: &Path,
+        candidate: SourceIdentity,
+        completion: SessionCompletion,
+    ) -> Result<Self> {
+        if candidate != SourceIdentity::capture_candidate(session)? {
+            return Err(invalid_replay(
+                "canonical source changed during completion validation",
+            ));
+        }
+
+        let source = SourceIdentity::capture(session)?;
+        if !source.0.starts_with(&candidate.0) {
+            return Err(invalid_replay(
+                "canonical source changed while publishing completion",
+            ));
+        }
+        return Ok(Self {
+            root: session.to_path_buf(),
+            completion,
+            source,
+        });
+    }
+
+    /// The validated session directory.
+    pub fn root(&self) -> &Path {
+        return &self.root;
+    }
+
+    /// The validated completion record.
+    pub const fn completion(&self) -> &SessionCompletion {
+        return &self.completion;
+    }
+
+    /// Confirm the source is still the one that was validated.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any canonical source file changed since validation.
+    pub fn check(&self) -> Result<()> {
+        return self.source.check(&self.root);
+    }
 }
 
 /// Local-kernel identities are meaningful only under the local verifier's secret MAC.
@@ -40,16 +136,17 @@ impl SourceIdentity {
         let mut source = Self::capture_candidate(session)?;
         source
             .0
-            .push(file_identity(&session.join("completion.json"))?);
+            .push(file_identity(&SessionLayout::new(session).completion())?);
 
         return Ok(source);
     }
 
     pub(crate) fn capture_candidate(session: &Path) -> Result<Self> {
-        let mut paths = vec![session.join("events.jsonl"), session.join("session.json")];
+        let layout = SessionLayout::new(session);
+        let mut paths = vec![layout.event_log(), layout.manifest()];
 
-        if let Some(profile) = read_manifest(session)?.ghostty_visual {
-            paths.push(session.join(profile.replay_profile));
+        if read_manifest(session)?.ghostty_visual.is_some() {
+            paths.push(layout.ghostty_replay_profile());
         }
 
         return Ok(Self(
@@ -57,29 +154,13 @@ impl SourceIdentity {
                 .iter()
                 .map(|path| return file_identity(path))
                 .collect::<Result<_>>()?,
-            canonical_source_fingerprint(session.join("events.jsonl")).map_err(|source| {
+            canonical_source_fingerprint(layout.event_log()).map_err(|source| {
                 return Error::Filesystem {
-                    path: session.join("events.jsonl"),
+                    path: layout.event_log(),
                     source,
                 };
             })?,
         ));
-    }
-
-    pub(crate) fn completed(self, session: &Path) -> Result<Self> {
-        if self != Self::capture_candidate(session)? {
-            return Err(invalid_replay(
-                "canonical source changed during completion validation",
-            ));
-        }
-
-        let completed = Self::capture(session)?;
-        if !completed.0.starts_with(&self.0) {
-            return Err(invalid_replay(
-                "canonical source changed while publishing completion",
-            ));
-        }
-        return Ok(completed);
     }
 
     pub(crate) fn check(&self, session: &Path) -> Result<()> {
@@ -132,12 +213,12 @@ struct Authenticated<T> {
     mac: String,
 }
 
-pub(crate) fn encode<T: Serialize>(
-    session: &Path,
-    source: &SourceIdentity,
-    payload: T,
-) -> Result<Vec<u8>> {
-    let key = verification_key(session)?;
+/// Mint a local trust record; only a validated session can vouch for a payload.
+pub(crate) fn encode<T: Serialize>(validated: &ValidatedSession, payload: T) -> Result<Vec<u8>> {
+    validated.check()?;
+
+    let source = &validated.source;
+    let key = verification_key(&validated.root)?;
     let body = serde_json::to_vec(&(source, &payload))
         .map_err(|error| return json_error(PathBuf::from("<verified-cache>"), error))?;
     let mac = blake3::keyed_hash(&key, &body).to_hex().to_string();
@@ -150,6 +231,7 @@ pub(crate) fn encode<T: Serialize>(
     .map_err(|error| return json_error(PathBuf::from("<verified-cache>"), error));
 }
 
+/// Accept a local trust record only when it was minted for the session's current source identity.
 pub(crate) fn decode<T: Serialize + DeserializeOwned>(session: &Path, bytes: &[u8]) -> Result<T> {
     let authenticated: Authenticated<T> = serde_json::from_slice(bytes)
         .map_err(|error| return json_error(PathBuf::from("<verified-cache>"), error))?;

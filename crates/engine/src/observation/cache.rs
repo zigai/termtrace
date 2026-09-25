@@ -1,22 +1,21 @@
 use super::observation_error;
 use crate::replay::{
     semantic_state_hash,
-    trust::{self, SourceIdentity},
+    trust::{self, ValidatedSession},
     EndpointInspection,
 };
 use crate::{Error, Result};
 use nix::libc::O_NOFOLLOW;
 use std::{
     fs::OpenOptions,
-    io::{BufReader, ErrorKind, Read as _},
+    io::{ErrorKind, Read as _},
     os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
-    sync::atomic::AtomicBool,
     time::SystemTime,
 };
 use termtrace_evidence::artifact::{create_private_directory, sync_directory, write_secure};
-use termtrace_evidence::event_log::{canonical_source_fingerprint, CanonicalLogFile};
 use termtrace_model::{
+    execution::layout::SessionLayout,
     execution::session::SessionCompletion,
     terminal::observation::{
         ReplayCachePruneReport, ReplayCacheStatus, ReplayCheckpoint, StatePoint,
@@ -37,6 +36,7 @@ pub(super) struct CachedSemanticState {
     pub state: SemanticState,
 }
 
+const REPLAY_CHECKPOINT_VERSION: u32 = 3;
 const MAX_REPLAY_CACHE_ENTRIES: u64 = 32;
 const MAX_REPLAY_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_REPLAY_CHECKPOINT_BYTES: u64 = 32 * 1024 * 1024;
@@ -110,12 +110,7 @@ pub(super) fn load_checkpoint(
         }
 
         let checkpoint: ReplayCheckpoint = trust::decode(session, &bytes)?;
-        let completion_bytes = fs_err::read(session.join("completion.json")).map_err(|source| {
-            return Error::Filesystem {
-                path: session.join("completion.json"),
-                source,
-            };
-        })?;
+        let completion_bytes = read_completion_bytes(session)?;
 
         let state_bytes = serde_json::to_vec(&checkpoint.state).map_err(|source| {
             return Error::InvalidJson {
@@ -128,7 +123,7 @@ pub(super) fn load_checkpoint(
         let state_blake3 = blake3::hash(&state_bytes).to_hex().to_string();
         let semantic_hash = semantic_state_hash(&checkpoint.state)?;
 
-        if checkpoint.version != 2
+        if checkpoint.version != REPLAY_CHECKPOINT_VERSION
             || checkpoint.state_format_version != STATE_FORMAT_VERSION
             || checkpoint.ghostty_revision != GHOSTTY_REVISION
             || checkpoint.state_point != *point
@@ -171,12 +166,9 @@ pub(super) fn load_checkpoint(
 }
 
 pub(super) fn publish_checkpoint(
-    session: &Path,
+    validated: &ValidatedSession,
     point: &StatePoint,
-    completion: &SessionCompletion,
     inspection: &StateInspection,
-    source: &SourceIdentity,
-    cancelled: Option<&AtomicBool>,
 ) -> Result<()> {
     let state = CachedSemanticState {
         state_id: Some(inspection.record.state_id),
@@ -188,16 +180,13 @@ pub(super) fn publish_checkpoint(
         state: inspection.state.clone(),
     };
 
-    return publish_cached_checkpoint(session, point, completion, &state, source, cancelled);
+    return publish_cached_checkpoint(validated, point, &state);
 }
 
 pub(crate) fn publish_endpoint_checkpoint(
-    session: &Path,
+    validated: &ValidatedSession,
     point: &StatePoint,
-    completion: &SessionCompletion,
     inspection: &EndpointInspection,
-    source: &SourceIdentity,
-    cancelled: Option<&AtomicBool>,
 ) -> Result<()> {
     let state = CachedSemanticState {
         state_id: None,
@@ -209,19 +198,16 @@ pub(crate) fn publish_endpoint_checkpoint(
         state: inspection.state.clone(),
     };
 
-    return publish_cached_checkpoint(session, point, completion, &state, source, cancelled);
+    return publish_cached_checkpoint(validated, point, &state);
 }
 
 fn publish_cached_checkpoint(
-    session: &Path,
+    validated: &ValidatedSession,
     point: &StatePoint,
-    completion: &SessionCompletion,
     state: &CachedSemanticState,
-    source: &SourceIdentity,
-    cancelled: Option<&AtomicBool>,
 ) -> Result<()> {
-    source.check(session)?;
-
+    let session = validated.root();
+    let completion = validated.completion();
     let path = checkpoint_path(session, point, completion)?;
 
     if path.exists() {
@@ -232,19 +218,10 @@ fn publish_cached_checkpoint(
         return observation_error("checkpoint path has no parent directory");
     })?;
 
-    ensure_private_cache_directory(&session.join("derived-cache"))?;
+    ensure_private_cache_directory(&SessionLayout::new(session).derived_cache())?;
     ensure_private_cache_directory(directory)?;
 
-    let completion_bytes = fs_err::read(session.join("completion.json")).map_err(|source| {
-        return Error::Filesystem {
-            path: session.join("completion.json"),
-            source,
-        };
-    })?;
-
-    let (event_log_byte_count, event_log_blake3) =
-        hash_file(&session.join("events.jsonl"), cancelled)?;
-
+    let completion_bytes = read_completion_bytes(session)?;
     let state_bytes = serde_json::to_vec(&state.state).map_err(|source| {
         return Error::InvalidJson {
             path: PathBuf::from("<checkpoint-state>"),
@@ -254,12 +231,10 @@ fn publish_cached_checkpoint(
     })?;
 
     let checkpoint = ReplayCheckpoint {
-        version: 2,
+        version: REPLAY_CHECKPOINT_VERSION,
         state_format_version: STATE_FORMAT_VERSION,
         ghostty_revision: GHOSTTY_REVISION.to_owned(),
         state_point: point.clone(),
-        event_log_byte_count,
-        event_log_blake3,
         completion_blake3: blake3::hash(&completion_bytes).to_hex().to_string(),
         final_event_hash: completion.final_event_hash.clone(),
         state_id: state.state_id,
@@ -271,9 +246,7 @@ fn publish_cached_checkpoint(
         state: state.state.clone(),
         state_blake3: blake3::hash(&state_bytes).to_hex().to_string(),
     };
-
-    source.check(session)?;
-    let bytes = trust::encode(session, source, checkpoint)?;
+    let bytes = trust::encode(validated, checkpoint)?;
     let compressed = encode_all(bytes.as_slice(), 3).map_err(|error| {
         return observation_error(format!("could not compress replay checkpoint: {error}"));
     })?;
@@ -284,12 +257,18 @@ fn publish_cached_checkpoint(
         return Ok(());
     }
 
-    source.check(session)?;
+    validated.check()?;
 
     write_secure(&path, &compressed)?;
     enforce_replay_cache_limits(session, Some(&path))?;
 
     return Ok(sync_directory(directory)?);
+}
+
+fn read_completion_bytes(session: &Path) -> Result<Vec<u8>> {
+    let path = SessionLayout::new(session).completion();
+
+    return fs_err::read(&path).map_err(|source| return Error::Filesystem { path, source });
 }
 
 fn checkpoint_path(
@@ -307,7 +286,7 @@ fn checkpoint_path(
 
     let key = blake3::hash(&encoded).to_hex().to_string();
 
-    return Ok(session.join("derived-cache").join(format!(
+    return Ok(SessionLayout::new(session).derived_cache().join(format!(
         "checkpoint-{}-{key}.json.zst",
         completion.final_event_hash
     )));
@@ -325,7 +304,7 @@ struct ReplayCacheEntry {
 ///
 /// Returns an error when an existing cache directory or member is unsafe.
 pub fn replay_cache_status(session: &Path) -> Result<ReplayCacheStatus> {
-    let directory = session.join("derived-cache");
+    let directory = SessionLayout::new(session).derived_cache();
     let entries = replay_cache_entries(&directory)?;
 
     return Ok(cache_status_from_entries(directory, &entries));
@@ -339,7 +318,7 @@ pub fn replay_cache_status(session: &Path) -> Result<ReplayCacheStatus> {
 ///
 /// Returns an error when the cache is unsafe or a checkpoint cannot be removed durably.
 pub fn prune_replay_cache(session: &Path) -> Result<ReplayCachePruneReport> {
-    let directory = session.join("derived-cache");
+    let directory = SessionLayout::new(session).derived_cache();
     let entries = replay_cache_entries(&directory)?;
     let removed_entries = u64::try_from(entries.len()).unwrap_or(u64::MAX);
     let removed_bytes = entries.iter().fold(0_u64, |total, entry| {
@@ -370,7 +349,7 @@ pub fn prune_replay_cache(session: &Path) -> Result<ReplayCachePruneReport> {
 }
 
 fn enforce_replay_cache_limits(session: &Path, preserve: Option<&Path>) -> Result<()> {
-    let directory = session.join("derived-cache");
+    let directory = SessionLayout::new(session).derived_cache();
     let mut entries = replay_cache_entries(&directory)?;
     entries.sort_by(|left, right| {
         return left
@@ -516,62 +495,4 @@ fn ensure_private_cache_directory(path: &Path) -> Result<()> {
             });
         }
     }
-}
-
-fn hash_file(path: &Path, cancelled: Option<&AtomicBool>) -> Result<(u64, String)> {
-    let file = CanonicalLogFile::open(path).map_err(|source| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        };
-    })?;
-    let fingerprint = canonical_source_fingerprint(path).map_err(|source| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        };
-    })?;
-
-    let mut reader = BufReader::new(file);
-    let mut hasher = blake3::Hasher::new();
-    let mut buffer = [0_u8; 16384];
-
-    let mut bytes = 0_u64;
-    loop {
-        trust::check_cancelled(cancelled)?;
-
-        let count = reader.read(&mut buffer).map_err(|source| {
-            return Error::Filesystem {
-                path: path.to_path_buf(),
-                source,
-            };
-        })?;
-        if count == 0 {
-            break;
-        }
-
-        bytes = bytes
-            .checked_add(u64::try_from(count).unwrap_or(u64::MAX))
-            .ok_or_else(|| return observation_error("canonical byte count overflow"))?;
-
-        hasher.update(
-            buffer
-                .get(..count)
-                .ok_or_else(|| return observation_error("invalid hash read length"))?,
-        );
-    }
-
-    let after = canonical_source_fingerprint(path).map_err(|source| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        };
-    })?;
-
-    if fingerprint != after {
-        return Err(observation_error(
-            "canonical event log changed while hashing",
-        ));
-    }
-    return Ok((bytes, hasher.finalize().to_hex().to_string()));
 }

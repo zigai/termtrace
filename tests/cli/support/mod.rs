@@ -114,7 +114,7 @@ pub(crate) use termtrace_evidence::{
     event_log::EventLog,
     provenance::collect_execution_provenance,
     request_journal::read_mutation_journal,
-    session::{read_manifest, validate_completed_log},
+    session::{read_manifest, validate_completed_session},
 };
 pub(crate) use termtrace_model::{
     execution::environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},

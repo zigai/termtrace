@@ -1,4 +1,5 @@
 use crate::storage::{
+    artifact::sync_parent_directory,
     event_log::EventLogCursor,
     identifier_index::{index_error, IdentifierSet, RequestIndex, RequestPosition},
     Error, Result,
@@ -20,6 +21,7 @@ pub use termtrace_model::execution::request_journal::{
 };
 use termtrace_model::{
     execution::event::{Event, InputSource},
+    execution::layout::SessionLayout,
     execution::request_journal::MutationJournalRecord,
     protocol::control::{
         ControlCommand, ControlData, ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES,
@@ -70,7 +72,7 @@ impl MutationJournal {
     ///
     /// Returns an error when the journal already exists or cannot be durably created.
     pub fn create(session: &Path) -> Result<Self> {
-        let path = session.join(MUTATION_JOURNAL_NAME);
+        let path = SessionLayout::new(session).mutation_journal();
         let file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -429,7 +431,7 @@ impl MutationJournalCursor {
 ///
 /// Returns an error when journal records or their event boundaries are inconsistent.
 pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
-    let path = session.join(MUTATION_JOURNAL_NAME);
+    let path = SessionLayout::new(session).mutation_journal();
     let mut journal = MutationJournalCursor::open(&path)?;
     let database = Connection::open("").map_err(index_error)?;
     database
@@ -466,7 +468,7 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
         return Ok(0);
     }
 
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     let header_bytes = serde_json::to_vec(cursor.header()).map_err(|source| {
         return Error::InvalidJson {
             path: path.clone(),
@@ -612,10 +614,7 @@ fn response_boundaries(response: &ControlResponse) -> Option<&ActorBoundaries> {
     };
 }
 
-fn event_operation(
-    event: &Event,
-    host_operations: &mut HashSet<Uuid>,
-) -> Option<(Uuid, bool)> {
+fn event_operation(event: &Event, host_operations: &mut HashSet<Uuid>) -> Option<(Uuid, bool)> {
     return match event {
         Event::InputIntent {
             operation_id,
@@ -714,18 +713,6 @@ fn hash_body(body: &MutationJournalBody<'_>, path: &Path) -> Result<String> {
     })?;
 
     return Ok(blake3::hash(&bytes).to_hex().to_string());
-}
-
-fn sync_parent_directory(path: &Path) -> Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| return Error::invalid("journal path has no parent"))?;
-
-    File::open(parent)
-        .and_then(|directory| return directory.sync_all())
-        .map_err(|source| return Error::filesystem(parent, source))?;
-
-    return Ok(());
 }
 
 #[cfg(test)]
@@ -887,8 +874,8 @@ mod tests {
             432,
             "xterm",
         );
-        let mut writer =
-            EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
+        let mut writer = EventLogWriter::create(session.join("events.jsonl"), &header, clock)
+            .expect("event log");
 
         let client_op1 = Uuid::now_v7();
         let host_op = Uuid::now_v7();
@@ -952,8 +939,8 @@ mod tests {
             432,
             "xterm",
         );
-        let mut writer =
-            EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
+        let mut writer = EventLogWriter::create(session.join("events.jsonl"), &header, clock)
+            .expect("event log");
 
         let host_op = Uuid::now_v7();
         writer
@@ -990,8 +977,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_mutation_journal_succeeds_when_operation_ids_is_empty_and_host_operations_interleaved()
-    {
+    fn validate_mutation_journal_succeeds_when_operation_ids_is_empty_and_host_operations_interleaved(
+    ) {
         let temporary = tempfile::tempdir().expect("temporary directory");
         let session = temporary.path().join("session");
         secure_directory(&session);
@@ -1007,8 +994,8 @@ mod tests {
             432,
             "xterm",
         );
-        let mut writer =
-            EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
+        let mut writer = EventLogWriter::create(session.join("events.jsonl"), &header, clock)
+            .expect("event log");
 
         let host_op = Uuid::now_v7();
         writer
@@ -1057,8 +1044,8 @@ mod tests {
             432,
             "xterm",
         );
-        let mut writer =
-            EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
+        let mut writer = EventLogWriter::create(session.join("events.jsonl"), &header, clock)
+            .expect("event log");
 
         let client_op1 = Uuid::now_v7();
         let client_op2 = Uuid::now_v7();
@@ -1121,8 +1108,8 @@ mod tests {
             432,
             "xterm",
         );
-        let mut writer =
-            EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
+        let mut writer = EventLogWriter::create(session.join("events.jsonl"), &header, clock)
+            .expect("event log");
 
         let atom1 = Uuid::now_v7();
         let host_op = Uuid::now_v7();

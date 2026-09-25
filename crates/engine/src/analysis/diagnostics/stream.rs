@@ -3,7 +3,7 @@ use super::{
     detect_transients, native_correlations_for_state, ValidatedVisualManifest,
 };
 use crate::{
-    replay::{trust::SourceIdentity, visit_recording_states_range_while},
+    replay::{trust::SourceIdentity, visit_recording_states_range_while, ValidatedSession},
     timeline::stream::TokenCursor,
     Result,
 };
@@ -17,8 +17,9 @@ use std::{
 use tempfile::TempDir;
 use termtrace_evidence::{
     event_log::{EventLogCursor, EventLogSummary},
-    session::{validate_completed_session, SessionSnapshot},
+    session::SessionSnapshot,
 };
+use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::{
     execution::event::Event,
     terminal::{
@@ -44,9 +45,11 @@ pub fn diagnose_session(
     broad_change_percent: u8,
     visual_evidence: &[ValidatedVisualManifest],
 ) -> Result<DiagnoseReport> {
-    validate_completed_session(session)?;
+    let validated = ValidatedSession::open(session)?;
+    let report = diagnose_recording(session, true, checks, broad_change_percent, visual_evidence)?;
+    validated.check()?;
 
-    return diagnose_recording(session, true, checks, broad_change_percent, visual_evidence);
+    return Ok(report);
 }
 
 /// Diagnose a verified finite prefix; the report hash and count identify only that prefix.
@@ -69,7 +72,7 @@ fn diagnose_recording(
     visual_evidence: &[ValidatedVisualManifest],
 ) -> Result<DiagnoseReport> {
     let source = SourceIdentity::capture_candidate(session)?;
-    let summary = EventLogSummary::read(session.join("events.jsonl"))?;
+    let summary = EventLogSummary::read(SessionLayout::new(session).event_log())?;
 
     checks.sort_unstable();
     checks.dedup();
@@ -191,7 +194,7 @@ fn diagnose_recording(
         }
     }
 
-    let mut canonical = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut canonical = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     let initial_cols = canonical.header().cols;
     let initial_rows = canonical.header().rows;
 

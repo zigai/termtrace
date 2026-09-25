@@ -2,6 +2,7 @@
 
 use crate::{
     execution::event_log::CanonicalBoundary,
+    terminal::replay::StateSelector,
     terminal::state::{ModeState, SemanticState},
     value::ByteString,
 };
@@ -32,10 +33,6 @@ pub struct ReplayCheckpoint {
     pub ghostty_revision: String,
     /// Exact requested state point.
     pub state_point: StatePoint,
-    /// Exact canonical event-log byte count.
-    pub event_log_byte_count: u64,
-    /// BLAKE3 of the complete canonical event-log file.
-    pub event_log_blake3: String,
     /// BLAKE3 of exact completion JSON bytes.
     pub completion_blake3: String,
     /// Completion-bound final canonical event hash.
@@ -185,6 +182,27 @@ pub enum StatePoint {
         /// Unique marker label.
         label: String,
     },
+}
+
+impl StatePoint {
+    /// Translate to a replay selector, resolving a marker label to its event sequence.
+    ///
+    /// # Errors
+    ///
+    /// Returns the resolver's error for a missing or ambiguous marker.
+    pub fn selector<E>(
+        &self,
+        marker_event_seq: impl FnOnce(&str) -> Result<u64, E>,
+    ) -> Result<StateSelector, E> {
+        return Ok(match self {
+            Self::LatestPresented => StateSelector::LatestPresented,
+            Self::StateId { state_id } => StateSelector::StateId(*state_id),
+            Self::StateHash { state_hash } => StateSelector::StateHash(state_hash.clone()),
+            Self::EventSeq { event_seq } => StateSelector::EventSeq(*event_seq),
+            Self::MonotonicNs { monotonic_ns } => StateSelector::MonotonicNs(*monotonic_ns),
+            Self::Marker { label } => StateSelector::EventSeq(marker_event_seq(label)?),
+        });
+    }
 }
 
 /// Compact stable frame shared by CLI and clients.

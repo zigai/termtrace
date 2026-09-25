@@ -712,16 +712,6 @@
         "null"
       ]
     },
-    "event_log_blake3": {
-      "description": "BLAKE3 of the complete canonical event-log file.",
-      "type": "string"
-    },
-    "event_log_byte_count": {
-      "description": "Exact canonical event-log byte count.",
-      "format": "uint64",
-      "minimum": 0,
-      "type": "integer"
-    },
     "event_seq": {
       "description": "Canonical event responsible for the state, when known.",
       "format": "uint64",
@@ -795,8 +785,6 @@
     "state_format_version",
     "ghostty_revision",
     "state_point",
-    "event_log_byte_count",
-    "event_log_blake3",
     "completion_blake3",
     "final_event_hash",
     "state_hash",

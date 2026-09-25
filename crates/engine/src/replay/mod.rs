@@ -5,8 +5,7 @@ use std::path::PathBuf;
 pub use termtrace_model::terminal::replay::{
     CollectedReplay, IndexOptions, IndexOutcome, ReplayArtifacts, ReplayManifest, RowDiff,
     SemanticReplayCheckpoint, SourceRange, StateDelta, StateIndexEntry, StateInspection,
-    StateRecord, StateSelection, StateSelector, DERIVED_DIRECTORY, GHOSTTY_REVISION,
-    STATE_FORMAT_VERSION,
+    StateRecord, StateSelection, StateSelector, GHOSTTY_REVISION, STATE_FORMAT_VERSION,
 };
 use termtrace_model::{execution::event::Event, terminal::state::SemanticState};
 
@@ -38,13 +37,14 @@ use engine::{
 };
 #[cfg(test)]
 pub(crate) use engine::{reset_test_replay_output_bytes, test_replay_output_bytes};
-pub(crate) use index::load_nearest_replay_seed;
 #[cfg(test)]
-pub(crate) use index::write_index;
+pub(crate) use index::write_cataloged_index;
 pub use index::{
     derived_directory_name, derived_directory_name_for, index_session, index_session_for_video,
     index_session_range, index_session_with_options, index_session_with_stride,
 };
+pub(crate) use index::{DerivedIndex, CONTROL_INDEX, CONTROL_SOURCE_INDEX, STATE_INDEX};
+pub use trust::ValidatedSession;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct EndpointInspection {

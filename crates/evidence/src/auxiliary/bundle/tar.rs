@@ -1,10 +1,15 @@
 use crate::{
     auxiliary::bundle::{
-        collect_regular_files, create_private_directory, create_private_parents,
-        open_regular_nofollow, secure_file, sync_parent, verify, BundleIdentity,
-        MAX_ARCHIVE_EXPANDED_BYTES, MAX_BUNDLE_MANIFEST_BYTES, MAX_BUNDLE_MEMBERS,
+        collect_regular_files, verify, BundleIdentity, MAX_ARCHIVE_EXPANDED_BYTES,
+        MAX_BUNDLE_MANIFEST_BYTES, MAX_BUNDLE_MEMBERS,
     },
-    storage::{Error, Result},
+    storage::{
+        artifact::{
+            create_private_directory, open_regular_file_nofollow, secure_file,
+            sync_parent_directory,
+        },
+        Error, Result,
+    },
 };
 use nix::{
     errno::Errno,
@@ -110,7 +115,7 @@ pub fn archive(
         return Error::filesystem(destination, io::Error::from_raw_os_error(error as i32));
     })?;
 
-    sync_parent(destination)?;
+    sync_parent_directory(destination)?;
 
     cleanup.disarm();
 
@@ -191,7 +196,7 @@ fn write_tar_file<W: io::Write>(
         .ok_or_else(|| return Error::invalid("bundle archive paths must be UTF-8"))?;
 
     let source = root.join(relative);
-    let (mut input, size) = open_regular_nofollow(&source)?;
+    let (mut input, size) = open_regular_file_nofollow(&source)?;
     let mut header = Header::new_ustar();
     header
         .set_path(path)
@@ -318,7 +323,7 @@ impl<R: io::Read> io::Read for PaddingCheckedReader<R> {
 }
 
 pub(super) fn extract_archive(archive: &Path, destination: &Path) -> Result<()> {
-    let (file, _) = open_regular_nofollow(archive)?;
+    let (file, _) = open_regular_file_nofollow(archive)?;
     let decoder = zstd::stream::read::Decoder::new(file)
         .map_err(|source| return Error::filesystem(archive, source))?;
 
@@ -374,7 +379,6 @@ pub(super) fn extract_archive(archive: &Path, destination: &Path) -> Result<()> 
                 return Err(Error::invalid("bundle archive expands beyond 8 GiB"));
             }
 
-            create_private_parents(destination, &path)?;
             let target = destination.join(&path);
             let mut writer = secure_file(&target)?;
             let copied = io::copy(&mut entry, &mut writer)

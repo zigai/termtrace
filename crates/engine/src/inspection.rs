@@ -1,6 +1,6 @@
 //! Save-independent state inspection and bounded evidence waits.
 
-use crate::replay::{inspect_prefix_stream, inspect_session_stream};
+use crate::replay::{inspect_prefix_stream, inspect_session_stream, ValidatedSession};
 use crate::{Error, Result};
 use std::{
     path::Path,
@@ -14,6 +14,7 @@ use termtrace_evidence::{
 pub use termtrace_model::terminal::inspection::WaitOutcome;
 use termtrace_model::{
     execution::event::Event,
+    execution::layout::SessionLayout,
     execution::session::SessionCompletion,
     terminal::replay::{StateInspection, StateSelector},
 };
@@ -24,13 +25,15 @@ pub fn inspect_session(
     selector: StateSelector,
 ) -> Result<StateInspection> {
     let session = session_directory.as_ref();
-    if session.join("completion.json").is_file() {
-        validate_completed_session(session)?;
+    if SessionLayout::new(session).completion().is_file() {
+        let validated = ValidatedSession::open(session)?;
+        let inspection = inspect_session_stream(session, selector, None)?;
+        validated.check()?;
 
-        return inspect_session_stream(session, selector, None);
+        return Ok(inspection);
     }
 
-    EventLogSummary::read(session.join("events.jsonl"))?;
+    EventLogSummary::read(SessionLayout::new(session).event_log())?;
 
     return inspect_prefix_stream(session, selector);
 }
@@ -46,8 +49,8 @@ pub fn wait_for_output(
     }
 
     let session = session_directory.as_ref();
-    let event_path = session.join("events.jsonl");
-    let completion_path = session.join("completion.json");
+    let event_path = SessionLayout::new(session).event_log();
+    let completion_path = SessionLayout::new(session).completion();
     let deadline = Instant::now() + timeout;
     let mut cursor = EventLogCursor::open(&event_path)?;
     let mut matcher = OutputMatcher::new(needle);
@@ -95,7 +98,7 @@ pub fn wait_for_completion(
     timeout: Duration,
 ) -> Result<SessionCompletion> {
     let session = session_directory.as_ref();
-    let completion_path = session.join("completion.json");
+    let completion_path = SessionLayout::new(session).completion();
     let deadline = Instant::now() + timeout;
 
     loop {

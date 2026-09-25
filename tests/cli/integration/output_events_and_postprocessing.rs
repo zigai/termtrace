@@ -436,11 +436,7 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
 
     assert!(receiver.try_iter().next().is_none(), "no duplicate markers");
 
-    validate_completed_log(
-        &session,
-        &EventLog::read(session.join("events.jsonl")).expect("log"),
-    )
-    .expect("valid completed transition");
+    validate_completed_session(&session).expect("valid completed transition");
 }
 
 #[test]

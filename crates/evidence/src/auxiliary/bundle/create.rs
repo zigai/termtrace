@@ -1,11 +1,13 @@
 use crate::{
     artifact::BudgetWriter,
     auxiliary::bundle::{
-        create_private_directory, create_private_parents, secure_file, sync_directory, sync_parent,
         validate_relative_path, BundleIdentity, BundleMemberMetadata, BUNDLE_MANIFEST_NAME,
         MAX_BUNDLE_MANIFEST_BYTES, MAX_BUNDLE_MEMBERS,
     },
-    storage::{Error, Result},
+    storage::{
+        artifact::{create_private_directory, secure_file, sync_directory, sync_parent_directory},
+        Error, Result,
+    },
 };
 use nix::{
     errno::Errno,
@@ -113,7 +115,6 @@ impl BundleDraft {
             )));
         }
 
-        create_private_parents(&self.staging, relative)?;
         let destination = self.staging.join(relative);
         let writer = match secure_file(&destination) {
             Ok(file) => BufWriter::new(file),
@@ -247,7 +248,7 @@ impl BundleDraft {
             );
         })?;
 
-        sync_parent(&self.destination)?;
+        sync_parent_directory(&self.destination)?;
         self.committed = true;
 
         return Ok(manifest);
@@ -290,7 +291,7 @@ impl BundleMemberWriter<'_> {
             .and_then(|()| return writer.get_ref().sync_all())
             .map_err(|source| return Error::filesystem(&self.destination, source))?;
 
-        sync_parent(&self.destination)?;
+        sync_parent_directory(&self.destination)?;
 
         let member = ArtifactMember {
             path: self.path.clone(),

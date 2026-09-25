@@ -1,5 +1,5 @@
 use crate::storage::{
-    artifact::{read_artifact_roots, ARTIFACT_ROOT_LOG},
+    artifact::{read_artifact_roots, sync_parent_directory},
     session::{read_completion, read_manifest, verify_session},
     Error, Result,
 };
@@ -13,11 +13,10 @@ use std::{
     process::{Command, Stdio},
     time::{SystemTime, UNIX_EPOCH},
 };
-pub use termtrace_model::execution::receipt::{
-    EVIDENCE_RECEIPT_FORMAT, EVIDENCE_RECEIPT_NAME, EVIDENCE_RECEIPT_VERSION,
-};
+pub use termtrace_model::execution::receipt::{EVIDENCE_RECEIPT_FORMAT, EVIDENCE_RECEIPT_VERSION};
 use termtrace_model::{
     artifact::metadata::ArtifactRootRecord,
+    execution::layout::SessionLayout,
     execution::receipt::{
         EvidenceReceipt, EvidenceReceiptPayload, EvidenceSignature, ReceiptVerification,
     },
@@ -80,7 +79,7 @@ pub fn create_ssh_receipt(session: &Path, key: &Path, signer_key_id: &str) -> Re
     }
 
     let payload = build_payload(session, signer_key_id)?;
-    let path = session.join(EVIDENCE_RECEIPT_NAME);
+    let path = SessionLayout::new(session).evidence_receipt();
     sign_ssh_receipt(&path, payload, key)?;
 
     return Ok(path);
@@ -89,11 +88,11 @@ pub fn create_ssh_receipt(session: &Path, key: &Path, signer_key_id: &str) -> Re
 fn build_payload(session: &Path, signer_key_id: &str) -> Result<EvidenceReceiptPayload> {
     let manifest = read_manifest(session)?;
     let completion = read_completion(session)?;
-    let completion_path = session.join("completion.json");
+    let completion_path = SessionLayout::new(session).completion();
     let completion_bytes = fs_err::read(&completion_path)
         .map_err(|source| return Error::filesystem(completion_path.clone(), source))?;
 
-    let roots = read_artifact_roots(&session.join(ARTIFACT_ROOT_LOG))?;
+    let roots = read_artifact_roots(&SessionLayout::new(session).artifact_root_log())?;
     let available_count = u64::try_from(roots.len()).unwrap_or(u64::MAX);
     let created_unix_ns = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -245,7 +244,7 @@ fn sign_ssh_receipt(
     })?;
 
     write_temporary(receipt_path, &bytes)?;
-    sync_parent(receipt_path)?;
+    sync_parent_directory(receipt_path)?;
 
     return Ok(());
 }
@@ -441,19 +440,6 @@ fn write_temporary(path: &Path, bytes: &[u8]) -> Result<()> {
     file.write_all(bytes)
         .and_then(|()| return file.sync_all())
         .map_err(|source| return Error::filesystem(path, source))?;
-
-    return Ok(());
-}
-
-fn sync_parent(path: &Path) -> Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| return Error::invalid("path has no parent"))?;
-    let directory =
-        fs_err::File::open(parent).map_err(|source| return Error::filesystem(parent, source))?;
-    directory
-        .sync_all()
-        .map_err(|source| return Error::filesystem(parent, source))?;
 
     return Ok(());
 }

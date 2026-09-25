@@ -19,13 +19,12 @@ pub use secure_fs::{
 #[cfg(test)]
 pub(crate) use verification::ArtifactMemberEnvelope;
 pub use verification::{
-    collect_artifact_members, hash_regular_file, open_regular_file_nofollow,
-    verify_artifact_members, verify_session_artifacts,
+    collect_artifact_members, hash_regular_file, member_media_type, member_schema_type,
+    open_regular_file_nofollow, open_verified_artifact, verify_artifact_members,
+    verify_session_artifacts,
 };
 
-/// Session-relative name of the append-only artifact-root catalog.
-pub const ARTIFACT_ROOT_LOG: &str = "artifact-roots.jsonl";
-const ARTIFACT_ROOT_LOCK: &str = ".artifact-roots.lock";
+const ARTIFACT_MANIFEST: &str = "manifest.json";
 const ARTIFACT_ROOT_FORMAT: &str = "termtrace-artifact-root";
 const ARTIFACT_ROOT_VERSION: u32 = 1;
 

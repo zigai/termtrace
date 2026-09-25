@@ -988,7 +988,7 @@ fn adjacent_request_atom_identities_close_with_valid_canonical_evidence() {
     assert!(output.status.success(), "fixture failed: {output:?}");
 
     let log = EventLog::read(session.join("events.jsonl")).expect("unique operation evidence");
-    validate_completed_log(&session, &log).expect("closed canonical evidence validates");
+    validate_completed_session(&session).expect("closed canonical evidence validates");
 
     assert!(canonical_output_bytes(&log).windows(14).any(|bytes| {
         return bytes == b"GOT:4142434421";
@@ -1091,7 +1091,7 @@ fn raw_operation_collisions_reject_atomically_across_mutation_kinds() {
     assert!(output.status.success(), "fixture failed: {output:?}");
 
     let log = EventLog::read(session.join("events.jsonl")).expect("unique operation evidence");
-    validate_completed_log(&session, &log).expect("closed canonical evidence validates");
+    validate_completed_session(&session).expect("closed canonical evidence validates");
 
     assert!(canonical_output_bytes(&log).windows(10).any(|bytes| {
         return bytes == b"GOT:414221";

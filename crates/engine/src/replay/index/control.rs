@@ -24,8 +24,8 @@ pub(super) fn write_control_index(
     source: &IndexSource<'_>,
     range: Option<SourceRange>,
 ) -> Result<()> {
-    let path = directory.join("control-index.jsonl");
-    let source_path = directory.join("control-source-index.jsonl");
+    let path = directory.join(super::CONTROL_INDEX);
+    let source_path = directory.join(super::CONTROL_SOURCE_INDEX);
     let mut output = ControlWriter {
         writer: secure_writer(&path)?,
         path,

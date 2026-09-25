@@ -1,7 +1,7 @@
 use super::selection::range_error;
 use crate::replay::{
-    load_nearest_replay_seed, timeline_event, visit_states_range, visit_states_range_while,
-    visit_states_seeded_while, ReplaySeed,
+    timeline_event, visit_states_range, visit_states_range_while, visit_states_seeded_while,
+    DerivedIndex, ReplaySeed, CONTROL_INDEX, CONTROL_SOURCE_INDEX, STATE_INDEX,
 };
 use crate::{Error, Result};
 #[cfg(test)]
@@ -15,9 +15,7 @@ use std::{
 use termtrace_evidence::event_log::EventLog;
 use termtrace_model::{
     execution::event::Event,
-    terminal::replay::{
-        ControlSourceIndexEntry, StateIndexEntry, StateRecord, StateSelector, DERIVED_DIRECTORY,
-    },
+    terminal::replay::{ControlSourceIndexEntry, StateIndexEntry, StateRecord, StateSelector},
     terminal::state::SemanticState,
     terminal::vt::VtToken,
 };
@@ -261,19 +259,12 @@ struct IndexedTokenTimelineCursor {
 
 impl IndexedTokenTimelineCursor {
     fn open(
-        log: &EventLog,
+        index: &DerivedIndex,
         range: Option<SourceRange>,
         offset: u64,
         record_metrics: bool,
     ) -> Result<Option<Self>> {
-        let Some(source_path) = log.source_path.as_ref() else {
-            return Ok(None);
-        };
-        let Some(session) = source_path.parent() else {
-            return Ok(None);
-        };
-        let path = session.join(DERIVED_DIRECTORY).join("control-index.jsonl");
-
+        let path = index.member(CONTROL_INDEX);
         if !path.is_file() {
             return Ok(None);
         }
@@ -393,6 +384,7 @@ struct AuxiliaryTimelineCursor<'log> {
 impl<'log> AuxiliaryTimelineCursor<'log> {
     fn new(
         log: &'log EventLog,
+        index: Option<&DerivedIndex>,
         range: Option<SourceRange>,
         include_controls: bool,
         start_key: Option<TimelineKey>,
@@ -408,12 +400,15 @@ impl<'log> AuxiliaryTimelineCursor<'log> {
             .unwrap_or(0);
 
         let (tokens, open_error) = if include_controls {
-            match IndexedTokenTimelineCursor::open(
-                log,
-                range,
-                control_index_offset.unwrap_or(0),
-                record_metrics,
-            ) {
+            let indexed = index.map_or(Ok(None), |index| {
+                return IndexedTokenTimelineCursor::open(
+                    index,
+                    range,
+                    control_index_offset.unwrap_or(0),
+                    record_metrics,
+                );
+            });
+            match indexed {
                 Ok(Some(cursor)) => (Some(ControlTimelineCursor::Indexed(cursor)), None),
                 Ok(None) => (
                     Some(ControlTimelineCursor::Framed(TokenTimelineCursor {
@@ -486,16 +481,16 @@ impl<'log> AuxiliaryTimelineCursor<'log> {
     }
 }
 
-fn locate_range_control_offset(log: &EventLog, range: SourceRange) -> Result<Option<u64>> {
-    let Some(source_path) = log.source_path.as_ref() else {
+fn locate_range_control_offset(
+    log: &EventLog,
+    index: Option<&DerivedIndex>,
+    range: SourceRange,
+) -> Result<Option<u64>> {
+    let Some(index) = index else {
         return Ok(None);
     };
-    let Some(session) = source_path.parent() else {
-        return Ok(None);
-    };
-    let directory = session.join(DERIVED_DIRECTORY);
-    let controls_path = directory.join("control-index.jsonl");
-    let source_index_path = directory.join("control-source-index.jsonl");
+    let controls_path = index.member(CONTROL_INDEX);
+    let source_index_path = index.member(CONTROL_SOURCE_INDEX);
 
     if !controls_path.is_file() || !source_index_path.is_file() {
         return Ok(None);
@@ -564,23 +559,15 @@ fn locate_range_control_offset(log: &EventLog, range: SourceRange) -> Result<Opt
 }
 
 fn locate_offset_checkpoint(
-    log: &EventLog,
+    index: Option<&DerivedIndex>,
     include_hidden_states: bool,
     include_controls: bool,
     offset: u64,
 ) -> Result<Option<(u64, ReplaySeed, Option<u64>)>> {
-    if offset == 0 {
-        return Ok(None);
-    }
-
-    let Some(event_path) = log.source_path.as_ref() else {
+    let Some(index) = index.filter(|_| return offset > 0) else {
         return Ok(None);
     };
-    let Some(session) = event_path.parent() else {
-        return Ok(None);
-    };
-    let directory = session.join(DERIVED_DIRECTORY);
-    let path = directory.join("state-index.jsonl");
+    let path = index.member(STATE_INDEX);
     let file = match File::open(&path) {
         Ok(file) => file,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
@@ -644,7 +631,8 @@ fn locate_offset_checkpoint(
     let Some((checkpoint_rank, state_id, control_index_offset)) = candidate else {
         return Ok(None);
     };
-    let seed = load_nearest_replay_seed(&directory, log, &StateSelector::StateId(state_id))?
+    let seed = index
+        .nearest_seed(&StateSelector::StateId(state_id))?
         .ok_or_else(|| return range_error("timeline checkpoint index entry has no replay seed"))?;
 
     return Ok(Some((checkpoint_rank, seed, Some(control_index_offset))));
@@ -724,14 +712,20 @@ pub fn build_timeline(
     }
 
     if include_controls {
+        let index = match range {
+            Some(_) => DerivedIndex::open(log)?,
+            None => None,
+        };
+
         let control_index_offset = match range {
-            Some(range) => locate_range_control_offset(log, range)?,
+            Some(range) => locate_range_control_offset(log, index.as_ref(), range)?,
             None => None,
         };
 
         if let (Some(range), Some(control_index_offset)) = (range, control_index_offset) {
             let mut auxiliary = AuxiliaryTimelineCursor::new(
                 log,
+                index.as_ref(),
                 Some(range),
                 true,
                 Some((range.start_monotonic_ns, 0, 0, 0)),
@@ -790,8 +784,19 @@ pub fn build_timeline_page(
         return Err(range_error("timeline page limit must be greater than zero"));
     }
 
+    let index = if include_controls || (range.is_none() && offset > 0) {
+        DerivedIndex::open(log)?
+    } else {
+        None
+    };
+
     let checkpoint = if range.is_none() {
-        locate_offset_checkpoint(log, include_hidden_states, include_controls, offset)?
+        locate_offset_checkpoint(
+            index.as_ref(),
+            include_hidden_states,
+            include_controls,
+            offset,
+        )?
     } else {
         None
     };
@@ -810,7 +815,7 @@ pub fn build_timeline_page(
     {
         Some(offset) => Some(offset),
         None if include_controls => match range {
-            Some(range) => locate_range_control_offset(log, range)?,
+            Some(range) => locate_range_control_offset(log, index.as_ref(), range)?,
             None => None,
         },
         None => None,
@@ -818,6 +823,7 @@ pub fn build_timeline_page(
 
     let mut auxiliary = AuxiliaryTimelineCursor::new(
         log,
+        index.as_ref(),
         range,
         include_controls,
         auxiliary_start,

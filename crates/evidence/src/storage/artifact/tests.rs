@@ -11,6 +11,7 @@ use std::{
 };
 use tempfile::TempDir;
 use termtrace_model::execution::event::{Event, EventLogHeader};
+use termtrace_model::execution::layout::{ARTIFACT_ROOT_LOCK, ARTIFACT_ROOT_LOG};
 use termtrace_model::value::ByteString;
 use uuid::Uuid;
 

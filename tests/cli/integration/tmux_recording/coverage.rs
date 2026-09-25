@@ -64,7 +64,7 @@ fn tmux_default_pane_is_a_complete_termtrace_recording() {
 
     let log = EventLog::read(session.join("events.jsonl")).expect("tmux event log");
     assert_eq!(log.header.term, "tmux-256color");
-    validate_completed_log(&session, &log).expect("valid completed tmux evidence");
+    validate_completed_session(&session).expect("valid completed tmux evidence");
 
     assert!(log.events.iter().any(|record| {
         return matches!(
@@ -174,7 +174,7 @@ fn tmux_strict_mode_blocks_creation_and_respawn_bypasses() {
 
     wait_for_path(&recording.join("completion.json"));
     let log = EventLog::read(recording.join("events.jsonl")).expect("interrupted pane log");
-    validate_completed_log(&recording, &log).expect("respawn closed canonical evidence");
+    validate_completed_session(&recording).expect("respawn closed canonical evidence");
 
     assert!(log.events.iter().any(|record| {
         return matches!(

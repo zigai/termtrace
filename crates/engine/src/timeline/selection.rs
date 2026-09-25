@@ -1,6 +1,7 @@
 use crate::{Error, Result};
 use std::path::Path;
 use termtrace_evidence::event_log::{EventLog, EventLogCursor};
+use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::{execution::event::Event, terminal::replay::SourceRange};
 
 /// Resolve optional CLI bounds against a canonical event-log endpoint.
@@ -141,7 +142,7 @@ pub fn resolve_session_source_selection(
     to_marker: Option<&str>,
 ) -> Result<Option<SourceRange>> {
     return resolve_cursor_source_selection(
-        EventLogCursor::open(session.join("events.jsonl"))?,
+        EventLogCursor::open(SessionLayout::new(session).event_log())?,
         false,
         None,
         start,
@@ -167,7 +168,7 @@ pub fn resolve_session_prefix_source_selection(
     to_marker: Option<&str>,
 ) -> Result<Option<SourceRange>> {
     return resolve_cursor_source_selection(
-        EventLogCursor::open_snapshot(session.join("events.jsonl"))?,
+        EventLogCursor::open_snapshot(SessionLayout::new(session).event_log())?,
         true,
         event_count,
         start,

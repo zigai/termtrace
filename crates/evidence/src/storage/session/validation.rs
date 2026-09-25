@@ -1,42 +1,19 @@
 use super::io::{canonical_manifest_bytes, manifest_hash, read_completion, read_manifest};
 use crate::storage::{
-    artifact::hash_regular_file,
-    event_log::{EventLog, EventLogSummary},
-    is_lowercase_blake3, CompletionIntegrityError, CompletionIntegrityKind, Error, Result,
+    artifact::hash_regular_file, event_log::EventLogSummary, is_lowercase_blake3,
+    CompletionIntegrityError, CompletionIntegrityKind, Error, Result,
 };
 use std::{fs, path::Path};
 use termtrace_model::{
     execution::event::Event,
-    execution::request_journal::MUTATION_JOURNAL_NAME,
+    execution::layout::{self, SessionLayout},
     execution::session::{
         GeometrySource, ResourceLimitKind, SessionCompletion, SessionManifest,
-        COMPLETION_VALIDATION_VERSION, GHOSTTY_REPLAY_PROFILE_NAME, SESSION_COMPLETION_FORMAT,
-        SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
-        TMUX_PANE_PROVENANCE_VERSION,
+        COMPLETION_VALIDATION_VERSION, SESSION_COMPLETION_FORMAT, SESSION_COMPLETION_VERSION,
+        SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, TMUX_PANE_PROVENANCE_VERSION,
     },
     protocol::control::control_socket_name,
 };
-
-/// Load and validate the durable completion record for an event log.
-///
-/// # Errors
-///
-/// Returns an error when completion is absent or inconsistent with the session and log.
-pub fn validate_completed_log(
-    session_directory: &Path,
-    log: &EventLog,
-) -> Result<SessionCompletion> {
-    if !session_directory.join("completion.json").is_file() {
-        return Err(Error::SessionIncomplete {
-            session: session_directory.to_path_buf(),
-        });
-    }
-
-    let completion = read_completion(session_directory)?;
-    validate_completion_candidate(session_directory, log, &completion)?;
-
-    return Ok(completion);
-}
 
 pub(super) fn validate_replay_profile_file(
     session_directory: &Path,
@@ -45,7 +22,8 @@ pub(super) fn validate_replay_profile_file(
     let Some(profile) = &manifest.ghostty_visual else {
         return Ok(());
     };
-    let profile_path = session_directory.join(&profile.replay_profile);
+
+    let profile_path = SessionLayout::new(session_directory).ghostty_replay_profile();
     let (_, actual_hash) = hash_regular_file(&profile_path)?;
     if actual_hash != profile.replay_profile_hash {
         return Err(Error::InvalidEvidence {
@@ -58,37 +36,33 @@ pub(super) fn validate_replay_profile_file(
     return Ok(());
 }
 
-/// Validate a proposed completion record against a session manifest and event log.
-///
-/// # Errors
-///
-/// Returns an error when any canonical identity, count, hash, or format contract differs.
-pub fn validate_completion_candidate(
-    session_directory: &Path,
-    log: &EventLog,
-    completion: &SessionCompletion,
-) -> Result<()> {
-    return validate_completion_summary_candidate(
-        session_directory,
-        &EventLogSummary::from(log),
-        completion,
-    );
-}
-
 /// Stream and validate a completed canonical session without retaining its output.
 ///
 /// # Errors
 ///
 /// Returns an error for any malformed source or inconsistent completion.
 pub fn validate_completed_session(session_directory: &Path) -> Result<SessionCompletion> {
-    if !session_directory.join("completion.json").is_file() {
+    return validate_completed_session_with_check(session_directory, || return Ok(()));
+}
+
+/// Validate a completed canonical session, running `check` before every streamed record.
+///
+/// # Errors
+///
+/// Returns any check failure, malformed source, or inconsistent completion.
+pub fn validate_completed_session_with_check(
+    session_directory: &Path,
+    check: impl FnMut() -> Result<()>,
+) -> Result<SessionCompletion> {
+    let layout = SessionLayout::new(session_directory);
+    if !layout.completion().is_file() {
         return Err(Error::SessionIncomplete {
             session: session_directory.to_path_buf(),
         });
     }
 
     let completion = read_completion(session_directory)?;
-    let summary = EventLogSummary::read(session_directory.join("events.jsonl"))?;
+    let summary = EventLogSummary::read_with_check(layout.event_log(), check)?;
     validate_completion_summary_candidate(session_directory, &summary, &completion)?;
 
     return Ok(completion);
@@ -104,7 +78,7 @@ pub fn validate_completion_summary_candidate(
     log: &EventLogSummary,
     completion: &SessionCompletion,
 ) -> Result<()> {
-    let manifest_path = session_directory.join("session.json");
+    let manifest_path = SessionLayout::new(session_directory).manifest();
     let manifest_bytes = fs::read(&manifest_path).map_err(|source| {
         return Error::Filesystem {
             path: manifest_path.clone(),
@@ -152,7 +126,7 @@ pub(super) fn validate_completion_with_loaded(
     let actual_manifest_hash = manifest_hash(manifest_bytes);
     let header_bytes = serde_json::to_vec(&log.header).map_err(|source| {
         return Error::InvalidJson {
-            path: session_directory.join("events.jsonl"),
+            path: SessionLayout::new(session_directory).event_log(),
             json_path: "$".to_owned(),
             source,
         };
@@ -371,16 +345,23 @@ pub(super) fn validate_manifest(manifest: &SessionManifest) -> Result<()> {
         ));
     }
 
-    if manifest.request_journal != MUTATION_JOURNAL_NAME {
+    if manifest.event_log != layout::EVENT_LOG {
+        return Err(Error::invalid(
+            "session manifest names an unsupported event log path",
+        ));
+    }
+
+    if manifest.request_journal != layout::MUTATION_JOURNAL {
         return Err(Error::invalid(
             "session manifest names an unsupported mutation journal path",
         ));
     }
 
     if let Some(profile) = &manifest.ghostty_visual {
-        if profile.replay_profile != GHOSTTY_REPLAY_PROFILE_NAME {
+        if profile.replay_profile != layout::GHOSTTY_REPLAY_PROFILE {
             return Err(Error::invalid(format!(
-                "session manifest Ghostty replay profile must be the canonical root artifact `{GHOSTTY_REPLAY_PROFILE_NAME}`"
+                "session manifest Ghostty replay profile must be the canonical root artifact `{}`",
+                layout::GHOSTTY_REPLAY_PROFILE
             )));
         }
 

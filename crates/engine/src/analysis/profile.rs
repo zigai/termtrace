@@ -3,9 +3,8 @@
 use crate::{Error, Result};
 use termtrace_model::{
     execution::event::TerminalColors,
-    execution::session::{
-        GhosttyVisualOverrides, GhosttyVisualProvenance, GHOSTTY_REPLAY_PROFILE_NAME,
-    },
+    execution::layout::GHOSTTY_REPLAY_PROFILE,
+    execution::session::{GhosttyVisualOverrides, GhosttyVisualProvenance},
     terminal::state::Rgb,
     value::ByteString,
 };
@@ -31,9 +30,9 @@ impl ResolvedGhosttyProfile {
 
     /// Validate both persisted profile hashes and the canonical artifact name.
     pub fn validate(&self) -> Result<()> {
-        if self.provenance.replay_profile != GHOSTTY_REPLAY_PROFILE_NAME {
+        if self.provenance.replay_profile != GHOSTTY_REPLAY_PROFILE {
             return Err(profile_error(format!(
-                "recorded Ghostty replay profile must be the canonical root artifact `{GHOSTTY_REPLAY_PROFILE_NAME}`"
+                "recorded Ghostty replay profile must be the canonical root artifact `{GHOSTTY_REPLAY_PROFILE}`"
             )));
         }
 
@@ -70,7 +69,7 @@ pub fn resolve_profile(
         provenance: GhosttyVisualProvenance {
             source_config,
             overrides,
-            replay_profile: GHOSTTY_REPLAY_PROFILE_NAME.to_owned(),
+            replay_profile: GHOSTTY_REPLAY_PROFILE.to_owned(),
             replay_profile_hash: hash(&replay_config),
             effective_config_hash: hash(&effective_config),
         },
@@ -85,9 +84,9 @@ pub fn restore_profile(
     provenance: GhosttyVisualProvenance,
     resolve_effective: impl FnOnce(&[u8]) -> Result<Vec<u8>>,
 ) -> Result<ResolvedGhosttyProfile> {
-    if provenance.replay_profile != GHOSTTY_REPLAY_PROFILE_NAME {
+    if provenance.replay_profile != GHOSTTY_REPLAY_PROFILE {
         return Err(profile_error(format!(
-            "recorded Ghostty replay profile must be the canonical root artifact `{GHOSTTY_REPLAY_PROFILE_NAME}`"
+            "recorded Ghostty replay profile must be the canonical root artifact `{GHOSTTY_REPLAY_PROFILE}`"
         )));
     }
 
@@ -353,10 +352,7 @@ mod tests {
         assert_eq!(profile.replay_config, replay_config);
         assert_ne!(profile.effective_config, profile.replay_config);
         assert_ne!(second_generation, profile.effective_config);
-        assert_eq!(
-            profile.provenance.replay_profile,
-            GHOSTTY_REPLAY_PROFILE_NAME
-        );
+        assert_eq!(profile.provenance.replay_profile, GHOSTTY_REPLAY_PROFILE);
         assert_eq!(
             profile.provenance.replay_profile_hash,
             blake3::hash(replay_config).to_hex().to_string()

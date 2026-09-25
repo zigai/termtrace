@@ -1,5 +1,4 @@
 use crate::storage::{Error, Result};
-use blake3::Hash;
 use nix::unistd::Uid;
 use std::{
     fs,
@@ -202,15 +201,6 @@ pub(super) fn validate_event_geometry(path: &Path, line: u64, event: &Event) -> 
         return Err(invalid_log(path, line, geometry_limit_reason("resize")));
     }
     return Ok(());
-}
-
-#[expect(dead_code, reason = "canonical hash-chain reference helper")]
-pub(super) fn chained_hash(previous: Hash, body: &[u8]) -> Hash {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(previous.as_bytes());
-    hasher.update(body);
-
-    return hasher.finalize();
 }
 
 pub(super) fn invalid_log(path: &Path, line: u64, reason: impl Into<String>) -> Error {

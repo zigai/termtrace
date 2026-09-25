@@ -438,6 +438,10 @@ pub(super) fn write_secure_with_failure(
     });
 }
 
+/// Durably record a file's directory entry by syncing its parent directory.
+///
+/// Syncing has no effect on content, so the parent is opened by ordinary resolution: the
+/// directory synced is the one in which the caller created the file.
 pub(crate) fn sync_parent_directory(path: &Path) -> Result<()> {
     let parent = match path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p,
@@ -450,7 +454,12 @@ pub(crate) fn sync_parent_directory(path: &Path) -> Result<()> {
         }
     };
 
-    let directory = open_directory_path(parent, false)?;
+    let directory = open(
+        parent,
+        OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| return nix_filesystem(parent, error))?;
 
     return sync_fd(&directory, parent);
 }

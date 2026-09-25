@@ -1,4 +1,4 @@
-use super::{invalid_replay, load_nearest_replay_seed, state_delta, EndpointInspection};
+use super::{invalid_replay, state_delta, DerivedIndex, EndpointInspection};
 use crate::{Error, Result};
 #[cfg(test)]
 use std::cell::Cell;
@@ -12,13 +12,13 @@ use std::{
     time::{Duration, Instant},
 };
 use termtrace_evidence::event_log::{EventLog, EventLogCursor};
-use termtrace_evidence::session::{validate_completed_session, SessionSnapshot};
+use termtrace_evidence::session::SessionSnapshot;
 use termtrace_model::{
     execution::event::{Event, EventLogHeader, EventRecord, OperationStatus},
     execution::event_log::CanonicalBoundary,
+    execution::layout::SessionLayout,
     terminal::replay::{
         CollectedReplay, ReplayArtifacts, SourceRange, StateInspection, StateRecord, StateSelector,
-        DERIVED_DIRECTORY,
     },
     terminal::state::{CellStyle, ColorSpec, DirtyState, SemanticState},
 };
@@ -636,8 +636,7 @@ pub fn inspect_completed_many(
     session: &Path,
     selectors: &[StateSelector],
 ) -> Result<Vec<StateInspection>> {
-    let source = super::trust::SourceIdentity::capture(session)?;
-    validate_completed_session(session)?;
+    let validated = super::trust::ValidatedSession::open(session)?;
 
     if selectors.is_empty() {
         return Ok(Vec::new());
@@ -679,7 +678,7 @@ pub fn inspect_completed_many(
         return Ok(true);
     })?;
 
-    source.check(session)?;
+    validated.check()?;
 
     return selected
         .into_iter()
@@ -716,10 +715,9 @@ pub fn inspect_completed_session_with_formats(
     selector: StateSelector,
     formats: &[Format],
 ) -> Result<StateInspectionWithFormats> {
-    let source = super::trust::SourceIdentity::capture(session)?;
-    validate_completed_session(session)?;
+    let validated = super::trust::ValidatedSession::open(session)?;
     let inspection = inspect_session_stream_with_formats(session, selector, formats)?;
-    source.check(session)?;
+    validated.check()?;
 
     return Ok(inspection);
 }
@@ -764,18 +762,11 @@ fn replay_seed_for_selector(
     log: &EventLog,
     selector: &StateSelector,
 ) -> Result<Option<ReplaySeed>> {
-    let Some(event_path) = log.source_path.as_ref() else {
+    let Some(index) = DerivedIndex::open(log)? else {
         return Ok(None);
     };
-    let Some(session) = event_path.parent() else {
-        return Ok(None);
-    };
-    let directory = session.join(DERIVED_DIRECTORY);
 
-    if !directory.is_dir() {
-        return Ok(None);
-    }
-    return load_nearest_replay_seed(&directory, log, selector);
+    return index.nearest_seed(selector);
 }
 
 fn replay_for_selector(
@@ -1139,7 +1130,7 @@ fn visit_recording_states_with_engine(
         super::trust::SourceIdentity::capture_candidate(session)?
     };
 
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     let builder = ReplayBuilder::new(cursor.header(), INDEX_REPLAY_LIMITS)?;
     let mut exhausted = false;
     let records = from_fn(|| {

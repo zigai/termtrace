@@ -5,8 +5,7 @@ mod stream;
 use crate::{
     observation::state_selector_for_session,
     replay::{
-        inspect_completed_session, replay, trust::SourceIdentity, visit_session_states_while,
-        visit_states,
+        inspect_session_stream, replay, visit_session_states_while, visit_states, ValidatedSession,
     },
     timeline::stream::TokenCursor,
     Error, Result,
@@ -18,7 +17,7 @@ use std::{
     sync::atomic::AtomicBool,
 };
 pub use stream::{diagnose_session, diagnose_snapshot};
-use termtrace_evidence::{event_log::EventLog, session::validate_completed_session};
+use termtrace_evidence::event_log::EventLog;
 use termtrace_model::{
     artifact::visual::{VideoMapEntry, VisualManifest},
     execution::event::Event,
@@ -322,10 +321,10 @@ pub fn explain_session(
     target: StatePoint,
     context_events: u64,
 ) -> Result<ExplainReport> {
-    let source = SourceIdentity::capture(session)?;
-    let completion = validate_completed_session(session)?;
+    let validated = ValidatedSession::open(session)?;
+    let completion = validated.completion();
     let selector = state_selector_for_session(session, &target, None)?;
-    let target_state = inspect_completed_session(session, selector)?.record;
+    let target_state = inspect_session_stream(session, selector, None)?.record;
     let target_event = target_state.event_seq.unwrap_or(0);
     let start_event = target_event.saturating_sub(context_events);
     let end_event = target_event.saturating_add(context_events);
@@ -361,13 +360,13 @@ pub fn explain_session(
         return Ok(true);
     })?;
 
-    source.check(session)?;
+    validated.check()?;
 
     let findings = findings(&tokens, &states);
 
     return Ok(ExplainReport {
         session_id: completion.session_id,
-        source_final_event_hash: completion.final_event_hash,
+        source_final_event_hash: completion.final_event_hash.clone(),
         source_event_count: completion.event_count,
         target,
         target_state,

@@ -240,12 +240,12 @@ fn completed_content_validation_binds_the_replay_profile_file() {
 
 #[test]
 fn completed_validation_requires_terminal_exit() {
-    let (temporary, log) = completed_fixture(vec![Event::Marker {
+    let (temporary, _) = completed_fixture(vec![Event::Marker {
         operation_id: Uuid::now_v7(),
         label: "not-an-exit".to_owned(),
     }]);
 
-    let error = validate_completed_log(&temporary.path().join("session"), &log)
+    let error = validate_completed_session(&temporary.path().join("session"))
         .expect_err("nonterminal completion must fail");
     assert!(matches!(error, Error::InvalidEvidence { .. }));
     let report = verify_session(temporary.path().join("session"), VerificationLevel::Content);
@@ -256,7 +256,7 @@ fn completed_validation_requires_terminal_exit() {
 #[test]
 fn completed_validation_rejects_pending_mutation() {
     let operation_id = Uuid::now_v7();
-    let (temporary, log) = completed_fixture(vec![
+    let (temporary, _) = completed_fixture(vec![
         Event::InputIntent {
             operation_id,
             source: InputSource::Agent,
@@ -274,7 +274,7 @@ fn completed_validation_rejects_pending_mutation() {
         },
     ]);
 
-    let error = validate_completed_log(&temporary.path().join("session"), &log)
+    let error = validate_completed_session(&temporary.path().join("session"))
         .expect_err("pending mutation must fail");
     assert!(matches!(error, Error::InvalidEvidence { .. }));
     let report = verify_session(temporary.path().join("session"), VerificationLevel::Content);

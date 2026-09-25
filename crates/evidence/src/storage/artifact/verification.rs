@@ -1,7 +1,7 @@
 use super::{
     json_error, read_artifact_roots,
     secure_fs::{nix_filesystem, open_file_at, open_parent_directory, safe_file_name},
-    ARTIFACT_ROOT_LOG,
+    ARTIFACT_MANIFEST,
 };
 use crate::event_log::EventLogCursor;
 use crate::storage::{Error, Result};
@@ -17,9 +17,13 @@ use std::{
     thread,
 };
 use termtrace_model::artifact::metadata::{
-    ArtifactMember, ArtifactSensitivity, ArtifactSourceRange,
+    ArtifactMember, ArtifactRootRecord, ArtifactSensitivity, ArtifactSourceRange,
 };
-use termtrace_model::execution::{event::Event, event_log::CanonicalBoundary};
+use termtrace_model::execution::{
+    event::Event,
+    event_log::CanonicalBoundary,
+    layout::{self, SessionLayout},
+};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct ArtifactMemberEnvelope {
@@ -43,7 +47,7 @@ pub fn collect_artifact_members(directory: &Path) -> Result<Vec<ArtifactMember>>
     let mut payloads: Vec<(PathBuf, String)> = Vec::with_capacity(paths.len());
     for relative in paths {
         let normalized = normalized_relative_path(&relative)?;
-        if normalized != "manifest.json" {
+        if normalized != ARTIFACT_MANIFEST {
             payloads.push((directory.join(relative), normalized));
         }
     }
@@ -144,62 +148,112 @@ pub fn verify_session_artifacts(
     session_manifest_hash: &str,
     source_event_hash: Option<&str>,
 ) -> Result<u64> {
-    let records = read_artifact_roots(&session.join(ARTIFACT_ROOT_LOG))?;
+    let records = read_artifact_roots(&SessionLayout::new(session).artifact_root_log())?;
 
     for record in &records {
-        if record.session_manifest_hash != session_manifest_hash
-            || record.source_prefix.is_none()
-                && record.source_event_hash.as_deref() != source_event_hash
-        {
-            return Err(Error::invalid(
-                "artifact-root catalog entry does not bind the canonical source roots",
-            ));
-        }
-
-        if let Some(prefix) = &record.source_prefix {
-            if record.source_event_hash.as_deref() != Some(prefix.event_hash.as_str()) {
-                return Err(Error::invalid(
-                    "artifact catalog prefix hash differs from its source root",
-                ));
-            }
-
-            validate_source_prefix(session, session_manifest_hash, prefix)?;
-        }
-
-        let relative = Path::new(&record.artifact_directory);
-        normalized_relative_path(relative)?;
-        let directory = session.join(relative);
-        let manifest_path = directory.join("manifest.json");
-        let manifest_bytes = fs::read(&manifest_path).map_err(|source| {
-            return Error::Filesystem {
-                path: manifest_path.clone(),
-                source,
-            };
-        })?;
-        if blake3::hash(&manifest_bytes).to_hex().as_str() != record.manifest_hash {
-            return Err(Error::invalid(
-                "artifact manifest hash does not match its catalog root",
-            ));
-        }
-
-        let manifest: ArtifactMemberEnvelope = serde_json::from_slice(&manifest_bytes)
-            .map_err(|source| return json_error(manifest_path, source))?;
-        if manifest.source_range != record.source_range {
-            return Err(Error::invalid(
-                "artifact catalog source range does not match its manifest",
-            ));
-        }
-
-        if manifest.source_event_hash != record.source_event_hash {
-            return Err(Error::invalid(
-                "artifact catalog source event hash does not match its manifest",
-            ));
-        }
-
-        verify_artifact_members(&directory, &manifest.members)?;
+        verify_artifact_root(session, record, session_manifest_hash, source_event_hash)?;
     }
 
     return Ok(u64::try_from(records.len()).unwrap_or(u64::MAX));
+}
+
+/// Open a derived artifact directory only when the session's catalog vouches for it.
+///
+/// This is the single trust rule for derived artifact directories: a catalog root must bind the
+/// directory's exact manifest bytes to the given canonical source, and every payload member must
+/// match that manifest. A directory without a catalog root is not trusted and yields `None`.
+///
+/// # Errors
+///
+/// Returns an error when a cataloged root, its manifest binding, or a payload member is invalid.
+pub fn open_verified_artifact(
+    session: &Path,
+    artifact_directory: &str,
+    session_manifest_hash: &str,
+    source_event_hash: Option<&str>,
+) -> Result<Option<PathBuf>> {
+    let catalog = SessionLayout::new(session).artifact_root_log();
+    if !catalog.try_exists().map_err(|source| {
+        return Error::Filesystem {
+            path: catalog.clone(),
+            source,
+        };
+    })? {
+        return Ok(None);
+    }
+
+    let records = read_artifact_roots(&catalog)?;
+    let Some(record) = records
+        .iter()
+        .find(|record| return record.artifact_directory == artifact_directory)
+    else {
+        return Ok(None);
+    };
+
+    return verify_artifact_root(session, record, session_manifest_hash, source_event_hash)
+        .map(Some);
+}
+
+fn verify_artifact_root(
+    session: &Path,
+    record: &ArtifactRootRecord,
+    session_manifest_hash: &str,
+    source_event_hash: Option<&str>,
+) -> Result<PathBuf> {
+    if record.session_manifest_hash != session_manifest_hash
+        || record.source_prefix.is_none()
+            && record.source_event_hash.as_deref() != source_event_hash
+    {
+        return Err(Error::invalid(
+            "artifact-root catalog entry does not bind the canonical source roots",
+        ));
+    }
+
+    if let Some(prefix) = &record.source_prefix {
+        if record.source_event_hash.as_deref() != Some(prefix.event_hash.as_str()) {
+            return Err(Error::invalid(
+                "artifact catalog prefix hash differs from its source root",
+            ));
+        }
+
+        validate_source_prefix(session, session_manifest_hash, prefix)?;
+    }
+
+    let relative = Path::new(&record.artifact_directory);
+    normalized_relative_path(relative)?;
+    let directory = session.join(relative);
+    let manifest_path = directory.join(ARTIFACT_MANIFEST);
+    let manifest_bytes = fs::read(&manifest_path).map_err(|source| {
+        return Error::Filesystem {
+            path: manifest_path.clone(),
+            source,
+        };
+    })?;
+
+    if blake3::hash(&manifest_bytes).to_hex().as_str() != record.manifest_hash {
+        return Err(Error::invalid(
+            "artifact manifest hash does not match its catalog root",
+        ));
+    }
+
+    let manifest: ArtifactMemberEnvelope = serde_json::from_slice(&manifest_bytes)
+        .map_err(|source| return json_error(manifest_path, source))?;
+
+    if manifest.source_range != record.source_range {
+        return Err(Error::invalid(
+            "artifact catalog source range does not match its manifest",
+        ));
+    }
+
+    if manifest.source_event_hash != record.source_event_hash {
+        return Err(Error::invalid(
+            "artifact catalog source event hash does not match its manifest",
+        ));
+    }
+
+    verify_artifact_members(&directory, &manifest.members)?;
+
+    return Ok(directory);
 }
 
 fn validate_source_prefix(
@@ -207,7 +261,7 @@ fn validate_source_prefix(
     manifest_hash: &str,
     prefix: &CanonicalBoundary,
 ) -> Result<()> {
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     if cursor.header().session_manifest_hash != manifest_hash {
         return Err(Error::invalid(
             "artifact prefix has a different source manifest",
@@ -351,7 +405,8 @@ pub fn open_regular_file_nofollow(path: &Path) -> Result<(File, u64)> {
     return Ok((File::from(fd), size));
 }
 
-fn member_media_type(path: &str) -> &'static str {
+/// Media type of an artifact or bundle member, classified by its file name.
+pub fn member_media_type(path: &str) -> &'static str {
     if path.ends_with(".jsonl") {
         return "application/x-ndjson";
     } else if path.ends_with(".json") {
@@ -371,8 +426,11 @@ fn member_media_type(path: &str) -> &'static str {
     }
 }
 
-fn member_schema_type(path: &str) -> Option<&'static str> {
+/// Public schema identifier of a structured artifact or bundle member, when it has one.
+pub fn member_schema_type(path: &str) -> Option<&'static str> {
     match Path::new(path).file_name()?.to_str()? {
+        layout::MANIFEST => return Some("session.schema.json"),
+        layout::COMPLETION => return Some("completion.schema.json"),
         "state-index.jsonl" => return Some("state-index-entry.schema.json"),
         "video-map.jsonl" => return Some("video-map-entry.schema.json"),
         "replay-endpoint.json" => return Some("replay-endpoint.schema.json"),

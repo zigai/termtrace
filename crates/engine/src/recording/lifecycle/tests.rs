@@ -22,7 +22,7 @@ use tempfile::TempDir;
 use termtrace_evidence::{
     event_log::{CanonicalBoundary, DurabilityPolicy, EventLog},
     request_journal::{guarded_command_hash, MUTATION_JOURNAL_NAME},
-    session::{read_completion, validate_completed_log},
+    session::{read_completion, validate_completed_session},
     Error as EvidenceError,
 };
 use termtrace_model::execution::session::RecordingFailurePolicy;
@@ -271,7 +271,7 @@ fn fatal_actor_exit_writes_durable_failure_completion() {
         Event::HostError { code, .. } if code == "recorder_actor_failed"
     )));
 
-    validate_completed_log(&session, &log).expect("valid durable failure completion");
+    validate_completed_session(&session).expect("valid durable failure completion");
 }
 
 #[test]
@@ -326,7 +326,7 @@ fn poisoned_terminal_exit_append_preserves_incomplete_failure_without_completion
         u64::try_from(log.events.len()).expect("event count")
     );
     assert!(matches!(
-        validate_completed_log(&session, &log),
+        validate_completed_session(&session),
         Err(EvidenceError::SessionIncomplete { .. })
     ));
 }
@@ -366,7 +366,7 @@ fn spawn_failure_after_manifest_creation_writes_valid_fatal_closure() {
         Event::HostError { code, .. } if code == "spawn_failed"
     )));
 
-    validate_completed_log(&session, &log).expect("valid spawn failure completion");
+    validate_completed_session(&session).expect("valid spawn failure completion");
 
     assert!(!session.join(SESSION_FAILURE_NAME).exists());
 }
@@ -481,7 +481,7 @@ fn output_budget_retains_observed_bytes_and_records_termination() {
         );
     }));
 
-    validate_completed_log(&session, &log).expect("valid completed budget evidence");
+    validate_completed_session(&session).expect("valid completed budget evidence");
 }
 
 #[test]
@@ -518,7 +518,7 @@ fn max_duration_limit_terminates_session() {
             Event::HostError { code, .. } if code == "max_duration_exceeded"
         );
     }));
-    validate_completed_log(&session, &log).expect("valid completed duration evidence");
+    validate_completed_session(&session).expect("valid completed duration evidence");
 }
 
 #[test]
@@ -555,7 +555,7 @@ fn idle_timeout_limit_terminates_session() {
             Event::HostError { code, .. } if code == "idle_timeout_exceeded"
         );
     }));
-    validate_completed_log(&session, &log).expect("valid completed idle evidence");
+    validate_completed_session(&session).expect("valid completed idle evidence");
 }
 
 #[test]

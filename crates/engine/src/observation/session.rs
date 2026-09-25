@@ -5,7 +5,7 @@ use super::{
 use crate::replay::{
     inspect_latest_presented_prefix, inspect_latest_presented_stream, inspect_prefix_stream,
     inspect_session_stream, inspect_session_stream_with_formats,
-    trust::{check_cancelled, SourceIdentity},
+    trust::{check_cancelled, SourceIdentity, ValidatedSession},
     EndpointInspection, RenderedStateFormats,
 };
 use crate::{Error, Result};
@@ -17,13 +17,11 @@ use std::{
 };
 use termtrace_evidence::{
     event_log::{CanonicalBoundary, EventLogCursor, EventLogSummary},
-    session::{
-        canonical_manifest_bytes, manifest_hash, read_completion, read_manifest,
-        validate_completed_session, validate_completion_summary_candidate,
-    },
+    session::{canonical_manifest_bytes, manifest_hash, read_completion, read_manifest},
 };
 use termtrace_model::{
     execution::event::Event,
+    execution::layout::SessionLayout,
     execution::session::SessionCompletion,
     protocol::control::ControlData,
     terminal::observation::{
@@ -36,7 +34,6 @@ use termtrace_model::{
     value::ByteString,
 };
 use termtrace_terminal::Format;
-use uuid::Uuid;
 use zstd::stream::read::Decoder;
 
 const MAX_LIVE_SEMANTIC_STATE_BYTES: u64 = 32 * 1024 * 1024;
@@ -54,8 +51,11 @@ pub fn replay_endpoint_for_prefix(
     boundary: &CanonicalBoundary,
     cancelled: &AtomicBool,
 ) -> Result<ReplayEndpoint> {
-    let (header, state) =
-        inspect_latest_presented_prefix(&session.join("events.jsonl"), boundary, cancelled)?;
+    let (header, state) = inspect_latest_presented_prefix(
+        &SessionLayout::new(session).event_log(),
+        boundary,
+        cancelled,
+    )?;
 
     let manifest = read_manifest(session)?;
     if header.session_id != manifest.session_id
@@ -106,15 +106,12 @@ pub fn presented_replay_endpoint_for_session(
     point: &StatePoint,
     cancelled: &AtomicBool,
 ) -> Result<Option<ReplayEndpoint>> {
-    let manifest = read_manifest(session)?;
-    let completion = read_completion(session)?;
-    let (state, _) = resolve_completed_state(session, point, &completion, Some(cancelled))?;
-
+    let (state, _, completion) = resolve_completed_state(session, point, Some(cancelled))?;
     if !state.presented {
         return Ok(None);
     }
     return Ok(Some(ReplayEndpoint {
-        session_id: manifest.session_id,
+        session_id: completion.session_id,
         session_manifest_hash: completion.session_manifest_hash,
         source_complete: true,
         boundary: CanonicalBoundary {
@@ -160,14 +157,12 @@ pub fn observe_session_with_options(
         };
     })?;
 
-    let manifest = read_manifest(&canonical)?;
-
-    if !canonical.join("completion.json").is_file() {
+    if !SessionLayout::new(&canonical).completion().is_file() {
         return Err(observation_error(
             "session is live; engine observation requires completed evidence or explicit validated-prefix observation",
         ));
     }
-    return observe_completed(&canonical, manifest.session_id, state_point, include_hidden);
+    return observe_completed(&canonical, state_point, include_hidden);
 }
 
 /// Observe a completed session and format the selected state in the same replay.
@@ -189,14 +184,12 @@ pub fn observe_completed_with_formats(
         };
     })?;
 
-    let manifest = read_manifest(&canonical)?;
-    let source = SourceIdentity::capture(&canonical)?;
-    let completion = validate_completed_session(&canonical)?;
+    let validated = ValidatedSession::open(&canonical)?;
     let selector = state_selector_for_session(&canonical, &state_point, None)?;
     let (inspection, rendered) =
         inspect_session_stream_with_formats(&canonical, selector, formats)?;
 
-    source.check(&canonical)?;
+    validated.check()?;
 
     let state = CachedSemanticState {
         state_id: Some(inspection.record.state_id),
@@ -209,9 +202,8 @@ pub fn observe_completed_with_formats(
     };
     let observation = completed_observation_from_cached(
         &canonical,
-        manifest.session_id,
         state_point,
-        &completion,
+        validated.completion(),
         &state,
         include_hidden,
         ObservationResolution::CanonicalReplay,
@@ -307,7 +299,8 @@ pub fn observe_validated_prefix(
         };
     })?;
 
-    if canonical.join("completion.json").exists() {
+    let layout = SessionLayout::new(&canonical);
+    if layout.completion().exists() {
         return Err(observation_error(
             "validated-prefix observation requires incomplete evidence",
         ));
@@ -315,15 +308,13 @@ pub fn observe_validated_prefix(
 
     let manifest = read_manifest(&canonical)?;
     let source = SourceIdentity::capture_candidate(&canonical)?;
-    let log = EventLogSummary::snapshot(canonical.join("events.jsonl"))?;
+    let log = EventLogSummary::snapshot(layout.event_log())?;
     let inspection = inspect_prefix_stream(
         &canonical,
         state_selector_for_session(&canonical, &point, None)?,
     )?;
 
-    if source != SourceIdentity::capture_candidate(&canonical)?
-        || canonical.join("completion.json").exists()
-    {
+    if source != SourceIdentity::capture_candidate(&canonical)? || layout.completion().exists() {
         return Err(observation_error(
             "canonical prefix changed during observation",
         ));
@@ -380,16 +371,13 @@ pub fn observe_validated_prefix(
 
 fn observe_completed(
     session: &Path,
-    session_id: Uuid,
     point: StatePoint,
     include_hidden: bool,
 ) -> Result<Observation> {
-    let completion = read_completion(session)?;
-    let (state, resolution) = resolve_completed_state(session, &point, &completion, None)?;
+    let (state, resolution, completion) = resolve_completed_state(session, &point, None)?;
 
     return completed_observation_from_cached(
         session,
-        session_id,
         point,
         &completion,
         &state,
@@ -416,10 +404,7 @@ pub fn resolved_screen_state_for_session(
         };
     })?;
 
-    let manifest = read_manifest(&canonical)?;
-    let completion = read_completion(&canonical)?;
-    let (state, resolution) = resolve_completed_state(&canonical, &point, &completion, None)?;
-
+    let (state, resolution, completion) = resolve_completed_state(&canonical, &point, None)?;
     if !state.presented && !include_hidden {
         return Err(observation_error(
             "selected semantic state is hidden; pass explicit hidden-state permission",
@@ -428,7 +413,7 @@ pub fn resolved_screen_state_for_session(
 
     let source = ScreenFrameSource::Resolved {
         source_kind: ObservationSourceKind::CompletedSession,
-        session_id: Some(manifest.session_id),
+        session_id: Some(completion.session_id),
         source_completed: true,
         state_point: point,
         state_id: state.state_id,
@@ -446,60 +431,59 @@ pub fn resolved_screen_state_for_session(
     return Ok((state.state, source, state.presented));
 }
 
+/// Resolve a completed state under the one trust rule for derived state.
+///
+/// A replay checkpoint short-circuits validation only when its local trust record was minted
+/// from a [`ValidatedSession`] for the session's current source identity. Otherwise the session
+/// is validated canonically and replayed, and the result is published as a new checkpoint.
 fn resolve_completed_state(
     session: &Path,
     point: &StatePoint,
-    completion: &SessionCompletion,
     cancelled: Option<&AtomicBool>,
-) -> Result<(CachedSemanticState, ObservationResolution)> {
+) -> Result<(
+    CachedSemanticState,
+    ObservationResolution,
+    SessionCompletion,
+)> {
     check_cancelled(cancelled)?;
 
-    let source = SourceIdentity::capture(session)?;
-
-    if let Some(state) = load_checkpoint(session, point, completion)? {
-        source.check(session)?;
-
-        return Ok((state, ObservationResolution::ValidatedCheckpoint));
+    let completion = read_completion(session)?;
+    if let Some(state) = load_checkpoint(session, point, &completion)? {
+        return Ok((
+            state,
+            ObservationResolution::ValidatedCheckpoint,
+            completion,
+        ));
     }
 
     if matches!(point, StatePoint::StateHash { .. })
-        && let Some(state) = load_checkpoint(session, &StatePoint::LatestPresented, completion)?
+        && let Some(state) = load_checkpoint(session, &StatePoint::LatestPresented, &completion)?
         && matches!(
             point,
             StatePoint::StateHash { state_hash } if state.state_hash == *state_hash
         )
     {
-        source.check(session)?;
-
-        return Ok((state, ObservationResolution::ValidatedCheckpoint));
+        return Ok((
+            state,
+            ObservationResolution::ValidatedCheckpoint,
+            completion,
+        ));
     }
 
-    let summary = EventLogSummary::read_with_check(session.join("events.jsonl"), || {
-        return check_cancelled(cancelled).map_err(|error| {
-            return termtrace_evidence::Error::InvalidEvidence {
-                reason: error.to_string(),
-            };
-        });
-    })?;
-
-    validate_completion_summary_candidate(session, &summary, completion)?;
-    source.check(session)?;
+    let validated = ValidatedSession::open_cancellable(session, cancelled)?;
 
     if matches!(
         point,
         StatePoint::LatestPresented | StatePoint::StateHash { .. }
     ) {
-        let endpoint = inspect_latest_presented_stream(&session.join("events.jsonl"), cancelled)?;
-        source.check(session)?;
+        let endpoint =
+            inspect_latest_presented_stream(&SessionLayout::new(session).event_log(), cancelled)?;
 
-        if let Err(error) = publish_endpoint_checkpoint(
-            session,
-            &StatePoint::LatestPresented,
-            completion,
-            &endpoint,
-            &source,
-            cancelled,
-        ) {
+        validated.check()?;
+
+        if let Err(error) =
+            publish_endpoint_checkpoint(&validated, &StatePoint::LatestPresented, &endpoint)
+        {
             tracing::warn!(%error, "could not publish endpoint replay checkpoint");
         }
 
@@ -512,17 +496,16 @@ fn resolve_completed_state(
             return Ok((
                 cached_state_from_endpoint(endpoint),
                 ObservationResolution::CanonicalReplay,
+                validated.completion().clone(),
             ));
         }
     }
 
     let selector = state_selector_for_session(session, point, cancelled)?;
     let inspection = inspect_session_stream(session, selector, cancelled)?;
-    source.check(session)?;
+    validated.check()?;
 
-    if let Err(error) =
-        publish_checkpoint(session, point, completion, &inspection, &source, cancelled)
-    {
+    if let Err(error) = publish_checkpoint(&validated, point, &inspection) {
         tracing::warn!(%error, "could not publish disposable replay checkpoint");
     }
 
@@ -537,6 +520,7 @@ fn resolve_completed_state(
             state: inspection.state,
         },
         ObservationResolution::CanonicalReplay,
+        validated.completion().clone(),
     ));
 }
 
@@ -554,7 +538,6 @@ fn cached_state_from_endpoint(state: EndpointInspection) -> CachedSemanticState 
 
 fn completed_observation_from_cached(
     session: &Path,
-    session_id: Uuid,
     point: StatePoint,
     completion: &SessionCompletion,
     state: &CachedSemanticState,
@@ -572,7 +555,7 @@ fn completed_observation_from_cached(
 
     return Ok(Observation {
         source_kind: ObservationSourceKind::CompletedSession,
-        session_id: Some(session_id),
+        session_id: Some(completion.session_id),
         canonical_session: Some(ByteString::from(session.as_os_str().as_bytes())),
         source_completed: true,
         state_point: point,
@@ -607,18 +590,15 @@ pub fn state_selector_for_session(
     point: &StatePoint,
     cancelled: Option<&AtomicBool>,
 ) -> Result<StateSelector> {
-    let StatePoint::Marker { label } = point else {
-        return Ok(match point {
-            StatePoint::LatestPresented => StateSelector::LatestPresented,
-            StatePoint::StateId { state_id } => StateSelector::StateId(*state_id),
-            StatePoint::StateHash { state_hash } => StateSelector::StateHash(state_hash.clone()),
-            StatePoint::EventSeq { event_seq } => StateSelector::EventSeq(*event_seq),
-            StatePoint::MonotonicNs { monotonic_ns } => StateSelector::MonotonicNs(*monotonic_ns),
-            StatePoint::Marker { .. } => return Err(observation_error("invalid marker selector")),
-        });
-    };
+    return point.selector(|label| return unique_marker_event_seq(session, label, cancelled));
+}
 
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+fn unique_marker_event_seq(
+    session: &Path,
+    label: &str,
+    cancelled: Option<&AtomicBool>,
+) -> Result<u64> {
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     let mut found = None;
 
     while let Some(record) = cursor.next_record()? {
@@ -633,9 +613,7 @@ pub fn state_selector_for_session(
 
     let _pending = cursor.finish()?;
 
-    return found
-        .map(StateSelector::EventSeq)
-        .ok_or_else(|| return observation_error("marker does not exist"));
+    return found.ok_or_else(|| return observation_error("marker does not exist"));
 }
 
 /// Resolve the complete semantic state behind a completed session observation.
@@ -700,15 +678,13 @@ fn semantic_state_with_hash_for_session_inner(
         };
     })?;
 
-    if !canonical.join("completion.json").is_file() {
+    if !SessionLayout::new(&canonical).completion().is_file() {
         return Err(observation_error(
             "session is live; semantic state resolution requires completed evidence",
         ));
     }
 
-    let completion = read_completion(&canonical)?;
-    let (state, _) = resolve_completed_state(&canonical, point, &completion, cancelled)?;
-
+    let (state, _, _) = resolve_completed_state(&canonical, point, cancelled)?;
     if !state.presented && !include_hidden {
         return Err(observation_error(
             "selected semantic state is hidden; pass explicit hidden-state permission",

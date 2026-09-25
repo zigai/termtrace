@@ -15,6 +15,7 @@ use termtrace_evidence::{
     event_log::EventLogCursor,
     session::{read_manifest, validate_completed_session},
 };
+use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::{
     artifact::bug_report::{BugReportManifest, BugReportMetadata, BugReportSessionReference},
     artifact::metadata::ArtifactSensitivity,
@@ -47,7 +48,7 @@ pub fn create(
 
     let completion = validate_completed_session(&canonical)?;
     let session_manifest = read_manifest(&canonical)?;
-    let mut cursor = EventLogCursor::open(canonical.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(&canonical).event_log())?;
 
     let mut has_input = false;
     while let Some(record) = cursor.next_record()? {

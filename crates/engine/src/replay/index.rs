@@ -9,23 +9,24 @@ use std::{
     fmt::Write as _,
     fs::File,
     io::{BufRead, BufReader, BufWriter, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 use termtrace_evidence::{
     artifact::{
         append_artifact_root, collect_artifact_members, commit_directory, create_private_directory,
-        finish_writer, secure_file, secure_writer, sync_directory, verify_artifact_members,
-        write_secure,
+        finish_writer, open_verified_artifact, secure_file, secure_writer, sync_directory,
+        verify_artifact_members, write_secure,
     },
     event_log::{EventLog, EventLogSummary},
     session::{read_completion, validate_completion_summary_candidate},
 };
 use termtrace_model::{
     artifact::metadata::ArtifactSourceRange,
+    execution::layout::{self, SessionLayout},
     terminal::replay::{
         IndexOptions, IndexOutcome, ReplayArtifacts, ReplayManifest, SemanticReplayCheckpoint,
         SourceRange, StateIndexEntry, StateInspection, StateRecord, StateSelection, StateSelector,
-        DERIVED_DIRECTORY, GHOSTTY_REVISION, STATE_FORMAT_VERSION,
+        GHOSTTY_REVISION, STATE_FORMAT_VERSION,
     },
     terminal::state::SemanticState,
     value::ByteString,
@@ -44,6 +45,11 @@ use rank::TimelineRanks;
 use source::IndexSource;
 
 const REPLAY_CHECKPOINT_STATE_INTERVAL: u64 = 128;
+const INDEX_MANIFEST: &str = "manifest.json";
+pub(crate) const STATE_INDEX: &str = "state-index.jsonl";
+const CHECKPOINTS: &str = "checkpoints.jsonl.zst";
+pub(crate) const CONTROL_INDEX: &str = "control-index.jsonl";
+pub(crate) const CONTROL_SOURCE_INDEX: &str = "control-source-index.jsonl";
 
 /// Generate replay artifacts into an atomically committed `derived` directory.
 ///
@@ -115,7 +121,8 @@ pub fn index_session_with_options(
     options: IndexOptions,
 ) -> Result<IndexOutcome> {
     let session_directory = session_directory.as_ref();
-    let completion_exists = session_directory.join("completion.json").is_file();
+    let session_layout = SessionLayout::new(session_directory);
+    let completion_exists = session_layout.completion().is_file();
 
     if !completion_exists && !options.live_snapshot {
         return Err(Error::SessionIncomplete {
@@ -123,7 +130,7 @@ pub fn index_session_with_options(
         });
     }
 
-    let event_path = session_directory.join("events.jsonl");
+    let event_path = session_layout.event_log();
     let identity = completion_exists
         .then(|| return SourceIdentity::capture(session_directory))
         .transpose()?;
@@ -208,7 +215,7 @@ pub fn index_session_with_options(
         }
 
         commit_directory(session_directory, &staging, &destination)?;
-        let manifest_path = destination.join("manifest.json");
+        let manifest_path = destination.join(INDEX_MANIFEST);
         let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
             return Error::Filesystem {
                 path: manifest_path,
@@ -273,8 +280,8 @@ pub fn derived_directory_name_for(
     state_selection: StateSelection,
 ) -> String {
     let base = match state_selection {
-        StateSelection::All => DERIVED_DIRECTORY.to_owned(),
-        StateSelection::Presented => format!("{DERIVED_DIRECTORY}-presented"),
+        StateSelection::All => layout::DERIVED.to_owned(),
+        StateSelection::Presented => format!("{}-presented", layout::DERIVED),
     };
 
     return source_range.map_or_else(
@@ -283,32 +290,72 @@ pub fn derived_directory_name_for(
     );
 }
 
-pub(crate) fn load_nearest_replay_seed(
-    directory: &Path,
-    log: &EventLog,
-    selector: &StateSelector,
-) -> Result<Option<ReplaySeed>> {
-    let manifest_path = directory.join("manifest.json");
-    let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
-        return Error::Filesystem {
-            path: manifest_path.clone(),
-            source,
-        };
-    })?;
-    let manifest: ReplayManifest = serde_json::from_slice(&manifest_bytes)
-        .map_err(|source| return json_error(manifest_path, source))?;
+/// A session's default semantic index, reachable only through the derived-artifact trust rule.
+///
+/// The index is a read model: it is opened only when the session's artifact catalog binds its
+/// exact manifest to the replayed log and every member matches, and an index built by another
+/// engine revision is ignored so replay falls back to canonical events.
+pub(crate) struct DerivedIndex {
+    directory: PathBuf,
+}
 
-    if manifest.version != STATE_FORMAT_VERSION
-        || manifest.ghostty_revision != GHOSTTY_REVISION
-        || manifest.state_selection != StateSelection::All
-        || manifest.source_event_hash != log.events.last().map(|record| return record.hash.clone())
-    {
-        return Err(invalid_replay(
-            "semantic checkpoint index does not match the replay source",
-        ));
+impl DerivedIndex {
+    /// Open the default index of `log`'s session, or `None` when no trusted index exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a cataloged index fails its catalog binding or member verification.
+    pub(crate) fn open(log: &EventLog) -> Result<Option<Self>> {
+        let Some(session) = log.source_path.as_deref().and_then(Path::parent) else {
+            return Ok(None);
+        };
+        let Some(directory) = open_verified_artifact(
+            session,
+            layout::DERIVED,
+            &log.header.session_manifest_hash,
+            log.events.last().map(|record| return record.hash.as_str()),
+        )?
+        else {
+            return Ok(None);
+        };
+        let manifest_path = directory.join(INDEX_MANIFEST);
+        let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
+            return Error::Filesystem {
+                path: manifest_path.clone(),
+                source,
+            };
+        })?;
+        let manifest: ReplayManifest = serde_json::from_slice(&manifest_bytes)
+            .map_err(|source| return json_error(manifest_path, source))?;
+
+        if manifest.version != STATE_FORMAT_VERSION
+            || manifest.ghostty_revision != GHOSTTY_REVISION
+            || manifest.state_selection != StateSelection::All
+        {
+            return Ok(None);
+        }
+        return Ok(Some(Self { directory }));
     }
 
-    verify_artifact_members(directory, &manifest.members)?;
+    /// Path of one verified index member.
+    pub(crate) fn member(&self, name: &str) -> PathBuf {
+        return self.directory.join(name);
+    }
+
+    /// Load the latest replay checkpoint at or before `selector`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a verified member cannot be read or decoded.
+    pub(crate) fn nearest_seed(&self, selector: &StateSelector) -> Result<Option<ReplaySeed>> {
+        return load_nearest_replay_seed(&self.directory, selector);
+    }
+}
+
+fn load_nearest_replay_seed(
+    directory: &Path,
+    selector: &StateSelector,
+) -> Result<Option<ReplaySeed>> {
     let checkpoint_selector = match selector {
         StateSelector::Final => Some(CheckpointSelector::Final),
         StateSelector::LatestPresented => Some(CheckpointSelector::LatestPresented),
@@ -318,7 +365,7 @@ pub(crate) fn load_nearest_replay_seed(
             Some(CheckpointSelector::MonotonicNs(*monotonic_ns))
         }
         StateSelector::StateHash(state_hash) => {
-            let index_path = directory.join("state-index.jsonl");
+            let index_path = directory.join(STATE_INDEX);
             let file = fs_err::File::open(&index_path).map_err(|source| {
                 return Error::Filesystem {
                     path: index_path.clone(),
@@ -349,7 +396,7 @@ pub(crate) fn load_nearest_replay_seed(
         return Ok(None);
     };
 
-    let checkpoints_path = directory.join("checkpoints.jsonl.zst");
+    let checkpoints_path = directory.join(CHECKPOINTS);
     let file = fs_err::File::open(&checkpoints_path).map_err(|source| {
         return Error::Filesystem {
             path: checkpoints_path.clone(),
@@ -405,6 +452,41 @@ fn checkpoint_precedes_selector(record: &StateRecord, selector: &CheckpointSelec
             .is_none_or(|value| return value <= *event_seq),
         CheckpointSelector::MonotonicNs(monotonic_ns) => record.monotonic_ns <= *monotonic_ns,
     };
+}
+
+/// Write and catalog a session's default index for tests that exercise the trust rule.
+#[cfg(test)]
+pub(crate) fn write_cataloged_index(session: &Path, log: &EventLog) -> Result<PathBuf> {
+    use std::{fs::Permissions, os::unix::fs::PermissionsExt as _};
+
+    fs_err::set_permissions(session, Permissions::from_mode(0o700)).map_err(|source| {
+        return Error::Filesystem {
+            path: session.to_path_buf(),
+            source,
+        };
+    })?;
+
+    let directory = SessionLayout::new(session).derived();
+    create_private_directory(&directory)?;
+    write_index(&directory, log, None, true, StateSelection::All)?;
+    let manifest_bytes = fs_err::read(directory.join(INDEX_MANIFEST)).map_err(|source| {
+        return Error::Filesystem {
+            path: directory.join(INDEX_MANIFEST),
+            source,
+        };
+    })?;
+
+    append_artifact_root(
+        session,
+        &directory,
+        "semantic_index",
+        &manifest_bytes,
+        &log.header.session_manifest_hash,
+        log.events.last().map(|record| return record.hash.as_str()),
+        None,
+    )?;
+
+    return Ok(directory);
 }
 
 #[cfg(test)]
@@ -469,7 +551,7 @@ fn write_source_index(
         };
     })?;
 
-    let checkpoints_path = directory.join("checkpoints.jsonl.zst");
+    let checkpoints_path = directory.join(CHECKPOINTS);
     let checkpoints_file = secure_file(&checkpoints_path)?;
     let mut checkpoints =
         zstd::stream::write::Encoder::new(checkpoints_file, 3).map_err(|source| {
@@ -485,7 +567,7 @@ fn write_source_index(
         };
     })?;
 
-    let mut index = secure_writer(&directory.join("state-index.jsonl"))?;
+    let mut index = secure_writer(&directory.join(STATE_INDEX))?;
     let mut retained_state_count = 0_u64;
     let mut final_retained_state_hash = None;
     let mut previous_retained_state = None;
@@ -707,7 +789,7 @@ fn write_source_index(
         };
     })?;
 
-    finish_writer(index, &directory.join("state-index.jsonl"))?;
+    finish_writer(index, &directory.join(STATE_INDEX))?;
     write_secure(&directory.join("final.txt"), &artifacts.final_text)?;
     write_secure(&directory.join("final.vt"), &artifacts.final_vt)?;
     write_secure(&directory.join("final.html"), &artifacts.final_html)?;
@@ -728,8 +810,8 @@ fn write_source_index(
         members,
     };
     let manifest_bytes = serde_json::to_vec_pretty(&manifest)
-        .map_err(|source| return json_error(directory.join("manifest.json"), source))?;
-    write_secure(&directory.join("manifest.json"), &manifest_bytes)?;
+        .map_err(|source| return json_error(directory.join(INDEX_MANIFEST), source))?;
+    write_secure(&directory.join(INDEX_MANIFEST), &manifest_bytes)?;
     verify_artifact_members(directory, &manifest.members)?;
     sync_directory(directory)?;
 

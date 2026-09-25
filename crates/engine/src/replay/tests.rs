@@ -328,12 +328,11 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
     let mut data = b"\x1b]2;tmux-title\x1b\\\x1b]7;file:///tmp\x1b\\".to_vec();
     data.extend(vec![b'x'; 1_100]);
     let output_bytes = u64::try_from(data.len()).expect("output length");
-    let log = output_log(&data);
+    let mut log = output_log(&data);
     let temporary = tempfile::TempDir::new().expect("temporary directory");
-    let directory = temporary.path().join("derived");
-    create_private_directory(&directory).expect("private derived directory");
-    index::write_index(&directory, &log, None, true, StateSelection::All)
-        .expect("periodic checkpoint index");
+    log.source_path = Some(temporary.path().join("events.jsonl"));
+    let directory =
+        index::write_cataloged_index(temporary.path(), &log).expect("periodic checkpoint index");
 
     let entries: Vec<StateIndexEntry> = fs_err::read_to_string(directory.join("state-index.jsonl"))
         .expect("state index")
@@ -376,7 +375,10 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
     assert!(directory.join("control-index.jsonl").is_file());
     assert!(directory.join("control-source-index.jsonl").is_file());
 
-    let seed = load_nearest_replay_seed(&directory, &log, &StateSelector::StateId(1_099))
+    let seed = DerivedIndex::open(&log)
+        .expect("trusted index lookup")
+        .expect("cataloged index")
+        .nearest_seed(&StateSelector::StateId(1_099))
         .expect("validated checkpoint lookup")
         .expect("nearest late checkpoint");
     assert_eq!(

@@ -18,9 +18,9 @@ pub mod artifact {
     pub use crate::storage::artifact::{
         append_artifact_prefix_root, append_artifact_root, collect_artifact_members,
         commit_directory, create_private_directory, finish_writer, hash_regular_file,
-        open_regular_file_nofollow, read_artifact_roots, secure_file, secure_writer,
-        sync_directory, verify_artifact_members, verify_session_artifacts, write_secure,
-        BudgetWriter, ARTIFACT_ROOT_LOG,
+        member_media_type, member_schema_type, open_regular_file_nofollow, open_verified_artifact,
+        read_artifact_roots, secure_file, secure_writer, sync_directory, verify_artifact_members,
+        verify_session_artifacts, write_secure, BudgetWriter,
     };
 }
 
@@ -38,7 +38,7 @@ pub mod event_log {
 pub mod session {
     pub use crate::storage::session::{
         canonical_manifest_bytes, manifest_hash, read_completion, read_manifest, recover_session,
-        validate_completed_log, validate_completed_session, validate_completion_candidate,
+        validate_completed_session, validate_completed_session_with_check,
         validate_completion_summary_candidate, verify_session, verify_session_with_trust,
         SessionSnapshot,
     };
@@ -55,7 +55,7 @@ pub mod provenance {
 pub mod receipt {
     pub use crate::auxiliary::receipt::{
         create_ssh_receipt, read_receipt, receipt_signing_capability, verify_ssh_receipt,
-        EVIDENCE_RECEIPT_FORMAT, EVIDENCE_RECEIPT_NAME, EVIDENCE_RECEIPT_VERSION,
+        EVIDENCE_RECEIPT_FORMAT, EVIDENCE_RECEIPT_VERSION,
     };
 }
 
@@ -71,7 +71,7 @@ pub mod request_journal {
 /// Portable evidence-bundle creation and verification.
 pub mod bundle {
     pub use crate::auxiliary::bundle::{
-        archive, hash_regular_file, verify, verify_archive, BundleDraft, BundleIdentity,
-        BundleMemberMetadata, BundleMemberWriter,
+        archive, verify, verify_archive, BundleDraft, BundleIdentity, BundleMemberMetadata,
+        BundleMemberWriter,
     };
 }

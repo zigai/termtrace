@@ -15,7 +15,10 @@ use super::{
 };
 use crate::{
     observation::publish_endpoint_checkpoint,
-    replay::{trust::SourceIdentity, EndpointInspection},
+    replay::{
+        trust::{SourceIdentity, ValidatedSession},
+        EndpointInspection,
+    },
     Error, Result,
 };
 use portable_pty::PtySize;
@@ -331,7 +334,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
 
     let source = SourceIdentity::capture_candidate(&options.output_directory)?;
     publish_session_completion(options, &completion)?;
-    let source = source.completed(&options.output_directory)?;
+    let validated = ValidatedSession::published(&options.output_directory, source, completion)?;
 
     match semantic_state_hash(&runtime.final_presented) {
         Ok(final_state_hash) => {
@@ -344,14 +347,9 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
                 presented: true,
             };
 
-            if let Err(error) = publish_endpoint_checkpoint(
-                &options.output_directory,
-                &StatePoint::LatestPresented,
-                &completion,
-                &endpoint,
-                &source,
-                None,
-            ) {
+            if let Err(error) =
+                publish_endpoint_checkpoint(&validated, &StatePoint::LatestPresented, &endpoint)
+            {
                 tracing::warn!(%error, "could not publish completion endpoint checkpoint");
             }
         }

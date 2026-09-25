@@ -5,7 +5,7 @@ use super::{
         validate_private_directory_fd, validate_private_regular_file_fd,
     },
     verification::normalized_relative_path,
-    ARTIFACT_ROOT_FORMAT, ARTIFACT_ROOT_LOCK, ARTIFACT_ROOT_LOG, ARTIFACT_ROOT_VERSION,
+    ARTIFACT_ROOT_FORMAT, ARTIFACT_ROOT_VERSION,
 };
 use crate::storage::{Error, Result};
 use nix::fcntl::{Flock, FlockArg, OFlag};
@@ -18,7 +18,10 @@ use std::{
     path::Path,
 };
 use termtrace_model::artifact::metadata::{ArtifactRootRecord, ArtifactSourceRange};
-use termtrace_model::execution::event_log::CanonicalBoundary;
+use termtrace_model::execution::{
+    event_log::CanonicalBoundary,
+    layout::{self, SessionLayout},
+};
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -114,10 +117,10 @@ fn append_root(
     let directory_name = normalized_relative_path(directory_name)?;
     let session_fd = open_directory_path(session, false)?;
     validate_private_directory_fd(&session_fd, session)?;
-    let lock_path = session.join(ARTIFACT_ROOT_LOCK);
+    let lock_path = SessionLayout::new(session).artifact_root_lock();
     let lock_fd = open_file_at(
         &session_fd,
-        OsStr::new(ARTIFACT_ROOT_LOCK),
+        OsStr::new(layout::ARTIFACT_ROOT_LOCK),
         OFlag::O_RDWR | OFlag::O_CREAT | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
         Mode::from_bits_truncate(0o600),
         &lock_path,
@@ -135,10 +138,10 @@ fn append_root(
             };
         })?;
 
-    let catalog_path = session.join(ARTIFACT_ROOT_LOG);
+    let catalog_path = SessionLayout::new(session).artifact_root_log();
     let catalog_fd = open_file_at(
         &session_fd,
-        OsStr::new(ARTIFACT_ROOT_LOG),
+        OsStr::new(layout::ARTIFACT_ROOT_LOG),
         OFlag::O_RDWR | OFlag::O_APPEND | OFlag::O_CREAT | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
         Mode::from_bits_truncate(0o600),
         &catalog_path,

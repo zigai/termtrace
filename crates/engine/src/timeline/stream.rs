@@ -3,14 +3,14 @@ use super::{
     selection::range_error,
 };
 use crate::{
-    replay::{timeline_event, trust::SourceIdentity, visit_recording_states_range_while},
+    replay::{
+        timeline_event, trust::SourceIdentity, visit_recording_states_range_while, ValidatedSession,
+    },
     Result,
 };
 use std::{collections::VecDeque, path::Path, sync::atomic::AtomicBool};
-use termtrace_evidence::{
-    event_log::EventLogCursor,
-    session::{validate_completed_session, SessionSnapshot},
-};
+use termtrace_evidence::{event_log::EventLogCursor, session::SessionSnapshot};
+use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::{
     execution::event::{Event, EventRecord},
     terminal::{
@@ -35,16 +35,17 @@ pub fn visit_session_timeline_while(
     range: Option<SourceRange>,
     visitor: impl FnMut(TimelineEntry) -> Result<bool>,
 ) -> Result<()> {
-    validate_completed_session(session)?;
-
-    return visit_recording_timeline_while(
+    let validated = ValidatedSession::open(session)?;
+    visit_recording_timeline_while(
         session,
         true,
         include_hidden,
         include_controls,
         range,
         visitor,
-    );
+    )?;
+
+    return validated.check();
 }
 
 /// Visit an ordered timeline for a verified finite prefix without claiming completion.
@@ -77,7 +78,7 @@ fn visit_recording_timeline_while(
     mut visitor: impl FnMut(TimelineEntry) -> Result<bool>,
 ) -> Result<()> {
     let source = SourceIdentity::capture_candidate(session)?;
-    let mut canonical = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut canonical = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     let mut controls = include_controls
         .then(|| return TokenCursor::new(session, range))
         .transpose()?;
@@ -248,7 +249,7 @@ pub(crate) struct TokenCursor {
 impl TokenCursor {
     pub(crate) fn new(session: &Path, range: Option<SourceRange>) -> Result<Self> {
         return Ok(Self {
-            cursor: EventLogCursor::open(session.join("events.jsonl"))?,
+            cursor: EventLogCursor::open(SessionLayout::new(session).event_log())?,
             framer: Some(VtFramer::default()),
             output: None,
             byte_offset: 0,

@@ -2,19 +2,16 @@ use super::{bounded_action_findings, finish_analysis, task_error, ActionAnalysis
 use crate::{
     analysis::diagnostics::diagnose_session,
     diff::diff_inspections_with_semantic_states,
-    replay::{trust::SourceIdentity, visit_session_states_while, StateInspection},
+    replay::{visit_session_states_while, StateInspection, ValidatedSession},
     timeline::stream::TokenCursor,
     Result,
 };
 use rusqlite::{params, Connection, OptionalExtension as _};
 use std::{fmt::Display, path::Path, sync::atomic::AtomicBool};
-use termtrace_evidence::{
-    event_log::EventLogCursor,
-    request_journal::{MutationJournalCursor, MUTATION_JOURNAL_NAME},
-    session::validate_completed_session,
-};
+use termtrace_evidence::{event_log::EventLogCursor, request_journal::MutationJournalCursor};
 use termtrace_model::{
     execution::event::{Event, OperationStatus},
+    execution::layout::SessionLayout,
     terminal::{
         analysis::{ActionOutputSummary, DiagnosticCheck, LastActionAnalysis, LastActionBoundary},
         observation::StatePoint,
@@ -38,8 +35,8 @@ pub fn analyze_last_action_session(
         ));
     }
 
-    let source = SourceIdentity::capture(session)?;
-    let completion = validate_completed_session(session)?;
+    let validated = ValidatedSession::open(session)?;
+    let completion = validated.completion();
     let action = last_input_action(session)?;
     let mut before = None;
     let mut after = None;
@@ -86,7 +83,7 @@ pub fn analyze_last_action_session(
         byte_count: 0,
     };
 
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     while let Some(record) = cursor.next_record()? {
         if record.seq > action.intent_event_seq
             && let Event::Output { data } = record.event
@@ -121,11 +118,11 @@ pub fn analyze_last_action_session(
         first_action_token_id,
     );
 
-    source.check(session)?;
+    validated.check()?;
 
     return Ok(finish_analysis(ActionAnalysisInputs {
         session_id: completion.session_id,
-        source_final_event_hash: completion.final_event_hash,
+        source_final_event_hash: completion.final_event_hash.clone(),
         action,
         difference,
         before,
@@ -157,7 +154,7 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
         )
         .map_err(index_error)?;
 
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     let mut last_intent_seq = None;
 
     {
@@ -211,7 +208,7 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
     let last_intent_seq = last_intent_seq
         .ok_or_else(|| return task_error("session contains no canonical input action"))?;
 
-    let mut journal = MutationJournalCursor::open(&session.join(MUTATION_JOURNAL_NAME))?;
+    let mut journal = MutationJournalCursor::open(&SessionLayout::new(session).mutation_journal())?;
     let mut selected = None;
     let mut contains_input = connection
         .prepare("SELECT 1 FROM intents WHERE seq >= ?1 AND seq < ?2 LIMIT 1")

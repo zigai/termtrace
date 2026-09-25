@@ -8,15 +8,15 @@ use crate::{
         request_journal::validate_mutation_journal,
     },
     storage::{
-        artifact::{read_artifact_roots, verify_session_artifacts, ARTIFACT_ROOT_LOG},
+        artifact::{read_artifact_roots, verify_session_artifacts},
         event_log::EventLogSummary,
         CompletionIntegrityKind, Error,
     },
 };
 use std::{fs, path::Path};
 use termtrace_model::{
-    execution::receipt::{EvidenceReceiptPayload, EVIDENCE_RECEIPT_NAME},
-    execution::request_journal::MUTATION_JOURNAL_NAME,
+    execution::layout::SessionLayout,
+    execution::receipt::EvidenceReceiptPayload,
     execution::session::{
         MutationJournalStatus, SessionCompletion, VerificationFinding, VerificationLevel,
         VerificationReport, VERIFICATION_REPORT_FORMAT, VERIFICATION_REPORT_VERSION,
@@ -40,6 +40,7 @@ pub fn verify_session_with_trust(
     allowed_signers: Option<&Path>,
 ) -> VerificationReport {
     let session_directory = session_directory.as_ref();
+    let layout = SessionLayout::new(session_directory);
     let mut report = VerificationReport {
         format: VERIFICATION_REPORT_FORMAT.to_owned(),
         version: VERIFICATION_REPORT_VERSION,
@@ -62,9 +63,7 @@ pub fn verify_session_with_trust(
         findings: Vec::new(),
         output_page: None,
     };
-
-    let manifest_path = session_directory.join("session.json");
-    let manifest_bytes = match fs::read(&manifest_path) {
+    let manifest_bytes = match fs::read(layout.manifest()) {
         Ok(bytes) => bytes,
         Err(error) => {
             finding(
@@ -95,7 +94,7 @@ pub fn verify_session_with_trust(
         return report;
     }
 
-    let log = match EventLogSummary::read(session_directory.join(&manifest.event_log)) {
+    let log = match EventLogSummary::read(layout.event_log()) {
         Ok(log) => log,
         Err(error) => {
             finding(&mut report, "event_log_invalid", error.to_string());
@@ -163,7 +162,7 @@ pub fn verify_session_with_trust(
         }
     }
 
-    if session_directory.join(MUTATION_JOURNAL_NAME).exists() {
+    if layout.mutation_journal().exists() {
         match validate_mutation_journal(session_directory) {
             Ok(count) => {
                 report.mutation_journal_status = MutationJournalStatus::Verified;
@@ -206,7 +205,7 @@ fn verify_signature(
     completion: &SessionCompletion,
     report: &mut VerificationReport,
 ) {
-    let receipt_path = session.join(EVIDENCE_RECEIPT_NAME);
+    let receipt_path = SessionLayout::new(session).evidence_receipt();
     if !receipt_path.exists() {
         finding(
             report,
@@ -274,8 +273,9 @@ fn expected_receipt_payload(
         };
     })?;
 
-    let roots = read_artifact_roots(&session.join(ARTIFACT_ROOT_LOG))?;
-    let completion_path = session.join("completion.json");
+    let layout = SessionLayout::new(session);
+    let roots = read_artifact_roots(&layout.artifact_root_log())?;
+    let completion_path = layout.completion();
     let completion_bytes = fs::read(&completion_path).map_err(|source| {
         return Error::Filesystem {
             path: completion_path,

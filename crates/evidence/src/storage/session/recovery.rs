@@ -16,7 +16,9 @@ use std::{
     os::unix::fs::PermissionsExt as _,
     path::{absolute, Path},
 };
-use termtrace_model::execution::event_log::RecoveryReport;
+use termtrace_model::execution::{
+    event_log::RecoveryReport, layout::SessionLayout, session::SessionManifest,
+};
 
 /// Owned, verified disk snapshot of a finite canonical prefix, without a completion claim.
 pub struct SessionSnapshot {
@@ -35,36 +37,18 @@ impl SessionSnapshot {
             .tempdir()
             .map_err(|error| return Error::filesystem(temp_dir(), error))?;
 
-        copy_context_file(
-            &source.join("session.json"),
-            &directory.path().join("session.json"),
-        )?;
+        let (manifest, manifest_hash) = stage_context(source, directory.path())?;
+        let mut cursor = EventLogCursor::open_snapshot(SessionLayout::new(source).event_log())?;
 
-        let manifest = read_manifest(directory.path())?;
-        validate_manifest(&manifest)?;
-        if let Some(profile) = &manifest.ghostty_visual {
-            copy_context_file(
-                &source.join(&profile.replay_profile),
-                &directory.path().join(&profile.replay_profile),
-            )?;
-
-            validate_replay_profile_file(directory.path(), &manifest)?;
-        }
-
-        let manifest_path = directory.path().join("session.json");
-        let manifest_bytes = fs::read(&manifest_path)
-            .map_err(|error| return Error::filesystem(&manifest_path, error))?;
-
-        let mut cursor = EventLogCursor::open_snapshot(source.join("events.jsonl"))?;
         if cursor.header().session_id != manifest.session_id
-            || cursor.header().session_manifest_hash != manifest_hash(&manifest_bytes)
+            || cursor.header().session_manifest_hash != manifest_hash
         {
             return Err(Error::invalid(
                 "snapshot header does not bind the session manifest",
             ));
         }
 
-        let path = directory.path().join("events.jsonl");
+        let path = SessionLayout::new(directory.path()).event_log();
         let mut output = io::BufWriter::new(secure_file(&path)?);
         write_snapshot_record(&path, &mut output, cursor.header())?;
 
@@ -138,41 +122,22 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
         .tempdir_in(parent)
         .map_err(|error| return Error::filesystem(parent, error))?;
 
-    copy_context_file(
-        &source.join("session.json"),
-        &staging.path().join("session.json"),
-    )?;
+    let (manifest, manifest_hash) = stage_context(source, staging.path())?;
+    let staged = SessionLayout::new(staging.path());
+    let mut report =
+        EventLog::recover_prefix(SessionLayout::new(source).event_log(), staged.event_log())?;
 
-    let manifest = read_manifest(staging.path())?;
-    validate_manifest(&manifest)?;
-    if let Some(profile) = &manifest.ghostty_visual {
-        copy_context_file(
-            &source.join(&profile.replay_profile),
-            &staging.path().join(&profile.replay_profile),
-        )?;
-
-        validate_replay_profile_file(staging.path(), &manifest)?;
-    }
-
-    let mut report = EventLog::recover_prefix(
-        source.join("events.jsonl"),
-        staging.path().join("events.jsonl"),
-    )?;
-
-    let summary = EventLogSummary::read(staging.path().join("events.jsonl"))?;
-    let manifest_bytes = fs::read(staging.path().join("session.json"))
-        .map_err(|error| return Error::filesystem(staging.path().join("session.json"), error))?;
-
+    let summary = EventLogSummary::read(staged.event_log())?;
     if summary.header.session_id != manifest.session_id
-        || summary.header.session_manifest_hash != manifest_hash(&manifest_bytes)
+        || summary.header.session_manifest_hash != manifest_hash
     {
         return Err(Error::invalid(
             "recovered event header does not bind the source session manifest",
         ));
     }
 
-    report.recovered = destination.join("events.jsonl");
-    let recovery_path = staging.path().join("recovery.json");
+    report.recovered = SessionLayout::new(&destination).event_log();
+    let recovery_path = staged.recovery_diagnostic();
     let bytes = serde_json::to_vec(&serde_json::json!({
         "format": "termtrace-session-recovery",
         "version": 1,
@@ -196,6 +161,29 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
     commit_directory(parent, staging.path(), &destination)?;
 
     return Ok(report);
+}
+
+/// Copy and validate the immutable session context, returning the manifest and its hash.
+fn stage_context(source: &Path, destination: &Path) -> Result<(SessionManifest, String)> {
+    let source = SessionLayout::new(source);
+    let staged = SessionLayout::new(destination);
+    copy_context_file(&source.manifest(), &staged.manifest())?;
+
+    let manifest = read_manifest(destination)?;
+    validate_manifest(&manifest)?;
+    if manifest.ghostty_visual.is_some() {
+        copy_context_file(
+            &source.ghostty_replay_profile(),
+            &staged.ghostty_replay_profile(),
+        )?;
+
+        validate_replay_profile_file(destination, &manifest)?;
+    }
+
+    let manifest_bytes = fs::read(staged.manifest())
+        .map_err(|error| return Error::filesystem(staged.manifest(), error))?;
+
+    return Ok((manifest, manifest_hash(&manifest_bytes)));
 }
 
 fn copy_context_file(source: &Path, destination: &Path) -> Result<()> {

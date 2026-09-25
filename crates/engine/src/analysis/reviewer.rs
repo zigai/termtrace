@@ -3,7 +3,7 @@
 use crate::{
     analysis::diagnostics::{visit_native_correlations, ValidatedVisualManifest},
     observation::state_text,
-    replay::{inspect_completed_session, visit_session_states_while},
+    replay::{inspect_session_stream, visit_session_states_while, ValidatedSession},
     Error, Result,
 };
 use std::{
@@ -18,10 +18,10 @@ use std::{
 use termtrace_evidence::{
     artifact::{commit_directory, write_secure},
     event_log::EventLogCursor,
-    session::validate_completed_session,
 };
 use termtrace_model::{
     execution::event::Event,
+    execution::layout::SessionLayout,
     terminal::replay::{StateRecord, StateSelector},
     terminal::reviewer::{
         ReviewExportManifest, ReviewSearchMatch, ReviewSearchResult, ReviewSummary,
@@ -40,7 +40,8 @@ pub fn summarize(
     visual_evidence: &[ValidatedVisualManifest],
 ) -> Result<ReviewSummary> {
     let session = session.as_ref().to_path_buf();
-    let completion = validate_completed_session(&session)?;
+    let validated = ValidatedSession::open(&session)?;
+    let completion = validated.completion();
     let mut state_count = 0_u64;
     let mut presented_state_count = 0_u64;
     let mut final_state_hash = String::new();
@@ -69,7 +70,7 @@ pub fn summarize(
     });
 
     let mut marker_count = 0_u64;
-    let mut cursor = EventLogCursor::open(session.join("events.jsonl"))?;
+    let mut cursor = EventLogCursor::open(SessionLayout::new(&session).event_log())?;
 
     while let Some(record) = cursor.next_record()? {
         if matches!(record.event, Event::Marker { .. }) {
@@ -79,6 +80,7 @@ pub fn summarize(
 
     cursor.validate_boundary(completion.event_count, &completion.final_event_hash)?;
     let _pending = cursor.finish()?;
+    validated.check()?;
 
     return Ok(ReviewSummary {
         canonical_session: session,
@@ -96,8 +98,7 @@ pub fn search(session: impl AsRef<Path>, query: &str) -> Result<ReviewSearchResu
     validate_query(query)?;
 
     let session = session.as_ref().to_path_buf();
-    validate_completed_session(&session)?;
-
+    let validated = ValidatedSession::open(&session)?;
     let mut matches: Vec<ReviewSearchMatch> = Vec::new();
 
     visit_session_states_while(&session, &AtomicBool::new(false), |record, state| {
@@ -114,6 +115,8 @@ pub fn search(session: impl AsRef<Path>, query: &str) -> Result<ReviewSearchResu
         return Ok(true);
     })?;
 
+    validated.check()?;
+
     return Ok(ReviewSearchResult {
         canonical_session: session,
         query: query.to_owned(),
@@ -128,11 +131,13 @@ pub fn export_state(
     destination: impl AsRef<Path>,
 ) -> Result<ReviewExportManifest> {
     let session = session.as_ref().to_path_buf();
-    let completion = validate_completed_session(&session)?;
-    let inspection = inspect_completed_session(&session, StateSelector::StateId(state_id))
+    let validated = ValidatedSession::open(&session)?;
+    let inspection = inspect_session_stream(&session, StateSelector::StateId(state_id), None)
         .map_err(|error| {
             return review_error(format!("review state {state_id} does not exist: {error}"));
         })?;
+
+    validated.check()?;
 
     let state_json = serde_json::to_vec_pretty(&inspection).map_err(|source_error| {
         return Error::InvalidJson {
@@ -166,7 +171,7 @@ pub fn export_state(
         &temporary,
         destination,
         &session,
-        &completion.final_event_hash,
+        &validated.completion().final_event_hash,
         &inspection.record,
         state_json,
         screen,

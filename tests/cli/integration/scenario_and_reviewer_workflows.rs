@@ -119,7 +119,7 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
     assert!(canonical.is_dir());
 
     let log = EventLog::read(canonical.join("events.jsonl")).expect("scenario event log");
-    validate_completed_log(&canonical, &log).expect("scenario completion closure");
+    validate_completed_session(&canonical).expect("scenario completion closure");
 
     let replayed = replay(&log).expect("scenario final replay");
     assert!(
@@ -382,7 +382,9 @@ fn scenario_retry_stops_after_success_and_preserves_real_attempt_outcomes() {
         );
 
         let log = EventLog::read(path.join("events.jsonl")).expect("canonical events");
-        validate_completed_log(path, &log).expect("valid attempt closure");
+
+        validate_completed_session(path).expect("valid attempt closure");
+
         let contains_marker = log.events.iter().any(|record| {
             return matches!(&record.event, Event::Marker { label, .. } if label == "after-success");
         });

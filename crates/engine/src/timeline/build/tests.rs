@@ -1,8 +1,7 @@
 use super::*;
 use crate::replay::{
-    reset_test_replay_output_bytes, test_replay_output_bytes, write_index, StateSelection,
+    reset_test_replay_output_bytes, test_replay_output_bytes, write_cataloged_index,
 };
-use termtrace_evidence::artifact::create_private_directory;
 use termtrace_model::execution::event::{EventLogHeader, EventRecord};
 use termtrace_model::value::ByteString;
 use uuid::Uuid;
@@ -116,10 +115,7 @@ fn indexed_control_log(temporary: &tempfile::TempDir) -> EventLog {
         source_path: Some(temporary.path().join("events.jsonl")),
     };
 
-    let directory = temporary.path().join(DERIVED_DIRECTORY);
-    create_private_directory(&directory).expect("derived directory");
-    write_index(&directory, &log, None, true, StateSelection::All)
-        .expect("control-rich checkpoint index");
+    write_cataloged_index(temporary.path(), &log).expect("control-rich checkpoint index");
 
     return log;
 }
@@ -215,9 +211,7 @@ fn indexed_range_preserves_control_spanning_output_events() {
 
     let temporary = tempfile::TempDir::new().expect("indexed directory");
     log.source_path = Some(temporary.path().join("events.jsonl"));
-    let directory = temporary.path().join(DERIVED_DIRECTORY);
-    create_private_directory(&directory).expect("derived directory");
-    write_index(&directory, &log, None, true, StateSelection::All).expect("spanning-control index");
+    write_cataloged_index(temporary.path(), &log).expect("spanning-control index");
 
     let range = Some(SourceRange {
         start_monotonic_ns: 350,
@@ -311,8 +305,6 @@ fn streaming_pages_match_full_timeline_with_controls() {
 #[test]
 fn late_page_uses_checkpoint_and_retains_only_requested_entries() {
     let temporary = tempfile::TempDir::new().expect("temporary directory");
-    let directory = temporary.path().join(DERIVED_DIRECTORY);
-    create_private_directory(&directory).expect("derived directory");
     let data = vec![b'x'; 1_100];
     let mut log = EventLog {
         header: EventLogHeader::new(
@@ -339,7 +331,7 @@ fn late_page_uses_checkpoint_and_retains_only_requested_entries() {
         source_path: Some(temporary.path().join("events.jsonl")),
     };
 
-    write_index(&directory, &log, None, true, StateSelection::All).expect("checkpointed index");
+    write_cataloged_index(temporary.path(), &log).expect("checkpointed index");
 
     reset_test_replay_output_bytes();
 
