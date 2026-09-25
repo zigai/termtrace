@@ -5,12 +5,7 @@ use nix::{
     unistd::Pid,
 };
 use std::{
-    collections::BTreeMap,
-    ffi::OsString,
-    path::Path,
-    process::Command,
-    thread,
-    time::Duration,
+    collections::BTreeMap, ffi::OsString, path::Path, process::Command, thread, time::Duration,
 };
 use tempfile::TempDir;
 use termtrace_evidence::{
@@ -27,13 +22,16 @@ use termtrace_model::{
             SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
         },
     },
-    protocol::control::InputSequenceFailureDetails,
+    protocol::{
+        control::InputSequenceFailureDetails,
+        mutation::{MutationEffect, Retry},
+    },
     terminal::observation::{ActorBoundaries, StatePoint},
     value::ByteString,
 };
 use termtrace_service::{
     context::OperationContext,
-    error::{Error, ErrorKind, MutationEffect, RetrySafety},
+    error::{Error, ErrorKind},
     recording::{DetachedRecording, Recording},
     session::Session,
     types::{Operation, OperationStatus, SessionId, StateSelector},
@@ -153,7 +151,7 @@ fn test_state_selector_to_state_point_mapping() {
 }
 
 #[test]
-fn test_error_kind_codes_mutation_effects_and_retry_safety() {
+fn test_error_kind_codes_effects_and_derived_retry() {
     let stale = Error::StaleState {
         expected_state_hash: "0".repeat(64),
         current_state_hash: "1".repeat(64),
@@ -169,16 +167,12 @@ fn test_error_kind_codes_mutation_effects_and_retry_safety() {
                 event_hash: "0".repeat(64),
             },
         }),
-        retry_safety: RetrySafety::NewRequest,
     };
 
     assert_eq!(stale.kind(), ErrorKind::StaleState);
     assert_eq!(stale.code(), "stale_state");
-    assert_eq!(
-        stale.mutation_effect(),
-        MutationEffect::RejectedBeforeMutation
-    );
-    assert_eq!(stale.retry_safety(), RetrySafety::NewRequest);
+    assert_eq!(stale.effect(), MutationEffect::NotApplied);
+    assert_eq!(stale.retry(), Retry::NewRequest);
 
     let partial = Error::PartialInput {
         details: InputSequenceFailureDetails {
@@ -193,19 +187,16 @@ fn test_error_kind_codes_mutation_effects_and_retry_safety() {
             last_result_event_seq: 2,
             resume_from_atom_index: 2,
         },
-        retry_safety: RetrySafety::SameRequestOnly,
-        uncertain: false,
+        effect: MutationEffect::Partial { completed_atoms: 2 },
     };
 
     assert_eq!(partial.kind(), ErrorKind::PartialInput);
     assert_eq!(partial.code(), "partial_input");
     assert_eq!(
-        partial.mutation_effect(),
-        MutationEffect::PartiallyApplied {
-            completed_prefix: 2
-        }
+        partial.effect(),
+        MutationEffect::Partial { completed_atoms: 2 }
     );
-    assert_eq!(partial.retry_safety(), RetrySafety::SameRequestOnly);
+    assert_eq!(partial.retry(), Retry::InspectFirst);
 }
 
 #[test]

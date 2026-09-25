@@ -1199,6 +1199,10 @@
               ],
               "description": "Actor-consistent context for a rejected optimistic guard."
             },
+            "effect": {
+              "$ref": "#/$defs/MutationEffect",
+              "description": "What the request did before it failed, as stated by the actor."
+            },
             "message": {
               "description": "Human-readable diagnostic.",
               "type": "string"
@@ -1211,7 +1215,8 @@
           "required": [
             "status",
             "code",
-            "message"
+            "message",
+            "effect"
           ],
           "type": "object"
         }
@@ -1570,6 +1575,74 @@
         "values"
       ],
       "type": "object"
+    },
+    "MutationEffect": {
+      "description": "Effect a request had on the child, its PTY, or canonical evidence.\n\nThe recording actor states this fact in every rejection. Clients only\nsynthesize it for transport outcomes the actor could not report.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Nothing was applied.",
+          "properties": {
+            "kind": {
+              "const": "not_applied",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A known prefix of input atoms was applied completely, and nothing after it.",
+          "properties": {
+            "completed_atoms": {
+              "description": "Number of leading atoms applied completely.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "partial",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "completed_atoms"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Every requested mutation was applied.",
+          "properties": {
+            "kind": {
+              "const": "applied",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The request may or may not have been applied.",
+          "properties": {
+            "kind": {
+              "const": "unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "ObservationIntegrity": {
       "description": "Integrity relationship between an observation and canonical evidence.",

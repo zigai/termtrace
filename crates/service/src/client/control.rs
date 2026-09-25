@@ -1,7 +1,7 @@
 use super::{
     ActionCondition, ActionOptions, ActionPostcondition, ByteString, ControlErrorDetails, Duration,
-    Error, FrameDetail, InputAtom, InputKind, InputSequenceAtom, InvalidRegionReason, Result,
-    RetrySafety, ScreenFrameError, ScreenFrameLimitKind, StableCaptureOptions, Uuid,
+    Error, FrameDetail, InputAtom, InputKind, InputSequenceAtom, InvalidRegionReason,
+    MutationEffect, Result, ScreenFrameError, ScreenFrameLimitKind, StableCaptureOptions, Uuid,
 };
 
 pub(super) fn validate_action_options(atoms: &[InputAtom], options: &ActionOptions) -> Result<()> {
@@ -209,6 +209,7 @@ pub(super) fn action_atom(
 pub(super) fn public_control_error(
     code: String,
     message: String,
+    effect: MutationEffect,
     details: Option<ControlErrorDetails>,
     request_id: Option<Uuid>,
     expected_state_hash: Option<String>,
@@ -220,7 +221,6 @@ pub(super) fn public_control_error(
             expected_state_hash,
             current_state_hash: details.current_presented_state_hash.clone(),
             boundaries: Box::new(details.boundaries.clone()),
-            retry_safety: RetrySafety::NewRequest,
         };
     }
 
@@ -232,12 +232,9 @@ pub(super) fn public_control_error(
         && let Some(details) = details.as_ref()
         && let Some(input_sequence) = details.input_sequence.clone()
     {
-        let uncertain = input_sequence.failed_atom_bytes_written != 0;
-
         return Error::PartialInput {
             details: input_sequence,
-            retry_safety: RetrySafety::SameRequestOnly,
-            uncertain,
+            effect,
         };
     }
 
@@ -271,7 +268,7 @@ pub(super) fn public_control_error(
                 "cell_count" => ScreenFrameLimitKind::CellCount,
                 "serialized_bytes" => ScreenFrameLimitKind::SerializedBytes,
                 "response_bytes" => ScreenFrameLimitKind::ResponseBytes,
-                _ => return rejected(code, message, Some(details.clone())),
+                _ => return rejected(code, message, effect, Some(details.clone())),
             };
 
             let source = ScreenFrameError::ResourceLimit {
@@ -286,13 +283,19 @@ pub(super) fn public_control_error(
         }
     }
 
-    return rejected(code, message, details);
+    return rejected(code, message, effect, details);
 }
 
-fn rejected(code: String, message: String, details: Option<ControlErrorDetails>) -> Error {
+fn rejected(
+    code: String,
+    message: String,
+    effect: MutationEffect,
+    details: Option<ControlErrorDetails>,
+) -> Error {
     return Error::Control(termtrace_control::Error::Rejected {
         code,
         message,
+        effect,
         details: details.map(Box::new),
     });
 }
@@ -308,8 +311,6 @@ pub(super) fn public_screen_frame_error(
         return Error::ActionTerminatingFrame {
             request_id,
             boundaries: Box::new(details.boundaries.clone()),
-            input_fully_applied: true,
-            retry_safety: RetrySafety::SameRequestOnly,
             source,
         };
     }
@@ -368,6 +369,7 @@ mod tests {
         let error = public_control_error(
             "screen_frame_resource_limit".to_owned(),
             "projection failed".to_owned(),
+            MutationEffect::Applied,
             Some(details),
             Some(request_id),
             None,
@@ -375,18 +377,15 @@ mod tests {
         let Error::ActionTerminatingFrame {
             request_id: actual_request_id,
             boundaries: actual_boundaries,
-            input_fully_applied,
-            retry_safety,
             source,
-        } = error
+        } = &error
         else {
             panic!("expected typed action terminating-frame failure");
         };
 
-        assert_eq!(actual_request_id, request_id);
-        assert_eq!(*actual_boundaries, boundaries);
-        assert!(input_fully_applied);
-        assert_eq!(retry_safety, RetrySafety::SameRequestOnly);
+        assert_eq!(*actual_request_id, request_id);
+        assert_eq!(**actual_boundaries, boundaries);
+        assert_eq!(error.effect(), MutationEffect::Applied);
         assert!(matches!(
             source,
             ScreenFrameError::ResourceLimit {

@@ -30,6 +30,7 @@ use termtrace_model::{
         ControlResponse, ControlResult, ScreenFrameFailureDetails, CONTROL_PROTOCOL_VERSION,
         MAX_CONTROL_MESSAGE_BYTES,
     },
+    protocol::mutation::MutationEffect,
     terminal::observation::ActorBoundaries,
     terminal::screen::{FrameDetail, ScreenFrame, ScreenFrameData, ScreenFrameSource},
 };
@@ -208,15 +209,23 @@ fn handle_control_connection(
                 result: ControlResult::Error {
                     code: "unsupported_version".to_owned(),
                     message: format!("protocol version {} is unsupported", request.version),
+                    effect: MutationEffect::NotApplied,
                     details: None,
                 },
             },
             request_timeout,
+            MutationEffect::NotApplied,
         );
     }
 
     let request_id = request.request_id;
     let response_timeout = request.command.actor_response_timeout();
+    let unanswered = request.command.unanswered_effect();
+    let success_effect = if request.command.is_mutation() {
+        MutationEffect::Applied
+    } else {
+        MutationEffect::NotApplied
+    };
     let (response_sender, response_receiver) = mpsc::sync_channel(1);
     let mut message = RuntimeMessage::Control {
         request,
@@ -240,11 +249,17 @@ fn handle_control_connection(
                         result: ControlResult::Error {
                             code: "actor_unresponsive".to_owned(),
                             message: "recording actor is unresponsive".to_owned(),
+                            effect: MutationEffect::NotApplied,
                             details: None,
                         },
                     };
-                    let _ =
-                        write_control_response(&mut stream, cancel, &response, response_timeout);
+                    let _ = write_control_response(
+                        &mut stream,
+                        cancel,
+                        &response,
+                        response_timeout,
+                        MutationEffect::NotApplied,
+                    );
 
                     return Err(terminal_error(
                         "dispatch control request",
@@ -268,10 +283,17 @@ fn handle_control_connection(
                     result: ControlResult::Error {
                         code: "actor_disconnected".to_owned(),
                         message: "recording actor disconnected".to_owned(),
+                        effect: MutationEffect::NotApplied,
                         details: None,
                     },
                 };
-                let _ = write_control_response(&mut stream, cancel, &response, response_timeout);
+                let _ = write_control_response(
+                    &mut stream,
+                    cancel,
+                    &response,
+                    response_timeout,
+                    MutationEffect::NotApplied,
+                );
 
                 return Err(terminal_error(
                     "dispatch control request",
@@ -296,11 +318,17 @@ fn handle_control_connection(
                         result: ControlResult::Error {
                             code: "actor_unresponsive".to_owned(),
                             message: "recording actor is unresponsive".to_owned(),
+                            effect: unanswered,
                             details: None,
                         },
                     };
-                    let _ =
-                        write_control_response(&mut stream, cancel, &response, response_timeout);
+                    let _ = write_control_response(
+                        &mut stream,
+                        cancel,
+                        &response,
+                        response_timeout,
+                        MutationEffect::NotApplied,
+                    );
 
                     return Err(terminal_error(
                         "wait for control response",
@@ -315,10 +343,17 @@ fn handle_control_connection(
                     result: ControlResult::Error {
                         code: "actor_disconnected".to_owned(),
                         message: "recording actor disconnected".to_owned(),
+                        effect: unanswered,
                         details: None,
                     },
                 };
-                let _ = write_control_response(&mut stream, cancel, &response, response_timeout);
+                let _ = write_control_response(
+                    &mut stream,
+                    cancel,
+                    &response,
+                    response_timeout,
+                    MutationEffect::NotApplied,
+                );
 
                 return Err(terminal_error(
                     "wait for control response",
@@ -328,7 +363,13 @@ fn handle_control_connection(
         }
     };
 
-    return write_control_response(&mut stream, cancel, &response, response_timeout);
+    return write_control_response(
+        &mut stream,
+        cancel,
+        &response,
+        response_timeout,
+        success_effect,
+    );
 }
 
 fn cancellation_requested(cancel: &OwnedFd) -> Result<bool> {
@@ -466,6 +507,7 @@ fn write_control_response(
     cancel: &OwnedFd,
     response: &ControlResponse,
     timeout: Duration,
+    success_effect: MutationEffect,
 ) -> Result<()> {
     let encoded = serde_json::to_vec(response).map_err(|source| {
         return Error::InvalidJson {
@@ -478,6 +520,10 @@ fn write_control_response(
     let response_bytes = u64::try_from(encoded.len().saturating_add(1)).unwrap_or(u64::MAX);
     let mut payload = if response_bytes > MAX_CONTROL_MESSAGE_BYTES {
         let (code, message, details) = oversized_response_error(response, response_bytes);
+        let effect = match &response.result {
+            ControlResult::Ok { .. } => success_effect,
+            ControlResult::Error { effect, .. } => *effect,
+        };
 
         serde_json::to_vec(&ControlResponse {
             version: CONTROL_PROTOCOL_VERSION,
@@ -485,6 +531,7 @@ fn write_control_response(
             result: ControlResult::Error {
                 code,
                 message,
+                effect,
                 details,
             },
         })

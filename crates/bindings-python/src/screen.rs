@@ -1,7 +1,8 @@
 //! Screen observation and state representations for Python.
 
-use crate::errors::to_py_err;
+use crate::errors::{to_py_err, with_effect, TimeoutError};
 use pyo3::prelude::*;
+use termtrace_model::protocol::mutation::MutationEffect;
 use termtrace_sdk::client::Terminal;
 use termtrace_sdk::screen::frame_text;
 use termtrace_sdk::screen::ScreenProjectionRequest;
@@ -125,9 +126,10 @@ impl PyScreen {
             let screen = session.screen();
             let outcome = screen.wait_for_text(&pattern, timeout).map_err(to_py_err)?;
             if !outcome.matched {
-                return Err(crate::errors::TimeoutError::new_err(format!(
-                    "timed out waiting for pattern: '{pattern}'"
-                )));
+                return Err(with_effect(
+                    TimeoutError::new_err(format!("timed out waiting for pattern: '{pattern}'")),
+                    MutationEffect::NotApplied,
+                ));
             }
             let text = frame_text(&outcome.frame);
             let cursor_row = outcome.frame.cursor.row.unwrap_or_default();

@@ -96,7 +96,10 @@ fn value_u64(value: &serde_json::Value, key: &str) -> u64 {
 
 pub(crate) fn human_action_summary(value: &serde_json::Value) -> String {
     let input = value.get("input").unwrap_or(&serde_json::Value::Null);
-    let applied = value_string(input, "applied").unwrap_or_else(|| return "unknown".to_owned());
+    let effect = input
+        .get("effect")
+        .and_then(|effect| return value_string(effect, "kind"))
+        .unwrap_or_else(|| return "unknown".to_owned());
     let atoms = value_u64(input, "atoms");
     let bytes = value_u64(input, "bytes");
 
@@ -126,7 +129,7 @@ pub(crate) fn human_action_summary(value: &serde_json::Value) -> String {
     };
 
     return format!(
-        "Action: mutation applied={applied}, atoms={atoms}, bytes={bytes}; postcondition {postcondition_kind} matched={matched}, outcome={outcome}; session={session}\n"
+        "Action: mutation effect={effect}, atoms={atoms}, bytes={bytes}; postcondition {postcondition_kind} matched={matched}, outcome={outcome}; session={session}\n"
     );
 }
 

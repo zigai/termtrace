@@ -1,9 +1,10 @@
 use super::{
     actor_boundaries, control_error_code, control_error_response, evaluate_action_postcondition,
-    mpsc, presented_state_hash, screen_frame_error_response, ActionInputResult, AdmittedAction,
-    AdmittedPostcondition, ControlCommand, ControlData, ControlErrorDetails, ControlRequest,
-    ControlResponse, ControlResult, Duration, Error, EventLogWriter, InputSequenceExecution,
-    InputSequenceFailureDetails, Instant, Result, SessionActor, Uuid, CONTROL_PROTOCOL_VERSION,
+    mpsc, mutation_failure_effect, presented_state_hash, screen_frame_error_response,
+    ActionInputResult, AdmittedAction, AdmittedPostcondition, ControlCommand, ControlData,
+    ControlErrorDetails, ControlRequest, ControlResponse, ControlResult, Duration, Error,
+    EventLogWriter, InputSequenceExecution, InputSequenceFailureDetails, Instant, MutationEffect,
+    Result, SessionActor, Uuid, CONTROL_PROTOCOL_VERSION,
 };
 
 pub(in crate::recording) struct PendingInputSequence {
@@ -118,7 +119,13 @@ impl SessionActor<'_> {
                                 });
                             }
                         }
-                        Err(error) => break Err(error),
+                        Err(error) => {
+                            let recorded_events =
+                                self.event_log.next_seq() != pending.event_start_seq;
+                            let effect = mutation_failure_effect(&error, recorded_events);
+
+                            break Err((error, effect));
+                        }
                     }
                 }
                 InputSequencePhase::Waiting(mut waiting) => {
@@ -143,7 +150,7 @@ impl SessionActor<'_> {
 
                             return Ok(());
                         }
-                        Err(error) => break Err(error),
+                        Err(error) => break Err((error, MutationEffect::Applied)),
                     }
                 }
             }
@@ -165,11 +172,12 @@ impl SessionActor<'_> {
                 },
                 None,
             ),
-            Err(error) => {
+            Err((error, effect)) => {
                 let response = input_sequence_error_response(
                     pending.request.request_id,
                     atom_count,
                     &error,
+                    effect,
                     current_state_hash,
                     &self.event_log,
                 );
@@ -211,6 +219,7 @@ pub(super) fn input_sequence_error_response(
     request_id: Uuid,
     atom_count: u32,
     outcome: &Error,
+    effect: MutationEffect,
     current_state_hash: String,
     event_log: &EventLogWriter,
 ) -> ControlResponse {
@@ -233,6 +242,7 @@ pub(super) fn input_sequence_error_response(
                 message: format!(
                     "input sequence `{sequence_id}` stopped at atom {failed_atom_index}: {reason}"
                 ),
+                effect,
                 details: Some(ControlErrorDetails {
                     current_presented_state_hash: current_state_hash,
                     boundaries: actor_boundaries(event_log),
@@ -259,6 +269,7 @@ pub(super) fn input_sequence_error_response(
             current_state_hash,
             event_log,
             "action_terminating_screen_frame",
+            effect,
         ),
         Error::ControlRejected { code, message } => ControlResponse {
             version: CONTROL_PROTOCOL_VERSION,
@@ -266,6 +277,7 @@ pub(super) fn input_sequence_error_response(
             result: ControlResult::Error {
                 code: code.clone(),
                 message: message.clone(),
+                effect,
                 details: Some(ControlErrorDetails {
                     current_presented_state_hash: current_state_hash,
                     boundaries: actor_boundaries(event_log),
@@ -275,7 +287,12 @@ pub(super) fn input_sequence_error_response(
                 }),
             },
         },
-        error => control_error_response(request_id, control_error_code(error), error.to_string()),
+        error => control_error_response(
+            request_id,
+            control_error_code(error),
+            error.to_string(),
+            effect,
+        ),
     };
 }
 

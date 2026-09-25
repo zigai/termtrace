@@ -186,6 +186,7 @@ pub use termtrace_model::protocol::control::{
     ControlCommand, ControlData, ControlRequest, ControlResponse, ControlResult, PointerOperation,
     ProcessSignal, ScreenMode, ScreenPredicate, StateHashComparison,
 };
+pub use termtrace_model::protocol::mutation::{MutationEffect, Retry};
 pub use termtrace_model::terminal::observation::StatePoint;
 pub use termtrace_model::terminal::screen::{
     FrameDetail, ScreenFrame, ScreenProjectionRequest, ScreenRegion, ScreenSnapshotOptions,
@@ -200,4 +201,4 @@ pub use termtrace_service::types::{
     ArtifactRef, Operation, OperationStatus, ResolvedState, SessionId, StateSelector,
 };
 #[cfg(feature = "local")]
-pub use termtrace_service::{error::ErrorKind, wait_for_screen, Error, Result, RetrySafety};
+pub use termtrace_service::{error::ErrorKind, wait_for_screen, Error, Result};

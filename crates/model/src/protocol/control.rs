@@ -3,6 +3,7 @@
 pub use crate::terminal::observation::ActorBoundaries;
 use crate::{
     execution::{application::ApplicationEvent, event::InputKind},
+    protocol::mutation::MutationEffect,
     terminal::{
         screen::{
             FrameDetail, InvalidRegionReason, ScreenFrame, ScreenProjectionRequest, ScreenRegion,
@@ -29,7 +30,7 @@ pub struct ClockSample {
 }
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 17;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 18;
 /// Maximum encoded request or response size.
 pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 16 * 1024 * 1024;
 /// Response deadline for commands that do not wait or pace input.
@@ -464,6 +465,15 @@ impl ControlCommand {
             | Self::Application { .. }
             | Self::Stop => true,
         };
+    }
+
+    /// Effect a caller must assume when this command reached the actor but no
+    /// response came back.
+    pub const fn unanswered_effect(&self) -> MutationEffect {
+        if self.is_mutation() {
+            return MutationEffect::Unknown;
+        }
+        return MutationEffect::NotApplied;
     }
 
     /// How long the actor may take to answer before it abandons the request.
@@ -938,6 +948,8 @@ pub enum ControlResult {
         code: String,
         /// Human-readable diagnostic.
         message: String,
+        /// What the request did before it failed, as stated by the actor.
+        effect: MutationEffect,
         /// Actor-consistent context for a rejected optimistic guard.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         details: Option<ControlErrorDetails>,
@@ -1008,6 +1020,17 @@ pub struct InputSequenceFailureDetails {
     pub last_result_event_seq: u64,
     /// First atom safe to submit independently with a new request ID.
     pub resume_from_atom_index: u32,
+}
+
+impl InputSequenceFailureDetails {
+    /// Effect of the attempted prefix these details describe.
+    #[must_use]
+    pub const fn effect(&self) -> MutationEffect {
+        return MutationEffect::stopped_input_sequence(
+            self.atoms_applied,
+            self.failed_atom_bytes_written,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1104,5 +1127,42 @@ mod tests {
             label: "checkpoint".to_owned()
         }
         .is_mutation());
+    }
+
+    #[test]
+    fn unanswered_mutations_have_unknown_effect() {
+        assert_eq!(
+            ControlCommand::Snapshot.unanswered_effect(),
+            MutationEffect::NotApplied
+        );
+        assert_eq!(
+            ControlCommand::Stop.unanswered_effect(),
+            MutationEffect::Unknown
+        );
+    }
+
+    #[test]
+    fn stopped_sequence_details_state_their_effect() {
+        let mut details = InputSequenceFailureDetails {
+            sequence_id: Uuid::nil(),
+            atom_count: 3,
+            atoms_applied: 2,
+            failed_atom_index: 2,
+            failed_operation_id: Uuid::nil(),
+            bytes_written: 2,
+            failed_atom_bytes_written: 0,
+            first_intent_event_seq: 1,
+            last_result_event_seq: 6,
+            resume_from_atom_index: 3,
+        };
+
+        assert_eq!(
+            details.effect(),
+            MutationEffect::Partial { completed_atoms: 2 }
+        );
+
+        details.failed_atom_bytes_written = 1;
+
+        assert_eq!(details.effect(), MutationEffect::Unknown);
     }
 }

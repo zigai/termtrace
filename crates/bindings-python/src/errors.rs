@@ -6,8 +6,9 @@
 )]
 
 use pyo3::create_exception;
-use pyo3::exceptions::PyException;
+use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::prelude::*;
+use termtrace_model::protocol::mutation::MutationEffect;
 use termtrace_sdk::ErrorKind;
 
 create_exception!(termtrace, TermtraceError, PyException);
@@ -17,13 +18,45 @@ create_exception!(termtrace, SessionNotFoundError, TermtraceError);
 create_exception!(termtrace, IntegrityError, TermtraceError);
 
 /// Translate a `termtrace_sdk::Error` into an appropriate `PyErr`.
+///
+/// Every exception carries `effect`, the model's mutation effect as a dict,
+/// and `retry`, the retry rule the model derives from it.
 pub fn to_py_err(err: termtrace_sdk::Error) -> PyErr {
     let msg = err.to_string();
-    match err.kind() {
+    let error = match err.kind() {
         ErrorKind::StaleState => StateGuardFailedError::new_err(msg),
         ErrorKind::ControlTimeout => TimeoutError::new_err(msg),
         ErrorKind::ControlUnavailable => SessionNotFoundError::new_err(msg),
         ErrorKind::Evidence => IntegrityError::new_err(msg),
         _ => TermtraceError::new_err(msg),
-    }
+    };
+
+    return with_effect(error, err.effect());
+}
+
+/// Attach the model's `effect` and derived `retry` to a Termtrace exception.
+pub fn with_effect(error: PyErr, effect: MutationEffect) -> PyErr {
+    return Python::attach(|py| {
+        let value = error.value(py);
+        let attached = serde_json::to_string(&effect)
+            .map_err(|source| return PyValueError::new_err(source.to_string()))
+            .and_then(|encoded| {
+                return py.import("json")?.call_method1("loads", (encoded,));
+            })
+            .and_then(|effect| return value.setattr("effect", effect))
+            .and_then(|()| {
+                let retry = serde_json::to_value(effect.retry())
+                    .map_err(|source| return PyValueError::new_err(source.to_string()))?;
+
+                return value.setattr("retry", retry.as_str());
+            });
+
+        return match attached {
+            Ok(()) => error,
+            Err(failure) => {
+                failure.set_cause(py, Some(error));
+                failure
+            }
+        };
+    });
 }

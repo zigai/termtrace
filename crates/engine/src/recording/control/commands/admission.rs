@@ -1,10 +1,11 @@
 use super::{
     action, actor_boundaries, compile_action_postcondition, compile_screen_predicate,
-    control_error_code, control_error_response, control_rejected, mpsc, presented_state_hash,
-    screen_frame_error_response, terminal_error, valid_blake3_hash, validate_screen_region,
-    AdmittedAction, ControlCommand, ControlErrorDetails, ControlRequest, ControlResponse,
-    ControlResult, Duration, Error, InputSequenceExecution, Instant, PendingInputSequence, Result,
-    ScreenWaiter, SessionActor, CONTROL_PROTOCOL_VERSION, MAX_SCREEN_WAITERS,
+    control_error_code, control_error_response, control_rejected, mpsc, mutation_failure_effect,
+    presented_state_hash, screen_frame_error_response, terminal_error, valid_blake3_hash,
+    validate_screen_region, AdmittedAction, ControlCommand, ControlErrorDetails, ControlRequest,
+    ControlResponse, ControlResult, Duration, Error, InputSequenceExecution, Instant,
+    MutationEffect, PendingInputSequence, Result, ScreenWaiter, SessionActor,
+    CONTROL_PROTOCOL_VERSION, MAX_SCREEN_WAITERS,
 };
 
 impl SessionActor<'_> {
@@ -20,6 +21,7 @@ impl SessionActor<'_> {
                 request.request_id,
                 "invalid_observation_guard",
                 "presented-state guards are only valid for mutations",
+                MutationEffect::NotApplied,
             );
 
             let _ = response_sender.send(response);
@@ -46,6 +48,7 @@ impl SessionActor<'_> {
                     request.request_id,
                     "mutation_limit_reached",
                     "session mutation operation limit has been reached",
+                    MutationEffect::NotApplied,
                 );
 
                 let _ = response_sender.send(response);
@@ -65,6 +68,7 @@ impl SessionActor<'_> {
                 request.request_id,
                 "action_busy",
                 "an actor-ordered action is still applying input or evaluating its postcondition",
+                MutationEffect::NotApplied,
             );
 
             let _ = response_sender.send(response);
@@ -92,8 +96,12 @@ impl SessionActor<'_> {
             let predicate = match predicate {
                 Ok(predicate) => predicate,
                 Err(reason) => {
-                    let response =
-                        control_error_response(request.request_id, "invalid_screen_wait", &reason);
+                    let response = control_error_response(
+                        request.request_id,
+                        "invalid_screen_wait",
+                        &reason,
+                        MutationEffect::NotApplied,
+                    );
                     let _ = response_sender.send(response);
 
                     return Ok(());
@@ -111,6 +119,7 @@ impl SessionActor<'_> {
                     presented_state_hash(&self.live)?,
                     &self.event_log,
                     "screen_wait_admission",
+                    MutationEffect::NotApplied,
                 );
 
                 let _ = response_sender.send(response);
@@ -123,6 +132,7 @@ impl SessionActor<'_> {
                     request.request_id,
                     "waiter_limit_reached",
                     "session screen waiter limit has been reached",
+                    MutationEffect::NotApplied,
                 );
 
                 let _ = response_sender.send(response);
@@ -158,6 +168,7 @@ impl SessionActor<'_> {
                     request.request_id,
                     "invalid_stable_capture",
                     "durations must satisfy stable <= timeout <= 1h and timeout must be nonzero",
+                    MutationEffect::NotApplied,
                 );
 
                 let _ = response_sender.send(response);
@@ -176,6 +187,7 @@ impl SessionActor<'_> {
                     presented_state_hash(&self.live)?,
                     &self.event_log,
                     "stable_capture_admission",
+                    MutationEffect::NotApplied,
                 );
 
                 let _ = response_sender.send(response);
@@ -188,6 +200,7 @@ impl SessionActor<'_> {
                     request.request_id,
                     "waiter_limit_reached",
                     "session screen waiter limit has been reached",
+                    MutationEffect::NotApplied,
                 );
 
                 let _ = response_sender.send(response);
@@ -213,6 +226,7 @@ impl SessionActor<'_> {
                 request.request_id,
                 "input_sequence_busy",
                 "another paced input sequence is still in progress",
+                MutationEffect::NotApplied,
             );
 
             let _ = response_sender.send(response);
@@ -308,11 +322,13 @@ impl SessionActor<'_> {
                                 current_state_hash,
                                 &self.event_log,
                                 "action_admission",
+                                MutationEffect::NotApplied,
                             ),
                             _ => control_error_response(
                                 request.request_id,
                                 control_error_code(&error),
                                 error.to_string(),
+                                MutationEffect::NotApplied,
                             ),
                         };
 
@@ -361,6 +377,12 @@ impl SessionActor<'_> {
                 })
         };
 
+        let effect = match &outcome {
+            Err(error) if !read_only => {
+                mutation_failure_effect(error, self.event_log.next_seq() != event_start_seq)
+            }
+            _ => MutationEffect::NotApplied,
+        };
         let response = match (&outcome, stale) {
             (Err(Error::ControlRejected { code, message }), true) => ControlResponse {
                 version: CONTROL_PROTOCOL_VERSION,
@@ -368,6 +390,7 @@ impl SessionActor<'_> {
                 result: ControlResult::Error {
                     code: code.clone(),
                     message: message.clone(),
+                    effect,
                     details: Some(ControlErrorDetails {
                         current_presented_state_hash: current_state_hash,
                         boundaries: actor_boundaries(&self.event_log),
@@ -388,11 +411,13 @@ impl SessionActor<'_> {
                 current_state_hash,
                 &self.event_log,
                 "screen_frame_projection",
+                effect,
             ),
             (Err(error), _) => control_error_response(
                 request.request_id,
                 control_error_code(error),
                 error.to_string(),
+                effect,
             ),
         };
 

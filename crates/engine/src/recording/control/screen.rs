@@ -18,6 +18,7 @@ use termtrace_model::{
         ControlData, ControlResponse, ControlResult, ScreenMode, ScreenPredicate,
         ScreenWaitQuality, StableCaptureQuality, StateHashComparison, CONTROL_PROTOCOL_VERSION,
     },
+    protocol::mutation::MutationEffect,
     terminal::observation::CaptureQuality,
     terminal::screen::{ScreenFrameSource, ScreenProjectionRequest, ScreenRegion},
     terminal::state::SemanticState,
@@ -157,6 +158,7 @@ impl SessionActor<'_> {
                         state_hash.clone(),
                         &self.event_log,
                         "screen_wait_terminating_frame",
+                        MutationEffect::NotApplied,
                     );
 
                     let _ = waiter.response.send(response);
@@ -236,7 +238,12 @@ impl SessionActor<'_> {
 impl SessionActor<'_> {
     pub(in crate::recording) fn fail_screen_waiters(&mut self, code: &str, message: &str) {
         for waiter in self.screen_waiters.drain(..) {
-            let response = control_error_response(waiter.request_id, code, message);
+            let response = control_error_response(
+                waiter.request_id,
+                code,
+                message,
+                MutationEffect::NotApplied,
+            );
             let _ = waiter.response.send(response);
         }
     }

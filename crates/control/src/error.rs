@@ -1,7 +1,13 @@
 //! Failures while reaching or observing a live session.
 
 use std::{io::Error as IoError, path::PathBuf, result::Result as StdResult};
-use termtrace_model::{execution::session::SessionPhase, protocol::control::ControlErrorDetails};
+use termtrace_model::{
+    execution::session::SessionPhase,
+    protocol::{
+        control::ControlErrorDetails,
+        mutation::{MutationEffect, Retry},
+    },
+};
 use thiserror::Error;
 
 /// Failure to reach, exchange with, or observe a session's recorder.
@@ -29,8 +35,8 @@ pub enum Error {
         step: &'static str,
         /// Requested deadline in milliseconds.
         timeout_ms: u64,
-        /// Whether the request may have reached the actor.
-        request_dispatched: bool,
+        /// What the request may have done, given how far it got.
+        effect: MutationEffect,
         #[source]
         /// Underlying timeout or transport failure.
         source: IoError,
@@ -42,8 +48,8 @@ pub enum Error {
         session: PathBuf,
         /// Transport step that failed.
         step: &'static str,
-        /// Whether the request may have reached the actor.
-        request_dispatched: bool,
+        /// What the request may have done, given how far it got.
+        effect: MutationEffect,
         #[source]
         /// Underlying transport failure.
         source: IoError,
@@ -53,6 +59,14 @@ pub enum Error {
     InvalidProtocol {
         /// Bounded protocol validation failure.
         reason: String,
+    },
+    /// The actor's answer to a dispatched request was unreadable or uncorrelated.
+    #[error("invalid control response: {reason}")]
+    InvalidResponse {
+        /// Bounded response validation failure.
+        reason: String,
+        /// What the request may have done, since it reached the actor.
+        effect: MutationEffect,
     },
     /// A request cannot be sent as specified.
     #[error("invalid control request: {reason}")]
@@ -93,6 +107,8 @@ pub enum Error {
         code: String,
         /// Safe actor rejection detail.
         message: String,
+        /// What the request did before it failed, as stated by the actor.
+        effect: MutationEffect,
         /// Actor-consistent context attached to the rejection.
         details: Option<Box<ControlErrorDetails>>,
     },
@@ -106,6 +122,30 @@ impl Error {
             self,
             Self::Unavailable { .. } | Self::Timeout { .. } | Self::Transport { .. }
         );
+    }
+
+    /// What the failed request did: stated by the actor, or implied by how far
+    /// the transport got.
+    #[must_use]
+    pub const fn effect(&self) -> MutationEffect {
+        return match self {
+            Self::Timeout { effect, .. }
+            | Self::Transport { effect, .. }
+            | Self::InvalidResponse { effect, .. }
+            | Self::Rejected { effect, .. } => *effect,
+            Self::Unavailable { .. }
+            | Self::InvalidProtocol { .. }
+            | Self::InvalidRequest { .. }
+            | Self::InvalidJson { .. }
+            | Self::Filesystem { .. }
+            | Self::CompletionIdentity { .. } => MutationEffect::NotApplied,
+        };
+    }
+
+    /// What the caller may safely do next, derived from [`Self::effect`].
+    #[must_use]
+    pub const fn retry(&self) -> Retry {
+        return self.effect().retry();
     }
 }
 

@@ -47,6 +47,7 @@ use termtrace_model::{
         ControlCommand, ControlData, ControlErrorDetails, ControlRequest, ControlResponse,
         ControlResult, CONTROL_PROTOCOL_VERSION,
     },
+    protocol::mutation::MutationEffect,
     terminal::observation::StatePoint,
     terminal::replay::STATE_FORMAT_VERSION,
     terminal::screen::ScreenFrameError,
@@ -127,26 +128,17 @@ impl Driver {
                             ControlResult::Error {
                                 code,
                                 message,
+                                effect,
                                 details,
-                            } => {
-                                let (retry_safety, uncertain) =
-                                    actor_failure_retry(&code, details.as_ref());
-
-                                Err(driver_failure_with_retry(
-                                    &code,
-                                    message,
-                                    Some(path.clone()),
-                                    retry_safety,
-                                    uncertain,
-                                    details,
-                                ))
-                            }
+                            } => Err(driver_failure_with_effect(
+                                &code,
+                                message,
+                                Some(path.clone()),
+                                effect,
+                                details,
+                            )),
                         },
-                        Err(error) => Err(driver_control_failure_from_error(
-                            error,
-                            path.clone(),
-                            command.is_mutation(),
-                        )),
+                        Err(error) => Err(driver_control_failure_from_error(error, path.clone())),
                     }
                 }
                 DriverMethod::WaitOutput {
@@ -317,27 +309,20 @@ impl Driver {
                                     ControlResult::Error {
                                         code,
                                         message,
+                                        effect,
                                         details,
                                     },
                                 ..
-                            }) => {
-                                let (retry_safety, uncertain) =
-                                    actor_failure_retry(&code, details.as_ref());
-
-                                Err(driver_failure_with_retry(
-                                    &code,
-                                    message,
-                                    Some(path.clone()),
-                                    retry_safety,
-                                    uncertain,
-                                    details,
-                                ))
-                            }
-                            Err(error) => Err(driver_control_failure_from_error(
-                                error,
-                                path.clone(),
-                                false,
+                            }) => Err(driver_failure_with_effect(
+                                &code,
+                                message,
+                                Some(path.clone()),
+                                effect,
+                                details,
                             )),
+                            Err(error) => {
+                                Err(driver_control_failure_from_error(error, path.clone()))
+                            }
                         }
                     }
                 }
@@ -769,70 +754,34 @@ where
         _ => ("operation_failed".to_owned(), error.to_string()),
     };
 
-    return driver_failure(&code, message, evidence);
+    return driver_failure_with_effect(&code, message, evidence, error.effect(), None);
 }
 
 pub(super) fn driver_control_failure_from_error(
     error: ControlError,
     evidence: PathBuf,
-    mutation: bool,
 ) -> Box<DriverResult> {
-    let (code, dispatched) = match &error {
-        ControlError::Unavailable { .. } => ("control_unavailable", false),
-        ControlError::Timeout {
-            request_dispatched, ..
-        } => ("control_timeout", *request_dispatched),
-        ControlError::Transport {
-            request_dispatched, ..
-        } => ("control_transport", *request_dispatched),
-        ControlError::InvalidRequest { .. } => ("invalid_control_request", false),
-        ControlError::InvalidProtocol { .. } | ControlError::InvalidJson { .. } => {
-            ("invalid_control_response", true)
+    let code = match &error {
+        ControlError::Unavailable { .. } => "control_unavailable",
+        ControlError::Timeout { .. } => "control_timeout",
+        ControlError::Transport { .. } => "control_transport",
+        ControlError::InvalidRequest { .. } => "invalid_control_request",
+        ControlError::InvalidProtocol { .. }
+        | ControlError::InvalidResponse { .. }
+        | ControlError::InvalidJson { .. } => "invalid_control_response",
+        ControlError::Rejected { code, .. } => code,
+        ControlError::Filesystem { .. } | ControlError::CompletionIdentity { .. } => {
+            "control_failed"
         }
-        ControlError::Rejected { code, .. } => {
-            return driver_failure_with_retry(
-                code,
-                error.to_string(),
-                Some(evidence),
-                "safe_new_request",
-                false,
-                None,
-            );
-        }
-        _ => ("control_failed", true),
     };
-    let uncertain = mutation && dispatched;
 
-    return driver_failure_with_retry(
+    return driver_failure_with_effect(
         code,
         error.to_string(),
         Some(evidence),
-        if uncertain { "safe_same_request_id" } else { "safe_new_request" },
-        uncertain,
+        error.effect(),
         None,
     );
-}
-
-pub(super) fn actor_failure_retry(
-    code: &str,
-    details: Option<&ControlErrorDetails>,
-) -> (&'static str, bool) {
-    if details.is_some_and(|value| return value.scope == "action_terminating_screen_frame") {
-        return ("safe_same_request_id", false);
-    }
-
-    if code == "input_sequence_incomplete" {
-        let uncertain = details
-            .and_then(|value| return value.input_sequence.as_ref())
-            .is_some_and(|sequence| return sequence.failed_atom_bytes_written != 0);
-
-        return ("safe_same_request_id", uncertain);
-    }
-
-    if code == "input_write_failed" {
-        return ("safe_same_request_id", true);
-    }
-    return ("safe_new_request", false);
 }
 
 pub(super) fn driver_response_is_cacheable(response: &DriverResponse) -> bool {
@@ -850,27 +799,26 @@ pub(super) fn driver_response_is_cacheable(response: &DriverResponse) -> bool {
     );
 }
 
+/// A failure the driver detected itself, before anything was applied.
 pub(super) fn driver_failure(
     code: &str,
     message: impl Into<String>,
     evidence: Option<PathBuf>,
 ) -> Box<DriverResult> {
-    return driver_failure_with_retry(code, message, evidence, "safe_new_request", false, None);
+    return driver_failure_with_effect(code, message, evidence, MutationEffect::NotApplied, None);
 }
 
-pub(super) fn driver_failure_with_retry(
+pub(super) fn driver_failure_with_effect(
     code: &str,
     message: impl Into<String>,
     evidence: Option<PathBuf>,
-    retry_safety: &str,
-    uncertain: bool,
+    effect: MutationEffect,
     details: Option<ControlErrorDetails>,
 ) -> Box<DriverResult> {
     return Box::new(DriverResult::Error {
         code: code.to_owned(),
         message: message.into(),
-        retry_safety: retry_safety.to_owned(),
-        uncertain,
+        effect,
         evidence,
         details,
     });

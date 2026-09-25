@@ -4,6 +4,7 @@ use super::*;
 use std::mem::take;
 use termtrace_model::{
     protocol::control::{PointerOperation, ProcessSignal, ScreenPredicate},
+    protocol::mutation::{MutationEffect, Retry},
     terminal::screen::FrameDetail,
     terminal::state::MouseButton,
 };
@@ -271,6 +272,8 @@ pub(in crate::cli) fn run_send(
                                     "type": label,
                                     "message": error.to_string(),
                                     "request_id": request_id,
+                                    "effect": error.effect(),
+                                    "retry": error.retry(),
                                 }),
                             )?;
                         } else {
@@ -284,6 +287,7 @@ pub(in crate::cli) fn run_send(
                 if let ControlResult::Error {
                     code,
                     message,
+                    effect,
                     details,
                 } = control_response.result
                 {
@@ -291,6 +295,7 @@ pub(in crate::cli) fn run_send(
                         control_response.request_id,
                         code,
                         message,
+                        effect,
                         details.as_ref(),
                         is_completed(&resolved.path),
                     );
@@ -425,15 +430,9 @@ pub(in crate::cli) fn run_send(
                 let control_response = match send_request_response(&resolved.path, &request) {
                     Ok(control_response) => control_response,
                     Err(error) => {
-                        let (code, applied, retry) = match &error {
-                            ControlError::InvalidRequest { .. } => {
-                                ("invalid_payload", "none", "safe_new_request")
-                            }
-                            _ => (
-                                "control_transport_failed",
-                                "unknown",
-                                "same_request_id_only",
-                            ),
+                        let code = match &error {
+                            ControlError::InvalidRequest { .. } => "invalid_payload",
+                            _ => "control_transport_failed",
                         };
 
                         let payload = serde_json::json!({
@@ -444,10 +443,10 @@ pub(in crate::cli) fn run_send(
                             "message": error.to_string(),
                             "request_id": request.request_id,
                             "input": {
-                                "applied": applied,
+                                "effect": error.effect(),
                                 "atoms": serde_json::Value::Null,
                                 "bytes": serde_json::Value::Null,
-                                "retry": retry,
+                                "retry": error.retry(),
                             },
                             "postcondition": {
                                 "matched": false,
@@ -528,12 +527,14 @@ pub(in crate::cli) fn run_send(
                     ControlResult::Error {
                         code,
                         message,
+                        effect,
                         details,
                     } => {
                         let output = action_error_response(
                             control_response.request_id,
                             code,
                             message,
+                            effect,
                             details.as_ref(),
                             is_completed(&resolved.path),
                         );
@@ -621,7 +622,7 @@ pub(super) fn action_observation(frame: &ScreenFrame) -> Result<serde_json::Valu
 
 #[derive(serde::Serialize)]
 pub(super) struct ActionInputSummary<'data> {
-    pub(super) applied: &'static str,
+    pub(super) effect: MutationEffect,
     pub(super) atoms: u32,
     pub(super) bytes: u64,
     pub(super) pace_ns: u64,
@@ -683,7 +684,7 @@ pub(super) fn action_applied_response(
     }
 
     let input_summary = ActionInputSummary {
-        applied: "all",
+        effect: MutationEffect::Applied,
         atoms: input.atom_count,
         bytes: input.bytes_written,
         pace_ns: input.pace_ns,
@@ -784,12 +785,12 @@ pub(super) struct ActionFailedPrefix {
 
 #[derive(serde::Serialize)]
 pub(super) struct ActionFailedInputSummary {
-    pub(super) applied: &'static str,
+    pub(super) effect: MutationEffect,
     pub(super) atoms: u32,
     pub(super) bytes: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) prefix: Option<ActionFailedPrefix>,
-    pub(super) retry: &'static str,
+    pub(super) retry: Retry,
 }
 
 #[derive(serde::Serialize)]
@@ -825,39 +826,32 @@ pub(super) fn action_error_response(
     request_id: uuid::Uuid,
     code: String,
     message: String,
+    effect: MutationEffect,
     details: Option<&ControlErrorDetails>,
     ended: bool,
 ) -> serde_json::Value {
-    let sequence = details.and_then(|details| return details.input_sequence.as_ref());
-    let (applied, atoms, bytes, prefix) = match sequence {
-        Some(sequence)
-            if sequence.atoms_applied != 0 || sequence.failed_atom_bytes_written != 0 =>
-        {
-            (
-                "partial",
-                sequence.atoms_applied,
-                sequence.bytes_written,
-                Some(ActionFailedPrefix {
-                    atoms: sequence.atoms_applied,
-                    bytes: sequence.bytes_written,
-                    failed_atom: sequence.failed_atom_index,
-                    failed_operation_id: sequence.failed_operation_id,
-                    failed_atom_bytes: sequence.failed_atom_bytes_written,
-                    first_intent_event_seq: sequence.first_intent_event_seq,
-                    last_result_event_seq: sequence.last_result_event_seq,
-                    resume_from_atom: sequence.resume_from_atom_index,
-                }),
-            )
-        }
-        _ => ("none", 0, 0, None),
-    };
+    let sequence = details
+        .and_then(|details| return details.input_sequence.as_ref())
+        .filter(|_| return effect != MutationEffect::NotApplied);
+    let prefix = sequence.map(|sequence| {
+        return ActionFailedPrefix {
+            atoms: sequence.atoms_applied,
+            bytes: sequence.bytes_written,
+            failed_atom: sequence.failed_atom_index,
+            failed_operation_id: sequence.failed_operation_id,
+            failed_atom_bytes: sequence.failed_atom_bytes_written,
+            first_intent_event_seq: sequence.first_intent_event_seq,
+            last_result_event_seq: sequence.last_result_event_seq,
+            resume_from_atom: sequence.resume_from_atom_index,
+        };
+    });
 
     let input = ActionFailedInputSummary {
-        applied,
-        atoms,
-        bytes,
+        effect,
+        atoms: prefix.as_ref().map_or(0, |prefix| return prefix.atoms),
+        bytes: prefix.as_ref().map_or(0, |prefix| return prefix.bytes),
         prefix,
-        retry: input_retry(applied),
+        retry: effect.retry(),
     };
 
     let observation = details.map(|details| {
@@ -893,14 +887,6 @@ pub(super) fn action_error_response(
     return serde_json::to_value(&output).expect("action error serialization");
 }
 
-pub(super) fn input_retry(applied: &str) -> &'static str {
-    return match applied {
-        "partial" => "inspect_before_retry",
-        "unknown" => "same_request_id_only",
-        _ => "safe_new_request",
-    };
-}
-
 #[cfg(test)]
 mod action_response_tests {
     use super::{
@@ -910,6 +896,7 @@ mod action_response_tests {
     use std::{path::PathBuf, time::Duration};
     use termtrace_model::{
         protocol::control::{ControlData, ControlErrorDetails},
+        protocol::mutation::MutationEffect,
         terminal::observation::{ActorBoundaries, CaptureQuality},
         terminal::screen::FrameDetail,
         terminal::screen::{ScreenFrameSource, ScreenProjectionRequest},
@@ -982,7 +969,7 @@ mod action_response_tests {
             action_applied_response(request_id, &data).expect("action response");
         assert!(!matched);
         assert_eq!(response["request_id"], request_id.to_string());
-        assert_eq!(response["input"]["applied"], "all");
+        assert_eq!(response["input"]["effect"]["kind"], "applied");
         assert_eq!(response["input"]["atoms"], 2);
         assert_eq!(response["input"]["bytes"], 4);
         assert_eq!(
@@ -1037,11 +1024,13 @@ mod action_response_tests {
             request_id,
             "input_sequence_incomplete".to_owned(),
             "input stopped".to_owned(),
+            MutationEffect::Unknown,
             Some(&details),
             false,
         );
         assert_eq!(response["request_id"], request_id.to_string());
-        assert_eq!(response["input"]["applied"], "partial");
+        assert_eq!(response["input"]["effect"]["kind"], "unknown");
+        assert_eq!(response["input"]["retry"], "same_request_id");
         assert_eq!(response["input"]["atoms"], 1);
         assert_eq!(response["input"]["bytes"], 5);
         assert_eq!(response["input"]["prefix"]["atoms"], 1);

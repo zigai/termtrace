@@ -1,26 +1,22 @@
 use super::{
     operations::{
-        actor_failure_retry, driver_error, driver_failure_from_error, driver_failure_with_retry,
-        driver_response_is_cacheable,
+        driver_control_failure_from_error, driver_error, driver_failure_from_error,
+        driver_failure_with_effect, driver_response_is_cacheable,
     },
     runtime::{bounded_response, serialized_size, DRIVER_RESPONSE_CACHE_BYTES},
     serve,
 };
-use std::{collections::BTreeMap, io::Cursor, path::PathBuf};
+use std::{collections::BTreeMap, io, io::Cursor, path::PathBuf};
+use termtrace_control::Error as ControlError;
 use termtrace_engine::Error;
 use termtrace_model::protocol::driver::{
     DriverData, DriverMethod, DriverRequest, DriverResponse, DriverResult,
     DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
 };
 use termtrace_model::{
-    execution::environment::EnvironmentSpec,
-    execution::event::EVENT_LOG_VERSION,
-    execution::event_log::CanonicalBoundary,
-    execution::session::ResourceLimits,
-    protocol::control::{ControlCommand, ControlErrorDetails, CONTROL_PROTOCOL_VERSION},
-    terminal::observation::ActorBoundaries,
-    terminal::replay::STATE_FORMAT_VERSION,
-    value::ByteString,
+    execution::environment::EnvironmentSpec, execution::event::EVENT_LOG_VERSION,
+    execution::session::ResourceLimits, protocol::control::CONTROL_PROTOCOL_VERSION,
+    protocol::mutation::MutationEffect, terminal::replay::STATE_FORMAT_VERSION, value::ByteString,
 };
 use uuid::Uuid;
 
@@ -180,9 +176,9 @@ fn oversized_response_is_replaced_with_a_bounded_error() {
         bounded.result,
         DriverResult::Error {
             code,
-            retry_safety,
+            effect: MutationEffect::NotApplied,
             ..
-        } if code == "response_too_large" && retry_safety == "safe_same_request_id"
+        } if code == "response_too_large"
     ));
 }
 
@@ -314,12 +310,11 @@ fn retryable_transport_failures_are_not_cached_by_request_id() {
     let response = DriverResponse {
         version: DRIVER_PROTOCOL_VERSION,
         request_id: Uuid::now_v7(),
-        result: *driver_failure_with_retry(
+        result: *driver_failure_with_effect(
             "control_timeout",
             "timed out",
             None,
-            "safe_same_request_id",
-            true,
+            MutationEffect::Unknown,
             None,
         ),
     };
@@ -329,12 +324,11 @@ fn retryable_transport_failures_are_not_cached_by_request_id() {
     let actor_response = DriverResponse {
         version: DRIVER_PROTOCOL_VERSION,
         request_id: Uuid::now_v7(),
-        result: *driver_failure_with_retry(
+        result: *driver_failure_with_effect(
             "input_sequence_incomplete",
             "prefix applied",
             None,
-            "safe_same_request_id",
-            true,
+            MutationEffect::Partial { completed_atoms: 1 },
             None,
         ),
     };
@@ -351,47 +345,25 @@ fn retryable_transport_failures_are_not_cached_by_request_id() {
 }
 
 #[test]
-fn retry_classification_distinguishes_observation_from_mutation() {
-    assert!(!ControlCommand::Snapshot.is_mutation());
-    assert!(ControlCommand::InputSequence {
-        atoms: Vec::new(),
-        pace_ns: 0,
-        include_atom_outcomes: false,
-    }
-    .is_mutation());
-    assert_eq!(
-        actor_failure_retry("input_sequence_incomplete", None),
-        ("safe_same_request_id", false)
-    );
-    assert_eq!(
-        actor_failure_retry("input_write_failed", None),
-        ("safe_same_request_id", true)
-    );
-}
+fn transport_failures_carry_the_effect_implied_by_delivery() {
+    let failure = |effect| {
+        return driver_control_failure_from_error(
+            ControlError::Timeout {
+                session: PathBuf::from("/session"),
+                step: "read response",
+                timeout_ms: 1,
+                effect,
+                source: io::Error::from(io::ErrorKind::TimedOut),
+            },
+            PathBuf::from("/session"),
+        );
+    };
 
-#[test]
-fn post_apply_terminating_frame_requires_same_action_id() {
-    let boundary = CanonicalBoundary {
-        next_event_seq: 2,
-        event_hash: "a".repeat(64),
-        output_bytes: 3,
-    };
-    let details = ControlErrorDetails {
-        current_presented_state_hash: "b".repeat(64),
-        boundaries: ActorBoundaries {
-            durable: boundary.clone(),
-            observed: boundary,
-        },
-        scope: "action_terminating_screen_frame".to_owned(),
-        input_sequence: None,
-        screen_frame: None,
-    };
-    assert_eq!(
-        actor_failure_retry("screen_frame_resource_limit", Some(&details)),
-        ("safe_same_request_id", false)
-    );
-    assert_eq!(
-        actor_failure_retry("screen_frame_resource_limit", None),
-        ("safe_new_request", false)
-    );
+    for effect in [MutationEffect::NotApplied, MutationEffect::Unknown] {
+        assert!(matches!(
+            failure(effect).as_ref(),
+            DriverResult::Error { code, effect: actual, .. }
+                if code == "control_timeout" && *actual == effect
+        ));
+    }
 }

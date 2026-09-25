@@ -78,11 +78,11 @@ fn human_screen_renders_text_sparse_and_diff_content() {
 fn human_action_summary_reports_mutation_and_postcondition() {
     let action = human_action_summary(&serde_json::json!({
         "type": "action",
-        "input": {"applied": "all", "atoms": 2, "bytes": 6},
+        "input": {"effect": {"kind": "applied"}, "atoms": 2, "bytes": 6},
         "postcondition": {"kind": "screen", "matched": true, "outcome": "stable"},
         "ended": false,
     }));
-    assert!(action.contains("mutation applied=all, atoms=2, bytes=6"));
+    assert!(action.contains("mutation effect=applied, atoms=2, bytes=6"));
     assert!(action.contains("postcondition screen matched=true, outcome=stable"));
     assert!(action.contains("session=live"));
 }

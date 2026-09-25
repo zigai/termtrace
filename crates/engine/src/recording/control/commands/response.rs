@@ -1,6 +1,6 @@
 use super::{
     actor_boundaries, ControlErrorDetails, ControlResponse, ControlResult, Error, EventLogWriter,
-    ScreenFrameError, ScreenFrameFailureDetails, ScreenFrameLimitKind, Uuid,
+    MutationEffect, ScreenFrameError, ScreenFrameFailureDetails, ScreenFrameLimitKind, Uuid,
     CONTROL_PROTOCOL_VERSION,
 };
 
@@ -22,6 +22,7 @@ pub(in crate::recording::control) fn screen_frame_error_response(
     current_state_hash: String,
     event_log: &EventLogWriter,
     scope: &str,
+    effect: MutationEffect,
 ) -> ControlResponse {
     return ControlResponse {
         version: CONTROL_PROTOCOL_VERSION,
@@ -29,6 +30,7 @@ pub(in crate::recording::control) fn screen_frame_error_response(
         result: ControlResult::Error {
             code: screen_frame_error_code(error).to_owned(),
             message: error.to_string(),
+            effect,
             details: Some(ControlErrorDetails {
                 current_presented_state_hash: current_state_hash,
                 boundaries: actor_boundaries(event_log),
@@ -122,5 +124,108 @@ pub(super) fn control_error_code(error: &Error) -> &str {
         Error::Filesystem { .. } => return "io_failed",
         Error::TerminalOperation { .. } => return "terminal_operation_failed",
         _ => return "internal_error",
+    }
+}
+
+/// Effect of a mutation whose execution returned `error`.
+///
+/// Every mutation records its canonical intent before it touches the child, so
+/// a failure before the first recorded event applied nothing. Rejections apply
+/// nothing, and a stopped write reports exactly how far it got.
+pub(super) const fn mutation_failure_effect(
+    error: &Error,
+    recorded_events: bool,
+) -> MutationEffect {
+    return match error {
+        Error::ControlRejected { .. } => MutationEffect::NotApplied,
+        Error::InputWriteFailed { bytes_written, .. } => {
+            MutationEffect::stopped_input_sequence(0, *bytes_written)
+        }
+        Error::InputSequenceIncomplete {
+            atoms_applied,
+            failed_atom_bytes_written,
+            ..
+        } => MutationEffect::stopped_input_sequence(*atoms_applied, *failed_atom_bytes_written),
+        _ if recorded_events => MutationEffect::Unknown,
+        _ => MutationEffect::NotApplied,
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_failed(bytes_written: u64) -> Error {
+        return Error::InputWriteFailed {
+            operation_id: Uuid::nil(),
+            bytes_written,
+            intent_event_seq: 1,
+            result_event_seq: 2,
+            reason: "closed".to_owned(),
+        };
+    }
+
+    fn sequence_stopped(atoms_applied: u32, failed_atom_bytes_written: u64) -> Error {
+        return Error::InputSequenceIncomplete {
+            sequence_id: Uuid::nil(),
+            failed_atom_index: atoms_applied,
+            failed_operation_id: Uuid::nil(),
+            atoms_applied,
+            bytes_written: 4,
+            failed_atom_bytes_written,
+            first_intent_event_seq: 1,
+            last_result_event_seq: 4,
+            reason: "closed".to_owned(),
+        };
+    }
+
+    #[test]
+    fn rejections_apply_nothing_even_after_recording_intent() {
+        let rejected = Error::ControlRejected {
+            code: "signal_failed".to_owned(),
+            message: "no such process".to_owned(),
+        };
+
+        assert_eq!(
+            mutation_failure_effect(&rejected, true),
+            MutationEffect::NotApplied
+        );
+    }
+
+    #[test]
+    fn writes_report_whole_atoms_or_unknown_delivery() {
+        assert_eq!(
+            mutation_failure_effect(&write_failed(0), true),
+            MutationEffect::NotApplied
+        );
+        assert_eq!(
+            mutation_failure_effect(&write_failed(3), true),
+            MutationEffect::Unknown
+        );
+        assert_eq!(
+            mutation_failure_effect(&sequence_stopped(2, 0), true),
+            MutationEffect::Partial { completed_atoms: 2 }
+        );
+        assert_eq!(
+            mutation_failure_effect(&sequence_stopped(2, 1), true),
+            MutationEffect::Unknown
+        );
+    }
+
+    #[test]
+    fn other_failures_are_unknown_once_the_mutation_recorded_events() {
+        let failure = Error::TerminalOperation {
+            operation: "resize child PTY",
+            reason: "failed".to_owned(),
+        };
+
+        assert_eq!(
+            mutation_failure_effect(&failure, false),
+            MutationEffect::NotApplied
+        );
+        assert_eq!(
+            mutation_failure_effect(&failure, true),
+            MutationEffect::Unknown
+        );
     }
 }

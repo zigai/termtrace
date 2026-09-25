@@ -8,6 +8,7 @@ use crate::{
         CaptureTarget, ResourceLimits, SessionCompletion, VerificationLevel, VerificationReport,
     },
     protocol::control::{ControlCommand, ControlData, ControlErrorDetails},
+    protocol::mutation::MutationEffect,
     terminal::analysis::{DiagnoseReport, DiagnosticCheck},
     terminal::diff::SemanticDiff,
     terminal::inspection::WaitOutcome,
@@ -22,7 +23,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Current JSONL driver protocol version.
-pub const DRIVER_PROTOCOL_VERSION: u32 = 5;
+pub const DRIVER_PROTOCOL_VERSION: u32 = 6;
 /// Maximum JSON bytes accepted in one newline-delimited request frame.
 pub const DRIVER_MAX_REQUEST_BYTES: u64 = 4 * 1024 * 1024;
 /// Maximum JSON bytes emitted in one newline-delimited response frame.
@@ -244,10 +245,8 @@ pub enum DriverResult {
         code: String,
         /// Human-readable diagnostic.
         message: String,
-        /// `safe_same_request_id`, `safe_new_request`, or `unknown`.
-        retry_safety: String,
-        /// Whether mutation application may be uncertain.
-        uncertain: bool,
+        /// What the method did before it failed; callers derive retry from it.
+        effect: MutationEffect,
         /// Canonical evidence path when known.
         evidence: Option<PathBuf>,
         /// Actor-provided ordering or attempted-prefix details when available.

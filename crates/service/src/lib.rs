@@ -44,7 +44,7 @@ pub use client::{
     Semantic, SessionBuilder, Terminal,
 };
 pub use context::OperationContext;
-pub use error::{Error, Result, RetrySafety};
+pub use error::{Error, Result};
 pub use events::{EventCursor, EventPage, EventsService};
 pub use integrity::IntegrityService;
 pub use locator::ScreenFrameQuery;

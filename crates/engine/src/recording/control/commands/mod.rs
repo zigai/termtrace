@@ -37,6 +37,7 @@ use termtrace_model::{
         InputSequenceFailureDetails, PointerOperation, ProcessSignal, ScreenFrameFailureDetails,
         ScreenPostconditionQuality, StableCaptureQuality, CONTROL_PROTOCOL_VERSION,
     },
+    protocol::mutation::MutationEffect,
     terminal::observation::{ActorBoundaries, CaptureQuality},
     terminal::screen::{
         ScreenFrame, ScreenFrameError, ScreenFrameLimitKind, ScreenFrameSource,
@@ -64,5 +65,5 @@ use observation::{
     compile_action_postcondition, evaluate_action_postcondition, AdmittedAction,
     AdmittedPostcondition,
 };
-use response::control_error_code;
+use response::{control_error_code, mutation_failure_effect};
 pub(in crate::recording::control) use response::screen_frame_error_response;

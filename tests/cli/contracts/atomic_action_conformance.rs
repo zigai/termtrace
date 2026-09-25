@@ -12,7 +12,7 @@ use termtrace_model::{
     },
 };
 use termtrace_sdk::{
-    ActionCompletion, ActionCondition, ActionOptions, Error, InputAtom, RetrySafety,
+    ActionCompletion, ActionCondition, ActionOptions, Error, InputAtom, MutationEffect, Retry,
     StableCaptureOptions,
 };
 use uuid::Uuid;
@@ -149,7 +149,6 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
 
     let Error::ActionTerminatingFrame {
         request_id,
-        retry_safety,
         source: ScreenFrameError::ResourceLimit { limit, .. },
         ..
     } = &error
@@ -161,7 +160,8 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
         *request_id,
         options.request_id.expect("fixed action request ID")
     );
-    assert_eq!(*retry_safety, RetrySafety::SameRequestOnly);
+    assert_eq!(error.effect(), MutationEffect::Applied);
+    assert_eq!(error.retry(), Retry::DoNotRetry);
     assert_eq!(*limit, ScreenFrameLimitKind::SerializedBytes);
 
     let retry = session
@@ -170,7 +170,6 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
 
     let Error::ActionTerminatingFrame {
         request_id: retry_request_id,
-        retry_safety: retry_safety_retry,
         source: ScreenFrameError::ResourceLimit {
             limit: retry_limit, ..
         },
@@ -181,7 +180,7 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
     };
 
     assert_eq!(retry_request_id, request_id);
-    assert_eq!(retry_safety_retry, retry_safety);
+    assert_eq!(retry.effect(), error.effect());
     assert_eq!(retry_limit, limit);
 
     wait_for_output(session.path(), b"COUNT:1:once", Duration::from_secs(5))

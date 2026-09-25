@@ -87,7 +87,7 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
         let action_value = compact_json_line(&action.stdout);
         assert_eq!(action_value["ok"], true);
         assert_eq!(
-            action_value["input"]["applied"], "all",
+            action_value["input"]["effect"]["kind"], "applied",
             "unexpected compact action response: {action_value}"
         );
         let output = child.wait_with_output().expect("workflow completion");

@@ -1,13 +1,14 @@
 //! Asyncio bridge for Termtrace using pyo3-async-runtimes.
 
 use crate::actions::PyActionBuilder;
-use crate::errors::to_py_err;
+use crate::errors::{to_py_err, with_effect, TimeoutError};
 use crate::recording::PyRecording;
 use crate::screen::{PyResolvedState, PyScreen};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3_async_runtimes::tokio::future_into_py;
 use std::time::Duration;
+use termtrace_model::protocol::mutation::MutationEffect;
 use termtrace_sdk::screen::frame_text;
 
 /// Asynchronously wait for text pattern on a screen.
@@ -29,9 +30,10 @@ pub fn wait_for_text_async<'py>(
             let s = session.screen();
             let outcome = s.wait_for_text(&pattern, timeout).map_err(to_py_err)?;
             if !outcome.matched {
-                return Err(crate::errors::TimeoutError::new_err(format!(
-                    "timed out waiting for pattern: '{pattern}'"
-                )));
+                return Err(with_effect(
+                    TimeoutError::new_err(format!("timed out waiting for pattern: '{pattern}'")),
+                    MutationEffect::NotApplied,
+                ));
             }
             return Ok(outcome);
         })

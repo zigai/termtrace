@@ -62,8 +62,13 @@ impl<'session> Screen<'session> {
             ControlResult::Error {
                 code,
                 message,
+                effect,
                 details,
-            } => return Err(public_control_error(code, message, details, None, None)),
+            } => {
+                return Err(public_control_error(
+                    code, message, effect, details, None, None,
+                ))
+            }
         };
 
         let ControlData::ScreenFrame { frame } = data else {
@@ -165,8 +170,13 @@ impl<'session> Screen<'session> {
             ControlResult::Error {
                 code,
                 message,
+                effect,
                 details,
-            } => return Err(public_control_error(code, message, details, None, None)),
+            } => {
+                return Err(public_control_error(
+                    code, message, effect, details, None, None,
+                ))
+            }
         };
 
         let ControlData::StableSnapshot {

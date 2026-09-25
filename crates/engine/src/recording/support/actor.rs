@@ -2,7 +2,10 @@ use crate::{Error, Result};
 use nix::poll::{PollFd, PollFlags};
 use termtrace_evidence::event_log::EventLogWriter;
 use termtrace_model::{
-    protocol::control::{ControlResponse, ControlResult, CONTROL_PROTOCOL_VERSION},
+    protocol::{
+        control::{ControlResponse, ControlResult, CONTROL_PROTOCOL_VERSION},
+        mutation::MutationEffect,
+    },
     terminal::observation::ActorBoundaries,
 };
 use uuid::Uuid;
@@ -54,6 +57,7 @@ pub(in crate::recording) fn control_error_response(
     request_id: Uuid,
     code: impl Into<String>,
     message: impl Into<String>,
+    effect: MutationEffect,
 ) -> ControlResponse {
     return ControlResponse {
         version: CONTROL_PROTOCOL_VERSION,
@@ -61,6 +65,7 @@ pub(in crate::recording) fn control_error_response(
         result: ControlResult::Error {
             code: code.into(),
             message: message.into(),
+            effect,
             details: None,
         },
     };

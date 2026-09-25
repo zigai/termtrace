@@ -1,4 +1,5 @@
 use super::*;
+use termtrace_model::protocol::mutation::MutationEffect;
 
 #[test]
 fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
@@ -41,6 +42,7 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
 
     let ControlResult::Error {
         code,
+        effect,
         details: Some(details),
         ..
     } = &stale_response.result
@@ -49,6 +51,7 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
     };
 
     assert_eq!(code, "stale_observation");
+    assert_eq!(*effect, MutationEffect::NotApplied);
     assert_eq!(details.current_presented_state_hash, state_hash);
     assert_eq!(details.scope, "actor_processed_presented_output");
     assert_eq!(
@@ -82,17 +85,17 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
         let rejection = compact_json_line(&output);
         assert_eq!(rejection["code"], "stale_observation");
 
-        let applied = rejection
-            .get("applied")
-            .or_else(|| return rejection.pointer("/input/applied"))
+        let effect = rejection
+            .pointer("/effect/kind")
+            .or_else(|| return rejection.pointer("/input/effect/kind"))
             .and_then(serde_json::Value::as_str);
-        assert_eq!(applied, Some("none"));
+        assert_eq!(effect, Some("not_applied"));
 
         let retry = rejection
             .get("retry")
             .or_else(|| return rejection.pointer("/input/retry"))
             .and_then(serde_json::Value::as_str);
-        assert_eq!(retry, Some("safe_new_request"));
+        assert_eq!(retry, Some("new_request"));
 
         let observed_state = rejection
             .pointer("/observation/state")

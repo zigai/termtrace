@@ -17,8 +17,9 @@ use std::{
     time::{Duration, Instant},
 };
 use termtrace_evidence::{artifact::write_secure, event_log::CanonicalBoundary};
-use termtrace_model::protocol::control::{
-    ControlResponse, ControlResult, ProcessSignal, CONTROL_PROTOCOL_VERSION,
+use termtrace_model::protocol::{
+    control::{ControlResponse, ControlResult, ProcessSignal, CONTROL_PROTOCOL_VERSION},
+    mutation::MutationEffect,
 };
 use termtrace_model::{execution::event::Event, value::ByteString};
 
@@ -161,6 +162,7 @@ pub(super) fn preserve_terminal(
                     result: ControlResult::Error {
                         code: "recording_degraded".to_owned(),
                         message: "canonical recording failed; use the attached terminal to control the preserved application".to_owned(),
+                        effect: MutationEffect::NotApplied,
                         details: None,
                     },
                 });

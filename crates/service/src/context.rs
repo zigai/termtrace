@@ -7,6 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 use termtrace_control::Error as ControlError;
+use termtrace_model::protocol::mutation::MutationEffect;
 use uuid::Uuid;
 
 /// Operation context tracking request identity, total deadlines, and cancellation.
@@ -93,7 +94,7 @@ impl OperationContext {
                 session: PathBuf::from("<operation-context>"),
                 step,
                 timeout_ms: 0,
-                request_dispatched: false,
+                effect: MutationEffect::NotApplied,
                 source: IoError::new(IoErrorKind::TimedOut, "deadline expired"),
             }));
         }

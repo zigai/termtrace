@@ -142,11 +142,13 @@ impl Session {
             ControlResult::Error {
                 code,
                 message,
+                effect,
                 details,
             } => {
                 return Err(public_control_error(
                     code,
                     message,
+                    effect,
                     details,
                     Some(request_id),
                     options.if_state,

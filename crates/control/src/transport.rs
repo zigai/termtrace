@@ -31,6 +31,7 @@ use termtrace_model::{
         ControlResult, ScreenPredicate, CONTROL_PROTOCOL_VERSION, DEFAULT_CONTROL_RESPONSE_TIMEOUT,
         MAX_CONTROL_MESSAGE_BYTES,
     },
+    protocol::mutation::MutationEffect,
     terminal::{inspection::ScreenWaitOutcome, screen::ScreenProjectionRequest},
 };
 
@@ -50,7 +51,7 @@ pub(crate) fn connect_recorder(
         Err(error) => return Err(error),
     };
 
-    let _ = timing.remaining(session, "connect", false)?;
+    let _ = timing.remaining(session, "connect", MutationEffect::NotApplied)?;
 
     let fd = socket(
         AddressFamily::Unix,
@@ -73,7 +74,7 @@ pub(crate) fn connect_recorder(
             let mut descriptors = [PollFd::new(fd.as_fd(), PollFlags::POLLOUT)];
 
             loop {
-                let remaining = timing.remaining(session, "connect", false)?;
+                let remaining = timing.remaining(session, "connect", MutationEffect::NotApplied)?;
                 let poll_timeout = PollTimeout::try_from(remaining.min(Duration::from_secs(60)))
                     .unwrap_or(PollTimeout::NONE);
 
@@ -83,7 +84,7 @@ pub(crate) fn connect_recorder(
                             session,
                             "connect",
                             remaining,
-                            false,
+                            MutationEffect::NotApplied,
                             IoError::new(ErrorKind::TimedOut, "control connect timed out"),
                         ));
                     }
@@ -103,7 +104,7 @@ pub(crate) fn connect_recorder(
                             session,
                             "connect",
                             remaining,
-                            false,
+                            MutationEffect::NotApplied,
                             IoError::from_raw_os_error(error as i32),
                         ));
                     }
@@ -231,11 +232,13 @@ pub fn send_request(
         ControlResult::Error {
             code,
             message,
+            effect,
             details,
         } => {
             return Err(Error::Rejected {
                 code,
                 message,
+                effect,
                 details: details.map(Box::new),
             });
         }
@@ -297,7 +300,7 @@ impl ExchangeTiming {
         &self,
         session: &Path,
         step: &'static str,
-        request_dispatched: bool,
+        effect: MutationEffect,
     ) -> Result<Duration> {
         return match self {
             Self::Timeout(timeout) => Ok(*timeout),
@@ -309,7 +312,7 @@ impl ExchangeTiming {
                         session,
                         step,
                         Duration::ZERO,
-                        request_dispatched,
+                        effect,
                         IoError::new(ErrorKind::TimedOut, "control deadline elapsed"),
                     );
                 }),
@@ -340,10 +343,10 @@ fn exchange_stream(
     request: &ControlRequest,
     timing: &ExchangeTiming,
 ) -> Result<ControlResponse> {
-    let socket = PathBuf::from("<abstract-control-socket>");
+    let unanswered = request.command.unanswered_effect();
     let mut request_frame = serde_json::to_vec(request).map_err(|source| {
         return Error::InvalidJson {
-            path: socket.clone(),
+            path: PathBuf::from("<abstract-control-socket>"),
             json_path: "$".to_owned(),
             source,
         };
@@ -359,13 +362,17 @@ fn exchange_stream(
 
     request_frame.push(b'\n');
 
-    let timeout = timing.remaining(session_directory, "write request", false)?;
+    let timeout = timing.remaining(
+        session_directory,
+        "write request",
+        MutationEffect::NotApplied,
+    )?;
     stream.set_nonblocking(false).map_err(|source| {
         return transport_error(
             session_directory,
             "configure deadlines",
             timeout,
-            false,
+            MutationEffect::NotApplied,
             source,
         );
     })?;
@@ -374,32 +381,44 @@ fn exchange_stream(
             session_directory,
             "configure deadlines",
             timeout,
-            false,
+            MutationEffect::NotApplied,
             source,
         );
     })?;
     stream.write_all(&request_frame).map_err(|source| {
-        return transport_error(session_directory, "write request", timeout, true, source);
+        return transport_error(
+            session_directory,
+            "write request",
+            timeout,
+            unanswered,
+            source,
+        );
     })?;
     stream.shutdown(Shutdown::Write).map_err(|source| {
-        return transport_error(session_directory, "finish request", timeout, true, source);
+        return transport_error(
+            session_directory,
+            "finish request",
+            timeout,
+            unanswered,
+            source,
+        );
     })?;
     stream.set_nonblocking(true).map_err(|source| {
         return transport_error(
             session_directory,
             "configure response deadline",
             timeout,
-            true,
+            unanswered,
             source,
         );
     })?;
 
-    let timeout = timing.remaining(session_directory, "read response", true)?;
+    let timeout = timing.remaining(session_directory, "read response", unanswered)?;
     let mut encoded = Vec::new();
     let mut chunk = [0_u8; 8192];
 
     loop {
-        let remaining = timing.remaining(session_directory, "read response", true)?;
+        let remaining = timing.remaining(session_directory, "read response", unanswered)?;
         let poll_timeout = PollTimeout::try_from(remaining.min(Duration::from_secs(60)))
             .unwrap_or(PollTimeout::NONE);
 
@@ -411,7 +430,7 @@ fn exchange_stream(
                     session_directory,
                     "read response",
                     remaining,
-                    true,
+                    unanswered,
                     IoError::new(ErrorKind::TimedOut, "control read timed out"),
                 ));
             }
@@ -421,14 +440,16 @@ fn exchange_stream(
                 }
                 Ok(count) => {
                     let bytes = chunk.get(..count).ok_or_else(|| {
-                        return Error::InvalidProtocol {
+                        return Error::InvalidResponse {
                             reason: "invalid response slice".to_owned(),
+                            effect: unanswered,
                         };
                     })?;
                     if let Some(position) = bytes.iter().position(|&byte| return byte == b'\n') {
                         let line = bytes.get(..=position).ok_or_else(|| {
-                            return Error::InvalidProtocol {
+                            return Error::InvalidResponse {
                                 reason: "invalid response slice".to_owned(),
+                                effect: unanswered,
                             };
                         })?;
                         encoded.extend_from_slice(line);
@@ -449,7 +470,7 @@ fn exchange_stream(
                         session_directory,
                         "read response",
                         remaining,
-                        true,
+                        unanswered,
                         source,
                     ));
                 }
@@ -460,26 +481,26 @@ fn exchange_stream(
                     session_directory,
                     "read response",
                     remaining,
-                    true,
+                    unanswered,
                     IoError::from_raw_os_error(error as i32),
                 ));
             }
         }
     }
 
-    validate_response_frame(session_directory, timeout, &encoded)?;
+    validate_response_frame(session_directory, timeout, &encoded, unanswered)?;
 
     let response: ControlResponse = serde_json::from_slice(&encoded).map_err(|source| {
-        return Error::InvalidJson {
-            path: socket,
-            json_path: "$".to_owned(),
-            source,
+        return Error::InvalidResponse {
+            reason: format!("response does not match the control schema: {source}"),
+            effect: unanswered,
         };
     })?;
 
     if response.version != CONTROL_PROTOCOL_VERSION || response.request_id != request.request_id {
-        return Err(Error::InvalidProtocol {
+        return Err(Error::InvalidResponse {
             reason: "response version or request identifier does not match".to_owned(),
+            effect: unanswered,
         });
     }
     return Ok(response);
@@ -497,7 +518,7 @@ fn transport_error(
     session: &Path,
     step: &'static str,
     timeout: Duration,
-    request_dispatched: bool,
+    effect: MutationEffect,
     source: IoError,
 ) -> Error {
     if matches!(source.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) {
@@ -505,25 +526,30 @@ fn transport_error(
             session: session.to_path_buf(),
             step,
             timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
-            request_dispatched,
+            effect,
             source,
         };
     }
     return Error::Transport {
         session: session.to_path_buf(),
         step,
-        request_dispatched,
+        effect,
         source,
     };
 }
 
-fn validate_response_frame(session: &Path, timeout: Duration, encoded: &[u8]) -> Result<()> {
+fn validate_response_frame(
+    session: &Path,
+    timeout: Duration,
+    encoded: &[u8],
+    unanswered: MutationEffect,
+) -> Result<()> {
     if encoded.is_empty() {
         return Err(transport_error(
             session,
             "read response",
             timeout,
-            true,
+            unanswered,
             IoError::new(
                 ErrorKind::UnexpectedEof,
                 "control endpoint closed without a response",
@@ -532,9 +558,10 @@ fn validate_response_frame(session: &Path, timeout: Duration, encoded: &[u8]) ->
     }
 
     if !is_control_frame(encoded) {
-        return Err(Error::InvalidProtocol {
+        return Err(Error::InvalidResponse {
             reason: "message must be one newline-terminated JSON object no larger than 16 MiB"
                 .to_owned(),
+            effect: unanswered,
         });
     }
     return Ok(());
@@ -561,7 +588,7 @@ mod tests {
             error,
             Error::Timeout {
                 step: "read response",
-                request_dispatched: true,
+                effect: MutationEffect::Unknown,
                 ..
             }
         ));
@@ -599,7 +626,7 @@ mod tests {
             error,
             Error::Timeout {
                 step: "read response",
-                request_dispatched: true,
+                effect: MutationEffect::Unknown,
                 ..
             }
         ));
@@ -623,7 +650,7 @@ mod tests {
             error,
             Error::Timeout {
                 step: "write request",
-                request_dispatched: false,
+                effect: MutationEffect::NotApplied,
                 ..
             }
         ));
@@ -646,13 +673,18 @@ mod tests {
 
     #[test]
     fn empty_control_response_is_a_transport_failure() {
-        let error = validate_response_frame(Path::new("/session"), Duration::from_secs(1), &[])
-            .expect_err("empty response must be a transport failure");
+        let error = validate_response_frame(
+            Path::new("/session"),
+            Duration::from_secs(1),
+            &[],
+            MutationEffect::Unknown,
+        )
+        .expect_err("empty response must be a transport failure");
         assert!(matches!(
             error,
             Error::Transport {
                 step: "read response",
-                request_dispatched: true,
+                effect: MutationEffect::Unknown,
                 source,
                 ..
             } if source.kind() == ErrorKind::UnexpectedEof

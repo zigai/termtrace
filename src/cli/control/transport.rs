@@ -157,6 +157,7 @@ pub(super) fn send_cli_control(
         ControlResult::Error {
             code,
             message,
+            effect,
             details,
         } => {
             write_json_line(
@@ -168,8 +169,8 @@ pub(super) fn send_cli_control(
                     "message": message,
                     "details": details,
                     "request_id": control_response.request_id,
-                    "applied": "none",
-                    "retry": "safe_new_request",
+                    "effect": effect,
+                    "retry": effect.retry(),
                     "session_state": "live",
                 }),
             )?;

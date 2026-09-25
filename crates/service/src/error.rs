@@ -4,22 +4,14 @@ use crate::{actions::ActionResult, client::StableScreenCapture};
 use std::{io::Error as IoError, path::PathBuf, result::Result as StdResult};
 use termtrace_control::Error as ControlError;
 use termtrace_model::{
-    protocol::control::InputSequenceFailureDetails,
+    protocol::{
+        control::InputSequenceFailureDetails,
+        mutation::{MutationEffect, Retry},
+    },
     terminal::{observation::ActorBoundaries, screen::ScreenFrameError},
 };
 use thiserror::Error;
 use uuid::Uuid;
-
-/// Bounded retry fact attached to typed public actor failures.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RetrySafety {
-    /// Retry only the exact request identifier and payload.
-    SameRequestOnly,
-    /// No mutation occurred; reevaluate and submit a new request.
-    NewRequest,
-    /// Evidence cannot establish a safe automatic retry.
-    Unknown,
-}
 
 /// Machine-readable classification of SDK and service errors.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -66,26 +58,6 @@ pub enum ErrorKind {
     InvalidOperation,
     /// Invalid duration argument.
     InvalidDuration,
-}
-
-/// Precise mutation effect boundary for action and control failures.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MutationEffect {
-    /// Request never reached the actor or dispatch queue.
-    NotDispatched,
-    /// Actor rejected the command before applying any mutation.
-    RejectedBeforeMutation,
-    /// Input sequence was partially applied up to a known prefix.
-    PartiallyApplied {
-        /// Number of input atoms successfully executed.
-        completed_prefix: usize,
-    },
-    /// All mutations were applied, but the requested postcondition was incomplete.
-    FullyAppliedPostconditionIncomplete,
-    /// All mutations were applied, but result frame projection failed.
-    AppliedProjectionFailed,
-    /// Transport failed after dispatch; actual mutation status is unknown.
-    DeliveryUnknown,
 }
 
 /// Failures translated at the SDK boundary.
@@ -154,8 +126,6 @@ pub enum Error {
         current_state_hash: String,
         /// Actor sequence boundaries proving rejection preceded mutation.
         boundaries: Box<ActorBoundaries>,
-        /// Retry constraint established by the actor evidence.
-        retry_safety: RetrySafety,
     },
     /// Actor exclusivity rejected an action before mutation.
     #[error("actor action is busy: {message}")]
@@ -168,10 +138,8 @@ pub enum Error {
     PartialInput {
         /// Bounded per-atom input failure evidence.
         details: InputSequenceFailureDetails,
-        /// Retry constraint established by the actor evidence.
-        retry_safety: RetrySafety,
-        /// Whether delivery prevents establishing an exact applied prefix.
-        uncertain: bool,
+        /// Applied prefix as stated by the actor.
+        effect: MutationEffect,
     },
     /// Input completed but projection of its terminating frame failed.
     #[error(
@@ -182,10 +150,6 @@ pub enum Error {
         request_id: Uuid,
         /// Actor sequence boundaries enclosing input application.
         boundaries: Box<ActorBoundaries>,
-        /// Whether every requested input atom was applied.
-        input_fully_applied: bool,
-        /// Retry constraint established by the actor evidence.
-        retry_safety: RetrySafety,
         #[source]
         /// Rich-frame projection failure.
         source: ScreenFrameError,
@@ -219,7 +183,9 @@ impl Error {
                 ControlError::Unavailable { .. } => ErrorKind::ControlUnavailable,
                 ControlError::Timeout { .. } => ErrorKind::ControlTimeout,
                 ControlError::Transport { .. } => ErrorKind::ControlTransport,
-                ControlError::InvalidProtocol { .. } => ErrorKind::InvalidControlProtocol,
+                ControlError::InvalidProtocol { .. } | ControlError::InvalidResponse { .. } => {
+                    ErrorKind::InvalidControlProtocol
+                }
                 ControlError::InvalidRequest { .. } => ErrorKind::InvalidOperation,
                 ControlError::InvalidJson { .. } => ErrorKind::InvalidJson,
                 ControlError::Filesystem { .. } => ErrorKind::Filesystem,
@@ -273,67 +239,35 @@ impl Error {
         };
     }
 
-    /// Determine the mutation boundary observed for this error.
+    /// What the failed request did to the session.
     #[must_use]
-    pub fn mutation_effect(&self) -> MutationEffect {
+    pub const fn effect(&self) -> MutationEffect {
         return match self {
-            Self::StaleState { .. } | Self::ActionBusy { .. } | Self::InvalidAtom { .. } => {
-                MutationEffect::RejectedBeforeMutation
+            Self::Control(error) => error.effect(),
+            Self::PartialInput { effect, .. } => *effect,
+            Self::ActionTerminatingFrame { .. } | Self::PostconditionIncomplete { .. } => {
+                MutationEffect::Applied
             }
-            Self::PartialInput { details, .. } => {
-                if details.atoms_applied > 0 {
-                    MutationEffect::PartiallyApplied {
-                        completed_prefix: details.atoms_applied as usize,
-                    }
-                } else {
-                    MutationEffect::RejectedBeforeMutation
-                }
-            }
-            Self::PostconditionIncomplete { .. } => {
-                MutationEffect::FullyAppliedPostconditionIncomplete
-            }
-            Self::ActionTerminatingFrame { .. } => MutationEffect::AppliedProjectionFailed,
-            Self::Control(
-                ControlError::Timeout {
-                    request_dispatched: true,
-                    ..
-                }
-                | ControlError::Transport {
-                    request_dispatched: true,
-                    ..
-                },
-            ) => MutationEffect::DeliveryUnknown,
-            _ => MutationEffect::NotDispatched,
+            Self::Evidence(_)
+            | Self::Engine(_)
+            | Self::Export(_)
+            | Self::Media(_)
+            | Self::Filesystem { .. }
+            | Self::InvalidJson { .. }
+            | Self::ScreenFrame(_)
+            | Self::InvalidAtom { .. }
+            | Self::InvalidDuration { .. }
+            | Self::StaleState { .. }
+            | Self::ActionBusy { .. }
+            | Self::StableCaptureIncomplete { .. }
+            | Self::InvalidOperation { .. } => MutationEffect::NotApplied,
         };
     }
 
-    /// Determine safe retry semantics for this error.
+    /// What the caller may safely do next, derived from [`Self::effect`].
     #[must_use]
-    pub fn retry_safety(&self) -> RetrySafety {
-        return match self {
-            Self::StaleState { retry_safety, .. }
-            | Self::PartialInput { retry_safety, .. }
-            | Self::ActionTerminatingFrame { retry_safety, .. } => *retry_safety,
-            Self::Control(
-                ControlError::Timeout {
-                    request_dispatched: true,
-                    ..
-                }
-                | ControlError::Transport {
-                    request_dispatched: true,
-                    ..
-                },
-            ) => RetrySafety::SameRequestOnly,
-            Self::Control(
-                ControlError::Rejected { .. }
-                | ControlError::Unavailable { .. }
-                | ControlError::Timeout {
-                    request_dispatched: false,
-                    ..
-                },
-            ) => RetrySafety::NewRequest,
-            _ => RetrySafety::Unknown,
-        };
+    pub const fn retry(&self) -> Retry {
+        return self.effect().retry();
     }
 }
 

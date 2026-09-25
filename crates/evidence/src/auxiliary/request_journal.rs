@@ -725,7 +725,7 @@ mod tests {
         execution::event::{
             Event, EventLogHeader, InputDescriptor, InputKind, InputSource, OperationStatus,
         },
-        protocol::control::CONTROL_PROTOCOL_VERSION,
+        protocol::{control::CONTROL_PROTOCOL_VERSION, mutation::MutationEffect},
         value::ByteString,
     };
 
@@ -736,6 +736,7 @@ mod tests {
             result: ControlResult::Error {
                 code: "fixture".to_owned(),
                 message,
+                effect: MutationEffect::NotApplied,
                 details: None,
             },
         };

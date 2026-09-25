@@ -2,7 +2,6 @@
 
 use crate::{
     actions::{ActionCompletion, ActionCondition, ActionOptions, ActionResult, InputAtom},
-    error::RetrySafety,
     protocol::wait_for_screen,
     screen::StableCaptureOptions,
     Error, Result,
@@ -63,6 +62,7 @@ use termtrace_model::{
         ControlData, ControlErrorDetails, ControlRequest, ControlResult, InputSequenceAtom,
         PointerOperation, ScreenPredicate, StableCaptureQuality,
     },
+    protocol::mutation::MutationEffect,
     terminal::analysis::{DiagnoseReport, DiagnosticCheck, ExplainReport},
     terminal::diff::SemanticDiff,
     terminal::inspection::{ScreenWaitOutcome, WaitOutcome},

@@ -46,8 +46,7 @@
           "status": "error",
           "code": "stale_observation",
           "message": "state changed",
-          "retry_safety": "safe_new_request",
-          "uncertain": false,
+          "effect": { "kind": "not_applied" },
           "evidence": "/tmp/example.termtrace",
           "details": {
             "current_presented_state_hash": "state",
@@ -69,8 +68,7 @@
           "status": "error",
           "code": "input_sequence_incomplete",
           "message": "input stopped at atom 1",
-          "retry_safety": "safe_same_request_id",
-          "uncertain": true,
+          "effect": { "kind": "unknown" },
           "evidence": "/tmp/example.termtrace",
           "details": {
             "current_presented_state_hash": "state-after-prefix",
@@ -124,8 +122,7 @@
           "status": "error",
           "code": "invalid",
           "message": "invalid response",
-          "retry_safety": "unknown",
-          "uncertain": false,
+          "effect": { "kind": "unknown" },
           "secret_payload": "SECRET_SENTINEL"
         }
       }

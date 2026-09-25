@@ -1,6 +1,6 @@
 use super::{
     framing::{read_frame, DriverFrame},
-    operations::{driver_error, driver_failure_with_retry, driver_response_is_cacheable},
+    operations::{driver_error, driver_failure_with_effect, driver_response_is_cacheable},
 };
 #[cfg(test)]
 use serde::Serialize;
@@ -17,6 +17,7 @@ use termtrace_model::protocol::driver::{
     DriverData, DriverRequest, DriverResponse, DriverResult, DRIVER_MAX_REQUEST_BYTES,
     DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
 };
+use termtrace_model::protocol::mutation::MutationEffect;
 use termtrace_sdk::{Error, Result};
 use uuid::Uuid;
 
@@ -194,12 +195,17 @@ impl Driver {
 
 pub(super) fn bounded_response_with_bytes(response: DriverResponse) -> (DriverResponse, Vec<u8>) {
     let Ok(bytes) = serde_json::to_vec(&response) else {
-        let err = driver_error(
-            response.request_id,
-            "response_encoding_failed",
-            "driver response could not be encoded",
-            None,
-        );
+        let err = DriverResponse {
+            version: DRIVER_PROTOCOL_VERSION,
+            request_id: response.request_id,
+            result: *driver_failure_with_effect(
+                "response_encoding_failed",
+                "driver response could not be encoded",
+                None,
+                undelivered_effect(&response.result),
+                None,
+            ),
+        };
 
         let err_bytes = serde_json::to_vec(&err).unwrap_or_default();
 
@@ -225,7 +231,7 @@ pub(super) fn bounded_response_with_bytes(response: DriverResponse) -> (DriverRe
     let fallback = DriverResponse {
         version: DRIVER_PROTOCOL_VERSION,
         request_id: response.request_id,
-        result: *driver_failure_with_retry(
+        result: *driver_failure_with_effect(
             if rich_screen_response {
                 "screen_frame_resource_limit"
             } else {
@@ -235,14 +241,43 @@ pub(super) fn bounded_response_with_bytes(response: DriverResponse) -> (DriverRe
                 "driver response exceeds the {DRIVER_MAX_RESPONSE_BYTES}-byte limit; request a smaller projection or page"
             ),
             None,
-            "safe_same_request_id",
-            false,
+            undelivered_effect(&response.result),
             None,
         ),
     };
     let fallback_bytes = serde_json::to_vec(&fallback).unwrap_or_default();
 
     return (fallback, fallback_bytes);
+}
+
+/// Effect of a completed method whose result cannot be delivered.
+fn undelivered_effect(result: &DriverResult) -> MutationEffect {
+    return match result {
+        DriverResult::Error { effect, .. } => *effect,
+        DriverResult::Ok {
+            data:
+                DriverData::Control {
+                    data:
+                        ControlData::EventCursor { .. }
+                        | ControlData::Status { .. }
+                        | ControlData::Snapshot { .. }
+                        | ControlData::ScreenFrame { .. }
+                        | ControlData::StableSnapshot { .. }
+                        | ControlData::ScreenWait { .. },
+                }
+                | DriverData::Hello { .. }
+                | DriverData::OutputWait { .. }
+                | DriverData::Completion { .. }
+                | DriverData::Observation { .. }
+                | DriverData::ScreenFrame { .. }
+                | DriverData::Timeline { .. }
+                | DriverData::Diff { .. }
+                | DriverData::Diagnose { .. }
+                | DriverData::Events { .. }
+                | DriverData::Verification { .. },
+        } => MutationEffect::NotApplied,
+        DriverResult::Ok { .. } => MutationEffect::Applied,
+    };
 }
 
 #[cfg(test)]

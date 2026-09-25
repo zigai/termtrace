@@ -81,7 +81,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
     let action: serde_json::Value =
         serde_json::from_slice(&output).expect("action response should be JSON");
     assert_eq!(action["request_id"], request_id);
-    assert_eq!(action["input"]["applied"], "all");
+    assert_eq!(action["input"]["effect"]["kind"], "applied");
     assert_eq!(action["input"]["atoms"], 1);
     assert_eq!(action["input"]["bytes"], 4);
     assert_eq!(action["postcondition"]["matched"], true);
@@ -139,7 +139,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
 
     let unmet: serde_json::Value =
         serde_json::from_slice(&output).expect("failed postcondition response should be JSON");
-    assert_eq!(unmet["input"]["applied"], "all");
+    assert_eq!(unmet["input"]["effect"]["kind"], "applied");
     assert_eq!(unmet["input"]["atoms"], 1);
     assert_eq!(unmet["input"]["bytes"], 1);
     assert_eq!(unmet["postcondition"]["matched"], false);
@@ -432,14 +432,15 @@ fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
     let rejected: serde_json::Value =
         serde_json::from_slice(&rejected).expect("concurrent rejection JSON");
     assert_eq!(rejected["code"], "action_busy");
-    assert_eq!(rejected["input"]["applied"], "none");
+    assert_eq!(rejected["input"]["effect"]["kind"], "not_applied");
+    assert_eq!(rejected["input"]["retry"], "new_request");
 
     let action_output = action.wait_with_output().expect("atomic action response");
     assert_eq!(action_output.status.code(), Some(1));
 
     let action: serde_json::Value =
         serde_json::from_slice(&action_output.stdout).expect("atomic action JSON");
-    assert_eq!(action["input"]["applied"], "all");
+    assert_eq!(action["input"]["effect"]["kind"], "applied");
     assert_eq!(action["input"]["atoms"], 1);
     assert_eq!(action["input"]["bytes"], 1);
     assert_eq!(action["postcondition"]["matched"], false);

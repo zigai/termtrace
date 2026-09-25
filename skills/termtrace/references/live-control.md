@@ -39,9 +39,11 @@ input is valid only for that presentation. Use the same state with
 screen differs from it without retransmitting the viewport.
 
 When `--json` is passed, `send` reports input application separately from its postcondition.
-Treat `applied`, `retry`, and `session_state` as authoritative even when the
-overall operation failed. A failed postcondition does not undo successfully
-applied input. Follow `retry` exactly: an uncertain transport outcome may require
-the identical request ID and payload, while deterministic rejection requires a
-corrected request. Never resend a whole sequence merely because its
-postcondition was unmet.
+Treat `effect`, `retry`, and `session_state` as authoritative even when the
+overall operation failed. `effect.kind` is `not_applied`, `partial` (with
+`completed_atoms`), `applied`, or `unknown`; `retry` is derived from it. A failed
+postcondition does not undo successfully applied input. Follow `retry` exactly:
+`same_request_id` resends the identical request ID and payload, `new_request`
+requires a corrected request, `inspect_first` means inspect the screen before
+continuing past the applied prefix, and `do_not_retry` means the input already
+applied. Never resend a whole sequence merely because its postcondition was unmet.

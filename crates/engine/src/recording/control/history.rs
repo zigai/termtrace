@@ -7,8 +7,9 @@ use super::super::{
 use crate::Result;
 use std::collections::{HashMap, VecDeque};
 use termtrace_evidence::request_journal::{guarded_command_hash, MutationJournal};
-use termtrace_model::protocol::control::{
-    ControlCommand, ControlData, ControlResponse, ControlResult,
+use termtrace_model::protocol::{
+    control::{ControlCommand, ControlData, ControlResponse, ControlResult},
+    mutation::MutationEffect,
 };
 use uuid::Uuid;
 
@@ -189,6 +190,7 @@ fn mutation_retry_response(
         request_id,
         "request_id_collision",
         "request identifier was already used for a different mutation",
+        MutationEffect::NotApplied,
     );
 }
 
@@ -319,9 +321,8 @@ mod tests {
             )
             .expect("remember succeeds");
 
-        let mut cursor =
-            MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
-                .expect("cursor");
+        let mut cursor = MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
+            .expect("cursor");
         let record = cursor
             .next_record()
             .expect("read")
@@ -391,9 +392,8 @@ mod tests {
             )
             .expect("remember succeeds");
 
-        let mut cursor =
-            MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
-                .expect("cursor");
+        let mut cursor = MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
+            .expect("cursor");
         let record = cursor
             .next_record()
             .expect("read")
@@ -431,6 +431,7 @@ mod tests {
             result: ControlResult::Error {
                 code: "input_sequence_failed".to_owned(),
                 message: "write failed".to_owned(),
+                effect: MutationEffect::Partial { completed_atoms: 1 },
                 details: Some(ControlErrorDetails {
                     current_presented_state_hash: "hash".to_owned(),
                     boundaries: dummy_boundaries(),
@@ -464,9 +465,8 @@ mod tests {
             )
             .expect("remember succeeds");
 
-        let mut cursor =
-            MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
-                .expect("cursor");
+        let mut cursor = MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
+            .expect("cursor");
         let record = cursor
             .next_record()
             .expect("read")
@@ -504,6 +504,7 @@ mod tests {
             result: ControlResult::Error {
                 code: "rejected".to_owned(),
                 message: "rejected".to_owned(),
+                effect: MutationEffect::NotApplied,
                 details: None,
             },
         };
@@ -520,9 +521,8 @@ mod tests {
             )
             .expect("remember succeeds");
 
-        let mut cursor =
-            MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
-                .expect("cursor");
+        let mut cursor = MutationJournalCursor::open(&temporary.path().join(MUTATION_JOURNAL_NAME))
+            .expect("cursor");
         let record = cursor
             .next_record()
             .expect("read")

@@ -219,5 +219,7 @@ def test_timeout_error_raised() -> None:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
         with tt.record(["/bin/sh", "-norc", "-c", "sleep 10"], rows=24, cols=80) as rec:
             screen = rec.screen()
-            with pytest.raises(TimeoutError):
+            with pytest.raises(TimeoutError) as raised:
                 screen.wait_for_text("NON_EXISTENT_STRING_XYZ", timeout_secs=0.2)
+            assert raised.value.effect == {"kind": "not_applied"}
+            assert raised.value.retry == "new_request"

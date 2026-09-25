@@ -2256,6 +2256,10 @@
               ],
               "description": "Actor-provided ordering or attempted-prefix details when available."
             },
+            "effect": {
+              "$ref": "#/$defs/MutationEffect",
+              "description": "What the method did before it failed; callers derive retry from it."
+            },
             "evidence": {
               "description": "Canonical evidence path when known.",
               "type": [
@@ -2267,25 +2271,16 @@
               "description": "Human-readable diagnostic.",
               "type": "string"
             },
-            "retry_safety": {
-              "description": "`safe_same_request_id`, `safe_new_request`, or `unknown`.",
-              "type": "string"
-            },
             "status": {
               "const": "error",
               "type": "string"
-            },
-            "uncertain": {
-              "description": "Whether mutation application may be uncertain.",
-              "type": "boolean"
             }
           },
           "required": [
             "status",
             "code",
             "message",
-            "retry_safety",
-            "uncertain"
+            "effect"
           ],
           "type": "object"
         }
@@ -3563,6 +3558,74 @@
         "values"
       ],
       "type": "object"
+    },
+    "MutationEffect": {
+      "description": "Effect a request had on the child, its PTY, or canonical evidence.\n\nThe recording actor states this fact in every rejection. Clients only\nsynthesize it for transport outcomes the actor could not report.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Nothing was applied.",
+          "properties": {
+            "kind": {
+              "const": "not_applied",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A known prefix of input atoms was applied completely, and nothing after it.",
+          "properties": {
+            "completed_atoms": {
+              "description": "Number of leading atoms applied completely.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "partial",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "completed_atoms"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Every requested mutation was applied.",
+          "properties": {
+            "kind": {
+              "const": "applied",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The request may or may not have been applied.",
+          "properties": {
+            "kind": {
+              "const": "unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "MutationJournalStatus": {
       "description": "Offline status of the disposable mutation request journal.",

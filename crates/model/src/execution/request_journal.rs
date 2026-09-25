@@ -10,7 +10,7 @@ pub const MUTATION_JOURNAL_NAME: &str = "requests.jsonl";
 /// Mutation journal record format identifier.
 pub const MUTATION_JOURNAL_FORMAT: &str = "termtrace-mutation-request";
 /// Mutation journal schema version.
-pub const MUTATION_JOURNAL_VERSION: u32 = 2;
+pub const MUTATION_JOURNAL_VERSION: u32 = 3;
 
 /// One durable mutation request outcome tied to a canonical event boundary.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
