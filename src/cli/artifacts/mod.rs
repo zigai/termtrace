@@ -64,10 +64,10 @@ use termtrace_model::{
     artifact::save::{SaveFormat, SemanticRasterProfile},
     execution::event::Event,
     execution::session::CaptureTarget,
+    execution::session::SessionPhase,
     protocol::capability::{
         NATIVE_VIDEO_CAPABILITY, PRESENTATION_CAPABILITY, SEMANTIC_VIDEO_CAPABILITY,
     },
-    registry::RegistryLifecycle,
     terminal::observation::StatePoint,
     terminal::replay::StateSelection,
     value::ByteString,
@@ -237,7 +237,7 @@ pub(super) fn run_video_facade(
     };
 
     let resolved = resolve_session(arguments.session.clone())?;
-    if resolved.lifecycle != RegistryLifecycle::Completed {
+    if resolved.lifecycle != SessionPhase::Completed {
         return write_session_lifecycle(response, &resolved, "video", ExitCode::FAILURE);
     }
 

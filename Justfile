@@ -13,7 +13,7 @@ install: bootstrap
 
 # Regenerate public schemas
 generate:
-  cargo run --locked --quiet -- tooling schemas --out schemas
+  cargo run --locked --quiet -- schema --out schemas
 
 # Enforce the complete allowlist of direct internal Cargo dependencies
 architecture:

@@ -135,7 +135,7 @@ fn expired_reservation_is_reclaimed_without_accepting_the_old_owner() {
     let resolved = registry
         .resolve_lifecycle("demo")
         .expect("resolve replacement reservation");
-    assert_eq!(resolved.lifecycle, RegistryLifecycle::Incomplete);
+    assert_eq!(resolved.lifecycle, SessionPhase::Incomplete);
     assert_eq!(resolved.session, second_path);
 
     registry.release(&second).expect("release replacement");

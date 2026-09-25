@@ -13,8 +13,8 @@ use termtrace_engine::{
     timeline::{resolve_session_prefix_source_selection, resolve_session_source_selection},
 };
 use termtrace_model::{
+    execution::session::SessionPhase,
     protocol::control::{ControlCommand, ControlData},
-    registry::RegistryLifecycle,
     terminal::observation::StatePoint,
     value::ByteString,
 };
@@ -22,7 +22,7 @@ use termtrace_sdk::{control_endpoint_is_reachable, request};
 
 pub(super) struct ResolvedSessionRef {
     pub(super) path: PathBuf,
-    pub(super) lifecycle: RegistryLifecycle,
+    pub(super) lifecycle: SessionPhase,
     pub(super) diagnostic: Option<String>,
 }
 
@@ -136,7 +136,7 @@ fn resolve_path_lifecycle(path: PathBuf) -> ResolvedSessionRef {
     if !path.is_dir() {
         return ResolvedSessionRef {
             path,
-            lifecycle: RegistryLifecycle::MissingEvidence,
+            lifecycle: SessionPhase::MissingEvidence,
             diagnostic: Some("session directory is missing or unreadable".to_owned()),
         };
     }
@@ -144,7 +144,7 @@ fn resolve_path_lifecycle(path: PathBuf) -> ResolvedSessionRef {
     if path.join("completion.json").is_file() {
         return ResolvedSessionRef {
             path,
-            lifecycle: RegistryLifecycle::Completed,
+            lifecycle: SessionPhase::Completed,
             diagnostic: None,
         };
     }
@@ -152,7 +152,7 @@ fn resolve_path_lifecycle(path: PathBuf) -> ResolvedSessionRef {
     if !path.join("session.json").is_file() {
         return ResolvedSessionRef {
             path,
-            lifecycle: RegistryLifecycle::Incomplete,
+            lifecycle: SessionPhase::Incomplete,
             diagnostic: Some("session manifest has not been published".to_owned()),
         };
     }
@@ -160,13 +160,13 @@ fn resolve_path_lifecycle(path: PathBuf) -> ResolvedSessionRef {
     if control_endpoint_is_reachable(&path) {
         return ResolvedSessionRef {
             path,
-            lifecycle: RegistryLifecycle::Live,
+            lifecycle: SessionPhase::Live,
             diagnostic: None,
         };
     }
     return ResolvedSessionRef {
         path,
-        lifecycle: RegistryLifecycle::Stale,
+        lifecycle: SessionPhase::Stale,
         diagnostic: Some(
             "session has no completion evidence and its abstract control endpoint is unreachable"
                 .to_owned(),

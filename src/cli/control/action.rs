@@ -57,7 +57,7 @@ pub(in crate::cli) fn run_send(
     arguments: SendArgs,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session.clone())?;
-    if resolved.lifecycle != RegistryLifecycle::Live {
+    if resolved.lifecycle != SessionPhase::Live {
         return write_session_lifecycle(response, &resolved, "send", ExitCode::FAILURE);
     }
 

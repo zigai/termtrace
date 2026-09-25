@@ -29,12 +29,13 @@ use termtrace_evidence::{
     session::{read_completion, read_manifest},
 };
 use termtrace_model::{
+    execution::session::SessionPhase,
     execution::session::{SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION},
     protocol::control::CONTROL_PROTOCOL_VERSION,
     registry::{
         AliasReservation, DetachedSessionPaths, GarbageCollectionCandidate,
-        GarbageCollectionReport, RegistryEntry, RegistryLifecycle, RegistryListEntry,
-        RegistrySessionResolution, REGISTRY_ENTRY_FORMAT, REGISTRY_ENTRY_VERSION,
+        GarbageCollectionReport, RegistryEntry, RegistryListEntry, RegistrySessionResolution,
+        REGISTRY_ENTRY_FORMAT, REGISTRY_ENTRY_VERSION,
     },
     value::ByteString,
 };

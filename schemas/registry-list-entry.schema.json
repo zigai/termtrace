@@ -5,46 +5,6 @@
       "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
       "type": "string"
     },
-    "RegistryLifecycle": {
-      "description": "Lifecycle classification derived without changing canonical evidence.",
-      "oneOf": [
-        {
-          "const": "live",
-          "description": "Recorder identity and control socket are present.",
-          "type": "string"
-        },
-        {
-          "const": "completed",
-          "description": "A completion manifest exists for the registered session ID.",
-          "type": "string"
-        },
-        {
-          "const": "incomplete",
-          "description": "Evidence exists but has neither a live recorder identity nor completion.",
-          "type": "string"
-        },
-        {
-          "const": "stale",
-          "description": "Socket or PID metadata remains but the recorder identity no longer matches.",
-          "type": "string"
-        },
-        {
-          "const": "missing_evidence",
-          "description": "Canonical evidence is missing, insecure, or unreadable.",
-          "type": "string"
-        },
-        {
-          "const": "identity_mismatch",
-          "description": "The manifest session ID differs from the registered immutable identity.",
-          "type": "string"
-        },
-        {
-          "const": "incompatible",
-          "description": "Registry or control protocol format is unsupported.",
-          "type": "string"
-        }
-      ]
-    },
     "SessionGeometry": {
       "description": "Initial PTY geometry.",
       "properties": {
@@ -84,6 +44,46 @@
         "pixel_height"
       ],
       "type": "object"
+    },
+    "SessionPhase": {
+      "description": "Where a session is in its life, observed without changing canonical evidence.\n\nThis is the one session-phase vocabulary. Registry listings, CLI output,\nand live-control failures all report it rather than inventing their own.",
+      "oneOf": [
+        {
+          "const": "live",
+          "description": "Recorder identity and control socket are present.",
+          "type": "string"
+        },
+        {
+          "const": "completed",
+          "description": "A completion manifest exists for the registered session ID.",
+          "type": "string"
+        },
+        {
+          "const": "incomplete",
+          "description": "Evidence exists but has neither a live recorder identity nor completion.",
+          "type": "string"
+        },
+        {
+          "const": "stale",
+          "description": "Socket or PID metadata remains but the recorder identity no longer matches.",
+          "type": "string"
+        },
+        {
+          "const": "missing_evidence",
+          "description": "Canonical evidence is missing, insecure, or unreadable.",
+          "type": "string"
+        },
+        {
+          "const": "identity_mismatch",
+          "description": "The manifest session ID differs from the registered immutable identity.",
+          "type": "string"
+        },
+        {
+          "const": "incompatible",
+          "description": "Registry or control protocol format is unsupported.",
+          "type": "string"
+        }
+      ]
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/registry-list-entry.schema.json",
@@ -128,7 +128,7 @@
       "description": "Initial grid and pixel geometry when the manifest is readable."
     },
     "lifecycle": {
-      "$ref": "#/$defs/RegistryLifecycle",
+      "$ref": "#/$defs/SessionPhase",
       "description": "Current derived lifecycle classification."
     },
     "registered_unix_ns": {

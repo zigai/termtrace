@@ -229,6 +229,49 @@ pub struct SessionManifest {
     pub resource_limits: ResourceLimits,
 }
 
+/// Where a session is in its life, observed without changing canonical evidence.
+///
+/// This is the one session-phase vocabulary. Registry listings, CLI output,
+/// and live-control failures all report it rather than inventing their own.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionPhase {
+    /// Recorder identity and control socket are present.
+    Live,
+    /// A completion manifest exists for the registered session ID.
+    Completed,
+    /// Evidence exists but has neither a live recorder identity nor completion.
+    Incomplete,
+    /// Socket or PID metadata remains but the recorder identity no longer matches.
+    Stale,
+    /// Canonical evidence is missing, insecure, or unreadable.
+    MissingEvidence,
+    /// The manifest session ID differs from the registered immutable identity.
+    IdentityMismatch,
+    /// Registry or control protocol format is unsupported.
+    Incompatible,
+}
+
+impl SessionPhase {
+    /// Whether the recorder has published its final state.
+    pub const fn is_completed(self) -> bool {
+        return matches!(self, Self::Completed);
+    }
+
+    /// Stable lowercase CLI and diagnostic spelling.
+    pub fn as_str(self) -> &'static str {
+        return match self {
+            Self::Live => "live",
+            Self::Completed => "completed",
+            Self::Incomplete => "incomplete",
+            Self::Stale => "stale",
+            Self::MissingEvidence => "missing_evidence",
+            Self::IdentityMismatch => "identity_mismatch",
+            Self::Incompatible => "incompatible",
+        };
+    }
+}
+
 /// Recorder failure retained when the child could not complete normally.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

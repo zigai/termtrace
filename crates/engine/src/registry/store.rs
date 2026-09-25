@@ -181,7 +181,7 @@ impl SessionRegistry {
                 if !valid_reservation(alias, &reservation) {
                     return Ok(RegistrySessionResolution {
                         session: reservation.session_path(),
-                        lifecycle: RegistryLifecycle::Incompatible,
+                        lifecycle: SessionPhase::Incompatible,
                         diagnostic: Some("alias startup reservation is incompatible".to_owned()),
                     });
                 }
@@ -190,11 +190,7 @@ impl SessionRegistry {
 
                 Ok(RegistrySessionResolution {
                     session: reservation.session_path(),
-                    lifecycle: if expired {
-                        RegistryLifecycle::Stale
-                    } else {
-                        RegistryLifecycle::Incomplete
-                    },
+                    lifecycle: if expired { SessionPhase::Stale } else { SessionPhase::Incomplete },
                     diagnostic: Some(if expired {
                         "alias startup reservation lease expired before promotion".to_owned()
                     } else {
@@ -239,7 +235,7 @@ impl SessionRegistry {
 
             let row = inspect_entry(&entry);
 
-            if include_all || row.lifecycle == RegistryLifecycle::Live {
+            if include_all || row.lifecycle == SessionPhase::Live {
                 rows.push(row);
             }
         }
@@ -379,7 +375,7 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         geometry: None,
         started_unix_ns: None,
         registered_unix_ns: entry.registered_unix_ns,
-        lifecycle: RegistryLifecycle::MissingEvidence,
+        lifecycle: SessionPhase::MissingEvidence,
         diagnostic: None,
     };
 
@@ -388,7 +384,7 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         || entry.control_protocol_version != CONTROL_PROTOCOL_VERSION
         || entry.recorder_pid.is_some() != entry.recorder_process_start_ticks.is_some()
     {
-        row.lifecycle = RegistryLifecycle::Incompatible;
+        row.lifecycle = SessionPhase::Incompatible;
         row.diagnostic =
             Some("registry format, protocol, or process identity is incompatible".to_owned());
 
@@ -433,7 +429,7 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
     row.started_unix_ns = Some(manifest.started_unix_ns);
 
     if manifest.session_id != entry.session_id {
-        row.lifecycle = RegistryLifecycle::IdentityMismatch;
+        row.lifecycle = SessionPhase::IdentityMismatch;
         row.diagnostic = Some("manifest session ID differs from registry binding".to_owned());
 
         return row;
@@ -443,19 +439,19 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
     if completion_path.exists() {
         match read_completion(&canonical) {
             Ok(completion) if completion.session_id == entry.session_id => {
-                row.lifecycle = RegistryLifecycle::Completed;
+                row.lifecycle = SessionPhase::Completed;
 
                 return row;
             }
             Ok(_) => {
-                row.lifecycle = RegistryLifecycle::IdentityMismatch;
+                row.lifecycle = SessionPhase::IdentityMismatch;
                 row.diagnostic =
                     Some("completion session ID differs from registry binding".to_owned());
 
                 return row;
             }
             Err(error) => {
-                row.lifecycle = RegistryLifecycle::MissingEvidence;
+                row.lifecycle = SessionPhase::MissingEvidence;
                 row.diagnostic = Some(error.to_string());
 
                 return row;
@@ -467,16 +463,16 @@ fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
 
     if let Some(identity) = entry.recorder_pid.zip(entry.recorder_process_start_ticks) {
         if responsive_identity == Some(identity) {
-            row.lifecycle = RegistryLifecycle::Live;
+            row.lifecycle = SessionPhase::Live;
         } else {
-            row.lifecycle = RegistryLifecycle::Stale;
+            row.lifecycle = SessionPhase::Stale;
             row.diagnostic =
                 Some("recorder PID/start identity or control socket is stale".to_owned());
         }
     } else if responsive_identity.is_some() {
-        row.lifecycle = RegistryLifecycle::Live;
+        row.lifecycle = SessionPhase::Live;
     } else {
-        row.lifecycle = RegistryLifecycle::Incomplete;
+        row.lifecycle = SessionPhase::Incomplete;
     }
 
     return row;

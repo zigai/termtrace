@@ -39,7 +39,7 @@ use termtrace_engine::{
 use termtrace_media::native_capture::validated_visual_manifests;
 use termtrace_model::{
     execution::event::Event,
-    registry::RegistryLifecycle,
+    execution::session::SessionPhase,
     terminal::analysis::{DiagnoseReport, ExplainOutputPage, ExplainReport},
     terminal::diff::SemanticDiff,
     terminal::observation::StatePoint,
@@ -380,7 +380,7 @@ pub(in crate::cli) fn run_last_action_facade(
     arguments: InspectFacadeArgs,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle != RegistryLifecycle::Completed {
+    if resolved.lifecycle != SessionPhase::Completed {
         return write_session_lifecycle(response, &resolved, "last_action", ExitCode::FAILURE);
     }
 
@@ -409,7 +409,7 @@ pub(in crate::cli) fn run_diagnose_last_action_facade(
     arguments: DiagnoseFacadeArgs,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle != RegistryLifecycle::Completed {
+    if resolved.lifecycle != SessionPhase::Completed {
         return write_session_lifecycle(
             response,
             &resolved,

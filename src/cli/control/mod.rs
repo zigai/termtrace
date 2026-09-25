@@ -27,13 +27,13 @@ use termtrace_engine::{
 };
 use termtrace_model::{
     execution::event::InputKind,
+    execution::session::SessionPhase,
     protocol::control::{
         derive_input_operation_id, ActionPostcondition, ActionPostconditionResult, ControlCommand,
         ControlData, ControlErrorDetails, ControlRequest, ControlResult, InputSequenceAtom,
         InputSequenceAtomOutcome, ScreenPostconditionQuality, ScreenPredicate, ScreenWaitQuality,
         StableCaptureQuality, StateHashComparison,
     },
-    registry::RegistryLifecycle,
     terminal::observation::{ActorBoundaries, CaptureQuality, StatePoint},
     terminal::screen::{ScreenFrame, ScreenProjectionRequest},
     terminal::state::{KeyModifiers, NamedKey},

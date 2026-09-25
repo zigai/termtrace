@@ -3,7 +3,7 @@
 use assert_cmd::Command;
 use std::path::Path;
 use tempfile::TempDir;
-use termtrace_model::registry::RegistryLifecycle;
+use termtrace_model::execution::session::SessionPhase;
 use termtrace_service::registry::{RegistryService, ValueOverride};
 
 #[allow(clippy::expect_used, reason = "test setup")]
@@ -47,7 +47,7 @@ fn test_registry_lifecycle_and_gc() {
         .resolve_lifecycle("test-alias")
         .expect("resolve lifecycle");
     assert_eq!(lifecycle.session, session_path);
-    assert_eq!(lifecycle.lifecycle, RegistryLifecycle::Completed);
+    assert_eq!(lifecycle.lifecycle, SessionPhase::Completed);
 
     // List aliases
     let list = registry.list(true).expect("list");

@@ -91,17 +91,17 @@ pub(in crate::cli) fn run_screen(
     }
 
     let mut resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle == RegistryLifecycle::Stale
+    if resolved.lifecycle == SessionPhase::Stale
         && wait_for_completion(&resolved.path, Duration::from_millis(500)).is_ok()
     {
-        resolved.lifecycle = RegistryLifecycle::Completed;
+        resolved.lifecycle = SessionPhase::Completed;
         resolved.diagnostic = None;
     }
 
     if !arguments.recover_prefix
         && !matches!(
             resolved.lifecycle,
-            RegistryLifecycle::Live | RegistryLifecycle::Completed
+            SessionPhase::Live | SessionPhase::Completed
         )
     {
         return write_session_lifecycle(response, &resolved, "screen", ExitCode::FAILURE);
@@ -110,7 +110,7 @@ pub(in crate::cli) fn run_screen(
     let lifecycle = resolved.lifecycle;
     let session = resolved.path;
     let mut stable_hash: Option<String> = None;
-    if !arguments.stable_for.is_zero() && lifecycle == RegistryLifecycle::Live {
+    if !arguments.stable_for.is_zero() && lifecycle == SessionPhase::Live {
         let stable_wait = wait_for_screen(
             &session,
             ScreenPredicate::StateHash {
@@ -323,7 +323,7 @@ struct ScreenResponse<'response> {
     #[serde(rename = "type")]
     response_type: &'static str,
     session: &'response Path,
-    lifecycle: RegistryLifecycle,
+    lifecycle: SessionPhase,
     state: &'response str,
     quality: CaptureQuality,
     size: [u16; 2],

@@ -11,7 +11,7 @@ pub(in crate::cli) fn run_wait(
     }
 
     let resolved = resolve_session(arguments.session.clone())?;
-    if resolved.lifecycle != RegistryLifecycle::Live {
+    if resolved.lifecycle != SessionPhase::Live {
         return write_session_lifecycle(response, &resolved, "wait", ExitCode::FAILURE);
     }
 
@@ -66,14 +66,14 @@ fn run_idle_wait(
     stable_for: Duration,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle == RegistryLifecycle::Completed {
+    if resolved.lifecycle == SessionPhase::Completed {
         if arguments.require_live_stability {
             return write_session_lifecycle(response, &resolved, "wait", ExitCode::FAILURE);
         }
         return write_completed_stable_snapshot(response, &resolved, arguments.full_state);
     }
 
-    if resolved.lifecycle != RegistryLifecycle::Live {
+    if resolved.lifecycle != SessionPhase::Live {
         return write_session_lifecycle(response, &resolved, "wait", ExitCode::FAILURE);
     }
 

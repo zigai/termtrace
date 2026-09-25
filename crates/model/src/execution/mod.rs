@@ -4,6 +4,7 @@ pub mod application;
 pub mod environment;
 pub mod event;
 pub mod event_log;
+pub mod layout;
 pub mod provenance;
 pub mod receipt;
 pub mod request_journal;

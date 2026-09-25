@@ -189,7 +189,7 @@ pub(in crate::cli) fn run_control_guarded(
     json: bool,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(session)?;
-    if resolved.lifecycle != RegistryLifecycle::Live {
+    if resolved.lifecycle != SessionPhase::Live {
         return write_session_lifecycle(response, &resolved, "control", ExitCode::FAILURE);
     }
 
@@ -323,7 +323,7 @@ pub(in crate::cli) fn run_status(
     };
     let session_label = requested_session.display().to_string();
     let resolved = resolve_session(requested_session)?;
-    if arguments.wait_complete || resolved.lifecycle == RegistryLifecycle::Completed {
+    if arguments.wait_complete || resolved.lifecycle == SessionPhase::Completed {
         let completion =
             wait_for_completion(&resolved.path, Duration::from_millis(arguments.timeout_ms))
                 .into_diagnostic()?;
@@ -349,7 +349,7 @@ pub(in crate::cli) fn run_status(
         );
     }
 
-    if resolved.lifecycle != RegistryLifecycle::Live {
+    if resolved.lifecycle != SessionPhase::Live {
         if arguments.json {
             return write_session_lifecycle(response, &resolved, "status", ExitCode::SUCCESS);
         }
@@ -412,7 +412,7 @@ pub(in crate::cli) fn run_stop(
     arguments: StopArgs,
 ) -> Result<ExitCode> {
     let resolved = resolve_session(arguments.session)?;
-    if resolved.lifecycle == RegistryLifecycle::Completed {
+    if resolved.lifecycle == SessionPhase::Completed {
         let completion = wait_for_completion(&resolved.path, Duration::ZERO).into_diagnostic()?;
 
         let payload = serde_json::json!({
@@ -429,7 +429,7 @@ pub(in crate::cli) fn run_stop(
         );
     }
 
-    if resolved.lifecycle != RegistryLifecycle::Live {
+    if resolved.lifecycle != SessionPhase::Live {
         return write_session_lifecycle(response, &resolved, "stop", ExitCode::FAILURE);
     }
 
