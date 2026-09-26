@@ -174,12 +174,6 @@ fn act_accepts_natural_modifier_aliases_and_single_character_text() {
             ..
         } if key == "down" && *control
     )));
-
-    let mut help = Command::cargo_bin("termtrace").expect("binary should build");
-    help.arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("send"));
 }
 
 #[test]

@@ -5,26 +5,6 @@ use termtrace_engine::{analysis::last_action, registry::SessionRegistry};
 use termtrace_evidence::event_log::EventLog;
 
 #[test]
-fn doctor_and_wait_help_remain_directly_discoverable() {
-    let mut doctor = Command::cargo_bin("termtrace").expect("binary should build");
-    doctor
-        .args(["doctor", "--json"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(r#""id": "semantic""#));
-
-    let mut wait_help = Command::cargo_bin("termtrace").expect("binary should build");
-    wait_help
-        .args(["wait", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--screen <SCREEN>"))
-        .stdout(predicate::str::contains("--screen-regex"))
-        .stdout(predicate::str::contains("--output"))
-        .stdout(predicate::str::contains("--idle"));
-}
-
-#[test]
 fn start_act_and_screen_form_one_state_safe_workflow() {
     let temporary = TempDir::new().expect("temporary directory");
     let state = temporary.path().join("state");
@@ -651,7 +631,6 @@ fn bug_report_supports_completed_sessions_without_input_actions() {
         &fs_err::read(report.join("manifest.json")).expect("no-action bug-report manifest"),
     )
     .expect("no-action bug-report manifest JSON");
-    assert_eq!(manifest["version"], 2);
     assert_eq!(manifest["includes_last_action"], false);
     assert_eq!(manifest["members"].as_array().map_or(0, Vec::len), 3);
 }

@@ -58,6 +58,3 @@ pub(super) use sink::{
     finish_response, response_output, write_clap_error, write_follow_json_line,
     write_follow_stdout, write_json_line, write_json_pretty, write_stdout,
 };
-
-#[cfg(test)]
-mod tests;

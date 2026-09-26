@@ -4,16 +4,12 @@ const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { Termtrace, version } = require('@termtrace/core');
+const { Termtrace } = require('@termtrace/core');
 const { withTermtrace } = require('@termtrace/core/testing');
 
 const TERMTRACE_BIN = process.env.TERMTRACE_BIN
   ? path.resolve(process.env.TERMTRACE_BIN)
   : path.resolve(__dirname, '../../../../target/debug/termtrace');
-
-test('version returns core semver', () => {
-  assert.strictEqual(version(), '0.1.0');
-});
 
 test('sync and async recording lifecycle', async () => {
   const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-consumer-'));

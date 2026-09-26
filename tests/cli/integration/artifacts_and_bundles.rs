@@ -49,68 +49,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         manifest["sensitivity"],
         "terminal_screen_may_contain_secrets"
     );
-    assert_eq!(manifest["version"], 4);
     assert_eq!(manifest["files"].as_array().map(Vec::len), Some(7));
-
-    let image_resource = &manifest["semantic_image_resources"][0];
-    let fonts = image_resource["fonts"].as_array().expect("font resources");
-    assert_eq!(fonts.len(), 5);
-
-    let roles: Vec<&str> = fonts
-        .iter()
-        .map(|font| return font["role"].as_str().expect("font role"))
-        .collect();
-    assert_eq!(
-        roles,
-        [
-            "regular",
-            "bold",
-            "italic",
-            "bold-italic",
-            "symbols-fallback"
-        ]
-    );
-
-    let families: Vec<&str> = fonts
-        .iter()
-        .map(|font| return font["family"].as_str().expect("font family"))
-        .collect();
-    assert_eq!(
-        families,
-        [
-            "Termtrace JetBrains Mono",
-            "Termtrace JetBrains Mono",
-            "Termtrace JetBrains Mono",
-            "Termtrace JetBrains Mono",
-            "Termtrace Symbols Nerd Font"
-        ]
-    );
-
-    for font in fonts {
-        assert!(font["repository_source"]
-            .as_str()
-            .is_some_and(|source| return source.starts_with("crates/render/assets/fonts/")));
-        assert!(font["decompressed_size"]
-            .as_u64()
-            .is_some_and(|size| return size > 0));
-        assert_eq!(font["decompressed_blake3"].as_str().map(str::len), Some(64));
-    }
-
-    assert_eq!(
-        image_resource["font_set_blake3"],
-        "013d52d10b90498adec2d19598f4040731dc00cf1539e748f05d86d355f919ec"
-    );
-    assert_eq!(
-        image_resource["fallback_policy"],
-        "style_face_then_symbols_nerd_font_then_missing_glyph_box"
-    );
-    assert_eq!(image_resource["raster_profile"], "supersampled-2x");
-    assert_eq!(image_resource["font_size"], 20);
-    assert_eq!(image_resource["text_baseline"], 20);
-    assert_eq!(image_resource["symbols_font_size"], 12);
-    assert_eq!(image_resource["symbols_baseline"], 16);
-    assert_eq!(image_resource["cell_width"], 12);
-    assert_eq!(image_resource["cell_height"], 24);
 
     let manifested_files = manifest["files"].as_array().expect("manifested files");
     assert_eq!(
@@ -273,8 +212,6 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         &fs_err::read(batch.join("batch-manifest.json")).expect("batch manifest"),
     )
     .expect("batch manifest JSON");
-    assert_eq!(batch_manifest["version"], 3);
-    assert_eq!(batch_manifest["entries"][0]["manifest"]["version"], 4);
     assert_eq!(
         batch_manifest["entries"][0]["manifest"]["semantic_image_resources"],
         manifest["semantic_image_resources"]

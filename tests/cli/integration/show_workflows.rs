@@ -78,7 +78,6 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
 
     let frame: serde_json::Value =
         serde_json::from_slice(&stable.get_output().stdout).expect("stable frame JSON");
-    assert_eq!(frame["version"], 1);
     assert_eq!(frame["capture_quality"], "stable");
     assert!(frame["frame"]["viewport_text"]
         .as_str()

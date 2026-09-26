@@ -119,9 +119,7 @@ pub(crate) use termtrace_evidence::{
 pub(crate) use termtrace_model::terminal::state::KeyChord;
 pub(crate) use termtrace_model::{
     execution::environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},
-    execution::event::{
-        Event, InputDescriptor, InputKind, InputSource, OperationStatus, EVENT_LOG_VERSION,
-    },
+    execution::event::{Event, InputDescriptor, InputKind, InputSource, OperationStatus},
     execution::provenance::{
         ProvenanceCapture, ProvenancePolicy, ProvenancePolicyKind, ProvenanceSensitivity,
     },

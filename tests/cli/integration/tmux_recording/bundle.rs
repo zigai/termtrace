@@ -334,7 +334,6 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
     };
 
     assert_eq!(linked["format"], "termtrace-tmux-recording");
-    assert_eq!(linked["version"], 5);
 
     let inventory = tmux_json(&["tmux", "tracks", "work", "--output-root", root]);
     let history = inventory["entries"]

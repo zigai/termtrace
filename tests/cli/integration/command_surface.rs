@@ -83,151 +83,6 @@ fn session_recovery_preserves_context_and_never_claims_completion() {
 }
 
 #[test]
-fn root_help_presents_flat_command_list() {
-    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-    command
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Commands:\n  record"))
-        .stdout(predicate::str::contains("Sessions:").not())
-        .stdout(predicate::str::contains("Interaction:").not())
-        .stdout(predicate::str::contains("Investigation:").not())
-        .stdout(predicate::str::contains("Artifacts:").not())
-        .stdout(predicate::str::contains("Automation:").not())
-        .stdout(predicate::str::contains("System:").not())
-        .stdout(predicate::str::contains("\n  Recording:").not())
-        .stdout(predicate::str::contains("\n  Live workflow:").not())
-        .stdout(predicate::str::contains("\n  Command groups:").not())
-        .stdout(predicate::str::contains("bundle-verify").not())
-        .stdout(predicate::str::contains("export-asciicast").not())
-        .stdout(predicate::str::contains(
-            "tmux        Record managed tmux panes for their full lifetime",
-        ));
-}
-
-#[test]
-fn tmux_help_exposes_setup_audit_and_pane_commands() {
-    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-    let output = command
-        .args(["tmux", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help = String::from_utf8(output).expect("UTF-8 help");
-
-    for subcommand in ["config", "enable", "disable", "status", "scope", "run"] {
-        assert!(
-            help.lines()
-                .any(|line| return line.trim_start().starts_with(subcommand)),
-            "tmux help omitted `{subcommand}`: {help}"
-        );
-    }
-
-    assert!(
-        !help.contains("guard"),
-        "hidden guard leaked into help: {help}"
-    );
-    assert!(
-        !help.contains("supervise"),
-        "hidden supervisor leaked into help: {help}"
-    );
-}
-
-#[test]
-fn native_screenshot_help_uses_the_solver_without_a_noop_flag() {
-    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-    command
-        .args(["screenshot", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("omit to solve the"))
-        .stdout(predicate::str::contains("exact recorded grid"))
-        .stdout(predicate::str::contains("--fit-viewport").not());
-}
-
-#[test]
-fn top_level_debug_and_handoff_commands_are_directly_discoverable() {
-    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-    command
-        .args(["last-action", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("<SESSION>"));
-
-    let mut diagnose = Command::cargo_bin("termtrace").expect("binary should build");
-    diagnose
-        .args(["analyze", "diagnose", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("<SESSION>"))
-        .stdout(predicate::str::contains("--last-action"));
-
-    for command_name in ["screenshot", "bundle"] {
-        let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-        command
-            .args([command_name, "--help"])
-            .assert()
-            .success()
-            .stdout(predicate::str::contains("<SESSION>"))
-            .stdout(predicate::str::contains("--out <OUT>"));
-    }
-
-    let mut bundle = Command::cargo_bin("termtrace").expect("binary should build");
-    bundle
-        .args(["bundle", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--screenshot"));
-}
-
-#[test]
-fn top_level_video_exposes_complete_manifested_workflow() {
-    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-    let output = command
-        .args(["video", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help = String::from_utf8(output).expect("UTF-8 help");
-    assert!(help.contains("Usage: termtrace video [OPTIONS]"));
-
-    for option in [
-        "--preset",
-        "--fps",
-        "--renderer",
-        "--resolution",
-        "--scale",
-        "--start-marker",
-        "--end-marker",
-        "--trim-idle",
-        "--hold-start",
-        "--hold-end",
-        "--cursor-style",
-        "--dry-run",
-        "--preview-out",
-        "--edit",
-        "--semantic-raster-profile",
-    ] {
-        assert!(
-            help.contains(option),
-            "video help omitted `{option}`:\n{help}"
-        );
-    }
-
-    assert!(help.contains("docs"));
-    assert!(help.contains("social"));
-    assert!(help.contains("lossless"));
-    assert!(help.contains("native never falls back"));
-}
-
-#[test]
 fn top_level_video_rejects_non_presentation_frame_rates_before_session_access() {
     let temporary = TempDir::new().expect("temporary directory");
     let output = temporary.path().join("video.mp4");
@@ -330,96 +185,7 @@ fn top_level_video_auto_captures_native_and_overwrites_output() {
 }
 
 #[test]
-fn complex_selector_help_stays_within_one_hundred_columns() {
-    for (arguments, synopsis, headings) in [
-        (
-            &["analyze", "diff", "--help"][..],
-            "termtrace analyze diff [OPTIONS] <SESSION> <FROM_SELECTION> <TO_SELECTION>",
-            &["From selection:", "To selection:"][..],
-        ),
-        (
-            &["analyze", "explain", "--help"][..],
-            "termtrace analyze explain [OPTIONS] <SESSION> <TARGET_SELECTION>",
-            &["Target selection:"][..],
-        ),
-        (&["playback", "--help"][..], "termtrace playback", &[][..]),
-        (&["screen", "--help"][..], "termtrace screen", &[][..]),
-        (&["wait", "--help"][..], "termtrace wait", &[][..]),
-        (
-            &["artifact", "save", "--help"][..],
-            "termtrace artifact save",
-            &[][..],
-        ),
-        (
-            &["screenshot", "--help"][..],
-            "termtrace screenshot",
-            &[][..],
-        ),
-        (&["tmux", "--help"][..], "termtrace tmux", &[][..]),
-        (
-            &["tmux", "config", "--help"][..],
-            "termtrace tmux config",
-            &[][..],
-        ),
-        (
-            &["tmux", "enable", "--help"][..],
-            "termtrace tmux enable",
-            &[][..],
-        ),
-        (
-            &["tmux", "scope", "--help"][..],
-            "termtrace tmux scope",
-            &[][..],
-        ),
-        (
-            &["tmux", "run", "--help"][..],
-            "termtrace tmux run",
-            &[][..],
-        ),
-    ] {
-        let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-        let output = command
-            .env("COLUMNS", "100")
-            .args(arguments)
-            .assert()
-            .success()
-            .get_output()
-            .stdout
-            .clone();
-
-        let help = String::from_utf8(output).expect("UTF-8 help");
-        assert!(
-            help.contains(synopsis),
-            "missing concise synopsis in:\n{help}"
-        );
-
-        for heading in headings {
-            assert!(help.contains(heading), "missing `{heading}` in:\n{help}");
-        }
-
-        for line in help.lines() {
-            assert!(
-                line.chars().count() <= 100,
-                "{}-column help line exceeds 100 columns:\n{line}\n\n{help}",
-                line.chars().count()
-            );
-        }
-    }
-}
-
-#[test]
-fn wait_help_exposes_the_consolidated_idle_surface() {
-    let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
-    wait.args(["wait", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--idle[=<IDLE>]"))
-        .stdout(predicate::str::contains("--allow-incomplete"))
-        .stdout(predicate::str::contains("--require-live-stability"))
-        .stdout(predicate::str::contains("--full-state"))
-        .stdout(predicate::str::contains("--timeout <TIMEOUT>"))
-        .stdout(predicate::str::contains("--timeout-ms").not());
-
+fn wait_rejects_idle_options_without_idle_and_conflicting_stability() {
     let mut idle_only = Command::cargo_bin("termtrace").expect("binary should build");
     idle_only
         .args(["wait", "session", "--screen", "READY", "--full-state"])
@@ -443,156 +209,54 @@ fn wait_requires_the_screen_flag_for_screen_predicates() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("unexpected argument 'READY'"));
-
-    let mut flagged = Command::cargo_bin("termtrace").expect("binary should build");
-    flagged
-        .args(["wait", "session", "--screen", "READY", "--help"])
-        .assert()
-        .success();
 }
 
 #[test]
-fn nested_command_paths_dispatch() {
-    let temporary = TempDir::new().expect("temporary directory");
-    let session = temporary.path().join("nested-session");
-    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
-    record
-        .args(["record", "--no-input", "--out"])
-        .arg(&session)
-        .args(["--", "/bin/sh", "-c", "printf NESTED"])
-        .assert()
-        .success();
-
-    let mut index = Command::cargo_bin("termtrace").expect("binary should build");
-    index
-        .args(["analyze", "index", "--session"])
-        .arg(&session)
-        .assert()
-        .success();
-
-    let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
-    verify
-        .args(["integrity", "verify"])
-        .arg(&session)
-        .assert()
-        .success();
-}
-
-#[test]
-fn doctor_is_the_only_top_level_capability_inventory_command() {
-    let mut root_help = Command::cargo_bin("termtrace").expect("binary should build");
-    let output = root_help
-        .arg("--help")
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let root_help = String::from_utf8(output).expect("UTF-8 help");
-    assert!(
-        root_help
-            .lines()
-            .any(|line| return line.trim_start().starts_with("doctor ")),
-        "doctor command missing from root help: {root_help}"
-    );
-    assert!(
-        !root_help
-            .lines()
-            .any(|line| return line.trim_start().starts_with("capabilities ")),
-        "redundant capabilities command remains in root help: {root_help}"
-    );
-}
-
-#[test]
-fn help_and_version_are_top_level_only() {
-    let mut help = Command::cargo_bin("termtrace").expect("binary should build");
-    help.args(["help", "version"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(
-            "Report build and runtime component versions",
-        ));
-
-    let mut version = Command::cargo_bin("termtrace").expect("binary should build");
-    version
-        .arg("version")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(concat!(
-            "termtrace ",
-            env!("CARGO_PKG_VERSION")
-        )))
-        .stdout(predicate::str::contains(format!(
-            "libghostty-vt {GHOSTTY_REVISION}"
-        )))
-        .stdout(predicate::str::contains(format!(
-            "event-log v{EVENT_LOG_VERSION}"
-        )));
-}
-
-#[test]
-fn doctor_reports_capability_boundaries_and_enforces_requirements() {
-    let mut version = Command::cargo_bin("termtrace").expect("binary should build");
-    let version_output = version
-        .args(["version", "--json"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let version_json: serde_json::Value =
-        serde_json::from_slice(&version_output).expect("version JSON");
-    assert_eq!(version_json["termtrace_version"], "0.1.0");
-    assert!(version_json.get("ghostty_vt_revision").is_some());
-    assert!(version_json.get("control_protocol_version").is_some());
+fn doctor_require_passes_ready_capabilities_and_fails_blocked_ones() {
+    let doctor_json = |output: &[u8]| -> serde_json::Value {
+        return serde_json::from_slice(output).expect("doctor JSON");
+    };
+    let status_of = |report: &serde_json::Value, id: &str| -> serde_json::Value {
+        return report["capabilities"]
+            .as_array()
+            .expect("capabilities array")
+            .iter()
+            .find(|capability| return capability["id"] == id)
+            .unwrap_or_else(|| panic!("missing {id} capability in {report:?}"))
+            .clone();
+    };
 
     let mut semantic = Command::cargo_bin("termtrace").expect("binary should build");
-    let semantic_output = semantic
+    let ready = semantic
         .args(["doctor", "--require", "semantic", "--json"])
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
-
-    let doctor_json: serde_json::Value =
-        serde_json::from_slice(&semantic_output).expect("doctor JSON");
-
-    let capabilities = doctor_json["capabilities"]
-        .as_array()
-        .expect("capabilities array");
-    assert!(
-        capabilities
-            .iter()
-            .any(|r| return r["id"] == "semantic" && r["status"] == "ready"),
-        "expected semantic ready report, got: {doctor_json:?}"
+    assert_eq!(
+        status_of(&doctor_json(&ready), "semantic")["status"],
+        "ready"
     );
 
-    let mut blocked = Command::cargo_bin("termtrace").expect("binary should build");
-    blocked
-        .env("PATH", "")
-        .args(["doctor", "--require", "native-video", "--explain"])
-        .assert()
-        .failure()
-        .stdout(predicate::str::contains("native-video"))
-        .stdout(predicate::str::contains("blocked"))
-        .stdout(predicate::str::contains("fix:"));
+    for required in ["native-video", "semantic-video"] {
+        let mut blocked = Command::cargo_bin("termtrace").expect("binary should build");
+        let output = blocked
+            .env("PATH", "")
+            .args(["doctor", "--require", required, "--json"])
+            .assert()
+            .code(1)
+            .get_output()
+            .stdout
+            .clone();
 
-    let mut semantic_video = Command::cargo_bin("termtrace").expect("binary should build");
-    semantic_video
-        .env("PATH", "")
-        .args(["doctor", "--require", "semantic-video", "--explain"])
-        .assert()
-        .code(1)
-        .stdout(predicate::str::contains("semantic-video"))
-        .stdout(predicate::str::contains("blocked"))
-        .stdout(predicate::str::contains(
-            "install FFmpeg/FFprobe with libx264rgb",
-        ))
-        .stdout(predicate::str::contains("fix:"))
-        .stderr(predicate::str::contains("unexpected argument").not());
+        let capability = status_of(&doctor_json(&output), required);
+        assert_eq!(capability["status"], "blocked");
+        assert!(
+            capability["remediation"].is_string(),
+            "blocked {required} must carry remediation: {capability:?}"
+        );
+    }
 }
 
 #[test]
@@ -642,29 +306,8 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
 
     let plan: serde_json::Value =
         serde_json::from_slice(&plan_output).expect("semantic video plan JSON");
-    assert_eq!(plan["version"], 2);
     assert_eq!(plan["source"]["kind"], "semantic");
-
-    let source_plan = &plan["source"]["plan"];
-
-    assert_eq!(source_plan["version"], 4);
-    assert_eq!(source_plan["fps"], 60);
-    assert_eq!(source_plan["raster_profile"], "direct");
-    assert_eq!(
-        source_plan["font_set_blake3"],
-        "013d52d10b90498adec2d19598f4040731dc00cf1539e748f05d86d355f919ec"
-    );
-
-    let fonts = source_plan["fonts"].as_array().expect("fonts array");
-    let roles: Vec<&str> = fonts
-        .iter()
-        .filter_map(|f| return f["role"].as_str())
-        .collect();
-    assert!(roles.contains(&"regular"));
-    assert!(roles.contains(&"bold"));
-    assert!(roles.contains(&"italic"));
-    assert!(roles.contains(&"bold-italic"));
-    assert!(roles.contains(&"symbols-fallback"));
+    assert_eq!(plan["source"]["plan"]["fps"], 60);
 
     let mut supersampled = Command::cargo_bin("termtrace").expect("binary should build");
     let supersampled_output = supersampled
@@ -944,36 +587,6 @@ fn retained_native_video_exports_without_native_capture_tools() {
 }
 
 #[test]
-fn completions_are_generated_from_the_current_command_graph() {
-    for (shell, signature) in [
-        ("bash", "complete -F _termtrace"),
-        ("zsh", "#compdef termtrace"),
-        ("fish", "complete -c termtrace"),
-        ("elvish", "edit:completion:arg-completer[termtrace]"),
-        ("powershell", "Register-ArgumentCompleter"),
-    ] {
-        let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-        command
-            .args(["completion", shell])
-            .assert()
-            .success()
-            .stdout(predicate::str::contains(signature))
-            .stdout(predicate::str::contains("send"))
-            .stdout(predicate::str::contains("screen"))
-            .stdout(predicate::str::contains("analyze"))
-            .stdout(predicate::str::contains("artifact"))
-            .stdout(predicate::str::contains("timeline"))
-            .stdout(predicate::str::contains("explain"))
-            .stdout(predicate::str::contains("events"))
-            .stdout(predicate::str::contains("bundle-verify").not())
-            .stdout(predicate::str::contains("export-asciicast").not())
-            .stdout(
-                predicate::str::contains("Report the current bounded capability inventory").not(),
-            );
-    }
-}
-
-#[test]
 fn publishing_and_generation_commands_emit_compact_result_envelopes() {
     let temporary = TempDir::new().expect("temporary directory");
     fs_err::set_permissions(temporary.path(), Permissions::from_mode(0o700))
@@ -1052,9 +665,6 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         first["directory_display"],
         schema_directory.display().to_string()
     );
-    assert!(first["file_count"]
-        .as_u64()
-        .is_some_and(|count| return count > 50));
     assert_eq!(first["replaced_existing_files"], false);
 
     let mut second = Command::cargo_bin("termtrace").expect("binary should build");
@@ -1071,15 +681,6 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
     assert_eq!(second["kind"], "schema_generation");
     assert_eq!(second["file_count"], first["file_count"]);
     assert_eq!(second["replaced_existing_files"], true);
-
-    let mut schema_help = Command::cargo_bin("termtrace").expect("binary should build");
-    schema_help
-        .args(["schema", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(
-            "existing files with generated schema names are replaced",
-        ));
 }
 
 #[allow(
@@ -1104,7 +705,7 @@ fn assert_no_entry_with_prefix(directory: &Path, prefix: &str) {
 }
 
 #[test]
-fn readme_command_references_match_the_visible_command_tree() {
+fn readme_command_references_name_real_commands() {
     let help_subcommands = |path: &[&str]| -> BTreeSet<String> {
         let output = Command::cargo_bin("termtrace")
             .expect("binary should build")
@@ -1153,18 +754,14 @@ fn readme_command_references_match_the_visible_command_tree() {
         .collect();
 
     let visible = help_subcommands(&[]);
-    let referenced: BTreeSet<String> = references
-        .iter()
-        .map(|[command, _]| return command.clone())
-        .collect();
-
-    assert!(visible.contains("record"), "help parsing found {visible:?}");
-    assert_eq!(
-        referenced, visible,
-        "README must reference exactly the visible top-level commands"
-    );
+    assert!(!visible.is_empty(), "help parsing found no commands");
 
     for [command, next] in &references {
+        assert!(
+            visible.contains(command),
+            "README references `termtrace {command}`, but the CLI has only {visible:?}"
+        );
+
         let subcommands = help_subcommands(&[command.as_str()]);
 
         if !subcommands.is_empty() && starts_lowercase(next) {

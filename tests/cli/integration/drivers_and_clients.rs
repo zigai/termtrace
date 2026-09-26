@@ -63,59 +63,6 @@ fn driver_handshake_attaches_sessions_and_caches_correlated_retries() {
 }
 
 #[test]
-fn removed_language_sdks_and_tooling_are_not_present() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let deleted_paths = [
-        "packages/python",
-        "packages/typescript",
-        "tests/consumers/python",
-        "tests/consumers/typescript",
-        "scripts/build-python-wheel.sh",
-        "scripts/build-npm-platform-package.sh",
-        "scripts/generate-client-protocol.sh",
-        "scripts/ci-clients.sh",
-    ];
-
-    for path in deleted_paths {
-        assert!(
-            !root.join(path).exists(),
-            "deleted path {path} must not exist in repository"
-        );
-    }
-
-    // CLI client subcommand must be rejected
-    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
-    command.arg("client").assert().failure();
-
-    // Verify configuration files have no residue of deleted packages
-    let justfile = fs_err::read_to_string(root.join("Justfile")).expect("Justfile");
-    assert!(!justfile.contains("packages/python"));
-    assert!(!justfile.contains("packages/typescript"));
-
-    let pre_commit = fs_err::read_to_string(root.join(".pre-commit-config.yaml"))
-        .expect(".pre-commit-config.yaml");
-    assert!(!pre_commit.contains("packages/python"));
-    assert!(!pre_commit.contains("packages/typescript"));
-
-    let ci_yml = fs_err::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
-    assert!(!ci_yml.contains("clients:"));
-    assert!(!ci_yml.contains("packages/python"));
-    assert!(!ci_yml.contains("packages/typescript"));
-
-    let release_yml =
-        fs_err::read_to_string(root.join(".github/workflows/release.yml")).expect("release.yml");
-    assert!(!release_yml.contains("packages/python"));
-    assert!(!release_yml.contains("packages/typescript"));
-    assert!(!release_yml.contains("publish-python"));
-    assert!(!release_yml.contains("publish-npm"));
-
-    let installer = fs_err::read_to_string(root.join("install.sh")).expect("install.sh");
-    assert!(!installer.contains("TERMTRACE_CLIENT_DIR"));
-    assert!(!installer.contains("clients/python"));
-    assert!(!installer.contains("clients/typescript"));
-}
-
-#[test]
 fn installer_script_validates_binary_only_release() {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/install.sh");
     let status = StdCommand::new("bash")

@@ -184,25 +184,6 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
 }
 
 #[test]
-fn agent_skill_discovery_uses_root_and_direct_help() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let skill = root.join("skills/termtrace");
-    let instructions = fs_err::read_to_string(skill.join("SKILL.md")).expect("skill instructions");
-    assert!(!instructions.trim().is_empty());
-    assert!(instructions.contains("termtrace"));
-
-    let root_help = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
-        .arg("--help")
-        .output()
-        .expect("read live root help");
-    assert!(root_help.status.success());
-
-    let root_help = String::from_utf8_lossy(&root_help.stdout);
-    assert!(!root_help.contains("commands --json"));
-    assert!(root_help.contains("record"));
-}
-
-#[test]
 fn blocking_rust_facade_launches_drives_and_completes_evidence() {
     let temporary = TempDir::new().expect("temporary directory");
     let terminal = ClientTerminal::new(

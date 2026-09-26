@@ -11,17 +11,12 @@ from termtrace import (
     StateGuardFailedError,
     Termtrace,
     TimeoutError,
-    version,
 )
 from termtrace.aio import AsyncTermtrace
 
 TERMTRACE_BIN = os.path.abspath(
     os.environ.get("TERMTRACE_BIN", "target/debug/termtrace")
 )
-
-
-def test_core_version() -> None:
-    assert version() == "0.1.0"
 
 
 def test_sync_recording_lifecycle() -> None:

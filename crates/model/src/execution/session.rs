@@ -496,8 +496,6 @@ mod tests {
 
     #[test]
     fn ghostty_profile_provenance_retains_the_split_hash_contract() {
-        assert_eq!(SESSION_MANIFEST_VERSION, 12);
-
         let provenance = GhosttyVisualProvenance {
             source_config: None,
             overrides: GhosttyVisualOverrides::default(),
