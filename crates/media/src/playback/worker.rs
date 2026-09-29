@@ -352,6 +352,7 @@ fn write_response(stream: &mut UnixStream, response: &WorkerResponse, path: &Pat
 fn invalid(reason: &str) -> Error {
     return Error::InvalidReplay {
         reason: reason.to_owned(),
+        source: None,
     };
 }
 

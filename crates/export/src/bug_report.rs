@@ -31,6 +31,12 @@ const MAX_BUG_REPORT_MEMBERS: usize = 16;
 /// Atomically publish a bounded, manifested bug-report evidence export.
 ///
 /// The payload deliberately omits canonical events and raw input/output byte streams.
+///
+/// # Errors
+///
+/// Returns an error when the session cannot be resolved, `destination` is inside it, the session is
+/// not a valid completed session, its evidence cannot be read or rendered, or the export cannot be
+/// published without replacing an existing destination.
 pub fn create(
     session: &Path,
     destination: &Path,

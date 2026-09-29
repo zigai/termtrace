@@ -446,6 +446,16 @@ pub enum ScreenFrameError {
     Serialization,
 }
 
+impl ScreenFrameError {
+    /// Collapse a serializer failure into the payload-free `Serialization` category.
+    ///
+    /// This error is itself a serialized protocol value that must not carry payload data, so
+    /// the serializer's detail is deliberately dropped at this boundary.
+    pub fn serialization(_: serde_json::Error) -> Self {
+        return Self::Serialization;
+    }
+}
+
 impl fmt::Display for ScreenFrameError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         return write!(f, "screen frame projection failed: {self:?}");

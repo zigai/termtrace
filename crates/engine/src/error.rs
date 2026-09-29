@@ -1,7 +1,13 @@
 //! Failures produced while coordinating Termtrace engine operations.
 
-use std::{error::Error as StdError, fmt, io, path::PathBuf, result::Result as StdResult};
-use termtrace_model::{error::ModelValidationError, terminal::screen::ScreenFrameError};
+use std::{
+    error::Error as StdError, fmt, io, path::PathBuf, result::Result as StdResult, str::Utf8Error,
+    time::SystemTimeError,
+};
+use termtrace_model::{
+    error::{ModelValidationError, ThreadPanic},
+    terminal::screen::ScreenFrameError,
+};
 use uuid::Uuid;
 
 /// Failure from recording, replay, observation, analysis, or registry coordination.
@@ -31,6 +37,8 @@ pub enum Error {
         line: u64,
         /// Validation failure description.
         reason: String,
+        /// Lower-level failure that exposed the violation, when one exists.
+        source: Option<Box<dyn StdError + Send + Sync>>,
     },
     /// An event-log writer cannot continue after an earlier write failure.
     EventLogPoisoned {
@@ -70,6 +78,8 @@ pub enum Error {
     InvalidEvidence {
         /// Evidence validation failure description.
         reason: String,
+        /// Lower-level failure that exposed the violation, when one exists.
+        source: Option<Box<dyn StdError + Send + Sync>>,
     },
     /// Requested terminal dimensions exceed supported geometry.
     InvalidGeometry {
@@ -88,6 +98,20 @@ pub enum Error {
         operation: &'static str,
         /// Failure description.
         reason: String,
+    },
+    /// A supervised worker thread panicked before it could be joined cleanly.
+    ThreadPanicked {
+        /// Name of the join operation.
+        operation: &'static str,
+        /// Captured panic.
+        source: ThreadPanic,
+    },
+    /// Libghostty-vt returned text that is not valid UTF-8.
+    InvalidTerminalText {
+        /// Name of the failed libghostty-vt operation.
+        operation: &'static str,
+        /// Underlying decoding failure.
+        source: Utf8Error,
     },
     /// Libghostty-vt returned a non-success result.
     GhosttyVt {
@@ -160,6 +184,8 @@ pub enum Error {
     InvalidReplay {
         /// Replay validation failure description.
         reason: String,
+        /// Lower-level failure that exposed the violation, when one exists.
+        source: Option<Box<dyn StdError + Send + Sync>>,
     },
     /// A checkpoint VT seed cannot reconstruct its committed semantic state.
     CheckpointReconstruction {
@@ -178,7 +204,10 @@ pub enum Error {
         remediation: String,
     },
     /// The system clock cannot be represented as time since the Unix epoch.
-    ClockBeforeEpoch,
+    ClockBeforeEpoch {
+        /// Underlying clock comparison failure.
+        source: SystemTimeError,
+    },
     /// An external command could not be executed successfully.
     ExternalCommand {
         /// Purpose of the external command.
@@ -211,7 +240,9 @@ impl fmt::Display for Error {
                     path.display()
                 );
             }
-            Self::InvalidEventLog { path, line, reason } => {
+            Self::InvalidEventLog {
+                path, line, reason, ..
+            } => {
                 return write!(
                     f,
                     "invalid event log `{}` at line {line}: {reason}",
@@ -244,7 +275,7 @@ impl fmt::Display for Error {
                     path.display()
                 );
             }
-            Self::InvalidEvidence { reason } => return write!(f, "invalid evidence: {reason}"),
+            Self::InvalidEvidence { reason, .. } => return write!(f, "invalid evidence: {reason}"),
             Self::InvalidGeometry {
                 cols,
                 rows,
@@ -301,7 +332,9 @@ impl fmt::Display for Error {
             Self::CleanupFailed { primary, cleanup } => {
                 return write!(f, "{primary}; cleanup also failed: {cleanup}");
             }
-            Self::InvalidReplay { reason } => return write!(f, "invalid replay input: {reason}"),
+            Self::InvalidReplay { reason, .. } => {
+                return write!(f, "invalid replay input: {reason}");
+            }
             Self::CheckpointReconstruction { mismatched_fields } => {
                 return write!(
                     f,
@@ -317,7 +350,18 @@ impl fmt::Display for Error {
                     "required capability `{id}` is blocked ({code}): {detail}"
                 );
             }
-            Self::ClockBeforeEpoch => return f.write_str("system clock is before the Unix epoch"),
+            Self::ClockBeforeEpoch { .. } => {
+                return f.write_str("system clock is before the Unix epoch");
+            }
+            Self::ThreadPanicked { operation, source } => {
+                return write!(f, "terminal operation `{operation}` failed: {source}");
+            }
+            Self::InvalidTerminalText { operation, source } => {
+                return write!(
+                    f,
+                    "libghostty-vt {operation} returned invalid UTF-8: {source}"
+                );
+            }
             Self::ExternalCommand { operation, reason } => {
                 return write!(f, "{operation} failed: {reason}");
             }
@@ -334,6 +378,21 @@ impl StdError for Error {
             Self::ScreenFrame(source) => return Some(source),
             Self::CleanupFailed { primary, .. } => return Some(primary),
             Self::ModelValidation(source) => return Some(source),
+            Self::InvalidEvidence {
+                source: Some(source),
+                ..
+            }
+            | Self::InvalidEventLog {
+                source: Some(source),
+                ..
+            }
+            | Self::InvalidReplay {
+                source: Some(source),
+                ..
+            } => return Some(source.as_ref()),
+            Self::ThreadPanicked { source, .. } => return Some(source),
+            Self::InvalidTerminalText { source, .. } => return Some(source),
+            Self::ClockBeforeEpoch { source } => return Some(source),
             _ => return None,
         }
     }
@@ -356,8 +415,18 @@ impl From<termtrace_evidence::Error> for Error {
                     source,
                 };
             }
-            termtrace_evidence::Error::InvalidEventLog { path, line, reason } => {
-                return Self::InvalidEventLog { path, line, reason };
+            termtrace_evidence::Error::InvalidEventLog {
+                path,
+                line,
+                reason,
+                source,
+            } => {
+                return Self::InvalidEventLog {
+                    path,
+                    line,
+                    reason,
+                    source,
+                };
             }
             termtrace_evidence::Error::InsecureArtifactDirectory {
                 path,
@@ -370,8 +439,8 @@ impl From<termtrace_evidence::Error> for Error {
                     mode,
                 };
             }
-            termtrace_evidence::Error::InvalidEvidence { reason } => {
-                return Self::InvalidEvidence { reason };
+            termtrace_evidence::Error::InvalidEvidence { reason, source } => {
+                return Self::InvalidEvidence { reason, source };
             }
             termtrace_evidence::Error::SessionIncomplete { session } => {
                 return Self::SessionIncomplete { session };
@@ -385,7 +454,9 @@ impl From<termtrace_evidence::Error> for Error {
             termtrace_evidence::Error::ExternalCommand { operation, reason } => {
                 return Self::ExternalCommand { operation, reason };
             }
-            termtrace_evidence::Error::ClockBeforeEpoch => return Self::ClockBeforeEpoch,
+            termtrace_evidence::Error::ClockBeforeEpoch { source } => {
+                return Self::ClockBeforeEpoch { source };
+            }
             termtrace_evidence::Error::ModelValidation(source) => {
                 return Self::ModelValidation(source);
             }
@@ -404,6 +475,9 @@ impl From<termtrace_terminal::Error> for Error {
             }
             termtrace_terminal::Error::InvalidVtStream { reason } => {
                 return Self::InvalidVtStream { reason };
+            }
+            termtrace_terminal::Error::InvalidUtf8 { operation, source } => {
+                return Self::InvalidTerminalText { operation, source };
             }
         }
     }

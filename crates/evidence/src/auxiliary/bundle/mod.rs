@@ -135,7 +135,9 @@ pub(crate) fn collect_regular_files(
             entry
                 .path()
                 .strip_prefix(root)
-                .map_err(|_| return Error::invalid("bundle path escaped its root"))?
+                .map_err(|source| {
+                    return Error::invalid_with_source("bundle path escaped its root", source);
+                })?
                 .to_path_buf(),
         );
 

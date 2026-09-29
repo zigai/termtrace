@@ -2,7 +2,7 @@
 
 use super::super::{
     model::RuntimeMessage,
-    support::{finish_with_cleanup, poll_ready, terminal_error},
+    support::{finish_with_cleanup, poll_ready, terminal_error, thread_panicked},
 };
 use super::transport::{control_socket_address, validate_frame};
 use crate::{Error, Result};
@@ -96,7 +96,16 @@ pub(in crate::recording) fn spawn_control_server(
             if let Err(error) =
                 control_server_loop(&listener, &stop_accepting_read, &cancel_read, &sender)
             {
-                let _ = sender.try_send(RuntimeMessage::ControlServerFailed(error.to_string()));
+                let reason = error.to_string();
+
+                if let Err(delivery) = sender.try_send(RuntimeMessage::ControlServerFailed(reason))
+                {
+                    tracing::warn!(
+                        %error,
+                        %delivery,
+                        "control server failure could not be delivered to the recording runtime"
+                    );
+                }
             }
         })
         .map_err(|error| return terminal_error("spawn control server", error.to_string()))?;
@@ -254,13 +263,16 @@ fn handle_control_connection(
                             details: None,
                         },
                     };
-                    let _ = write_control_response(
+
+                    if let Err(error) = write_control_response(
                         &mut stream,
                         cancel,
                         &response,
                         response_timeout,
                         MutationEffect::NotApplied,
-                    );
+                    ) {
+                        tracing::debug!(%error, "could not report actor failure to control client");
+                    }
 
                     return Err(terminal_error(
                         "dispatch control request",
@@ -288,13 +300,16 @@ fn handle_control_connection(
                         details: None,
                     },
                 };
-                let _ = write_control_response(
+
+                if let Err(error) = write_control_response(
                     &mut stream,
                     cancel,
                     &response,
                     response_timeout,
                     MutationEffect::NotApplied,
-                );
+                ) {
+                    tracing::debug!(%error, "could not report actor failure to control client");
+                }
 
                 return Err(terminal_error(
                     "dispatch control request",
@@ -323,13 +338,16 @@ fn handle_control_connection(
                             details: None,
                         },
                     };
-                    let _ = write_control_response(
+
+                    if let Err(error) = write_control_response(
                         &mut stream,
                         cancel,
                         &response,
                         response_timeout,
                         MutationEffect::NotApplied,
-                    );
+                    ) {
+                        tracing::debug!(%error, "could not report actor failure to control client");
+                    }
 
                     return Err(terminal_error(
                         "wait for control response",
@@ -348,13 +366,16 @@ fn handle_control_connection(
                         details: None,
                     },
                 };
-                let _ = write_control_response(
+
+                if let Err(error) = write_control_response(
                     &mut stream,
                     cancel,
                     &response,
                     response_timeout,
                     MutationEffect::NotApplied,
-                );
+                ) {
+                    tracing::debug!(%error, "could not report actor failure to control client");
+                }
 
                 return Err(terminal_error(
                     "wait for control response",
@@ -744,7 +765,7 @@ impl ControlWorker {
         let join_result = self
             .thread
             .join()
-            .map_err(|_| return terminal_error("join control server", "control thread panicked"));
+            .map_err(|payload| return thread_panicked("join control server", payload));
 
         let result = finish_with_cleanup(stop_accepting_result, cancel_result);
 

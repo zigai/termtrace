@@ -192,7 +192,7 @@ pub fn verify_session_with_trust(
         | VerificationLevel::Content
         | VerificationLevel::DurabilityRecord => report.valid = true,
         VerificationLevel::Signature => {
-            verify_signature(session_directory, allowed_signers, &completion, &mut report)
+            verify_signature(session_directory, allowed_signers, &completion, &mut report);
         }
     }
 
@@ -270,6 +270,7 @@ fn expected_receipt_payload(
     let receipt = read_receipt(receipt_path).map_err(|error| {
         return Error::InvalidEvidence {
             reason: error.to_string(),
+            source: None,
         };
     })?;
 

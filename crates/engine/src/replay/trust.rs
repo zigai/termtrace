@@ -60,6 +60,7 @@ impl ValidatedSession {
             return check_cancelled(cancelled).map_err(|error| {
                 return termtrace_evidence::Error::InvalidEvidence {
                     reason: error.to_string(),
+                    source: None,
                 };
             });
         })?;
@@ -244,8 +245,12 @@ pub(crate) fn decode<T: Serialize + DeserializeOwned>(session: &Path, bytes: &[u
     let body = serde_json::to_vec(&(&authenticated.source, &authenticated.payload))
         .map_err(|error| return json_error(PathBuf::from("<verified-cache>"), error))?;
     let expected = blake3::keyed_hash(&key, &body);
-    let supplied = blake3::Hash::from_hex(&authenticated.mac)
-        .map_err(|_| return invalid_replay("invalid local verification-cache MAC"))?;
+    let supplied = blake3::Hash::from_hex(&authenticated.mac).map_err(|source| {
+        return Error::InvalidReplay {
+            reason: "invalid local verification-cache MAC".to_owned(),
+            source: Some(Box::new(source)),
+        };
+    })?;
 
     if expected != supplied {
         return Err(invalid_replay(

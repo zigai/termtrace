@@ -141,6 +141,11 @@ impl PyScreen {
 #[pymethods]
 impl PyScreen {
     /// Return the current presented screen frame.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the session cannot be attached or the frame
+    /// cannot be captured.
     pub fn frame(&self, py: Python<'_>) -> PyResult<PyFrame> {
         return py.detach(|| {
             let frame = self.latest_frame()?;
@@ -154,11 +159,22 @@ impl PyScreen {
     }
 
     /// Return the normalized plain text of the latest presented frame.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the session cannot be attached or the frame
+    /// cannot be captured.
     pub fn text(&self, py: Python<'_>) -> PyResult<String> {
         return py.detach(|| return Ok(frame_text(&self.latest_frame()?)));
     }
 
     /// Wait until the presented screen contains the specified text pattern.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` when `timeout_secs` is negative, not finite, or out of range,
+    /// `TimeoutError` when the text is not presented in time, and `TermtraceError` or a subclass
+    /// when the session cannot be attached or the wait fails.
     #[pyo3(signature = (pattern, timeout_secs = None))]
     pub fn wait_for_text(
         &self,
@@ -172,6 +188,12 @@ impl PyScreen {
     }
 
     /// Wait until the presented screen remains unchanged for an idle window.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` when `timeout_secs` is negative, not finite, or out of range,
+    /// `TimeoutError` when the screen does not settle in time, and `TermtraceError` or a subclass
+    /// when the session cannot be attached or the capture fails.
     #[pyo3(signature = (timeout_secs = None))]
     pub fn wait_for_idle(
         &self,

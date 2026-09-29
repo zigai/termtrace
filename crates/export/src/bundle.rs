@@ -81,6 +81,12 @@ pub fn plan(profile: BundleProfile) -> BundlePlan {
 }
 
 /// Publish one manifested evidence export without replacing an existing destination.
+///
+/// # Errors
+///
+/// Returns an error when the source session cannot be trusted, `destination` is inside it or
+/// already exists, the export would exceed `max_bytes`, or evidence cannot be observed, written, or
+/// published.
 pub fn create(
     session: &Path,
     destination: &Path,
@@ -162,6 +168,12 @@ pub fn create(
 }
 
 /// Verify an evidence export against a caller-owned source and exact profile policy.
+///
+/// # Errors
+///
+/// Returns an error when the source session cannot be trusted, the bundle does not match the source
+/// identity, its members or payloads fail validation or violate the profile policy, or forensic
+/// canonical evidence fails content verification.
 pub fn verify_profile(
     directory: &Path,
     policy: &BundleVerificationPolicy,
@@ -169,7 +181,7 @@ pub fn verify_profile(
     let trusted = TrustedSource::resolve(&policy.source_session)?;
     let identity = trusted.identity(policy.profile);
     let manifest = verify_bundle(directory, Some(&identity)).map_err(|error| {
-        if let termtrace_evidence::Error::InvalidEvidence { reason } = &error
+        if let termtrace_evidence::Error::InvalidEvidence { reason, .. } = &error
             && (reason == "bundle manifest does not match the caller-owned source identity"
                 || reason == "bundle manifest does not match the canonical source identity")
         {

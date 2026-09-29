@@ -426,12 +426,14 @@ fn wait_for_tmux_server_exit(server_pid: u64) {
 
 impl Drop for PrivateTmux {
     fn drop(&mut self) {
-        let _ = self
-            .command()
-            .arg("kill-server")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        // Drop has no error channel; the private server may already have exited.
+        drop(
+            self.command()
+                .arg("kill-server")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status(),
+        );
     }
 }
 

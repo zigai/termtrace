@@ -73,6 +73,10 @@ pub(crate) fn human_screen_summary(value: &serde_json::Value) -> String {
                 .get(1)
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default();
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "`fmt::Write` for `String` never fails, as documented on `format!`, and `drop_non_drop` rejects dropping the unit result"
+            )]
             let _ = writeln!(output, "  row {number}: {text}");
         }
     }

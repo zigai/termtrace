@@ -1,6 +1,6 @@
 //! Identity, validation, and loading for bundled deterministic semantic fonts.
 
-use crate::error::{render_error, Result};
+use crate::error::{render_error, Error, Result};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 use resvg::usvg::fontdb::{Database, Source};
@@ -265,7 +265,7 @@ fn load_font_set() -> Result<SemanticFontSet> {
         database.load_font_source(Source::Binary(font_data));
     }
 
-    let font_faces_css = precompute_font_faces_css(&faces);
+    let font_faces_css = precompute_font_faces_css(&faces)?;
 
     return Ok(SemanticFontSet {
         faces,
@@ -275,7 +275,7 @@ fn load_font_set() -> Result<SemanticFontSet> {
     });
 }
 
-fn precompute_font_faces_css(faces: &[SemanticFontFace; 5]) -> Arc<str> {
+fn precompute_font_faces_css(faces: &[SemanticFontFace; 5]) -> Result<Arc<str>> {
     let mut total_capacity: usize = 32;
     for face in faces {
         let bytes_len = face.bytes.bytes().len();
@@ -294,20 +294,20 @@ fn precompute_font_faces_css(faces: &[SemanticFontFace; 5]) -> Arc<str> {
     for face in faces {
         let role = face.resource.role;
         let (family, weight, style) = embedded_font_attributes(role);
-        let _ = write!(
+        write!(
             css,
             "@font-face{{font-family:'{family}';src:url(data:font/ttf;base64,"
-        );
+        )?;
         STANDARD.encode_string(face.bytes.bytes(), &mut css);
-        let _ = write!(
+        write!(
             css,
             ") format('truetype');font-weight:{weight};font-style:{style}}}"
-        );
+        )?;
     }
 
     css.push_str("</style>\n");
 
-    return Arc::from(css);
+    return Ok(Arc::from(css));
 }
 
 fn embedded_font_attributes(role: SemanticFontRole) -> (&'static str, &'static str, &'static str) {
@@ -336,11 +336,14 @@ fn load_font(
     range: Range<usize>,
 ) -> Result<SemanticFontFace> {
     let bytes = Arc::new(FontBytes { bundle, range });
-    let face = Face::parse(bytes.bytes(), 0).map_err(|_| {
-        return render_error(format!(
-            "bundled semantic font {} has unexpected family/style metadata",
-            spec.role.as_str()
-        ));
+    let face = Face::parse(bytes.bytes(), 0).map_err(|source| {
+        return Error::FontFace {
+            reason: format!(
+                "bundled semantic font {} has unexpected family/style metadata",
+                spec.role.as_str()
+            ),
+            source,
+        };
     })?;
 
     if !has_name(&face, name_id::FAMILY, spec.expected_family)

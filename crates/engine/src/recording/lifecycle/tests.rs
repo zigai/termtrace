@@ -898,7 +898,10 @@ fn answers_and_audits_terminal_queries() {
         panic!("query must reference output")
     };
 
-    assert_eq!(data.as_bytes()[offset as usize], b'n');
+    assert_eq!(
+        data.as_bytes()[usize::try_from(offset).expect("offset fits usize")],
+        b'n'
+    );
     assert!(output.windows(4).any(|window| return window == b"GOT:"));
     assert!(log.events.iter().any(|record| matches!(
         &record.event,

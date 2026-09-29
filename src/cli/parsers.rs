@@ -1,4 +1,4 @@
-use miette::Result;
+use miette::{IntoDiagnostic as _, Result, WrapErr as _};
 use std::{ffi::OsStr, path::PathBuf, result::Result as StdResult, time::Duration};
 use termtrace_engine::recording::control::compile_screen_predicate;
 pub(super) use termtrace_engine::timeline::parse_time_offset_ns;
@@ -16,7 +16,8 @@ pub(super) fn parse_row_predicate(value: &str) -> Result<(u16, String)> {
 
     let row = row
         .parse::<u16>()
-        .map_err(|_| return miette::miette!("row predicate ROW must be a zero-based integer"))?;
+        .into_diagnostic()
+        .wrap_err("row predicate ROW must be a zero-based integer")?;
 
     return Ok((row, text.to_owned()));
 }
@@ -29,9 +30,10 @@ pub(super) fn parse_region_predicate(value: &str) -> Result<(ScreenRegion, Strin
     let values = bounds
         .split(',')
         .map(|item| {
-            return item.parse::<u16>().map_err(|_| {
-                return miette::miette!("region bounds must be zero-based integers");
-            });
+            return item
+                .parse::<u16>()
+                .into_diagnostic()
+                .wrap_err("region bounds must be zero-based integers");
         })
         .collect::<Result<Vec<_>>>()?;
 
@@ -59,11 +61,13 @@ pub(super) fn parse_cursor_position(value: &str) -> Result<(u16, u16)> {
 
     let column = column
         .parse::<u16>()
-        .map_err(|_| return miette::miette!("cursor COLUMN must be a zero-based integer"))?;
+        .into_diagnostic()
+        .wrap_err("cursor COLUMN must be a zero-based integer")?;
 
     let row = row
         .parse::<u16>()
-        .map_err(|_| return miette::miette!("cursor ROW must be a zero-based integer"))?;
+        .into_diagnostic()
+        .wrap_err("cursor ROW must be a zero-based integer")?;
 
     return Ok((column, row));
 }

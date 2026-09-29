@@ -9,6 +9,10 @@ pub struct Events<'session> {
 
 impl Events<'_> {
     /// Read one bounded projection page and its resume sequence.
+    ///
+    /// # Errors
+    /// Returns an error when `limit` is not 1 through 4096 or the event-log page cannot be read and
+    /// validated.
     pub fn page(
         &self,
         from_event_seq: u64,

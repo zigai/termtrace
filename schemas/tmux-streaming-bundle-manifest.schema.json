@@ -39,7 +39,7 @@
       "type": "integer"
     },
     "track_inventory_blake3": {
-      "description": "BLAKE3 of tracks.jsonl; each row is a TmuxBundleTrack.",
+      "description": "BLAKE3 of tracks.jsonl; each row is a `TmuxBundleTrack`.",
       "type": "string"
     },
     "track_inventory_bytes": {

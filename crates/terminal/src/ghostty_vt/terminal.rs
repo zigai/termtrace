@@ -601,9 +601,8 @@ impl Drop for GhosttyVt {
 pub(super) fn check(operation: &'static str, result: sys::GhosttyResult) -> Result<()> {
     if result == sys::GhosttyResult_GHOSTTY_SUCCESS {
         return Ok(());
-    } else {
-        return Err(Error::GhosttyVt { operation, result });
     }
+    return Err(Error::GhosttyVt { operation, result });
 }
 
 fn configure_terminal_resource_policy(terminal: sys::GhosttyTerminal) -> Result<()> {

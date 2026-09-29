@@ -2,6 +2,7 @@ use super::{Error, Result};
 use std::{
     fs::{self, File},
     io::{self, BufRead as _, BufReader, Read as _, Write as _},
+    num::ParseIntError,
     path::{Path, PathBuf},
 };
 use termtrace_engine::replay::derived_directory_name_for;
@@ -72,6 +73,7 @@ impl StateIndexCursor {
             {
                 return Err(Error::InvalidReplay {
                     reason: "state index changed or does not match its manifest".to_owned(),
+                    source: None,
                 });
             }
             return Ok(None);
@@ -80,6 +82,7 @@ impl StateIndexCursor {
         if count > 64 * 1024 {
             return Err(Error::InvalidReplay {
                 reason: "state-index entry exceeds 64 KiB".to_owned(),
+                source: None,
             });
         }
 
@@ -91,6 +94,7 @@ impl StateIndexCursor {
         if self.byte_length > self.source.member.byte_length {
             return Err(Error::InvalidReplay {
                 reason: "state index exceeds its committed length".to_owned(),
+                source: None,
             });
         }
         return serde_json::from_slice(&self.line)
@@ -118,7 +122,7 @@ pub(super) fn validate_replay_manifest(
     let bytes = fs::read(&path).map_err(|source| {
         if source.kind() == io::ErrorKind::NotFound {
             return Error::InvalidReplay {
-                reason: "matching semantic index is missing; run analyze index for the requested range and state selection".to_owned(),
+                reason: "matching semantic index is missing; run analyze index for the requested range and state selection".to_owned(), source: None,
             };
         }
         return Error::Filesystem {
@@ -139,6 +143,7 @@ pub(super) fn validate_replay_manifest(
         path.parent().ok_or_else(|| {
             return Error::InvalidReplay {
                 reason: "semantic manifest has no artifact directory".to_owned(),
+                source: None,
             };
         })?,
         &manifest.members,
@@ -155,6 +160,7 @@ pub(super) fn validate_replay_manifest(
             .ok_or_else(|| {
                 return Error::InvalidReplay {
                     reason: "semantic manifest has no state-index member".to_owned(),
+                    source: None,
                 };
             })?
             .clone(),
@@ -182,7 +188,7 @@ pub(super) fn validate_replay_manifest(
         || manifest.final_retained_state_hash != final_hash
         || (selection == StateSelection::Presented && hidden)
     {
-        return Err(Error::InvalidReplay { reason: "semantic index does not match the capture request; recreate the matching derived index".to_owned() });
+        return Err(Error::InvalidReplay { reason: "semantic index does not match the capture request; recreate the matching derived index".to_owned(), source: None });
     }
     return Ok(source);
 }
@@ -220,6 +226,7 @@ pub(super) fn write_video_map(
                         range.start_monotonic_ns,
                         range.end_monotonic_ns
                     ),
+                    source: None,
                 });
             }
             None => state.monotonic_ns,
@@ -283,11 +290,13 @@ pub(super) fn validate_acquisition_frames(path: &Path, expected_count: u64) -> R
             reason: format!(
                 "acquisition has {count} frames but encoded video has {expected_count}"
             ),
+            source: None,
         });
     }
     return first.ok_or_else(|| {
         return Error::InvalidReplay {
             reason: "native acquisition has no first frame".to_owned(),
+            source: None,
         };
     });
 }
@@ -358,6 +367,7 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
             let line = line.map_err(|source| {
                 return Error::InvalidReplay {
                     reason: format!("cannot read acquisition timestamps: {source}"),
+                    source: None,
                 };
             })?;
             if !line.contains("Parsed_showinfo_") {
@@ -376,19 +386,30 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
                 continue;
             };
 
+            const INVALID_TIMESTAMP: &str = "invalid or nonmonotonic native acquisition timestamp";
             let invalid = || {
                 return Error::InvalidReplay {
-                    reason: "invalid or nonmonotonic native acquisition timestamp".to_owned(),
+                    reason: INVALID_TIMESTAMP.to_owned(),
+                    source: None,
                 };
             };
+
+            let unparsable = |source: ParseIntError| {
+                return Error::InvalidReplay {
+                    reason: INVALID_TIMESTAMP.to_owned(),
+                    source: Some(Box::new(source)),
+                };
+            };
+
             let (number, rest) = rest.split_once(" pts:").ok_or_else(invalid)?;
-            let number: u64 = number.trim().parse().map_err(|_| return invalid())?;
+            let number: u64 = number.trim().parse().map_err(unparsable)?;
             let pts: u128 = rest
                 .split_whitespace()
                 .next()
                 .ok_or_else(invalid)?
                 .parse()
-                .map_err(|_| return invalid())?;
+                .map_err(unparsable)?;
+
             let (numerator, denominator) = self.time_base.ok_or_else(invalid)?;
             let acquired = pts
                 .checked_mul(numerator)
@@ -410,6 +431,7 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
         if self.previous.is_none() {
             return Err(Error::InvalidReplay {
                 reason: "native video has no acquisition timestamps".to_owned(),
+                source: None,
             });
         }
         return Ok(None);

@@ -208,6 +208,7 @@ impl SessionActor<'_> {
                 Error::ControlRejected { .. }
                 | Error::InputSequenceIncomplete { .. }
                 | Error::GhosttyVt { .. }
+                | Error::InvalidTerminalText { .. }
                 | Error::ScreenFrame(_),
             ) => Ok(()),
             Some(error) => Err(error),

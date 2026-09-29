@@ -1,7 +1,9 @@
 //! Coherent errors exposed by the blocking SDK boundary.
 
 use crate::{actions::ActOutcome, screen::StableScreenCapture};
-use std::{io::Error as IoError, path::PathBuf, result::Result as StdResult};
+use std::{
+    error::Error as StdError, io::Error as IoError, path::PathBuf, result::Result as StdResult,
+};
 use termtrace_control::Error as ControlError;
 use termtrace_model::{
     protocol::{
@@ -119,6 +121,9 @@ pub enum Error {
     InvalidOperation {
         /// SDK invariant or caller contract violation.
         reason: String,
+        /// Lower-level failure that exposed the violation, when one exists.
+        #[source]
+        source: Option<Box<dyn StdError + Send + Sync>>,
     },
 }
 

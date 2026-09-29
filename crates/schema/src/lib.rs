@@ -82,6 +82,10 @@ pub struct SchemaEntry {
 
 impl SchemaEntry {
     /// Generate this registry entry without consulting repository files.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the schema cannot be generated or serialized.
     pub fn generate(self) -> Result<GeneratedSchema> {
         return (self.generator)(self.filename);
     }
@@ -339,6 +343,10 @@ registry!(
 );
 
 /// Return the complete ordered catalog after checking registry invariants.
+///
+/// # Errors
+///
+/// Returns `Error::DuplicateFilename` when two registry entries share a filename.
 pub fn catalog() -> Result<&'static [SchemaEntry]> {
     validate_registry()?;
 
@@ -346,6 +354,10 @@ pub fn catalog() -> Result<&'static [SchemaEntry]> {
 }
 
 /// Validate filename uniqueness for the complete registry.
+///
+/// # Errors
+///
+/// Returns `Error::DuplicateFilename` when two registry entries share a filename.
 pub fn validate_registry() -> Result<()> {
     let mut filenames: BTreeSet<&'static str> = BTreeSet::new();
     for entry in SCHEMA_REGISTRY {
@@ -360,6 +372,10 @@ pub fn validate_registry() -> Result<()> {
 }
 
 /// Generate every public schema in stable registry order.
+///
+/// # Errors
+///
+/// Returns an error when the registry is invalid or any schema cannot be generated.
 pub fn generate() -> Result<Vec<GeneratedSchema>> {
     return catalog()?
         .iter()
@@ -369,6 +385,11 @@ pub fn generate() -> Result<Vec<GeneratedSchema>> {
 }
 
 /// Write all generated schemas to a directory in stable registry order.
+///
+/// # Errors
+///
+/// Returns an error when the registry is invalid, a schema cannot be generated, or the directory or
+/// a schema file cannot be written.
 pub fn write_all(directory: impl AsRef<Path>) -> Result<Vec<PathBuf>> {
     let directory = directory.as_ref();
     fs_err::create_dir_all(directory).map_err(|source| {

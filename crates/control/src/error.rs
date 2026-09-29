@@ -1,6 +1,8 @@
 //! Failures while reaching or observing a live session.
 
-use std::{io::Error as IoError, path::PathBuf, result::Result as StdResult};
+use std::{
+    error::Error as StdError, io::Error as IoError, path::PathBuf, result::Result as StdResult,
+};
 use termtrace_model::{
     execution::session::SessionPhase,
     protocol::{
@@ -73,6 +75,9 @@ pub enum Error {
     InvalidRequest {
         /// Request contract violation.
         reason: String,
+        /// Lower-level failure that exposed the violation, when one exists.
+        #[source]
+        source: Option<Box<dyn StdError + Send + Sync>>,
     },
     /// A session file or response was not valid JSON for its schema.
     #[error("invalid JSON document `{path}` at `{json_path}`")]

@@ -1,4 +1,4 @@
-//! Integration tests for RegistryService and TmuxService.
+//! Integration tests for `RegistryService` and `TmuxService`.
 
 use assert_cmd::Command;
 use std::path::Path;

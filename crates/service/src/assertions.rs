@@ -95,6 +95,10 @@ impl fmt::Display for AssertionError {
 impl StdError for AssertionError {}
 
 /// Purely normalize an exact frame with one of the three stable profiles.
+///
+/// # Errors
+/// Returns `ScreenFrameError::Serialization` when `profile` needs span or cell detail that `frame`
+/// does not hold, or the normalized frame cannot be serialized.
 pub fn normalize_frame(
     frame: &ScreenFrame,
     profile: SnapshotProfile,
@@ -119,6 +123,10 @@ pub fn normalize_frame(
 }
 
 /// Produce deterministic pretty JSON suitable for Rust's built-in `assert_eq!` diff.
+///
+/// # Errors
+/// Returns `AssertionError::Snapshot` when the frame cannot be normalized for `profile` or
+/// serialized.
 pub fn normalized_snapshot(
     frame: &ScreenFrame,
     profile: SnapshotProfile,
@@ -127,7 +135,8 @@ pub fn normalized_snapshot(
     let value = normalize_frame(frame, profile, options).map_err(AssertionError::Snapshot)?;
 
     return serde_json::to_string_pretty(&value)
-        .map_err(|_| return AssertionError::Snapshot(ScreenFrameError::Serialization));
+        .map_err(ScreenFrameError::serialization)
+        .map_err(AssertionError::Snapshot);
 }
 
 fn data_for_profile(
@@ -279,6 +288,9 @@ fn append_snapshot_grapheme(text: &mut String, grapheme: &str, wide_kind: WideKi
 }
 
 /// Require at least one valid match.
+///
+/// # Errors
+/// Returns an `ExpectationMismatch` when `result` has no matches.
 pub fn assert_exists(result: &QueryResult) -> Result<(), ExpectationMismatch> {
     if result.count() > 0 {
         return Ok(());
@@ -292,6 +304,9 @@ pub fn assert_exists(result: &QueryResult) -> Result<(), ExpectationMismatch> {
 }
 
 /// Require no valid matches.
+///
+/// # Errors
+/// Returns an `ExpectationMismatch` when `result` has any match.
 pub fn assert_not_exists(result: &QueryResult) -> Result<(), ExpectationMismatch> {
     if result.count() == 0 {
         return Ok(());
@@ -305,6 +320,9 @@ pub fn assert_not_exists(result: &QueryResult) -> Result<(), ExpectationMismatch
 }
 
 /// Require one exact match count.
+///
+/// # Errors
+/// Returns an `ExpectationMismatch` when `result` does not have exactly `expected` matches.
 pub fn assert_count(result: &QueryResult, expected: usize) -> Result<(), ExpectationMismatch> {
     if result.count() == expected {
         return Ok(());
@@ -318,6 +336,9 @@ pub fn assert_count(result: &QueryResult, expected: usize) -> Result<(), Expecta
 }
 
 /// Require literal text to occur in the deterministic presented row stream.
+///
+/// # Errors
+/// Returns an `ExpectationMismatch` when `expected` is empty or absent from the presented row text.
 pub fn assert_screen_text(frame: &ScreenFrame, expected: &str) -> Result<(), ExpectationMismatch> {
     let text = frame_text(frame);
     if !expected.is_empty() && text.contains(expected) {
@@ -332,6 +353,9 @@ pub fn assert_screen_text(frame: &ScreenFrame, expected: &str) -> Result<(), Exp
 }
 
 /// Require exact text evidence on one already selected match.
+///
+/// # Errors
+/// Returns an `ExpectationMismatch` when the match text differs from `expected`.
 pub fn assert_match_text(
     screen_match: &ScreenMatch,
     expected: &str,
@@ -348,6 +372,10 @@ pub fn assert_match_text(
 }
 
 /// Require every covered authoritative head cell to satisfy a complete appearance filter.
+///
+/// # Errors
+/// Returns an `ExpectationMismatch` when the match covers no authoritative head cells or any
+/// covered cell fails `expected`.
 pub fn assert_match_style(
     screen_match: &ScreenMatch,
     expected: &StyleFilter,
@@ -391,6 +419,9 @@ pub fn assert_match_style(
 }
 
 /// Require the complete exact cursor state.
+///
+/// # Errors
+/// Returns an `ExpectationMismatch` when the frame's cursor differs from `expected` in any field.
 pub fn assert_cursor(
     frame: &ScreenFrame,
     expected: &CursorState,
@@ -407,6 +438,10 @@ pub fn assert_cursor(
 }
 
 /// Require no native soft-wrap or wrap-continuation facts.
+///
+/// # Errors
+/// Returns an `ExpectationMismatch` naming the rows that carry soft-wrap or wrap-continuation
+/// facts.
 pub fn assert_no_wrapped_rows(frame: &ScreenFrame) -> Result<(), ExpectationMismatch> {
     let wrapped: Vec<u16> = match &frame.data {
         ScreenFrameData::Text { rows } => rows
@@ -439,6 +474,11 @@ pub fn assert_no_wrapped_rows(frame: &ScreenFrame) -> Result<(), ExpectationMism
 }
 
 /// Require a region to contain only unselected blanks with default source colors and no attributes.
+///
+/// # Errors
+/// Returns `AssertionError::Query` when `region` is empty or outside the frame geometry, or the
+/// frame lacks span or cell detail covering it, and `AssertionError::Mismatch` when any cell in it
+/// is not an unselected blank with default colors and no attributes.
 pub fn assert_neutral_region(
     frame: &ScreenFrame,
     region: ScreenRegion,
@@ -535,6 +575,10 @@ pub fn assert_neutral_region(
 }
 
 /// Require a presentation-eligible frame outside synchronized-output suppression.
+///
+/// # Errors
+/// Returns an `ExpectationMismatch` when the frame is not presented or synchronized output is
+/// active.
 pub fn assert_no_presented_transient(frame: &ScreenFrame) -> Result<(), ExpectationMismatch> {
     if frame.presented && !frame.modes.synchronized_output {
         return Ok(());

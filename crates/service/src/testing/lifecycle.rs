@@ -118,6 +118,10 @@ pub struct TerminalTest {
 
 impl TerminalTest {
     /// Launch the fresh session when the test body begins.
+    ///
+    /// # Errors
+    /// Returns an error when the private attempt directory cannot be created or the session cannot
+    /// be started.
     pub fn launch(config: TerminalTestConfig) -> Result<Self> {
         let attempt_directory = config
             .terminal
@@ -190,6 +194,10 @@ impl TerminalTest {
     }
 
     /// Capture one exact bounded frame and assert that its presented text contains a literal.
+    ///
+    /// # Errors
+    /// Returns `TerminalAssertionError::SessionUnavailable` when the session is closed, a capture
+    /// error when the frame cannot be captured, and a mismatch when `expected` is not on screen.
     pub fn assert_screen_text(
         &self,
         expected: &str,
@@ -206,6 +214,11 @@ impl TerminalTest {
     }
 
     /// Capture one exact bounded frame and assert its complete cursor state.
+    ///
+    /// # Errors
+    /// Returns `TerminalAssertionError::SessionUnavailable` when the session is closed, a capture
+    /// error when the frame cannot be captured, and a mismatch when the cursor differs from
+    /// `expected`.
     pub fn assert_cursor(
         &self,
         expected: &CursorState,
@@ -221,6 +234,10 @@ impl TerminalTest {
     }
 
     /// Compare one already captured exact frame with a reviewed deterministic snapshot.
+    ///
+    /// # Errors
+    /// Returns a mismatch when `name` is not 1-128 ASCII letters, digits, `.`, `_`, or `-`, and the
+    /// errors of [`assert_snapshot_file`].
     pub fn assert_snapshot(
         &self,
         name: &str,
@@ -420,6 +437,12 @@ pub enum TestFailure<E> {
 ///
 /// Panics are caught only around the body, finalized, reported with bounded secondary cleanup
 /// diagnostics when needed, and resumed with their original payload.
+///
+/// # Errors
+/// Returns `TestFailure::Launch` when the session cannot start, `TestFailure::Body` with the
+/// finalization report when the body returns an error, and `TestFailure::Finalization` when a
+/// passing body leaves secondary finalization failures. A panicking body is finalized and its panic
+/// resumed.
 pub fn run_terminal_test<T, E>(
     config: TerminalTestConfig,
     body: impl FnOnce(&mut TerminalTest) -> StdResult<T, E>,
@@ -460,23 +483,29 @@ fn emit_panic_finalization_diagnostics(report: &FinalizationReport) {
         return;
     }
 
+    // Standard error is the last-resort channel while a test panics; a failed write has nowhere
+    // else to be reported.
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
-    let _ = writeln!(
+    drop(writeln!(
         stderr,
         "termtrace: secondary failures occurred while finalizing a panicked test"
-    );
+    ));
 
     for failure in &report.secondary_failures {
-        let _ = writeln!(stderr, "termtrace: {}: {}", failure.phase, failure.message);
+        drop(writeln!(
+            stderr,
+            "termtrace: {}: {}",
+            failure.phase, failure.message
+        ));
     }
 
     if let Some(path) = &report.evidence_directory {
-        let _ = writeln!(
+        drop(writeln!(
             stderr,
             "termtrace: retained panic evidence: {}",
             bounded_text(&path.display().to_string())
-        );
+        ));
     }
 }
 

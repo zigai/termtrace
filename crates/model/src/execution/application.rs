@@ -71,10 +71,18 @@ impl ApplicationEvent {
             return Err("application span IDs must be non-nil and distinct");
         }
 
-        let bytes = serde_json::to_vec(self).map_err(|_| return "invalid application JSON")?;
+        let bytes = serde_json::to_vec(self).map_err(encoding_failure)?;
         if bytes.len() > MAX_APPLICATION_EVENT_BYTES {
             return Err("application event exceeds 64 KiB");
         }
         return Ok(());
     }
+}
+
+/// Collapse an encoding failure into the stable validation description.
+///
+/// `validate` reports stable `&'static str` categories, and the attributes it would otherwise
+/// echo are sensitive application data, so the serializer's detail is deliberately dropped.
+fn encoding_failure(_: serde_json::Error) -> &'static str {
+    return "invalid application JSON";
 }

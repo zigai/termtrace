@@ -142,8 +142,8 @@ pub(super) fn encode_mouse(
         });
     }
 
-    let cell_width = u32::from(pixel_width.checked_div(cols).unwrap_or(0).max(1));
-    let cell_height = u32::from(pixel_height.checked_div(rows).unwrap_or(0).max(1));
+    let cell_width = pixel_width.checked_div(cols).unwrap_or(0).max(1);
+    let cell_height = pixel_height.checked_div(rows).unwrap_or(0).max(1);
     let mut encoder = ptr::null_mut();
     check("create mouse encoder", unsafe {
         sys::ghostty_mouse_encoder_new(ptr::null(), &raw mut encoder)
@@ -155,8 +155,8 @@ pub(super) fn encode_mouse(
         size: size_of::<sys::GhosttyMouseEncoderSize>(),
         screen_width: u32::from(pixel_width),
         screen_height: u32::from(pixel_height),
-        cell_width,
-        cell_height,
+        cell_width: u32::from(cell_width),
+        cell_height: u32::from(cell_height),
         padding_top: 0,
         padding_bottom: 0,
         padding_right: 0,
@@ -190,8 +190,8 @@ pub(super) fn encode_mouse(
     };
 
     let position = sys::GhosttyMousePosition {
-        x: (f32::from(column) + 0.5) * cell_width as f32,
-        y: (f32::from(row) + 0.5) * cell_height as f32,
+        x: (f32::from(column) + 0.5) * f32::from(cell_width),
+        y: (f32::from(row) + 0.5) * f32::from(cell_height),
     };
     unsafe {
         sys::ghostty_mouse_event_set_action(event.0, action);
@@ -275,19 +275,22 @@ fn physical_key(key: NamedKey) -> Result<(sys::GhosttyKey, Option<[u8; 1]>)> {
         NamedKey::Function(number) if (1..=24).contains(&number) => {
             return Ok((sys::GhosttyKey_GHOSTTY_KEY_F1 + u32::from(number - 1), None));
         }
-        NamedKey::Letter(letter) if letter.is_ascii_alphabetic() => {
-            let lower = letter.to_ascii_lowercase();
-            let index = u32::from(lower) - u32::from('a');
-            let byte = u8::try_from(u32::from(lower)).map_err(|_| {
-                return Error::GhosttyVt {
-                    operation: "validate semantic key",
-                    result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
-                };
-            })?;
+        NamedKey::Letter(letter) => {
+            if let Ok(byte) = u8::try_from(letter)
+                && byte.is_ascii_alphabetic()
+            {
+                let lower = byte.to_ascii_lowercase();
+                let index = u32::from(lower - b'a');
 
-            return Ok((sys::GhosttyKey_GHOSTTY_KEY_A + index, Some([byte])));
+                return Ok((sys::GhosttyKey_GHOSTTY_KEY_A + index, Some([lower])));
+            }
+
+            return Err(Error::GhosttyVt {
+                operation: "validate semantic key",
+                result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
+            });
         }
-        NamedKey::Function(_) | NamedKey::Letter(_) => {
+        NamedKey::Function(_) => {
             return Err(Error::GhosttyVt {
                 operation: "validate semantic key",
                 result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,

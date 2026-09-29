@@ -126,7 +126,10 @@ fn native_processes_stop_after_driver_is_killed() {
         .expect("kill owner")
         .success());
 
-    let _ = driver.close(Duration::from_secs(2));
+    // The owner was killed above, so closing may report its loss; descendant cleanup is asserted
+    // below.
+    drop(driver.close(Duration::from_secs(2)));
+
     let deadline = Instant::now() + Duration::from_secs(5);
 
     loop {
@@ -574,8 +577,9 @@ fn original_native_cancellation_stops_the_managed_command() {
         }
 
         if Instant::now() >= deadline {
-            let _ = capture.kill();
-            let _ = capture.wait();
+            // Best-effort cleanup before failing the test with the cancellation assertion.
+            drop(capture.kill());
+            drop(capture.wait());
             panic!("capture did not stop on cancellation");
         }
 

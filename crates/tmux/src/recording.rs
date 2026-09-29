@@ -273,7 +273,7 @@ pub fn status(state_root: &Path, name: &str) -> Result<TmuxRecordingManifest> {
         Ok(()) => {}
         Err(error @ Error::ServerIdentityChanged { .. }) => return Err(error),
         Err(error) => {
-            tracing::debug!(%error, "tmux server is unavailable while reading aggregate status")
+            tracing::debug!(%error, "tmux server is unavailable while reading aggregate status");
         }
     }
 
@@ -493,14 +493,14 @@ pub fn stop(tracks: &impl Tracks, request: StopRequest<'_>) -> Result<TmuxRecord
     if server_validated && let Ok(report) = status::observe(&client) {
         for pane in report.panes {
             if pane.selected && pane.recorded {
-                let _ = client.run(["kill-pane", "-t", pane.pane_id.as_str()]);
+                kill_pane(&client, &pane.pane_id);
             }
         }
     }
 
     for (pane_id, session) in &manifest.state.pane_tracks {
         if server_validated {
-            let _ = client.run(["kill-pane", "-t", pane_id.as_str()]);
+            kill_pane(&client, pane_id);
         }
 
         if request.wait {
@@ -626,6 +626,13 @@ fn unix_time_ns() -> u64 {
         .ok()
         .and_then(|duration| return u64::try_from(duration.as_nanos()).ok())
         .unwrap_or(u64::MAX);
+}
+
+/// Kill a recorded pane during shutdown; a pane that already exited is traced, not fatal.
+fn kill_pane(client: &TmuxClient, pane_id: &str) {
+    if let Err(error) = client.run(["kill-pane", "-t", pane_id]) {
+        tracing::debug!(%error, pane_id, "could not kill recorded tmux pane");
+    }
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@
 
 #![allow(
     unsafe_code,
+    clippy::undocumented_unsafe_blocks,
     reason = "the module is the audited boundary around Ghostty's C API"
 )]
 #![allow(

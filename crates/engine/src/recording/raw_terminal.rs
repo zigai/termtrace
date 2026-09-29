@@ -42,9 +42,14 @@ impl RawTerminalGuard {
         let res = tcsetattr(io::stdin(), SetArg::TCSANOW, &original)
             .map_err(|error| return terminal_error("restore terminal mode", error.to_string()));
 
+        // Standard output may not be the terminal, so resetting its screen modes stays best-effort.
         let mut stdout = io::stdout().lock();
-        let _ = stdout.write_all(b"\x1b[?1049l\x1b[?25h");
-        let _ = stdout.flush();
+        if let Err(error) = stdout
+            .write_all(b"\x1b[?1049l\x1b[?25h")
+            .and_then(|()| return stdout.flush())
+        {
+            tracing::debug!(%error, "could not reset terminal screen modes");
+        }
 
         return res;
     }
@@ -52,6 +57,8 @@ impl RawTerminalGuard {
 
 impl Drop for RawTerminalGuard {
     fn drop(&mut self) {
-        let _ = self.restore();
+        if let Err(error) = self.restore() {
+            tracing::warn!(%error, "could not restore terminal mode while dropping the raw-mode guard");
+        }
     }
 }

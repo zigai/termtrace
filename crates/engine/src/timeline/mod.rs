@@ -14,4 +14,4 @@ pub use stream::{
     build_session_timeline_page, visit_session_timeline_while, visit_snapshot_timeline_while,
 };
 pub use termtrace_model::terminal::replay::SourceRange;
-pub use time::parse_time_offset_ns;
+pub use time::{parse_time_offset_ns, TimeOffsetError};

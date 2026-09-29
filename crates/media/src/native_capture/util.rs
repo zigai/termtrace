@@ -43,9 +43,13 @@ pub(super) fn check_cancelled(cancelled: &AtomicBool, operation: &str) -> Result
 }
 
 pub(super) fn status_error_with_logs(program: &str, status: ExitStatus, staging: &Path) -> Error {
-    let mut stderr = String::new();
-    let _ = fs::File::open(staging.join(format!("{program}.stderr.log")))
-        .and_then(|file| return file.take(2048).read_to_string(&mut stderr));
+    let mut bytes = Vec::new();
+    let stderr = match fs::File::open(staging.join(format!("{program}.stderr.log")))
+        .and_then(|file| return file.take(2048).read_to_end(&mut bytes))
+    {
+        Ok(_) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(error) => format!("stderr log unavailable: {error}"),
+    };
 
     return Error::ExternalCommand {
         operation: program.to_owned(),
@@ -95,11 +99,7 @@ pub(super) fn unix_now_ns() -> Result<u128> {
     return SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| return duration.as_nanos())
-        .map_err(|_| {
-            return Error::InvalidReplay {
-                reason: "system clock is before Unix epoch".to_owned(),
-            };
-        });
+        .map_err(|source| return Error::ClockBeforeEpoch { source });
 }
 
 pub(super) fn outcome(directory: PathBuf, kind: &CaptureKind) -> CaptureOutcome {

@@ -487,12 +487,13 @@ impl ManagedChild {
             let _termination = child.terminate(TERMINATION_GRACE);
         }
 
+        // Termination is teardown without an error channel; retaining output is best-effort.
         if let Some(output) = self.output.as_mut() {
-            let _ = output.drain(self.name);
+            drop(output.drain(self.name));
 
             if let Some(mut log) = output.log.take() {
-                let _ = log.write_all(&output.stdout_bytes);
-                let _ = log.write_all(&output.stderr_bytes);
+                drop(log.write_all(&output.stdout_bytes));
+                drop(log.write_all(&output.stderr_bytes));
             }
         }
     }
@@ -553,6 +554,7 @@ pub(super) fn wait_for_playback_handshake(
             if let Ok(value) = read_json::<PlaybackFailure>(failure) {
                 return Err(Error::InvalidReplay {
                     reason: format!("playback child failed before capture: {}", value.message),
+                    source: None,
                 });
             }
             return Ok(read_json(timing).ok());

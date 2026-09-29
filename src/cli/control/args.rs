@@ -213,7 +213,7 @@ pub(in crate::cli) struct SendArgs {
     /// File whose exact bytes are written directly to the child PTY.
     #[arg(long)]
     pub(in crate::cli) file: Option<PathBuf>,
-    /// Terminal resize as WxH or COLSxROWS.
+    /// Terminal resize as `WxH` or `COLSxROWS`.
     #[arg(long)]
     pub(in crate::cli) resize: Option<String>,
     /// Signal to deliver to child process (e.g. INT, TERM, HUP).

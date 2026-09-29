@@ -216,6 +216,7 @@ fn doctor_require_passes_ready_capabilities_and_fails_blocked_ones() {
     let doctor_json = |output: &[u8]| -> serde_json::Value {
         return serde_json::from_slice(output).expect("doctor JSON");
     };
+
     let status_of = |report: &serde_json::Value, id: &str| -> serde_json::Value {
         return report["capabilities"]
             .as_array()

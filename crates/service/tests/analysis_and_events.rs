@@ -1,4 +1,4 @@
-//! Integration tests for OutputService, EventsService, and AnalysisService.
+//! Integration tests for `OutputService`, `EventsService`, and `AnalysisService`.
 
 use assert_cmd::Command;
 use std::path::Path;

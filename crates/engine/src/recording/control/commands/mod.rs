@@ -9,8 +9,8 @@ use super::super::{
     model::TerminalGeometry,
     presentation::{find_text_regions, resize_semantic, LiveTerminal},
     support::{
-        actor_boundaries, control_error_response, control_rejected, finish_with_cleanup,
-        terminal_error, validate_control_input,
+        actor_boundaries, control_error_response, control_rejected, deliver_response,
+        finish_with_cleanup, terminal_error, validate_control_input,
     },
     termination::Fact,
 };

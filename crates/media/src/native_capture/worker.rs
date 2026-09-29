@@ -57,7 +57,8 @@ struct WorkDirectory(PathBuf);
 
 impl Drop for WorkDirectory {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        // Drop has no error channel; the private work directory is never published.
+        drop(fs::remove_dir_all(&self.0));
     }
 }
 
@@ -380,7 +381,9 @@ impl NativeReplayWorker {
     /// End playback and terminate all owned processes. Safe to call repeatedly.
     pub fn close(&mut self) {
         if !self.closed {
-            let _ = self.stream.shutdown(Shutdown::Both);
+            // The worker may already have closed its end; closing is idempotent teardown.
+            drop(self.stream.shutdown(Shutdown::Both));
+
             self.ghostty.terminate();
             self.xvfb.terminate();
             self.closed = true;
@@ -472,8 +475,9 @@ impl NativeReplayWorker {
         if let Err(error) = self.capture_staged(endpoint, &staging) {
             self.close();
 
+            // The logs supplement the capture failure reported below; a missing log is not an error.
             for name in ["ghostty.stdout.log", "ghostty.stderr.log"] {
-                let _ = fs::copy(self.work.0.join(name), staging.join(name));
+                drop(fs::copy(self.work.0.join(name), staging.join(name)));
             }
 
             return Err(preserve_failed(parent, &staging, error));

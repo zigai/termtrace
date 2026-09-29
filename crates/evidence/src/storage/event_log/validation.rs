@@ -115,6 +115,7 @@ where
             path: path.to_path_buf(),
             line,
             reason: format!("JSON decoding failed at `{json_path}`: {source}"),
+            source: None,
         };
     });
 }
@@ -208,5 +209,6 @@ pub(super) fn invalid_log(path: &Path, line: u64, reason: impl Into<String>) -> 
         path: path.to_path_buf(),
         line,
         reason: reason.into(),
+        source: None,
     };
 }

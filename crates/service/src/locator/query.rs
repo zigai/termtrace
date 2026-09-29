@@ -15,7 +15,19 @@ const MAX_QUERY_MATCHES: usize = 10_000;
 const MAX_DIAGNOSTIC_CHARS: usize = 256;
 const MAX_COVERED_CELLS: usize = 128;
 const MAX_QUERY_MATCHED_CELLS: usize = MAX_SCREEN_FRAME_CELLS as usize;
-const MAX_QUERY_TEXT_BYTES: usize = MAX_SCREEN_FRAME_JSON_BYTES as usize;
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "`TryFrom` is unavailable in const context; the assertion bounds the limit to 32 \
+              bits, which every supported `usize` holds"
+)]
+const MAX_QUERY_TEXT_BYTES: usize = {
+    assert!(
+        MAX_SCREEN_FRAME_JSON_BYTES <= 0xFFFF_FFFF,
+        "screen-frame JSON limit must fit a 32-bit usize"
+    );
+
+    MAX_SCREEN_FRAME_JSON_BYTES as usize
+};
 const MAX_QUERY_CELL_WORK: usize = MAX_QUERY_MATCHED_CELLS * 4;
 
 /// Whether a text query searches or compares the complete selected text.
@@ -145,11 +157,17 @@ pub struct LocatorSpec {
 
 impl LocatorSpec {
     /// Match a nonempty literal substring.
+    ///
+    /// # Errors
+    /// Returns `QueryError::InvalidQuery` when `text` is empty.
     pub fn text(text: impl Into<String>) -> Result<Self, QueryError> {
         return Self::literal(text, TextMatchKind::Substring);
     }
 
     /// Match the complete selected row or region text.
+    ///
+    /// # Errors
+    /// Returns `QueryError::InvalidQuery` when `text` is empty.
     pub fn exact(text: impl Into<String>) -> Result<Self, QueryError> {
         return Self::literal(text, TextMatchKind::Exact);
     }
@@ -171,6 +189,10 @@ impl LocatorSpec {
     }
 
     /// Compile a host-native regex source that cannot produce an empty match.
+    ///
+    /// # Errors
+    /// Returns `QueryError::InvalidQuery` when `source` is empty, does not compile, or can produce
+    /// a zero-width match.
     pub fn native_regex(source: impl Into<String>) -> Result<Self, QueryError> {
         let source = source.into();
         if source.is_empty() {
@@ -189,6 +211,9 @@ impl LocatorSpec {
     }
 
     /// Use an already compiled host-native regex that cannot produce an empty match.
+    ///
+    /// # Errors
+    /// Returns `QueryError::InvalidQuery` when `regex` can produce a zero-width match.
     pub fn regex(regex: Regex) -> Result<Self, QueryError> {
         if regex_can_match_zero_width(&regex) {
             return Err(QueryError::InvalidQuery {
@@ -216,6 +241,9 @@ impl LocatorSpec {
     }
 
     /// Restrict this query to one absolute nonempty half-open region.
+    ///
+    /// # Errors
+    /// Returns `QueryError::InvalidQuery` when `region` is empty.
     pub fn in_region(mut self, region: ScreenRegion) -> Result<Self, QueryError> {
         if region.top >= region.bottom || region.left >= region.right {
             return Err(QueryError::InvalidQuery {
@@ -245,6 +273,10 @@ impl LocatorSpec {
     }
 
     /// Combine independent scope, text, and appearance clauses.
+    ///
+    /// # Errors
+    /// Returns `QueryError::InvalidQuery` when both specifications have text matchers, their row
+    /// scopes conflict, or their regions do not intersect.
     pub fn and(self, other: Self) -> Result<Self, QueryError> {
         if self.matcher.is_some() && other.matcher.is_some() {
             return Err(QueryError::InvalidQuery {
@@ -518,6 +550,10 @@ impl QueryResult {
     }
 
     /// Require exactly one match.
+    ///
+    /// # Errors
+    /// Returns `QueryError::NoMatch` when there are no matches and `QueryError::MultipleMatches`
+    /// when there are several.
     pub fn single(&self) -> Result<&ScreenMatch, QueryError> {
         match self.all() {
             [] => {
@@ -533,6 +569,9 @@ impl QueryResult {
     }
 
     /// Explicitly select the first match, rejecting absence but not ambiguity.
+    ///
+    /// # Errors
+    /// Returns `QueryError::NoMatch` when there are no matches.
     pub fn first(&self) -> Result<&ScreenMatch, QueryError> {
         return self.matches.first().ok_or_else(|| {
             return QueryError::NoMatch {
@@ -544,6 +583,9 @@ impl QueryResult {
     }
 
     /// Explicitly select one zero-based ordered match.
+    ///
+    /// # Errors
+    /// Returns `QueryError::IndexOutOfBounds` when `index` is not less than the match count.
     pub fn nth(&self, index: usize) -> Result<&ScreenMatch, QueryError> {
         return self.matches.get(index).ok_or_else(|| {
             return QueryError::IndexOutOfBounds {
@@ -655,6 +697,11 @@ impl QueryBudget {
 /// Host-local immutable query operations for model-owned rich frames.
 pub trait ScreenFrameQuery {
     /// Evaluate an immutable specification without I/O.
+    ///
+    /// # Errors
+    /// Returns `QueryError::InvalidQuery` when the specification's row lies outside the frame and
+    /// `QueryError::InsufficientFrameDetail` when the frame does not hold the rows or detail the
+    /// specification needs.
     fn query(&self, spec: LocatorSpec) -> Result<QueryResult, QueryError>;
 }
 

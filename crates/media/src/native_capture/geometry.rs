@@ -27,6 +27,11 @@ use termtrace_model::{
 /// An explicit viewport is returned unchanged. Otherwise the recorded Ghostty profile is restored
 /// and the viewport is solved to reproduce the session's canonical terminal grid.
 /// `helper` is the Termtrace executable providing the geometry-probe subprocess protocol.
+///
+/// # Errors
+///
+/// Returns an error when the session manifest cannot be read, the recorded Ghostty profile is
+/// unsupported or cannot be restored, or no probed viewport reproduces the session's terminal grid.
 pub fn native_capture_target(
     helper: &Path,
     session: &Path,
@@ -54,6 +59,7 @@ pub fn native_capture_target(
                     "unsupported recorded Ghostty profile path `{}`",
                     provenance.replay_profile
                 ),
+                source: None,
             });
         }
 
@@ -81,6 +87,12 @@ pub fn native_capture_target(
 /// The probe runs in an isolated display. Failed probes retain their staging directory in
 /// [`Error::CaptureFailed`] for diagnosis.
 /// `helper` is the Termtrace executable providing the geometry-probe subprocess protocol.
+///
+/// # Errors
+///
+/// Returns `Error::InvalidReplay` for a viewport smaller than 320x200 pixels,
+/// `Error::CaptureFailed` retaining the staging directory when the probe fails, and a filesystem
+/// error when the staging directory cannot be created or removed.
 pub fn probe_ghostty_geometry(
     helper: &Path,
     target: CaptureTarget,
@@ -89,6 +101,7 @@ pub fn probe_ghostty_geometry(
     if target.width < 320 || target.height < 200 {
         return Err(Error::InvalidReplay {
             reason: "fitted geometry requires a viewport of at least 320x200 pixels".to_owned(),
+            source: None,
         });
     }
 
@@ -119,6 +132,11 @@ pub fn probe_ghostty_geometry(
 ///
 /// The returned report records every measured viewport and the selected exact fit.
 /// `helper` is the Termtrace executable providing the geometry-probe subprocess protocol.
+///
+/// # Errors
+///
+/// Returns an error when the required grid is empty, a probe fails, or the measured viewports
+/// cannot reproduce `required_cols` by `required_rows` exactly.
 pub fn solve_ghostty_geometry(
     helper: &Path,
     required_cols: u16,
@@ -140,6 +158,7 @@ pub(super) fn solve_geometry_with(
     if required_cols == 0 || required_rows == 0 {
         return Err(Error::InvalidReplay {
             reason: "native geometry solver requires a nonzero canonical grid".to_owned(),
+            source: None,
         });
     }
 
@@ -223,7 +242,7 @@ pub(super) fn validate_capture_geometry(
             reason: format!(
                 "capture viewport {viewport_width}x{viewport_height} renders {}x{} cells, but recording requires {}x{} cells; recapture with `--geometry fit --viewport {viewport_width}x{viewport_height}`",
                 reported.cols, reported.rows, expected.cols, expected.rows
-            ),
+            ), source: None,
         });
     }
 
@@ -239,6 +258,7 @@ pub(super) fn validate_capture_geometry(
                 expected.pixel_width,
                 expected.pixel_height
             ),
+            source: None,
         });
     }
     return Ok(());
@@ -259,9 +279,9 @@ fn probe_staged(
     let lease = DisplayLease::acquire()?;
     let display = format!(":{}", lease.number);
     let scaling = if target.width >= 2880 || target.height >= 1800 {
-        Some(super::capture::DisplayScaling::from_scale(2.0))
+        Some(super::capture::DisplayScaling::from_scale(2.0)?)
     } else if target.width >= 2560 || target.height >= 1440 {
-        Some(super::capture::DisplayScaling::from_scale(1.5))
+        Some(super::capture::DisplayScaling::from_scale(1.5)?)
     } else {
         None
     };
@@ -307,6 +327,7 @@ fn validate_report(report: TerminalGeometryReport) -> Result<()> {
     {
         return Err(Error::InvalidReplay {
             reason: "Ghostty reported inconsistent grid, cell, and text-area dimensions".to_owned(),
+            source: None,
         });
     }
     return Ok(());
@@ -331,5 +352,6 @@ fn solver_error(cols: u16, rows: u16, attempts: &[GeometryProbeAttempt], reason:
         reason: format!(
             "could not fit native viewport to {cols}x{rows} grid ({reason}); probes: {probes}"
         ),
+        source: None,
     };
 }

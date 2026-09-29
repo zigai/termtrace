@@ -702,9 +702,7 @@ fn write_source_index(
                     return Ok(());
                 }
 
-                if current_bucket == Some(bucket) {
-                    pending_state = Some((record, state.clone()));
-                } else {
+                if current_bucket != Some(bucket) {
                     if let Some((pending_rec, pending_st)) = pending_state.take() {
                         commit_retained_state(
                             pending_rec,
@@ -721,8 +719,9 @@ fn write_source_index(
                     }
 
                     current_bucket = Some(bucket);
-                    pending_state = Some((record, state.clone()));
                 }
+
+                pending_state = Some((record, state.clone()));
             } else {
                 commit_retained_state(
                     record,

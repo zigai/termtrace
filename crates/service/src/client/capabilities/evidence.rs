@@ -12,6 +12,10 @@ pub struct Evidence<'session> {
 
 impl Evidence<'_> {
     /// Save and verify a deterministic semantic PNG for one exact state.
+    ///
+    /// # Errors
+    /// Returns an error when `point` cannot be resolved, the state cannot be rendered, the
+    /// destination cannot be published, or the saved artifact fails verification.
     pub fn semantic_screenshot(
         &self,
         destination: impl AsRef<Path>,
@@ -32,6 +36,10 @@ impl Evidence<'_> {
     }
 
     /// Create and independently verify a bounded evidence bundle.
+    ///
+    /// # Errors
+    /// Returns an error when the bundle cannot be created or fails independent verification, or its
+    /// verified manifest differs from the published one.
     pub fn bundle(
         &self,
         destination: impl AsRef<Path>,

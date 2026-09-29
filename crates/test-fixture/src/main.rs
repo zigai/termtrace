@@ -252,6 +252,7 @@ fn write_output_events(
         let length = usize::try_from(length).map_err(|error| {
             return termtrace_evidence::Error::InvalidEvidence {
                 reason: format!("fixture output chunk does not fit in memory: {error}"),
+                source: None,
             };
         })?;
 

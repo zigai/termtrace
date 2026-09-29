@@ -11,6 +11,10 @@ pub struct Semantic<'session> {
 
 impl Semantic<'_> {
     /// Build the ordered semantic/canonical timeline.
+    ///
+    /// # Errors
+    /// Returns an error when the session's canonical evidence cannot be read, validated, or
+    /// replayed.
     pub fn timeline(&self, all_states: bool, controls: bool) -> Result<Vec<TimelineEntry>> {
         let mut entries = Vec::new();
         visit_session_timeline_while(self.session.path(), all_states, controls, None, |entry| {
@@ -23,6 +27,10 @@ impl Semantic<'_> {
     }
 
     /// Compare two complete semantic endpoints.
+    ///
+    /// # Errors
+    /// Returns an error when either point cannot be resolved or the session's evidence cannot be
+    /// validated or replayed.
     pub fn diff(&self, from: StatePoint, to: StatePoint) -> Result<SemanticDiff> {
         let (difference, _, _) =
             diff_session_states_with_semantic_states(self.session.path(), from, to)?;
@@ -31,11 +39,19 @@ impl Semantic<'_> {
     }
 
     /// Explain exact VT frames and transitions around one point.
+    ///
+    /// # Errors
+    /// Returns an error when `point` cannot be resolved or the session's evidence cannot be
+    /// validated or replayed.
     pub fn explain(&self, point: StatePoint, context_events: u64) -> Result<ExplainReport> {
         return Ok(explain_session(self.session.path(), point, context_events)?);
     }
 
     /// Run conservative source-bound detectors.
+    ///
+    /// # Errors
+    /// Returns an error when native visual evidence fails validation or the session's evidence
+    /// cannot be validated or replayed.
     pub fn diagnose(
         &self,
         checks: Vec<DiagnosticCheck>,

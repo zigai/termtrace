@@ -24,7 +24,7 @@ impl SessionClock {
     pub fn now() -> Result<Self> {
         let started_unix_ns = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| return Error::ClockBeforeEpoch)?
+            .map_err(|source| return Error::ClockBeforeEpoch { source })?
             .as_nanos();
 
         return Ok(Self {

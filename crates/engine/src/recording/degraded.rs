@@ -153,7 +153,7 @@ pub(super) fn preserve_terminal(
                 });
             }
             Ok(RuntimeMessage::OutputClosed | RuntimeMessage::ReadFailed(_)) => {
-                output_closed = true
+                output_closed = true;
             }
             Err(RecvTimeoutError::Disconnected) => output_closed = true,
             Ok(

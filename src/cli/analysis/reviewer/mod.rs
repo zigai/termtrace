@@ -27,7 +27,7 @@ use std::{
     process::ExitCode,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Condvar, Mutex,
+        Arc, Condvar, Mutex, PoisonError,
     },
     thread::{self, JoinHandle},
     time::Duration,
@@ -140,9 +140,7 @@ impl ReviewWorker {
         self.generation = self.generation.saturating_add(1);
 
         let (lock, changed) = &*self.shared;
-        let mut work = lock
-            .lock()
-            .map_err(|_| return review_error("review worker state poisoned"))?;
+        let mut work = lock.lock().map_err(poisoned_worker)?;
         work.completed = None;
         work.pending = Some(Request {
             generation: self.generation,
@@ -160,11 +158,7 @@ impl ReviewWorker {
             return Err(review_error("review page worker exited unexpectedly"));
         }
 
-        let mut work = self
-            .shared
-            .0
-            .lock()
-            .map_err(|_| return review_error("review worker state poisoned"))?;
+        let mut work = self.shared.0.lock().map_err(poisoned_worker)?;
         let Some((generation, result)) = work.completed.take() else {
             return Ok(None);
         };
@@ -449,10 +443,10 @@ pub(in crate::cli) fn run(
                         model.status = "query cancelled; displayed evidence retained";
                     }
                     KeyCode::Char('j') | KeyCode::Down | KeyCode::Right => {
-                        model.move_selection(true)?
+                        model.move_selection(true)?;
                     }
                     KeyCode::Char('k') | KeyCode::Up | KeyCode::Left => {
-                        model.move_selection(false)?
+                        model.move_selection(false)?;
                     }
                     KeyCode::Home => model.query(ReviewQuery::State(0))?,
                     KeyCode::End => model.query(ReviewQuery::Final)?,
@@ -565,7 +559,16 @@ fn terminal_error(source: io::Error) -> Error {
 fn review_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
+        source: None,
     };
+}
+
+/// Report the review-worker lock as poisoned.
+///
+/// `PoisonError` owns the borrowed lock guard, so it cannot outlive this call as an error
+/// source; only the poisoned state itself is reported.
+fn poisoned_worker<T>(_: PoisonError<T>) -> Error {
+    return review_error("review worker state poisoned");
 }
 
 #[cfg(test)]

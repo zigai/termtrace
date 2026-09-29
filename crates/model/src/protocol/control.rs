@@ -23,7 +23,7 @@ use uuid::Uuid;
 pub struct ClockSample {
     /// Session-relative time sampled inside the system clock bracket.
     pub session_monotonic_ns: u64,
-    /// Midpoint of the system CLOCK_MONOTONIC bracket.
+    /// Midpoint of the system `CLOCK_MONOTONIC` bracket.
     pub system_monotonic_ns: u64,
     /// Maximum error of the midpoint mapping, in nanoseconds.
     pub uncertainty_ns: u64,

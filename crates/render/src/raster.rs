@@ -137,6 +137,26 @@ fn get_glyph_path(
     });
 }
 
+/// Scale a cell or font measure to whole pixels, rejecting results the cast would saturate.
+fn scaled_pixels(base: u16, scale: f32) -> Result<u16> {
+    let scaled = (f32::from(base) * scale).round();
+    if !scaled.is_finite() || scaled < 0.0 || scaled > f32::from(u16::MAX) {
+        return Err(render_error(format!(
+            "scaled semantic geometry {scaled} does not fit 16-bit pixels"
+        )));
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "checked above to be finite and within `0..=u16::MAX`, and `round` makes it \
+                  whole, so the cast is exact; std has no checked float-to-integer conversion"
+    )]
+    let pixels = scaled as u16;
+
+    return Ok(pixels);
+}
+
 fn render_grid_direct(
     state: &SemanticState,
     canvas_cols: u16,
@@ -147,8 +167,8 @@ fn render_grid_direct(
     static FACES: LazyLock<ParsedFaces> = LazyLock::new(ParsedFaces::new);
     let faces = &*FACES;
     let font_set = semantic_font_set()?;
-    let cell_w = (f32::from(SEMANTIC_CELL_WIDTH) * scale).round() as u32;
-    let cell_h = (f32::from(SEMANTIC_CELL_HEIGHT) * scale).round() as u32;
+    let cell_w = u32::from(scaled_pixels(SEMANTIC_CELL_WIDTH, scale)?);
+    let cell_h = u32::from(scaled_pixels(SEMANTIC_CELL_HEIGHT, scale)?);
     let width = u32::from(canvas_cols).saturating_mul(cell_w);
     let height = u32::from(canvas_rows).saturating_mul(cell_h);
     let mut pixmap = Pixmap::new(width, height)
@@ -236,7 +256,7 @@ fn render_grid_direct(
 
             let role = select_font_role(font_set, &cell.style, &cell.grapheme);
             let (base_size, base_line) = font_geometry(role);
-            let size = (f32::from(base_size) * scale).round() as u16;
+            let size = scaled_pixels(base_size, scale)?;
             let baseline_y = row_y + (f32::from(base_line) * scale).round();
 
             let opacity = if cell.style.faint { 153 } else { 255 };
@@ -464,7 +484,7 @@ fn render_grid_direct(
 
                     let role = select_font_role(font_set, &cell.style, &cell.grapheme);
                     let (base_size, base_line) = font_geometry(role);
-                    let size = (f32::from(base_size) * scale).round() as u16;
+                    let size = scaled_pixels(base_size, scale)?;
                     let baseline_y = y + (f32::from(base_line) * scale).round();
 
                     for ch in cell.grapheme.chars() {
@@ -853,7 +873,7 @@ mod tests {
                 continue;
             }
 
-            let col = i as u32;
+            let col = u32::try_from(i).expect("glyph column fits u32");
             let has_pixels = (col * 12..(col + 1) * 12).any(|x| {
                 return (0..24).any(|y| {
                     return pixmap

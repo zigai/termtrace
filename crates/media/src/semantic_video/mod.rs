@@ -1,11 +1,11 @@
 //! Deterministic semantic-state video scheduling and source materialization.
 
-use crate::{capability::probe_semantic_video_encode, Error, Result};
+use crate::{capability::probe_semantic_video_encode, error::finish_with_cleanup, Error, Result};
 use std::{
     collections::HashMap,
     io::{self, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::atomic::AtomicBool,
 };
 use termtrace_engine::{replay::visit_session_states_while, Error as EngineError};
@@ -225,10 +225,10 @@ pub fn materialize(
         .spawn()
         .map_err(|source_error| return filesystem_error("ffmpeg", source_error))?;
     let Some(mut stdin) = child.stdin.take() else {
-        let _ = child.kill();
-        let _ = child.wait();
-
-        return Err(video_error("FFmpeg semantic source stdin was not created"));
+        return finish_with_cleanup(
+            Err(video_error("FFmpeg semantic source stdin was not created")),
+            stop_ffmpeg(&mut child),
+        );
     };
     let summary = match render_semantic_frames(source, &mut stdin, &mut |span| {
         return write_frame_span(&spans_path, &mut spans_writer, span);
@@ -237,10 +237,7 @@ pub fn materialize(
         Err(error) => {
             drop(stdin);
 
-            let _ = child.kill();
-            let _ = child.wait();
-
-            return Err(error);
+            return finish_with_cleanup(Err(error), stop_ffmpeg(&mut child));
         }
     };
     drop(stdin);
@@ -330,6 +327,7 @@ fn render_semantic_frames(
                 .map_err(|error| {
                     return EngineError::InvalidReplay {
                         reason: error.to_string(),
+                        source: None,
                     };
                 })?;
         }
@@ -682,6 +680,18 @@ fn render_error(error: RenderError) -> Error {
     return video_error(format!("semantic rendering failed: {error}"));
 }
 
+fn stop_ffmpeg(child: &mut Child) -> Result<()> {
+    let killed = child
+        .kill()
+        .map_err(|source| return filesystem_error("ffmpeg", source));
+    let reaped = child
+        .wait()
+        .map(|_status| {})
+        .map_err(|source| return filesystem_error("ffmpeg", source));
+
+    return finish_with_cleanup(killed, reaped);
+}
+
 fn filesystem_error(path: impl Into<PathBuf>, source: io::Error) -> Error {
     return Error::Filesystem {
         path: path.into(),
@@ -692,6 +702,7 @@ fn filesystem_error(path: impl Into<PathBuf>, source: io::Error) -> Error {
 fn video_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
+        source: None,
     };
 }
 

@@ -67,6 +67,7 @@ fn enforces_aggregate_event_log_limits_before_retention() {
         if checks == 2 {
             return Err(Error::InvalidEvidence {
                 reason: "cancelled".to_owned(),
+                source: None,
             });
         }
         return Ok(());

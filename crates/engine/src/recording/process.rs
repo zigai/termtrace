@@ -4,7 +4,7 @@ use super::{
     control::{spawn_control_server, ControlWorker},
     environment::EffectiveEnvironment,
     model::{RecordOptions, RuntimeMessage, SpawnedCommand, TerminalGeometry},
-    support::{finish_with_cleanup, poll_ready, terminal_error},
+    support::{finish_with_cleanup, poll_ready, terminal_error, thread_panicked},
 };
 use crate::{Error, Result};
 use nix::{
@@ -51,6 +51,7 @@ fn spawn_reader(
                 if let Some(raw_fd) = master_raw_fd {
                     #[allow(
                         unsafe_code,
+                        clippy::undocumented_unsafe_blocks,
                         reason = "master PTY raw file descriptor remains valid for the recording session"
                     )]
                     let borrowed = unsafe { std::os::fd::BorrowedFd::borrow_raw(raw_fd) };
@@ -64,7 +65,7 @@ fn spawn_reader(
                         Ok(_) => {}
                         Err(Errno::EINTR) => continue,
                         Err(error) => {
-                            let _ = sender.send(RuntimeMessage::ReadFailed(error.to_string()));
+                            notify_runtime(&sender, RuntimeMessage::ReadFailed(error.to_string()));
 
                             return;
                         }
@@ -96,7 +97,7 @@ fn spawn_reader(
 
                 match reader.read(&mut buffer) {
                     Ok(0) => {
-                        let _ = sender.send(RuntimeMessage::OutputClosed);
+                        notify_runtime(&sender, RuntimeMessage::OutputClosed);
 
                         return;
                     }
@@ -123,7 +124,7 @@ fn spawn_reader(
                             RuntimeMessage::ReadFailed(error.to_string())
                         };
 
-                        let _ = sender.send(message);
+                        notify_runtime(&sender, message);
 
                         return;
                     }
@@ -184,7 +185,7 @@ fn spawn_resize(
                         }
                     }
                     Err(error) => {
-                        let _ = sender.send(RuntimeMessage::ResizeFailed(error.to_string()));
+                        notify_runtime(&sender, RuntimeMessage::ResizeFailed(error.to_string()));
 
                         return;
                     }
@@ -252,17 +253,27 @@ fn geometry_from_winsize(size: Winsize, fallback: TerminalGeometry) -> Option<Te
     });
 }
 
+/// Deliver a worker's final notification to the recording runtime.
+///
+/// A send fails only once the runtime has dropped its receiver and stopped consuming worker
+/// notifications, so the undelivered notification is traced instead.
+fn notify_runtime(sender: &mpsc::SyncSender<RuntimeMessage>, message: RuntimeMessage) {
+    if sender.send(message).is_err() {
+        tracing::debug!("recording runtime stopped before a worker notification was delivered");
+    }
+}
+
 fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
     let stdin = io::stdin();
     let terminal = match isatty(&stdin) {
         Ok(terminal) => terminal,
         Err(Errno::EIO) => {
-            let _ = sender.send(RuntimeMessage::TerminalInputClosed);
+            notify_runtime(sender, RuntimeMessage::TerminalInputClosed);
 
             return;
         }
         Err(error) => {
-            let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
+            notify_runtime(sender, RuntimeMessage::InputFailed(error.to_string()));
 
             return;
         }
@@ -279,7 +290,7 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
             Ok(_) => {}
             Err(Errno::EINTR) => continue,
             Err(error) => {
-                let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
+                notify_runtime(sender, RuntimeMessage::InputFailed(error.to_string()));
 
                 return;
             }
@@ -302,7 +313,7 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
         match fd_read(&stdin, &mut buffer) {
             Ok(0) => {
                 if terminal {
-                    let _ = sender.send(RuntimeMessage::TerminalInputClosed);
+                    notify_runtime(sender, RuntimeMessage::TerminalInputClosed);
                 }
 
                 return;
@@ -317,12 +328,12 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
             }
             Err(Errno::EINTR) => {}
             Err(Errno::EIO) if terminal => {
-                let _ = sender.send(RuntimeMessage::TerminalInputClosed);
+                notify_runtime(sender, RuntimeMessage::TerminalInputClosed);
 
                 return;
             }
             Err(error) => {
-                let _ = sender.send(RuntimeMessage::InputFailed(error.to_string()));
+                notify_runtime(sender, RuntimeMessage::InputFailed(error.to_string()));
 
                 return;
             }
@@ -376,6 +387,7 @@ impl Write for PtyWriter {
         if let Some(raw_fd) = self.master_raw_fd {
             #[allow(
                 unsafe_code,
+                clippy::undocumented_unsafe_blocks,
                 reason = "master PTY raw file descriptor remains valid for the recording session"
             )]
             let borrowed = unsafe { std::os::fd::BorrowedFd::borrow_raw(raw_fd) };
@@ -522,9 +534,10 @@ impl InputWorker {
             )),
         };
 
-        let join_result = self.thread.join().map_err(|_| {
-            return terminal_error("join standard-input reader", "input thread panicked");
-        });
+        let join_result = self
+            .thread
+            .join()
+            .map_err(|payload| return thread_panicked("join standard-input reader", payload));
 
         return finish_with_cleanup(cancel_result, join_result);
     }
@@ -534,9 +547,10 @@ impl ResizeWorker {
     fn stop(self) -> Result<()> {
         self.handle.close();
 
-        return self.thread.join().map_err(|_| {
-            return terminal_error("join terminal-resize listener", "resize thread panicked");
-        });
+        return self
+            .thread
+            .join()
+            .map_err(|payload| return thread_panicked("join terminal-resize listener", payload));
     }
 }
 
@@ -544,9 +558,10 @@ impl SignalWorker {
     fn stop(self) -> Result<()> {
         self.handle.close();
 
-        return self.thread.join().map_err(|_| {
-            return terminal_error("join recorder-signal listener", "signal thread panicked");
-        });
+        return self
+            .thread
+            .join()
+            .map_err(|payload| return thread_panicked("join recorder-signal listener", payload));
     }
 }
 
@@ -659,7 +674,7 @@ impl RuntimeWorkers {
         let reader_join = self
             .reader
             .join()
-            .map_err(|_| return terminal_error("join PTY reader", "reader thread panicked"));
+            .map_err(|payload| return thread_panicked("join PTY reader", payload));
 
         let result = finish_with_cleanup(primary, control_stop);
         let result = finish_with_cleanup(result, input_stop);
@@ -671,6 +686,15 @@ impl RuntimeWorkers {
     }
 }
 
+fn remove_session_directory(path: &Path) -> Result<()> {
+    return fs_err::remove_dir(path).map_err(|source| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        };
+    });
+}
+
 pub(super) fn create_session_directory(path: &Path) -> Result<()> {
     let mut builder = DirBuilder::new();
     builder.mode(SESSION_DIRECTORY_MODE);
@@ -680,18 +704,17 @@ pub(super) fn create_session_directory(path: &Path) -> Result<()> {
             if let Err(source) =
                 fs_err::set_permissions(path, Permissions::from_mode(SESSION_DIRECTORY_MODE))
             {
-                let _ = fs_err::remove_dir(path);
-
-                return Err(Error::Filesystem {
-                    path: path.to_path_buf(),
-                    source,
-                });
+                return finish_with_cleanup(
+                    Err(Error::Filesystem {
+                        path: path.to_path_buf(),
+                        source,
+                    }),
+                    remove_session_directory(path),
+                );
             }
 
             if let Err(error) = sync_parent_directory(path) {
-                let _ = fs_err::remove_dir(path);
-
-                return Err(error);
+                return finish_with_cleanup(Err(error), remove_session_directory(path));
             }
             return Ok(());
         }
@@ -879,7 +902,7 @@ mod tests {
             let mut descriptors = [PollFd::new(write_pipe.as_fd(), PollFlags::POLLOUT)];
 
             if let Ok(1) = poll(&mut descriptors, PollTimeout::from(0_u16)) {
-                let _ = fd_write(&write_pipe, &fill_data);
+                fd_write(&write_pipe, &fill_data).expect("fill pipe");
             } else {
                 break;
             }
@@ -903,7 +926,7 @@ mod tests {
         let thread = spawn_reader(Box::new(File::from(read_pipe)), None, cancel_read, sender)
             .expect("spawn reader");
 
-        let _ = fd_write(&cancel_write, b"x");
+        fd_write(&cancel_write, b"x").expect("signal reader cancellation");
         let join_result = thread.join();
         assert!(join_result.is_ok());
 

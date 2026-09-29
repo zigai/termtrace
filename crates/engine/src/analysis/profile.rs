@@ -29,6 +29,11 @@ impl ResolvedGhosttyProfile {
     }
 
     /// Validate both persisted profile hashes and the canonical artifact name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the recorded replay profile is not the canonical root artifact or
+    /// either persisted hash disagrees with the recorded provenance.
     pub fn validate(&self) -> Result<()> {
         if self.provenance.replay_profile != GHOSTTY_REPLAY_PROFILE {
             return Err(profile_error(format!(
@@ -55,6 +60,10 @@ impl ResolvedGhosttyProfile {
 ///
 /// The supplied adapter observes the replay config through its process owner;
 /// this function transforms those bytes and binds their provenance.
+///
+/// # Errors
+///
+/// Returns the error reported by `resolve_effective`.
 pub fn resolve_profile(
     base_effective_config: &[u8],
     source_config: Option<ByteString>,
@@ -79,6 +88,12 @@ pub fn resolve_profile(
 }
 
 /// Restore and validate persisted profile bytes against caller-observed effective config.
+///
+/// # Errors
+///
+/// Returns an error when the provenance does not name the canonical replay profile, `replay_config`
+/// does not match its recorded hash, `resolve_effective` fails, or the resolved effective
+/// configuration does not match its recorded hash.
 pub fn restore_profile(
     replay_config: Vec<u8>,
     provenance: GhosttyVisualProvenance,
@@ -109,6 +124,11 @@ pub fn restore_profile(
 }
 
 /// Resolve terminal colors from a validated canonical Ghostty profile.
+///
+/// # Errors
+///
+/// Returns an error when the profile fails validation, the pinned engine's built-in colors cannot
+/// be read, or the effective configuration contains invalid color settings.
 pub fn terminal_colors_for_profile(profile: &ResolvedGhosttyProfile) -> Result<TerminalColors> {
     profile.validate()?;
 
@@ -124,6 +144,11 @@ pub(crate) fn terminal_colors_from_config(config: &[u8]) -> Result<TerminalColor
 }
 
 /// Read color defaults compiled into the pinned semantic engine.
+///
+/// # Errors
+///
+/// Returns an error when the pinned libghostty-vt terminal cannot be created or snapshotted, or
+/// reports a palette without exactly 256 entries.
 pub fn builtin_terminal_colors() -> Result<TerminalColors> {
     let mut terminal = GhosttyVt::new(1, 1, 0)?;
     let state = terminal.snapshot()?;

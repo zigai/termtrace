@@ -21,6 +21,11 @@ use termtrace_model::{
 };
 
 /// Reconstruct one complete semantic state directly from canonical evidence.
+///
+/// # Errors
+///
+/// Returns an error when the session's completion or event log is invalid, `selector` does not
+/// resolve to a state, semantic replay fails, or a completed session changes while it is inspected.
 pub fn inspect_session(
     session_directory: impl AsRef<Path>,
     selector: StateSelector,
@@ -40,6 +45,11 @@ pub fn inspect_session(
 }
 
 /// Wait until exact bytes appear in the bounded canonical output stream.
+///
+/// # Errors
+///
+/// Returns an error when `needle` is empty, the event log is invalid or ends in a truncated line,
+/// the child exits or the session completes before the output matches, or `timeout` elapses first.
 pub fn wait_for_output(
     session_directory: impl AsRef<Path>,
     needle: &[u8],
@@ -79,6 +89,7 @@ pub fn wait_for_output(
                     path: event_path,
                     line,
                     reason: "truncated line without newline terminator".to_owned(),
+                    source: None,
                 });
             }
             return Err(wait_error("session completed before output matched"));
@@ -94,6 +105,11 @@ pub fn wait_for_output(
 }
 
 /// Wait until completion is published and verify it against canonical events.
+///
+/// # Errors
+///
+/// Returns an error when `timeout` elapses before completion is published or the published
+/// completion fails validation against the canonical events.
 pub fn wait_for_completion(
     session_directory: impl AsRef<Path>,
     timeout: Duration,

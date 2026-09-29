@@ -211,7 +211,7 @@ pub(super) fn validate_alias(alias: &str) -> Result<()> {
 pub(super) fn system_time_unix_ns() -> Result<u128> {
     return Ok(SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|_| return Error::ClockBeforeEpoch)?
+        .map_err(|source| return Error::ClockBeforeEpoch { source })?
         .as_nanos());
 }
 

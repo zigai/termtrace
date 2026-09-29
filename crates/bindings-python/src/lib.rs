@@ -20,6 +20,10 @@ use pyo3::prelude::*;
 use std::time::Duration;
 
 /// Parse and validate an optional timeout in seconds, falling back to a shared default.
+///
+/// # Errors
+///
+/// Returns `ValueError` when `timeout_secs` is negative, not finite, or too large for a `Duration`.
 pub fn parse_timeout(timeout_secs: Option<f64>, default: Duration) -> PyResult<Duration> {
     let Some(secs) = timeout_secs else {
         return Ok(default);
@@ -29,10 +33,10 @@ pub fn parse_timeout(timeout_secs: Option<f64>, default: Duration) -> PyResult<D
             "timeout must be a non-negative finite number",
         ));
     }
-    return Duration::try_from_secs_f64(secs).map_err(|_| {
-        return pyo3::exceptions::PyValueError::new_err(
-            "timeout must be a non-negative finite number",
-        );
+    return Duration::try_from_secs_f64(secs).map_err(|error| {
+        return pyo3::exceptions::PyValueError::new_err(format!(
+            "timeout {secs} is out of range: {error}"
+        ));
     });
 }
 

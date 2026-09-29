@@ -121,6 +121,12 @@ fn bounded_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
 ///
 /// This checks manifest structure only; use [`validated_visual_manifests`] to bind manifests to
 /// a session and verify their artifact members.
+///
+/// # Errors
+///
+/// Returns an error when the manifest version is unsupported, the effective configuration hash is
+/// not 64 lowercase hexadecimal characters, or the effective configuration member is missing,
+/// duplicated, or does not match that hash.
 pub fn validate_visual_manifest(manifest: &VisualManifest) -> Result<()> {
     if manifest.version != VISUAL_MANIFEST_VERSION {
         return Err(invalid(format!(
@@ -298,6 +304,12 @@ pub fn validated_visual_manifests(
 /// Canonical completion is authenticated by the shared observation verifier.
 /// Candidate manifests and video-map lines have explicit allocation bounds, and
 /// map scans check cancellation without retaining unrelated semantic states.
+///
+/// # Errors
+///
+/// Returns an error when `cancelled` is set, canonical completion or event evidence fails
+/// verification, or a candidate manifest, video map, or artifact member is invalid or exceeds its
+/// bound.
 pub fn validated_visual_manifests_for_state(
     session: &Path,
     state_id: u64,
@@ -624,6 +636,7 @@ fn open_review_file(path: &Path) -> io::Result<File> {
 fn invalid(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
+        source: None,
     };
 }
 

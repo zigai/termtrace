@@ -39,6 +39,12 @@ fn require_presentation_tools() -> Result<()> {
 }
 
 /// Export a normalized plan without modifying its immutable source evidence.
+///
+/// # Errors
+///
+/// Returns an error when the plan has no output frames, its source no longer verifies, the
+/// destination exists or has no parent, presentation tools are unavailable, or rendering, encoding,
+/// or publication fails.
 pub fn export(
     plan: &PresentationPlan,
     destination: impl AsRef<Path>,
@@ -79,6 +85,10 @@ pub(super) fn export_with_capability_check(
     let _staging_cleanup = DirectoryCleanup(staging.clone());
     export_staged(plan, &staging)?;
     if destination.exists() || destination.symlink_metadata().is_ok() {
+        #[expect(
+            clippy::redundant_else,
+            reason = "an existing directory and file are removed differently; the `if` branch continues after its `?`, and the flagged `return` belongs to the `map_err` closure"
+        )]
         if destination.is_dir() {
             fs_err::remove_dir_all(destination).map_err(|source| {
                 return Error::Filesystem {
@@ -105,6 +115,12 @@ pub(super) fn export_with_capability_check(
 }
 
 /// Render an atomic contact sheet and low-resolution preview of a normalized edit.
+///
+/// # Errors
+///
+/// Returns an error when the preview options are invalid, a change-only preview lacks change
+/// visualization, the plan's source no longer verifies, the destination exists or has no parent,
+/// presentation tools are unavailable, or rendering or publication fails.
 pub fn preview(
     plan: &PresentationPlan,
     destination: impl AsRef<Path>,

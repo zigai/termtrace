@@ -158,15 +158,16 @@ pub fn capture_original_with_backend(
         Ok(manifest) => manifest,
         Err(error) => {
             // The attached recorder also receives terminal hangup when Ghostty is dropped.
-            // Request a durable stop if its control socket is still reachable.
-            let _ = probe_output(
+            // Request a durable stop if its control socket is still reachable; an unreachable
+            // socket is expected here, and the capture failure below is the reported outcome.
+            drop(probe_output(
                 "stop original recording",
                 Command::new(helper)
                     .arg("stop")
                     .arg(&options.session_directory)
                     .args(["--wait", "--timeout-ms", "3000"]),
                 Duration::from_secs(4),
-            );
+            ));
 
             return Err(preserve_failed(parent, &staging, error));
         }
@@ -369,6 +370,7 @@ fn capture_staged(
             if cancelled.load(Ordering::Relaxed) {
                 return Err(EvidenceError::InvalidEvidence {
                     reason: "original capture cancelled".to_owned(),
+                    source: None,
                 });
             }
             return Ok(());

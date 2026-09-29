@@ -267,6 +267,11 @@ pub struct CanonicalLogFile {
 
 impl CanonicalLogFile {
     /// Open the original JSONL file and discover its optional segment layout.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the file or its active chunk is not a regular file, or the segment
+    /// layout is replaced or unreadable.
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref().to_path_buf();
         let root = open_regular(&path)?;
@@ -290,11 +295,20 @@ impl CanonicalLogFile {
     }
 
     /// Immutable root descriptor metadata for live cursor authentication.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the root descriptor cannot be inspected.
     pub fn metadata(&self) -> io::Result<Metadata> {
         return self.root.metadata();
     }
 
     /// Current logical byte length, including the active uncompressed tail.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the segment layout, seal, or active chunk cannot be read, a chunk
+    /// exceeds its declared size, or the total length overflows.
     pub fn len(&self) -> io::Result<u64> {
         let Some(layout) = layout(&self.path)? else {
             return Ok(self.root.metadata()?.len());
@@ -321,6 +335,10 @@ impl CanonicalLogFile {
     }
 
     /// Whether the canonical stream contains no bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the logical length cannot be determined.
     pub fn is_empty(&self) -> io::Result<bool> {
         return Ok(self.len()? == 0);
     }
@@ -505,6 +523,11 @@ fn last_index(path: &Path) -> io::Result<u64> {
 /// Bounded-memory fingerprint of every physical member's local kernel identity.
 ///
 /// This supports locally authenticated caches, not portable content verification.
+///
+/// # Errors
+///
+/// Returns an error when a physical member cannot be inspected or the segment layout is replaced or
+/// unreadable.
 pub fn canonical_source_fingerprint(path: impl AsRef<Path>) -> io::Result<String> {
     let path = path.as_ref();
     let mut digest = Hasher::new();
@@ -522,7 +545,7 @@ pub fn canonical_source_fingerprint(path: impl AsRef<Path>) -> io::Result<String
                     &chunk_path(path, index, if index == 0 { "jsonl" } else { "zst" }),
                 )?,
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                    fingerprint_file(&mut digest, &chunk_path(path, index, "jsonl"))?
+                    fingerprint_file(&mut digest, &chunk_path(path, index, "jsonl"))?;
                 }
                 Err(error) => return Err(error),
             }

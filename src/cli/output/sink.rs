@@ -29,7 +29,13 @@ pub(in crate::cli) fn write_clap_error(error: clap::Error, quiet: bool) -> ExitC
     };
 
     if success {
-        let _ = error.print();
+        if let Err(print_error) = error.print()
+            && print_error.kind() != io::ErrorKind::BrokenPipe
+        {
+            direct_stderr(&format!("could not print help: {print_error}"));
+
+            return ExitCode::FAILURE;
+        }
     } else if !quiet {
         let err_str = error.to_string();
         let trimmed = err_str.trim_end();

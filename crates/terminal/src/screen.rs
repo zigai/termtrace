@@ -16,6 +16,10 @@ const SEMANTIC_STATE_HASH_DOMAIN: &[u8] = b"termtrace-semantic-state-v3\0";
 const SEMANTIC_ROW_HASH_DOMAIN: &[u8] = b"termtrace-semantic-row-v3\0";
 
 /// Hash normalized semantic terminal state using the stable v2 contract.
+///
+/// # Errors
+///
+/// Currently infallible; the `ScreenFrameError` result is part of the stable hashing signature.
 pub fn semantic_state_hash(state: &SemanticState) -> Result<String, ScreenFrameError> {
     let mut hash = semantic_state_metadata_hasher(state);
     for row in &state.grid {
@@ -41,7 +45,7 @@ fn hash_cell(hasher: &mut blake3::Hasher, cell: &CellState) {
         WideKind::SpacerTail => 2,
         WideKind::SpacerHead => 3,
     };
-    hasher.update(&[wide_byte, cell.selected as u8]);
+    hasher.update(&[wide_byte, u8::from(cell.selected)]);
 
     match cell.resolved_foreground {
         Some(rgb) => hasher.update(&[1, rgb.r, rgb.g, rgb.b]),
@@ -99,11 +103,15 @@ fn hash_cell(hasher: &mut blake3::Hasher, cell: &CellState) {
 }
 
 /// Hash one semantic row, excluding transient renderer dirtiness.
+///
+/// # Errors
+///
+/// Currently infallible; the `ScreenFrameError` result is part of the stable hashing signature.
 pub fn hash_semantic_row(row: &RowState) -> Result<blake3::Hash, ScreenFrameError> {
     let mut hash = blake3::Hasher::new();
     hash.update(SEMANTIC_ROW_HASH_DOMAIN);
     hash.update(&row.row.to_le_bytes());
-    hash.update(&[row.soft_wrapped as u8, row.wrap_continuation as u8]);
+    hash.update(&[u8::from(row.soft_wrapped), u8::from(row.wrap_continuation)]);
     let cell_count = u32::try_from(row.cells.len()).unwrap_or(u32::MAX);
     hash.update(&cell_count.to_le_bytes());
 
@@ -117,6 +125,10 @@ pub fn hash_semantic_row(row: &RowState) -> Result<blake3::Hash, ScreenFrameErro
 /// Compose a v3 state hash from metadata and cached row hashes in grid order.
 ///
 /// Callers must supply one digest from [`hash_semantic_row`] per state grid row.
+///
+/// # Errors
+///
+/// Currently infallible; the `ScreenFrameError` result is part of the stable hashing signature.
 pub fn semantic_state_hash_from_row_hashes(
     state: &SemanticState,
     row_hashes: &[blake3::Hash],
@@ -137,13 +149,13 @@ fn semantic_state_metadata_hasher(state: &SemanticState) -> blake3::Hasher {
 
     // Cursor
     hash.update(&[
-        state.cursor.visible as u8,
-        state.cursor.blinking as u8,
-        state.cursor.in_viewport as u8,
+        u8::from(state.cursor.visible),
+        u8::from(state.cursor.blinking),
+        u8::from(state.cursor.in_viewport),
     ]);
     hash.update(&state.cursor.column.unwrap_or(u16::MAX).to_le_bytes());
     hash.update(&state.cursor.row.unwrap_or(u16::MAX).to_le_bytes());
-    hash.update(&[state.cursor.wide_tail.map_or(2, |v| return v as u8)]);
+    hash.update(&[state.cursor.wide_tail.map_or(2, |v| return u8::from(v))]);
     let style_id = match state.cursor.style {
         CursorStyle::Bar => 0,
         CursorStyle::Block => 1,
@@ -154,17 +166,17 @@ fn semantic_state_metadata_hasher(state: &SemanticState) -> blake3::Hasher {
 
     // Modes
     hash.update(&[
-        state.modes.synchronized_output as u8,
-        state.modes.alternate_screen as u8,
-        state.modes.wraparound as u8,
-        state.modes.bracketed_paste as u8,
+        u8::from(state.modes.synchronized_output),
+        u8::from(state.modes.alternate_screen),
+        u8::from(state.modes.wraparound),
+        u8::from(state.modes.bracketed_paste),
     ]);
     let mode_count = u32::try_from(state.modes.values.len()).unwrap_or(u32::MAX);
     hash.update(&mode_count.to_le_bytes());
 
     for mode in &state.modes.values {
         hash.update(&mode.number.to_le_bytes());
-        hash.update(&[mode.enabled as u8]);
+        hash.update(&[u8::from(mode.enabled)]);
     }
 
     // Colors
@@ -273,6 +285,12 @@ pub fn semantic_viewport_text(state: &SemanticState) -> String {
 }
 
 /// Resolve and validate a requested region without allocating projection rows.
+///
+/// # Errors
+///
+/// Returns `ScreenFrameError::InvalidRegion` when a cell projection has no explicit region or the
+/// region is reversed, empty, or outside the `cols` by `rows` viewport, and
+/// `ScreenFrameError::ResourceLimit` when it covers more cells than a projection allows.
 pub fn validate_screen_region(
     request: &ScreenProjectionRequest,
     cols: u16,
@@ -335,6 +353,13 @@ pub fn validate_screen_region(
 }
 
 /// Project one exact semantic state without I/O or mutation.
+///
+/// # Errors
+///
+/// Returns `ScreenFrameError::InconsistentSemanticState` when `state` violates grid invariants, the
+/// region errors of [`validate_screen_region`], `ScreenFrameError::ResourceLimit` when the
+/// projection would exceed its byte budget, and `ScreenFrameError::Serialization` when the frame
+/// cannot be hashed.
 pub fn project_screen_frame(
     state: &SemanticState,
     request: &ScreenProjectionRequest,
@@ -347,8 +372,7 @@ pub fn project_screen_frame(
     validate_projection_clone_bytes(state, region, request.detail)?;
 
     let data = project_data(state, region, request.detail);
-    let state_hash =
-        semantic_state_hash(state).map_err(|_| return ScreenFrameError::Serialization)?;
+    let state_hash = semantic_state_hash(state)?;
 
     let mut frame = ScreenFrame {
         version: SCREEN_FRAME_VERSION,
@@ -711,6 +735,10 @@ impl Write for CountingHashWriter {
 
 /// Compute the canonical projection identity, excluding the identity field itself.
 /// Compute canonical projection identity and total serialized frame byte length in one pass.
+///
+/// # Errors
+///
+/// Returns `ScreenFrameError::Serialization` when the frame cannot be serialized.
 pub fn screen_frame_hash_and_bytes(frame: &ScreenFrame) -> Result<(String, u64), ScreenFrameError> {
     let input = ScreenFrameHashInput {
         version: frame.version,
@@ -732,8 +760,7 @@ pub fn screen_frame_hash_and_bytes(frame: &ScreenFrame) -> Result<(String, u64),
         hasher: blake3::Hasher::new(),
     };
     writer.hasher.update(SCREEN_FRAME_HASH_DOMAIN);
-    serde_json::to_writer(&mut writer, &input)
-        .map_err(|_| return ScreenFrameError::Serialization)?;
+    serde_json::to_writer(&mut writer, &input).map_err(ScreenFrameError::serialization)?;
     let hash = writer.hasher.finalize().to_hex().to_string();
     let total_bytes = writer.count.saturating_add(80);
 
@@ -741,11 +768,20 @@ pub fn screen_frame_hash_and_bytes(frame: &ScreenFrame) -> Result<(String, u64),
 }
 
 /// Compute the canonical projection identity, excluding the identity field itself.
+///
+/// # Errors
+///
+/// Returns `ScreenFrameError::Serialization` when the frame cannot be serialized.
 pub fn screen_frame_hash(frame: &ScreenFrame) -> Result<String, ScreenFrameError> {
     return screen_frame_hash_and_bytes(frame).map(|(hash, _)| return hash);
 }
 
 /// Pure deterministic text snapshot normalization.
+///
+/// # Errors
+///
+/// Returns `ScreenFrameError::Serialization` when `frame` does not hold text rows or cannot be
+/// serialized.
 pub fn normalize_screen_frame_text(
     frame: &ScreenFrame,
     options: ScreenSnapshotOptions,
@@ -758,6 +794,11 @@ pub fn normalize_screen_frame_text(
 }
 
 /// Pure deterministic span snapshot normalization.
+///
+/// # Errors
+///
+/// Returns `ScreenFrameError::Serialization` when `frame` does not hold span rows or cannot be
+/// serialized.
 pub fn normalize_screen_frame_spans(
     frame: &ScreenFrame,
     options: ScreenSnapshotOptions,
@@ -770,6 +811,11 @@ pub fn normalize_screen_frame_spans(
 }
 
 /// Pure deterministic exact-cell snapshot normalization.
+///
+/// # Errors
+///
+/// Returns `ScreenFrameError::Serialization` when `frame` does not hold cell rows or cannot be
+/// serialized.
 pub fn normalize_screen_frame_cells(
     frame: &ScreenFrame,
     options: ScreenSnapshotOptions,
@@ -802,7 +848,7 @@ fn normalized_value<T: Serialize>(
     normalized.insert("colors".to_owned(), serde_json::json!(frame.colors));
     normalized.insert(
         "rows".to_owned(),
-        serde_json::to_value(rows).map_err(|_| return ScreenFrameError::Serialization)?,
+        serde_json::to_value(rows).map_err(ScreenFrameError::serialization)?,
     );
 
     if options.include_cursor {

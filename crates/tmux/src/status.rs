@@ -48,7 +48,7 @@ impl Integration {
             coverage: client
                 .option_text(options::COVERAGE)?
                 .parse()
-                .map_err(Error::Invalid)?,
+                .map_err(Error::invalid)?,
             scope: TmuxScopePolicy::from_options(client)?,
             output_root: client
                 .option_path(options::OUTPUT_ROOT)?

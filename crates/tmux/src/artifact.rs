@@ -514,6 +514,6 @@ pub struct TmuxStreamingBundleManifest {
     pub track_count: u64,
     /// Exact byte count of tracks.jsonl.
     pub track_inventory_bytes: u64,
-    /// BLAKE3 of tracks.jsonl; each row is a TmuxBundleTrack.
+    /// BLAKE3 of tracks.jsonl; each row is a `TmuxBundleTrack`.
     pub track_inventory_blake3: String,
 }

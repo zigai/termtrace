@@ -827,10 +827,10 @@ fn read_grapheme(cells: sys::GhosttyRenderStateRowCells) -> Result<CompactString
         }
 
         if let Some(bytes) = stack_buffer.get(..buffer.len) {
-            let grapheme = str::from_utf8(bytes).map_err(|_| {
-                return Error::GhosttyVt {
+            let grapheme = str::from_utf8(bytes).map_err(|source| {
+                return Error::InvalidUtf8 {
                     operation: "decode cell grapheme",
-                    result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
+                    source,
                 };
             })?;
 
@@ -856,10 +856,10 @@ fn read_grapheme(cells: sys::GhosttyRenderStateRowCells) -> Result<CompactString
         )
     })?;
     bytes.truncate(buffer.len);
-    let text = str::from_utf8(&bytes).map_err(|_| {
-        return Error::GhosttyVt {
+    let text = str::from_utf8(&bytes).map_err(|source| {
+        return Error::InvalidUtf8 {
             operation: "decode cell grapheme",
-            result: sys::GhosttyResult_GHOSTTY_INVALID_VALUE,
+            source,
         };
     })?;
 

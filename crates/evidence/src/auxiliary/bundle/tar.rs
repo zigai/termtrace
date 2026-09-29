@@ -176,13 +176,14 @@ impl Drop for Cleanup {
             return;
         }
 
+        // Drop has no error channel, so removing an armed partial output is best-effort.
         if self.directory {
-            let _ = fs_err::remove_dir_all(&self.path);
+            drop(fs_err::remove_dir_all(&self.path));
 
             return;
         }
 
-        let _ = fs_err::remove_file(&self.path);
+        drop(fs_err::remove_file(&self.path));
     }
 }
 
@@ -358,8 +359,10 @@ pub(super) fn extract_archive(archive: &Path, destination: &Path) -> Result<()> 
 
             tracker.register_padding(entry.raw_file_position(), entry.size())?;
             let path_bytes = entry.path_bytes();
-            let path_text = str::from_utf8(path_bytes.as_ref())
-                .map_err(|_| return Error::invalid("tar paths must be UTF-8"))?;
+            let path_text = str::from_utf8(path_bytes.as_ref()).map_err(|source| {
+                return Error::invalid_with_source("tar paths must be UTF-8", source);
+            })?;
+
             let path = PathBuf::from(path_text);
             validate_archive_path(&path)?;
             if !paths.insert(path.clone()) {

@@ -135,8 +135,9 @@ pub fn create(
         recording_name: aggregate.name.clone(),
         aggregate_manifest: ByteString::from(aggregate_manifest.as_os_str().as_bytes()),
         aggregate_manifest_blake3: blake3::hash(&bytes).to_hex().to_string(),
-        track_count: u64::try_from(count)
-            .map_err(|_| return Error::invalid("tmux track count overflow"))?,
+        track_count: u64::try_from(count).map_err(|source| {
+            return Error::invalid_with_source("tmux track count overflow", source);
+        })?,
         track_inventory_bytes: inventory_bytes,
         track_inventory_blake3: inventory_hash,
     };

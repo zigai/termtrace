@@ -35,6 +35,12 @@ pub use pager::{
 };
 
 /// Load and summarize a validated completed session without changing it.
+///
+/// # Errors
+///
+/// Returns an error when the session is not a valid completed session, semantic replay or event-log
+/// reading fails, the session contains no semantic states, or the session changes while it is
+/// summarized.
 pub fn summarize(
     session: impl AsRef<Path>,
     visual_evidence: &[ValidatedVisualManifest],
@@ -94,6 +100,11 @@ pub fn summarize(
 }
 
 /// Search every semantic viewport in a validated completed session.
+///
+/// # Errors
+///
+/// Returns an error when `query` is empty or longer than 4096 bytes, the session is not a valid
+/// completed session, semantic replay fails, or the session changes during the search.
 pub fn search(session: impl AsRef<Path>, query: &str) -> Result<ReviewSearchResult> {
     validate_query(query)?;
 
@@ -125,6 +136,12 @@ pub fn search(session: impl AsRef<Path>, query: &str) -> Result<ReviewSearchResu
 }
 
 /// Atomically export one semantic state and viewport text without replacement.
+///
+/// # Errors
+///
+/// Returns an error when the session is not a valid completed session or changes during export,
+/// `state_id` does not exist, `destination` already exists or has no parent, or the export cannot
+/// be written and published.
 pub fn export_state(
     session: impl AsRef<Path>,
     state_id: u64,
@@ -254,5 +271,6 @@ fn filesystem_error(path: &Path, source: io::Error) -> Error {
 fn review_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
+        source: None,
     };
 }

@@ -265,6 +265,7 @@ fn resolve_found_marker(label: &str, (count, time): (u64, u64)) -> Result<u64> {
 pub(super) fn range_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
+        source: None,
     };
 }
 

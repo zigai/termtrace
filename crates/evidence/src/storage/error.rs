@@ -1,4 +1,7 @@
-use std::{error::Error as StdError, fmt, io, path::PathBuf, result::Result as StdResult};
+use std::{
+    error::Error as StdError, fmt, io, path::PathBuf, result::Result as StdResult,
+    time::SystemTimeError,
+};
 use termtrace_model::error::ModelValidationError;
 
 #[derive(Clone, Copy, Debug)]
@@ -67,6 +70,8 @@ pub enum Error {
         line: u64,
         /// Stable explanation of the violated contract.
         reason: String,
+        /// Lower-level failure that exposed the violation, when one exists.
+        source: Option<Box<dyn StdError + Send + Sync>>,
     },
     /// An artifact directory does not have the required private ownership or mode.
     InsecureArtifactDirectory {
@@ -81,6 +86,8 @@ pub enum Error {
     InvalidEvidence {
         /// Stable explanation of the violation.
         reason: String,
+        /// Lower-level failure that exposed the violation, when one exists.
+        source: Option<Box<dyn StdError + Send + Sync>>,
     },
     /// A session has no valid durable completion record.
     SessionIncomplete {
@@ -105,7 +112,10 @@ pub enum Error {
         reason: String,
     },
     /// The system clock cannot be represented relative to the Unix epoch.
-    ClockBeforeEpoch,
+    ClockBeforeEpoch {
+        /// Underlying clock comparison failure.
+        source: SystemTimeError,
+    },
     /// A shared model value failed validation.
     ModelValidation(ModelValidationError),
 }
@@ -121,6 +131,17 @@ impl Error {
     pub(crate) fn invalid(reason: impl Into<String>) -> Self {
         return Self::InvalidEvidence {
             reason: reason.into(),
+            source: None,
+        };
+    }
+
+    pub(crate) fn invalid_with_source(
+        reason: impl Into<String>,
+        source: impl Into<Box<dyn StdError + Send + Sync>>,
+    ) -> Self {
+        return Self::InvalidEvidence {
+            reason: reason.into(),
+            source: Some(source.into()),
         };
     }
 }
@@ -146,7 +167,9 @@ impl fmt::Display for Error {
                     path.display()
                 );
             }
-            Self::InvalidEventLog { path, line, reason } => {
+            Self::InvalidEventLog {
+                path, line, reason, ..
+            } => {
                 return write!(
                     f,
                     "invalid event log `{}` at line {line}: {reason}",
@@ -164,7 +187,7 @@ impl fmt::Display for Error {
                     path.display()
                 );
             }
-            Self::InvalidEvidence { reason } => {
+            Self::InvalidEvidence { reason, .. } => {
                 return write!(f, "invalid evidence: {reason}");
             }
             Self::SessionIncomplete { session } => {
@@ -183,7 +206,7 @@ impl fmt::Display for Error {
             Self::ExternalCommand { operation, reason } => {
                 return write!(f, "{operation} failed: {reason}");
             }
-            Self::ClockBeforeEpoch => {
+            Self::ClockBeforeEpoch { .. } => {
                 return f.write_str("system clock is before the Unix epoch");
             }
             Self::ModelValidation(source) => {
@@ -199,6 +222,15 @@ impl StdError for Error {
             Self::Filesystem { source, .. } => return Some(source),
             Self::InvalidJson { source, .. } => return Some(source),
             Self::ModelValidation(source) => return Some(source),
+            Self::ClockBeforeEpoch { source } => return Some(source),
+            Self::InvalidEventLog {
+                source: Some(source),
+                ..
+            }
+            | Self::InvalidEvidence {
+                source: Some(source),
+                ..
+            } => return Some(source.as_ref()),
             _ => return None,
         }
     }

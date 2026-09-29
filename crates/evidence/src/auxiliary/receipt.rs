@@ -96,7 +96,7 @@ fn build_payload(session: &Path, signer_key_id: &str) -> Result<EvidenceReceiptP
     let available_count = u64::try_from(roots.len()).unwrap_or(u64::MAX);
     let created_unix_ns = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|_| return Error::ClockBeforeEpoch)?
+        .map_err(|source| return Error::ClockBeforeEpoch { source })?
         .as_nanos();
 
     return receipt_payload(
@@ -129,8 +129,9 @@ pub(crate) fn receipt_payload(
     let artifact_root_hash = if artifact_root_count == 0 {
         None
     } else {
-        let index = usize::try_from(artifact_root_count - 1)
-            .map_err(|_| return Error::invalid("artifact checkpoint is not addressable"))?;
+        let index = usize::try_from(artifact_root_count - 1).map_err(|source| {
+            return Error::invalid_with_source("artifact checkpoint is not addressable", source);
+        })?;
 
         Some(
             roots
@@ -197,14 +198,16 @@ fn sign_ssh_receipt(
     let output = match output {
         Ok(output) => output,
         Err(error) => {
-            cleanup_temporary(&temporary, &signature_path);
+            // The launch failure is the reported outcome; leftover temporaries are secondary.
+            drop(cleanup_temporary(&temporary, &signature_path));
 
             return Err(command_error("launch OpenSSH signer", error.to_string()));
         }
     };
 
     let signature = fs_err::read(&signature_path).map_err(|source| {
-        cleanup_temporary(&temporary, &signature_path);
+        // The read or signing failure is the reported outcome; leftover temporaries are secondary.
+        drop(cleanup_temporary(&temporary, &signature_path));
 
         if output.status.success() {
             return Error::filesystem(signature_path.clone(), source);
@@ -215,7 +218,7 @@ fn sign_ssh_receipt(
         );
     })?;
 
-    cleanup_temporary(&temporary, &signature_path);
+    cleanup_temporary(&temporary, &signature_path)?;
 
     if !output.status.success() {
         return Err(command_error(
@@ -444,9 +447,19 @@ fn write_temporary(path: &Path, bytes: &[u8]) -> Result<()> {
     return Ok(());
 }
 
-fn cleanup_temporary(payload: &Path, signature: &Path) {
-    let _ = fs_err::remove_file(payload);
-    let _ = fs_err::remove_file(signature);
+fn cleanup_temporary(payload: &Path, signature: &Path) -> Result<()> {
+    let payload_removed = remove_temporary(payload);
+    let signature_removed = remove_temporary(signature);
+
+    return payload_removed.and(signature_removed);
+}
+
+fn remove_temporary(path: &Path) -> Result<()> {
+    match fs_err::remove_file(path) {
+        Ok(()) => return Ok(()),
+        Err(source) if source.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(source) => return Err(Error::filesystem(path, source)),
+    }
 }
 
 fn command_error(operation: &'static str, reason: impl Into<String>) -> Error {

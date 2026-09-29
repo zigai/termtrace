@@ -61,7 +61,14 @@ impl OutputService {
 
                 if chunk_end > start_offset && bytes.len() < limit {
                     let slice_start = if current_offset < start_offset {
-                        (start_offset - current_offset) as usize
+                        usize::try_from(start_offset - current_offset).map_err(|source| {
+                            return Error::InvalidOperation {
+                                reason: format!(
+                                    "output cursor offset {start_offset} is not addressable"
+                                ),
+                                source: Some(Box::new(source)),
+                            };
+                        })?
                     } else {
                         0
                     };

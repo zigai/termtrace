@@ -9,6 +9,10 @@ pub struct Pointer<'session> {
 
 impl Pointer<'_> {
     /// Emit a press/release click plan at a zero-based cell.
+    ///
+    /// # Errors
+    /// Returns an error when the recorder cannot be reached or rejects the request; with `strict`,
+    /// a request the application does not report is rejected instead of returning a semantic no-op.
     pub fn click(
         &self,
         column: u16,
@@ -27,6 +31,10 @@ impl Pointer<'_> {
     }
 
     /// Emit signed vertical wheel ticks at a zero-based cell.
+    ///
+    /// # Errors
+    /// Returns an error when the recorder cannot be reached or rejects the request; with `strict`,
+    /// a request the application does not report is rejected instead of returning a semantic no-op.
     pub fn scroll(&self, column: u16, row: u16, lines: i16, strict: bool) -> Result<ControlData> {
         return self
             .session
@@ -39,6 +47,10 @@ impl Pointer<'_> {
     }
 
     /// Report focus state when the application enabled focus reporting.
+    ///
+    /// # Errors
+    /// Returns an error when the recorder cannot be reached or rejects the request; with `strict`,
+    /// a request the application does not report is rejected instead of returning a semantic no-op.
     pub fn focus(&self, focused: bool, strict: bool) -> Result<ControlData> {
         return self
             .session

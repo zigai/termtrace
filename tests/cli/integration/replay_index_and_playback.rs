@@ -620,6 +620,10 @@ fn playback_does_not_echo_terminal_query_responses() {
                     output.extend_from_slice(&buffer[..n]);
 
                     if !observed_query && output.windows(query.len()).any(|w| return w == query) {
+                        #[expect(
+                            clippy::let_underscore_must_use,
+                            reason = "a waiter that timed out drops its receiver, and the reader keeps draining output either way; `drop_non_drop` rejects dropping `SendError<()>`"
+                        )]
                         let _ = query_tx.send(());
                         observed_query = true;
                     }

@@ -258,7 +258,8 @@ impl BundleDraft {
 impl Drop for BundleDraft {
     fn drop(&mut self) {
         if !self.committed {
-            let _ = fs_err::remove_dir_all(&self.staging);
+            // Drop has no error channel; an uncommitted staging directory is never published.
+            drop(fs_err::remove_dir_all(&self.staging));
         }
     }
 }
@@ -350,7 +351,9 @@ impl Drop for BundleMemberWriter<'_> {
 
         self.writer.take();
         self.draft.remaining_bytes = self.draft.remaining_bytes.saturating_add(self.byte_length);
-        let _ = fs_err::remove_file(&self.destination);
+        // Drop has no error channel; the unfinished member is already excluded from the draft.
+        drop(fs_err::remove_file(&self.destination));
+
         self.draft.paths.remove(&self.path);
     }
 }

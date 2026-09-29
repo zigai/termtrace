@@ -10,6 +10,7 @@
     clippy::all,
     clippy::implicit_return,
     clippy::pedantic,
+    clippy::undocumented_unsafe_blocks,
     dead_code,
     improper_ctypes,
     missing_docs,

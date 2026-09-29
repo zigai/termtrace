@@ -46,6 +46,10 @@ impl PyRecording {
     }
 
     /// Context manager exit ensuring child processes are reaped.
+    ///
+    /// # Errors
+    ///
+    /// Raises as `PyRecording::stop` with the default timeout.
     #[pyo3(signature = (_exc_type = None, _exc_val = None, _exc_tb = None))]
     pub fn __exit__(
         &self,
@@ -76,6 +80,10 @@ impl PyRecording {
     }
 
     /// Access screen inspection capabilities.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached.
     pub fn screen(&self) -> PyResult<PyScreen> {
         if !self.is_active() {
             return Err(PyRuntimeError::new_err(
@@ -89,6 +97,10 @@ impl PyRecording {
     }
 
     /// Create an action builder for input automation.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached.
     pub fn actions(&self) -> PyResult<PyActionBuilder> {
         if !self.is_active() {
             return Err(PyRuntimeError::new_err(
@@ -102,6 +114,10 @@ impl PyRecording {
     }
 
     /// Get a logical session reference.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached.
     pub fn session(&self) -> PyResult<PySession> {
         if !self.is_active() {
             return Err(PyRuntimeError::new_err(
@@ -115,6 +131,11 @@ impl PyRecording {
         })
     }
     /// Click mouse button at a terminal cell.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached, and otherwise
+    /// as `PySession::pointer_click`.
     #[pyo3(signature = (column, row, button = None, strict = None))]
     pub fn pointer_click(
         &self,
@@ -130,6 +151,11 @@ impl PyRecording {
     }
 
     /// Scroll mouse wheel at a terminal cell.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached, and otherwise
+    /// as `PySession::pointer_scroll`.
     #[pyo3(signature = (column, row, lines = None, strict = None))]
     pub fn pointer_scroll(
         &self,
@@ -145,6 +171,11 @@ impl PyRecording {
     }
 
     /// Report terminal focus state.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached, and otherwise
+    /// as `PySession::pointer_focus`.
     #[pyo3(signature = (focused, strict = None))]
     pub fn pointer_focus(
         &self,
@@ -158,6 +189,11 @@ impl PyRecording {
     }
 
     /// Atomically publish visual representations (PNG, SVG, HTML, TXT, JSON) of a state point.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached, and otherwise
+    /// as `PySession::save`.
     #[pyo3(signature = (destination, formats = None, state_hash = None, include_hidden = None))]
     pub fn save(
         &self,
@@ -173,6 +209,11 @@ impl PyRecording {
     }
 
     /// Read raw child PTY output bytes using an optional byte offset cursor.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached, and otherwise
+    /// as `PySession::read_output`.
     #[pyo3(signature = (offset = None, limit = None))]
     pub fn read_output(
         &self,
@@ -186,6 +227,11 @@ impl PyRecording {
     }
 
     /// Wait for exact child output bytes to appear in the canonical stream.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached, and otherwise
+    /// as `PySession::wait_for_output`.
     #[pyo3(signature = (pattern, timeout_secs = None))]
     pub fn wait_for_output(
         &self,
@@ -199,6 +245,11 @@ impl PyRecording {
     }
 
     /// Read canonical event records as pretty JSON starting at an optional event sequence.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached, and otherwise
+    /// as `PySession::read_events`.
     #[pyo3(signature = (cursor = None, limit = None))]
     pub fn read_events(
         &self,
@@ -212,6 +263,11 @@ impl PyRecording {
     }
 
     /// Explain VT and semantic evidence around a target state point.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached, and otherwise
+    /// as `PySession::explain`.
     #[pyo3(signature = (target_hash = None, context = None))]
     pub fn explain(
         &self,
@@ -225,6 +281,11 @@ impl PyRecording {
     }
 
     /// Run conservative evidence-backed rendering diagnostics on the session.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached, and otherwise
+    /// as `PySession::diagnose`.
     #[pyo3(signature = (broad_change_percent = None))]
     pub fn diagnose(&self, py: Python<'_>, broad_change_percent: Option<u8>) -> PyResult<String> {
         let sess = self.session()?;
@@ -233,6 +294,11 @@ impl PyRecording {
     }
 
     /// Perform full triage analysis on the most recent canonical action.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached, and otherwise
+    /// as `PySession::last_action`.
     #[pyo3(signature = (broad_change_percent = None))]
     pub fn last_action(
         &self,
@@ -245,6 +311,12 @@ impl PyRecording {
     }
 
     /// Stop the recording session and wait for validated completion evidence.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` when `timeout_secs` is negative, not finite, or out of range, and
+    /// `TermtraceError` or a subclass when the recorder does not stop with validated completion in
+    /// time, leaving the recording attached.
     #[pyo3(signature = (timeout_secs = None))]
     pub fn stop(&self, py: Python<'_>, timeout_secs: Option<f64>) -> PyResult<()> {
         let timeout = crate::parse_timeout(timeout_secs, defaults::STOP_TIMEOUT)?;
@@ -266,6 +338,11 @@ impl PyRecording {
     }
 
     /// Forcefully terminate and reap the recorded process group and owned recorder.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the process group or recorder cannot be
+    /// terminated and reaped, leaving the recording attached.
     pub fn force_close(&self) -> PyResult<()> {
         let Some(mut session) = self.take() else {
             return Ok(());
@@ -280,6 +357,10 @@ impl PyRecording {
     }
 
     /// Detach the recording so it continues running in the background.
+    ///
+    /// # Errors
+    ///
+    /// Raises `RuntimeError` when the recording has already been stopped or detached.
     pub fn detach(&self) -> PyResult<()> {
         let session = self.take().ok_or_else(|| {
             return PyRuntimeError::new_err("recording has already been stopped or detached");

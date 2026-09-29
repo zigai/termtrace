@@ -16,6 +16,10 @@ impl Native<'_> {
     ///
     /// Drop or close the returned worker to stop its terminal and display. The
     /// cancellation flag remains owned by the caller and is checked during replay.
+    ///
+    /// # Errors
+    /// Returns an error when the capture viewport cannot be resolved or the worker's terminal and
+    /// display cannot be started within `timeout`.
     pub fn replay_worker(
         &self,
         viewport: Option<CaptureTarget>,
@@ -36,6 +40,10 @@ impl Native<'_> {
     }
 
     /// Capture native pixels for this canonical session.
+    ///
+    /// # Errors
+    /// Returns an error when native capture tools are unavailable or the capture cannot be
+    /// produced, verified, or published.
     pub fn capture(&self, options: &CaptureOptions) -> Result<CaptureOutcome> {
         let mut options = options.clone();
         options.session_directory = self.session.path().to_path_buf();
@@ -44,6 +52,9 @@ impl Native<'_> {
     }
 
     /// Play this canonical session through the native playback runtime.
+    ///
+    /// # Errors
+    /// Returns an error when replay fails or its capture handshake files cannot be published.
     pub fn playback(&self, options: &PlaybackOptions) -> Result<()> {
         let mut options = options.clone();
         options.session_directory = self.session.path().to_path_buf();

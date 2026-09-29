@@ -150,6 +150,7 @@ fn actor_rejection_codes_classify_without_losing_the_code() {
 
     let local = Error::InvalidOperation {
         reason: "caller contract".to_owned(),
+        source: None,
     };
 
     assert_eq!(local.code(), "invalid_operation");

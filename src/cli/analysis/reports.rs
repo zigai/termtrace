@@ -17,7 +17,7 @@ use crate::cli::{
         resolve_session, resolve_session_path, resolve_state_point, write_session_lifecycle,
     },
 };
-use miette::{IntoDiagnostic as _, Result};
+use miette::{IntoDiagnostic as _, Result, WrapErr as _};
 use std::{
     fmt::Write as _,
     io,
@@ -69,7 +69,8 @@ pub(in crate::cli) fn run_timeline(
 
     let (entries, page, partial) = {
         let limit = u16::try_from(arguments.page.limit)
-            .map_err(|_| return miette::miette!("timeline page limit exceeds 65535"))?;
+            .into_diagnostic()
+            .wrap_err("timeline page limit exceeds 65535")?;
 
         let timeline_page = build_session_timeline_page(
             &session,
@@ -156,6 +157,10 @@ fn run_all_timeline(
         range,
         |entry| {
             if total >= arguments.page.offset {
+                #[expect(
+                    clippy::redundant_else,
+                    reason = "JSON lines and text output are exclusive; the `if` branch continues after its `?`, and the flagged `return` belongs to the `map_err` closure"
+                )]
                 if arguments.jsonl {
                     write_json_line(response, &entry).map_err(|source| {
                         return EngineError::Filesystem {

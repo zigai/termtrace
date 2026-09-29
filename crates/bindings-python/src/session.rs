@@ -53,6 +53,12 @@ impl PySession {
     }
 
     /// Click mouse button at a terminal cell.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` when `button` is unknown, and `TermtraceError` or a subclass when the
+    /// session cannot be attached or the recorder rejects the click (with `strict`, when the
+    /// application does not report mouse input).
     #[pyo3(signature = (column, row, button = None, strict = None))]
     pub fn pointer_click(
         &self,
@@ -95,6 +101,11 @@ impl PySession {
     }
 
     /// Scroll mouse wheel at a terminal cell.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the session cannot be attached or the recorder
+    /// rejects the scroll (with `strict`, when the application does not report mouse input).
     #[pyo3(signature = (column, row, lines = None, strict = None))]
     pub fn pointer_scroll(
         &self,
@@ -121,6 +132,11 @@ impl PySession {
     }
 
     /// Report terminal focus state.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the session cannot be attached or the recorder
+    /// rejects the focus report (with `strict`, when the application does not report focus).
     #[pyo3(signature = (focused, strict = None))]
     pub fn pointer_focus(
         &self,
@@ -144,6 +160,11 @@ impl PySession {
     }
 
     /// Atomically publish visual representations (PNG, SVG, HTML, TXT, JSON) of a state point.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` when a format name is unknown, and `TermtraceError` or a subclass when
+    /// the state cannot be resolved or rendered or the destination cannot be published.
     #[pyo3(signature = (destination, formats = None, state_hash = None, include_hidden = None))]
     pub fn save(
         &self,
@@ -203,6 +224,11 @@ impl PySession {
     }
 
     /// Export session terminal playback as an asciicast v2 file.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the event log cannot be read or the cast cannot
+    /// be written.
     pub fn export_asciicast(&self, py: Python<'_>, output_path: String) -> PyResult<()> {
         let session_path = PathBuf::from(&self.session_path);
         let target = PathBuf::from(output_path);
@@ -215,6 +241,10 @@ impl PySession {
     }
 
     /// Create a compressed evidence bundle (.tar.zst) for archiving or forensics.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the bundle cannot be created or published.
     pub fn create_bundle(&self, py: Python<'_>, output_path: String) -> PyResult<()> {
         let session_path = PathBuf::from(&self.session_path);
         let target = PathBuf::from(output_path);
@@ -228,6 +258,12 @@ impl PySession {
     }
 
     /// Compute semantic difference between two presented states and return JSON.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when either state hash cannot be resolved or the
+    /// session's evidence cannot be validated or replayed, and `ValueError` when the difference
+    /// cannot be serialized.
     pub fn diff(&self, py: Python<'_>, from_hash: String, to_hash: String) -> PyResult<String> {
         let session_path = PathBuf::from(&self.session_path);
 
@@ -246,6 +282,10 @@ impl PySession {
     }
 
     /// Read raw child PTY output bytes using an optional byte offset cursor.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the output page cannot be read.
     #[pyo3(signature = (offset = None, limit = None))]
     pub fn read_output(
         &self,
@@ -272,6 +312,12 @@ impl PySession {
     }
 
     /// Wait for exact child output bytes to appear in the canonical stream.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` when `timeout_secs` is negative, not finite, or out of range, and
+    /// `TermtraceError` or a subclass when `pattern` is empty, the event log is invalid, the child
+    /// exits or the session completes before the bytes appear, or the timeout elapses.
     #[pyo3(signature = (pattern, timeout_secs = None))]
     pub fn wait_for_output(
         &self,
@@ -292,6 +338,10 @@ impl PySession {
     }
 
     /// Read canonical event records as pretty JSON starting at an optional event sequence.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the event page cannot be read or serialized.
     #[pyo3(signature = (cursor = None, limit = None))]
     pub fn read_events(
         &self,
@@ -323,6 +373,11 @@ impl PySession {
     }
 
     /// Explain VT and semantic evidence around a target state point.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the target state cannot be resolved, the
+    /// session's evidence cannot be validated or replayed, or the report cannot be serialized.
     #[pyo3(signature = (target_hash = None, context = None))]
     pub fn explain(
         &self,
@@ -350,6 +405,11 @@ impl PySession {
     }
 
     /// Run conservative evidence-backed rendering diagnostics on the session.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when visual or canonical evidence fails validation or
+    /// replay, or the report cannot be serialized.
     #[pyo3(signature = (broad_change_percent = None))]
     pub fn diagnose(&self, py: Python<'_>, broad_change_percent: Option<u8>) -> PyResult<String> {
         let session_path = PathBuf::from(&self.session_path);
@@ -370,6 +430,11 @@ impl PySession {
     }
 
     /// Perform full triage analysis on the most recent canonical action.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the most recent action cannot be analyzed from
+    /// validated evidence or the report cannot be serialized.
     #[pyo3(signature = (broad_change_percent = None))]
     pub fn last_action(
         &self,
@@ -393,6 +458,11 @@ impl PySession {
     }
 
     /// Build a bounded page of timeline entries as pretty JSON.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the session's evidence cannot be read, validated,
+    /// or replayed, or the page cannot be serialized.
     #[pyo3(signature = (offset = None, limit = None, include_hidden = None, include_controls = None))]
     pub fn timeline_page(
         &self,

@@ -317,7 +317,12 @@ fn ensure_native_capture(
     }
 
     if visual.exists() && !visual.join(VISUAL_MANIFEST).is_file() {
-        let _ = fs_err::remove_dir_all(&visual);
+        fs_err::remove_dir_all(&visual).map_err(|source| {
+            return Error::Filesystem {
+                path: visual.clone(),
+                source,
+            };
+        })?;
     }
 
     progress(format_args!(
@@ -603,6 +608,7 @@ fn video_sidecar_path(output: &Path) -> PathBuf {
 fn invalid(reason: impl Into<String>) -> Error {
     return Error::InvalidOperation {
         reason: reason.into(),
+        source: None,
     };
 }
 

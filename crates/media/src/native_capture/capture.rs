@@ -101,6 +101,7 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
         .ok_or_else(|| {
             return Error::InvalidReplay {
                 reason: "native capture destination parent does not exist".to_owned(),
+                source: None,
             };
         })?;
 
@@ -196,6 +197,7 @@ fn selected_states(
             if range.is_some() {
                 return Err(Error::InvalidReplay {
                     reason: "native screenshot endpoints cannot use a time range".to_owned(),
+                    source: None,
                 });
             }
 
@@ -223,6 +225,7 @@ fn selected_states(
                     reason:
                         "native screenshot endpoint does not match one presented semantic state"
                             .to_owned(),
+                    source: None,
                 });
             }
             return Ok(None);
@@ -260,6 +263,7 @@ fn capture_staged(
                     "unsupported recorded Ghostty profile path `{}`",
                     provenance.replay_profile
                 ),
+                source: None,
             });
         }
 
@@ -269,6 +273,7 @@ fn capture_staged(
             return Err(Error::InvalidReplay {
                 reason: "recorded Ghostty replay profile hash does not match session provenance"
                     .to_owned(),
+                source: None,
             });
         }
 
@@ -293,6 +298,7 @@ fn capture_staged(
         if provenance.effective_config_hash != effective_hash {
             return Err(Error::InvalidReplay {
                 reason: "recorded Ghostty effective configuration changed".to_owned(),
+                source: None,
             });
         }
     } else if let Some(expected) = log
@@ -304,6 +310,7 @@ fn capture_staged(
     {
         return Err(Error::InvalidReplay {
             reason: "effective Ghostty configuration changed since recording".to_owned(),
+            source: None,
         });
     }
 
@@ -322,7 +329,7 @@ fn capture_staged(
         None
     };
 
-    let scaling = resolve_display_scaling(options, Some(&manifest));
+    let scaling = resolve_display_scaling(options, Some(&manifest))?;
     let lease = DisplayLease::acquire()?;
     let display = format!(":{}", lease.number);
     let mut xvfb = spawn_xvfb(
@@ -395,6 +402,7 @@ fn capture_staged(
     {
         return Err(Error::InvalidReplay {
             reason: "playback timing handshake does not match capture request".to_owned(),
+            source: None,
         });
     }
 
@@ -436,6 +444,7 @@ fn capture_staged(
                 .ok_or_else(|| {
                     return Error::InvalidReplay {
                         reason: "encoded frame count is missing".to_owned(),
+                        source: None,
                     };
                 })?;
             capture_started =
@@ -445,6 +454,7 @@ fn capture_staged(
                 states.ok_or_else(|| {
                     return Error::InvalidReplay {
                         reason: "video capture has no validated state index".to_owned(),
+                        source: None,
                     };
                 })?,
                 &staging.join("ffmpeg-video.log"),
@@ -557,6 +567,18 @@ pub(super) fn validate_options(options: &CaptureOptions) -> Result<()> {
         return Err(Error::InvalidReplay {
             reason: "native capture requires at least 320x200 pixels and 24, 30, or 60 FPS"
                 .to_owned(),
+            source: None,
+        });
+    }
+
+    if options.dpi == Some(0)
+        || options
+            .scale
+            .is_some_and(|scale| return !scale.is_finite() || scale <= 0.0)
+    {
+        return Err(Error::InvalidReplay {
+            reason: "native capture scale and DPI must be positive finite numbers".to_owned(),
+            source: None,
         });
     }
     return Ok(());
@@ -649,56 +671,107 @@ pub struct DisplayScaling {
     pub dpi: u32,
     /// Overall display scale factor (e.g. 1.0, 1.5, 2.0).
     pub scale: f64,
-    /// Integer GDK window scaling factor (set as GDK_SCALE in Ghostty).
+    /// Integer GDK window scaling factor (set as `GDK_SCALE` in Ghostty).
     pub gdk_scale: u32,
-    /// Fractional GDK font scaling factor (set as GDK_DPI_SCALE in Ghostty).
+    /// Fractional GDK font scaling factor (set as `GDK_DPI_SCALE` in Ghostty).
     pub gdk_dpi_scale: f64,
 }
 
 impl DisplayScaling {
     /// Calculate display scaling from an overall scale factor and optional explicit DPI.
-    #[must_use]
-    pub fn new(scale: f64, dpi: Option<u32>) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `scale` is not a positive finite number, or when the DPI or GDK
+    /// window factor derived from it does not fit `u32`.
+    pub fn new(scale: f64, dpi: Option<u32>) -> Result<Self> {
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err(Error::InvalidReplay {
+                reason: format!("display scale {scale} must be a positive finite number"),
+                source: None,
+            });
+        }
+
         let base_dpi = 96.0;
-        let effective_dpi = dpi.unwrap_or_else(|| return (base_dpi * scale).round() as u32);
+        let effective_dpi = match dpi {
+            Some(dpi) => dpi,
+            None => display_units((base_dpi * scale).round())?,
+        };
+
         let effective_scale = if dpi.is_some() && (scale - 1.0).abs() < f64::EPSILON {
-            effective_dpi as f64 / base_dpi
+            f64::from(effective_dpi) / base_dpi
         } else {
             scale
         };
 
-        let gdk_scale = if effective_scale >= 2.0 { effective_scale.floor() as u32 } else { 1 };
-        let gdk_dpi_scale = effective_scale / (gdk_scale as f64);
+        let gdk_scale =
+            if effective_scale >= 2.0 { display_units(effective_scale.floor())? } else { 1 };
+        let gdk_dpi_scale = effective_scale / f64::from(gdk_scale);
 
-        return Self {
+        return Ok(Self {
             dpi: effective_dpi,
             scale: effective_scale,
             gdk_scale,
             gdk_dpi_scale,
-        };
+        });
     }
 
     /// Calculate display scaling from a given DPI value.
-    #[must_use]
-    pub fn from_dpi(dpi: u32) -> Self {
-        let scale = dpi as f64 / 96.0;
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `dpi` is zero.
+    pub fn from_dpi(dpi: u32) -> Result<Self> {
+        let scale = f64::from(dpi) / 96.0;
 
         return Self::new(scale, Some(dpi));
     }
 
     /// Calculate display scaling from a given scale factor.
-    #[must_use]
-    pub fn from_scale(scale: f64) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `scale` is not a positive finite number or its derived DPI does not
+    /// fit `u32`.
+    pub fn from_scale(scale: f64) -> Result<Self> {
         return Self::new(scale, None);
     }
 }
 
+/// Convert a whole-valued display measure to `u32`, rejecting values the cast would saturate.
+fn display_units(value: f64) -> Result<u32> {
+    if !value.is_finite() || value < 0.0 || value > f64::from(u32::MAX) {
+        return Err(Error::InvalidReplay {
+            reason: format!("display scaling value {value} does not fit a 32-bit unsigned integer"),
+            source: None,
+        });
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "checked above to be finite and within `0..=u32::MAX`, and callers round or floor \
+                  first, so the cast is exact; std has no checked float-to-integer conversion"
+    )]
+    let units = value as u32;
+
+    return Ok(units);
+}
+
 /// Resolve display scaling for native headless capture from explicit options,
 /// environment variables, or recorded session provenance/geometry heuristics.
+///
+/// Environment and provenance values that are not positive finite numbers are ignored like
+/// unparsable ones.
+///
+/// # Errors
+///
+/// Returns an error when an explicit scale or DPI option is zero, negative, or non-finite, or when
+/// the resolved scale's derived DPI does not fit `u32`.
 pub fn resolve_display_scaling(
     options: &CaptureOptions,
     manifest: Option<&SessionManifest>,
-) -> DisplayScaling {
+) -> Result<DisplayScaling> {
     // 1. Explicit options
     if let Some(dpi) = options.dpi {
         return DisplayScaling::from_dpi(dpi);
@@ -719,6 +792,7 @@ pub fn resolve_display_scaling(
     if let Ok(scale_str) =
         env::var("TERMTRACE_DISPLAY_SCALE").or_else(|_| return env::var("TERMTRACE_SCALE"))
         && let Ok(scale) = scale_str.parse::<f64>()
+        && scale.is_finite()
         && scale > 0.0
     {
         return DisplayScaling::from_scale(scale);
@@ -726,13 +800,15 @@ pub fn resolve_display_scaling(
 
     if let Ok(gdk_scale_str) = env::var("GDK_SCALE")
         && let Ok(gdk_scale) = gdk_scale_str.parse::<u32>()
+        && gdk_scale > 0
     {
         let dpi_scale = env::var("GDK_DPI_SCALE")
             .ok()
             .and_then(|s| return s.parse::<f64>().ok())
+            .filter(|scale| return scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
 
-        let total_scale = (gdk_scale as f64) * dpi_scale;
+        let total_scale = f64::from(gdk_scale) * dpi_scale;
 
         return DisplayScaling::new(total_scale, None);
     }
@@ -745,6 +821,7 @@ pub fn resolve_display_scaling(
                 .as_ref()
                 .and_then(|b| return str::from_utf8(b.as_bytes()).ok())
             && let Ok(gdk_scale) = scale_str.parse::<u32>()
+            && gdk_scale > 0
         {
             let dpi_scale = manifest
                 .execution_provenance
@@ -753,17 +830,21 @@ pub fn resolve_display_scaling(
                 .and_then(|v| return v.value.as_ref())
                 .and_then(|b| return str::from_utf8(b.as_bytes()).ok())
                 .and_then(|s| return s.parse::<f64>().ok())
+                .filter(|scale| return scale.is_finite() && *scale > 0.0)
                 .unwrap_or(1.0);
 
-            let total_scale = (gdk_scale as f64) * dpi_scale;
+            let total_scale = f64::from(gdk_scale) * dpi_scale;
 
             return DisplayScaling::new(total_scale, None);
         }
 
         // 4. Geometry-based high-DPI detection from recorded cell dimensions
         if manifest.geometry.cols > 0 && manifest.geometry.rows > 0 {
-            let cell_w = manifest.geometry.pixel_width as f64 / manifest.geometry.cols as f64;
-            let cell_h = manifest.geometry.pixel_height as f64 / manifest.geometry.rows as f64;
+            let cell_w =
+                f64::from(manifest.geometry.pixel_width) / f64::from(manifest.geometry.cols);
+
+            let cell_h =
+                f64::from(manifest.geometry.pixel_height) / f64::from(manifest.geometry.rows);
 
             if cell_w >= 18.0 && cell_h >= 36.0 {
                 return DisplayScaling::from_scale(2.0);
@@ -828,31 +909,48 @@ mod tests {
         }
 
         assert!(validate_options(&options(25)).is_err());
+        assert!(validate_options(&options(24).with_dpi(0)).is_err());
+
+        for scale in [0.0, -1.5, f64::NAN, f64::INFINITY] {
+            assert!(validate_options(&options(24).with_scale(scale)).is_err());
+        }
+    }
+
+    #[test]
+    fn display_scaling_rejects_values_the_conversion_would_saturate() {
+        for scale in [0.0, -2.0, f64::NAN, f64::INFINITY, f64::MAX] {
+            assert!(
+                DisplayScaling::from_scale(scale).is_err(),
+                "{scale} must be rejected"
+            );
+        }
+
+        assert!(DisplayScaling::from_dpi(0).is_err());
     }
 
     #[test]
     fn display_scaling_computes_dpi_and_gdk_factors() {
-        let s1 = DisplayScaling::from_scale(1.0);
+        let s1 = DisplayScaling::from_scale(1.0).expect("valid display scaling");
         assert_eq!(s1.dpi, 96);
         assert_eq!(s1.gdk_scale, 1);
         assert!((s1.gdk_dpi_scale - 1.0).abs() < f64::EPSILON);
 
-        let s1_5 = DisplayScaling::from_scale(1.5);
+        let s1_5 = DisplayScaling::from_scale(1.5).expect("valid display scaling");
         assert_eq!(s1_5.dpi, 144);
         assert_eq!(s1_5.gdk_scale, 1);
         assert!((s1_5.gdk_dpi_scale - 1.5).abs() < f64::EPSILON);
 
-        let s2 = DisplayScaling::from_scale(2.0);
+        let s2 = DisplayScaling::from_scale(2.0).expect("valid display scaling");
         assert_eq!(s2.dpi, 192);
         assert_eq!(s2.gdk_scale, 2);
         assert!((s2.gdk_dpi_scale - 1.0).abs() < f64::EPSILON);
 
-        let s2_5 = DisplayScaling::from_scale(2.5);
+        let s2_5 = DisplayScaling::from_scale(2.5).expect("valid display scaling");
         assert_eq!(s2_5.dpi, 240);
         assert_eq!(s2_5.gdk_scale, 2);
         assert!((s2_5.gdk_dpi_scale - 1.25).abs() < f64::EPSILON);
 
-        let from_dpi = DisplayScaling::from_dpi(192);
+        let from_dpi = DisplayScaling::from_dpi(192).expect("valid display scaling");
         assert_eq!(from_dpi.scale, 2.0);
         assert_eq!(from_dpi.gdk_scale, 2);
         assert!((from_dpi.gdk_dpi_scale - 1.0).abs() < f64::EPSILON);
@@ -862,20 +960,20 @@ mod tests {
     fn resolve_display_scaling_respects_options_and_viewport_resolution() {
         let opt_1x = options(24);
         assert_eq!(
-            resolve_display_scaling(&opt_1x, None),
-            DisplayScaling::from_scale(1.0)
+            resolve_display_scaling(&opt_1x, None).expect("resolve scaling"),
+            DisplayScaling::from_scale(1.0).expect("valid display scaling")
         );
 
         let opt_explicit_dpi = options(24).with_dpi(192);
         assert_eq!(
-            resolve_display_scaling(&opt_explicit_dpi, None),
-            DisplayScaling::from_dpi(192)
+            resolve_display_scaling(&opt_explicit_dpi, None).expect("resolve scaling"),
+            DisplayScaling::from_dpi(192).expect("valid display scaling")
         );
 
         let opt_explicit_scale = options(24).with_scale(1.5);
         assert_eq!(
-            resolve_display_scaling(&opt_explicit_scale, None),
-            DisplayScaling::from_scale(1.5)
+            resolve_display_scaling(&opt_explicit_scale, None).expect("resolve scaling"),
+            DisplayScaling::from_scale(1.5).expect("valid display scaling")
         );
 
         let mut opt_2k = options(24);
@@ -883,8 +981,8 @@ mod tests {
         opt_2k.height = 1440;
 
         assert_eq!(
-            resolve_display_scaling(&opt_2k, None),
-            DisplayScaling::from_scale(1.5)
+            resolve_display_scaling(&opt_2k, None).expect("resolve scaling"),
+            DisplayScaling::from_scale(1.5).expect("valid display scaling")
         );
 
         let mut opt_4k = options(24);
@@ -892,8 +990,8 @@ mod tests {
         opt_4k.height = 2160;
 
         assert_eq!(
-            resolve_display_scaling(&opt_4k, None),
-            DisplayScaling::from_scale(2.0)
+            resolve_display_scaling(&opt_4k, None).expect("resolve scaling"),
+            DisplayScaling::from_scale(2.0).expect("valid display scaling")
         );
     }
 }

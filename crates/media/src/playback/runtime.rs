@@ -54,6 +54,11 @@ pub struct PlaybackOptions {
 ///
 /// On failure, this also attempts to create [`PlaybackOptions::error_file`] with the
 /// failure description before returning the original error.
+///
+/// # Errors
+///
+/// Returns the replay or publication error; when the error file also cannot be created, returns
+/// `Error::CleanupFailed` holding both failures.
 pub fn playback(options: &PlaybackOptions) -> Result<()> {
     match playback_inner(options) {
         Ok(()) => return Ok(()),
@@ -87,6 +92,7 @@ fn playback_inner(options: &PlaybackOptions) -> Result<()> {
                     "Ghostty applied {}x{} cells instead of recorded {}x{}",
                     reported.cols, reported.rows, expected.cols, expected.rows
                 ),
+                source: None,
             });
         }
 
@@ -102,6 +108,7 @@ fn playback_inner(options: &PlaybackOptions) -> Result<()> {
                     reported.text_width,
                     reported.text_height
                 ),
+                source: None,
             });
         }
 
@@ -117,6 +124,7 @@ fn validate_options(options: &PlaybackOptions) -> Result<()> {
     if options.endpoint_event_byte_offset.is_some() && options.endpoint_event_seq.is_none() {
         return Err(Error::InvalidReplay {
             reason: "playback byte endpoint requires an event endpoint".to_owned(),
+            source: None,
         });
     }
 
@@ -125,6 +133,7 @@ fn validate_options(options: &PlaybackOptions) -> Result<()> {
     {
         return Err(Error::InvalidReplay {
             reason: "exact playback endpoints cannot be combined with time ranges".to_owned(),
+            source: None,
         });
     }
     return Ok(());
@@ -179,6 +188,7 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
                     "Ghostty fast-forward ended at {}x{} cells instead of canonical {}x{}",
                     reported.cols, reported.rows, grid.0, grid.1
                 ),
+                source: None,
             });
         }
     }
@@ -207,6 +217,7 @@ fn timed_playback(
         .ok_or_else(|| {
             return Error::InvalidReplay {
                 reason: "playback wall-clock origin overflow".to_owned(),
+                source: None,
             };
         })?;
 
@@ -283,6 +294,7 @@ fn timed_playback(
     if options.endpoint_event_seq.is_some() && !endpoint_seen {
         return Err(Error::InvalidReplay {
             reason: "playback endpoint is absent from the source".to_owned(),
+            source: None,
         });
     }
 
@@ -315,6 +327,7 @@ fn validate_playback_boundary(cursor: &EventLogCursor, source: &EventLogSummary)
 fn changed_source() -> Error {
     return Error::InvalidReplay {
         reason: "canonical source changed during playback".to_owned(),
+        source: None,
     };
 }
 
@@ -329,6 +342,7 @@ pub(super) fn emit_endpoint(
             .ok_or_else(|| {
                 return Error::InvalidReplay {
                     reason: "output endpoint requires an inclusive byte offset".to_owned(),
+                    source: None,
                 };
             })?
             .checked_add(1)
@@ -336,11 +350,13 @@ pub(super) fn emit_endpoint(
             .ok_or_else(|| {
                 return Error::InvalidReplay {
                     reason: "output endpoint byte offset overflows".to_owned(),
+                    source: None,
                 };
             })?;
         let prefix = data.as_bytes().get(..end).ok_or_else(|| {
             return Error::InvalidReplay {
                 reason: "output endpoint byte offset exceeds the canonical event".to_owned(),
+                source: None,
             };
         })?;
         output
@@ -354,6 +370,7 @@ pub(super) fn emit_endpoint(
     if byte_offset.is_some() {
         return Err(Error::InvalidReplay {
             reason: "only output endpoints accept a byte offset".to_owned(),
+            source: None,
         });
     }
     return emit_event(output, resize_intents, event, None);
@@ -412,7 +429,7 @@ fn unix_now_ns() -> Result<u128> {
     return SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| return duration.as_nanos())
-        .map_err(|_| return Error::ClockBeforeEpoch);
+        .map_err(|source| return Error::ClockBeforeEpoch { source });
 }
 
 fn write_create_new_json(path: &Path, value: &impl serde::Serialize) -> Result<()> {

@@ -46,5 +46,6 @@ pub use terminal::Terminal;
 fn client_error(reason: impl Into<String>) -> Error {
     return Error::InvalidOperation {
         reason: reason.into(),
+        source: None,
     };
 }

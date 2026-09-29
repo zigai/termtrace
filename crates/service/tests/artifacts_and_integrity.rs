@@ -1,4 +1,4 @@
-//! Integration tests for ArtifactService and IntegrityService.
+//! Integration tests for `ArtifactService` and `IntegrityService`.
 
 use assert_cmd::Command;
 use std::path::Path;

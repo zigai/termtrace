@@ -93,6 +93,12 @@ pub(super) struct IncompleteSessionDiagnosticRecord {
     pub(super) durable_boundary: Option<CanonicalBoundary>,
 }
 
+/// Record a command running in a real pseudo-terminal and mirror its output.
+///
+/// # Errors
+///
+/// Returns an error when configuration is invalid, secure artifacts cannot be
+/// created, PTY setup or child execution fails, output cannot be mirrored, or
 /// the canonical event log cannot be durably committed.
 pub fn record(options: &RecordOptions) -> Result<RecordOutcome> {
     let mut stdout = io::stdout();
@@ -600,8 +606,12 @@ fn recorder_failure_code(error: &Error) -> &'static str {
         Error::TerminalOperation { operation, .. } if *operation == "spawn terminal command" => {
             "spawn_failed"
         }
-        Error::TerminalOperation { operation, .. } if operation.contains("PTY") => "pty_failed",
-        Error::GhosttyVt { .. } => "semantic_invariant_failed",
+        Error::TerminalOperation { operation, .. } | Error::ThreadPanicked { operation, .. }
+            if operation.contains("PTY") =>
+        {
+            "pty_failed"
+        }
+        Error::GhosttyVt { .. } | Error::InvalidTerminalText { .. } => "semantic_invariant_failed",
         _ => "recorder_actor_failed",
     };
 }

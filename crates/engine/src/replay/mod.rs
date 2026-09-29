@@ -67,6 +67,7 @@ fn json_error(path: PathBuf, source: serde_json::Error) -> Error {
 fn invalid_replay(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
+        source: None,
     };
 }
 

@@ -1,5 +1,5 @@
 use super::client_error;
-use crate::Result;
+use crate::{Error, Result};
 use std::{
     ffi::{OsStr, OsString},
     os::unix::ffi::{OsStrExt as _, OsStringExt as _},
@@ -59,8 +59,11 @@ impl SessionTarget {
 
         return str::from_utf8(name)
             .map(|name| return Self::Name(name.to_owned()))
-            .map_err(|_| {
-                return client_error("session aliases must be UTF-8; use path: for other paths");
+            .map_err(|source| {
+                return Error::InvalidOperation {
+                    reason: "session aliases must be UTF-8; use path: for other paths".to_owned(),
+                    source: Some(Box::new(source)),
+                };
             });
     }
 

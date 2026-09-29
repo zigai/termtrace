@@ -5,9 +5,10 @@ pub(in crate::cli) fn write_progress(response: &ResponseWriter, message: impl Di
         return;
     }
 
+    // Progress is advisory, and standard error has no fallback channel to report its own failure.
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
-    let _ = writeln!(stderr, "{message}");
+    drop(writeln!(stderr, "{message}"));
 }
 
 pub(super) fn direct_stdout(output: &[u8]) -> Result<ExitCode> {
@@ -27,15 +28,20 @@ pub(super) fn direct_stdout(output: &[u8]) -> Result<ExitCode> {
 }
 
 pub(super) fn direct_stderr(message: &str) {
+    // Standard error is the last-resort diagnostic channel; its own failure has nowhere to go.
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
-    let _ = writeln!(stderr, "termtrace: {message}");
+    drop(writeln!(stderr, "termtrace: {message}"));
 }
 
 pub(super) fn report_message(error: &miette::Report) -> String {
     let mut message = error.to_string();
 
     if let Some(help) = error.help() {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "`fmt::Write` for `String` never fails, as documented on `format!`, and `drop_non_drop` rejects dropping the unit result"
+        )]
         let _ = write!(message, "\nhelp: {help}");
     }
 

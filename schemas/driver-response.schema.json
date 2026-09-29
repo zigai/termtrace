@@ -682,7 +682,7 @@
           "type": "integer"
         },
         "system_monotonic_ns": {
-          "description": "Midpoint of the system CLOCK_MONOTONIC bracket.",
+          "description": "Midpoint of the system `CLOCK_MONOTONIC` bracket.",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"

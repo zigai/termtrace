@@ -19,6 +19,7 @@ use std::{
 use termtrace_model::artifact::metadata::{
     ArtifactMember, ArtifactRootRecord, ArtifactSensitivity, ArtifactSourceRange,
 };
+use termtrace_model::error::ThreadPanic;
 use termtrace_model::execution::{
     event::Event,
     event_log::CanonicalBoundary,
@@ -87,11 +88,12 @@ pub fn collect_artifact_members(directory: &Path) -> Result<Vec<ArtifactMember>>
 
         let mut indexed: Vec<(usize, ArtifactMember)> = Vec::with_capacity(payloads.len());
         for handle in handles {
-            indexed.append(
-                &mut handle
-                    .join()
-                    .map_err(|_| return Error::invalid("artifact hashing worker panicked"))??,
-            );
+            indexed.append(&mut handle.join().map_err(|payload| {
+                return Error::invalid_with_source(
+                    "artifact hashing worker panicked",
+                    ThreadPanic::from_payload(payload),
+                );
+            })??);
         }
 
         return Ok(indexed);
@@ -327,7 +329,12 @@ fn collect_member_paths(root: &Path, directory: &Path, paths: &mut Vec<PathBuf>)
         } else if metadata.is_file() {
             paths.push(
                 path.strip_prefix(root)
-                    .map_err(|_| return Error::invalid("artifact member escaped its root"))?
+                    .map_err(|source| {
+                        return Error::invalid_with_source(
+                            "artifact member escaped its root",
+                            source,
+                        );
+                    })?
                     .to_path_buf(),
             );
         } else {
@@ -400,8 +407,9 @@ pub fn open_regular_file_nofollow(path: &Path) -> Result<(File, u64)> {
         return Err(Error::invalid("artifact member is not a regular file"));
     }
 
-    let size = u64::try_from(stat.st_size)
-        .map_err(|_| return Error::invalid("artifact member size is invalid"))?;
+    let size = u64::try_from(stat.st_size).map_err(|source| {
+        return Error::invalid_with_source("artifact member size is invalid", source);
+    })?;
 
     return Ok((File::from(fd), size));
 }
@@ -422,9 +430,9 @@ pub fn member_media_type(path: &str) -> &'static str {
         return "video/x-matroska";
     } else if path.ends_with(".vt") {
         return "application/vnd.termtrace.vt";
-    } else {
-        return "text/plain";
     }
+
+    return "text/plain";
 }
 
 /// Public schema identifier of a structured artifact or bundle member, when it has one.

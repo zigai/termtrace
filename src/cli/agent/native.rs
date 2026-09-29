@@ -43,6 +43,7 @@ impl Driver {
                     return Err(EngineError::InvalidReplay {
                         reason: "live native capture requires the latest presented state"
                             .to_owned(),
+                        source: None,
                     }
                     .into());
                 }
@@ -50,6 +51,7 @@ impl Driver {
                 let ControlData::Status { boundaries, .. } = *data else {
                     return Err(EngineError::InvalidReplay {
                         reason: "live status returned an unexpected response".to_owned(),
+                        source: None,
                     }
                     .into());
                 };
@@ -101,6 +103,7 @@ impl Driver {
         let active = self.native.as_mut().ok_or_else(|| {
             return EngineError::InvalidReplay {
                 reason: "native replay worker unavailable".to_owned(),
+                source: None,
             };
         })?;
 

@@ -1,6 +1,8 @@
 //! Recording options, actor messages, and terminal geometry.
 
+use super::support::{finish_with_cleanup, terminal_error};
 use crate::analysis::profile::ResolvedGhosttyProfile;
+use crate::Result;
 use portable_pty::{Child, MasterPty, PtySize};
 use std::{
     ffi::OsString,
@@ -41,6 +43,28 @@ impl SpawnedCommand {
         if let Some(group) = self.process_group() {
             let _kill = group.kill();
         }
+    }
+
+    /// Kill the recorded process group and child, then reap the child after a recorder failure.
+    pub(in crate::recording) fn reap_after_failure(&mut self) -> Result<()> {
+        self.kill_process_group();
+        // An exited child is already reaped, and signalling its released PID would fail
+        // spuriously and mask the primary failure.
+        if let Ok(Some(_status)) = self.child.try_wait() {
+            return Ok(());
+        }
+
+        let killed = self
+            .child
+            .kill()
+            .map_err(|error| return terminal_error("kill child", error.to_string()));
+        let reaped = self
+            .child
+            .wait()
+            .map(|_status| {})
+            .map_err(|error| return terminal_error("wait for child", error.to_string()));
+
+        return finish_with_cleanup(killed, reaped);
     }
 }
 

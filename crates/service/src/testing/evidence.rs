@@ -14,7 +14,7 @@ pub(super) fn capture_failure_artifacts(
     {
         Ok(outcome) => verified_artifacts.push(outcome.directory),
         Err(error) => {
-            secondary_failures.push(bounded_secondary("semantic_screenshot", &error.to_string()))
+            secondary_failures.push(bounded_secondary("semantic_screenshot", &error.to_string()));
         }
     }
 
@@ -23,7 +23,7 @@ pub(super) fn capture_failure_artifacts(
     match session.evidence().bundle(&bundle, BundleProfile::Debug) {
         Ok(_) => verified_artifacts.push(bundle),
         Err(error) => {
-            secondary_failures.push(bounded_secondary("debug_bundle", &error.to_string()))
+            secondary_failures.push(bounded_secondary("debug_bundle", &error.to_string()));
         }
     }
 }
@@ -106,8 +106,11 @@ pub(super) fn write_evidence_manifest(
 }
 
 fn relative_evidence_path(root: &Path, path: &Path) -> Result<String> {
-    let relative = path.strip_prefix(root).map_err(|_| {
-        return testing_error("test artifact escaped its attempt evidence directory");
+    let relative = path.strip_prefix(root).map_err(|source| {
+        return Error::InvalidOperation {
+            reason: "test artifact escaped its attempt evidence directory".to_owned(),
+            source: Some(Box::new(source)),
+        };
     })?;
 
     if relative.as_os_str().is_empty() {

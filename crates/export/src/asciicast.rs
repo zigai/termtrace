@@ -46,6 +46,11 @@ pub fn export(session_directory: impl AsRef<Path>, output: impl AsRef<Path>) -> 
 }
 
 /// Export an asciinema v2 cast to an arbitrary writer.
+///
+/// # Errors
+///
+/// Returns an error when the session's event log cannot be read or validated, or writing to
+/// `writer` fails.
 pub fn export_to_writer(
     session_directory: impl AsRef<Path>,
     mut writer: impl Write,

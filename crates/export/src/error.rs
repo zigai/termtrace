@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf, result::Result as StdResult};
+use std::{error::Error as StdError, io, path::PathBuf, result::Result as StdResult};
 use termtrace_engine::Error as EngineError;
 use termtrace_evidence::Error as EvidenceError;
 use termtrace_render::Error as RenderError;
@@ -39,6 +39,8 @@ pub enum Error {
     InvalidExport {
         /// Actionable reason the export was rejected.
         reason: String,
+        /// Lower-level failure that exposed the violation, when one exists.
+        source: Option<Box<dyn StdError + Send + Sync>>,
     },
 }
 
@@ -53,6 +55,17 @@ impl Error {
     pub(super) fn invalid(reason: impl Into<String>) -> Self {
         return Self::InvalidExport {
             reason: reason.into(),
+            source: None,
+        };
+    }
+
+    pub(super) fn invalid_with_source(
+        reason: impl Into<String>,
+        source: impl Into<Box<dyn StdError + Send + Sync>>,
+    ) -> Self {
+        return Self::InvalidExport {
+            reason: reason.into(),
+            source: Some(source.into()),
         };
     }
 

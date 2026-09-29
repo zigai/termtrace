@@ -37,6 +37,7 @@ use uuid::Uuid;
 fn analysis_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
+        source: None,
     };
 }
 
@@ -51,6 +52,11 @@ pub struct ValidatedVisualManifest {
 
 impl ValidatedVisualManifest {
     /// Validate a model manifest using a directional validator owned by the caller.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `manifest_path` is empty, absolute, or not a plain relative path, or
+    /// when `validate` rejects the manifest.
     pub fn new(
         manifest_path: PathBuf,
         manifest: VisualManifest,
@@ -82,6 +88,11 @@ impl ValidatedVisualManifest {
     ///
     /// The media owner verifies the stored source prefix before supplying the resolved
     /// endpoint. This records a derived correlation without changing the source manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the manifest is not a screenshot or does not match the session, state
+    /// hash, and endpoint position of `canonical`.
     pub fn bind_screenshot_state(
         &mut self,
         state_id: u64,

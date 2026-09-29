@@ -1,5 +1,5 @@
 use crate::{artifact::TmuxRecordingLifecycle, lifecycle::LifecycleTrigger};
-use std::{io, path::PathBuf, result::Result as StdResult};
+use std::{error::Error as StdError, io, path::PathBuf, result::Result as StdResult};
 
 /// Failure of an aggregate tmux recording operation.
 #[derive(Debug, thiserror::Error)]
@@ -29,8 +29,13 @@ pub enum Error {
         source: rusqlite::Error,
     },
     /// Stored or observed tmux state violates the recording contract.
-    #[error("{0}")]
-    Invalid(String),
+    #[error("{reason}")]
+    Invalid {
+        /// Stable explanation of the violated contract.
+        reason: String,
+        /// Lower-level failure that exposed the violation, when one exists.
+        source: Option<Box<dyn StdError + Send + Sync>>,
+    },
     /// A tmux command could not run or failed.
     #[error("{0}")]
     Tmux(String),
@@ -91,7 +96,20 @@ impl Error {
     }
 
     pub(crate) fn invalid(reason: impl Into<String>) -> Self {
-        return Self::Invalid(reason.into());
+        return Self::Invalid {
+            reason: reason.into(),
+            source: None,
+        };
+    }
+
+    pub(crate) fn invalid_with_source(
+        reason: impl Into<String>,
+        source: impl Into<Box<dyn StdError + Send + Sync>>,
+    ) -> Self {
+        return Self::Invalid {
+            reason: reason.into(),
+            source: Some(source.into()),
+        };
     }
 }
 

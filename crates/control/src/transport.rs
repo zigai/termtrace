@@ -294,6 +294,7 @@ impl ExchangeTiming {
             Self::Timeout(timeout) => Instant::now().checked_add(timeout).ok_or_else(|| {
                 return Error::InvalidRequest {
                     reason: "request timeout exceeds the monotonic clock range".to_owned(),
+                    source: None,
                 };
             }),
             Self::Deadline(deadline) => Ok(deadline),
@@ -361,6 +362,7 @@ fn exchange_stream(
     {
         return Err(Error::InvalidRequest {
             reason: "request must be no larger than 16 MiB".to_owned(),
+            source: None,
         });
     }
 
@@ -609,7 +611,8 @@ mod tests {
 
         let sender = thread::spawn(move || {
             let mut buf = [0_u8; 1024];
-            let _ = server.read(&mut buf);
+            let received = server.read(&mut buf).expect("read request");
+            assert!(received > 0, "peer received the request");
 
             for byte in b"{\"version\":1" {
                 thread::sleep(Duration::from_millis(30));
@@ -636,7 +639,7 @@ mod tests {
             }
         ));
 
-        let _ = sender.join();
+        sender.join().expect("slow peer thread");
     }
 
     #[test]

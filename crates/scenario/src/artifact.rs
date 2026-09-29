@@ -199,6 +199,7 @@ fn write_timeline(snapshot: &SessionSnapshot, path: &Path) -> Result<()> {
 fn timeline_error(error: impl Display) -> EngineError {
     return EngineError::InvalidReplay {
         reason: format!("write scenario timeline: {error}"),
+        source: None,
     };
 }
 

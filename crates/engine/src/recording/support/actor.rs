@@ -1,7 +1,9 @@
 use crate::{Error, Result};
 use nix::poll::{PollFd, PollFlags};
+use std::{any::Any, sync::mpsc};
 use termtrace_evidence::event_log::EventLogWriter;
 use termtrace_model::{
+    error::ThreadPanic,
     protocol::{
         control::{ControlResponse, ControlResult, CONTROL_PROTOCOL_VERSION},
         mutation::MutationEffect,
@@ -85,6 +87,32 @@ pub(in crate::recording) fn finish_with_cleanup<T>(
                 cleanup: Box::new(cleanup),
             });
         }
+    }
+}
+
+pub(in crate::recording) fn thread_panicked(
+    operation: &'static str,
+    payload: Box<dyn Any + Send>,
+) -> Error {
+    return Error::ThreadPanicked {
+        operation,
+        source: ThreadPanic::from_payload(payload),
+    };
+}
+
+/// Deliver a control response to its requester.
+///
+/// A requester that stopped waiting has dropped its receiver, leaving the response undeliverable;
+/// the loss is traced because no other party can observe it.
+pub(in crate::recording) fn deliver_response(
+    sender: &mpsc::SyncSender<ControlResponse>,
+    response: ControlResponse,
+) {
+    if let Err(mpsc::SendError(response)) = sender.send(response) {
+        tracing::debug!(
+            request_id = %response.request_id,
+            "control response receiver disconnected"
+        );
     }
 }
 

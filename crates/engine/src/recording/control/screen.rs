@@ -3,7 +3,7 @@
 use super::super::{
     actor::SessionActor,
     presentation::LiveTerminal,
-    support::{actor_boundaries, control_error_response, terminal_error},
+    support::{actor_boundaries, control_error_response, deliver_response, terminal_error},
 };
 use super::commands::screen_frame_error_response;
 use crate::Result;
@@ -161,7 +161,7 @@ impl SessionActor<'_> {
                         MutationEffect::NotApplied,
                     );
 
-                    let _ = waiter.response.send(response);
+                    deliver_response(&waiter.response, response);
 
                     continue;
                 }
@@ -228,7 +228,8 @@ impl SessionActor<'_> {
                 request_id: waiter.request_id,
                 result: ControlResult::Ok { data },
             };
-            let _ = waiter.response.send(response);
+
+            deliver_response(&waiter.response, response);
         }
 
         return Ok(());
@@ -245,7 +246,7 @@ impl SessionActor<'_> {
                 MutationEffect::NotApplied,
             );
 
-            let _ = waiter.response.send(response);
+            deliver_response(&waiter.response, response);
         }
     }
 }
@@ -257,6 +258,13 @@ pub struct CompiledScreenPredicate {
 }
 
 /// Validate a bounded screen predicate and retain its compiled expressions.
+///
+/// # Errors
+///
+/// Returns a description of the first violation: composition deeper than 4 levels, more than 32
+/// nodes, or other than 1-16 children; empty or oversized text or patterns; an invalid regular
+/// expression; an empty or inverted region; an unconstrained cursor predicate; or a state hash that
+/// is not lowercase BLAKE3 hex.
 pub fn compile_screen_predicate(
     predicate: &ScreenPredicate,
 ) -> StdResult<CompiledScreenPredicate, String> {

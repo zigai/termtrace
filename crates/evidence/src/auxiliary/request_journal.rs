@@ -151,8 +151,9 @@ impl MutationJournal {
             .read_to_string(&mut line)
             .map_err(|source| return Error::filesystem(&self.path, source))?;
 
-        let sequence = usize::try_from(position.sequence)
-            .map_err(|_| return Error::invalid("mutation sequence exceeds platform range"))?;
+        let sequence = usize::try_from(position.sequence).map_err(|source| {
+            return Error::invalid_with_source("mutation sequence exceeds platform range", source);
+        })?;
 
         let record = decode_record(
             line.trim_end_matches('\n'),
@@ -409,8 +410,10 @@ impl MutationJournalCursor {
             ));
         }
 
-        let line = str::from_utf8(&line)
-            .map_err(|_| return Error::invalid("mutation journal is not UTF-8"))?;
+        let line = str::from_utf8(&line).map_err(|source| {
+            return Error::invalid_with_source("mutation journal is not UTF-8", source);
+        })?;
+
         let record = decode_record(line, self.sequence, &self.previous_hash, &self.path)?;
         self.sequence = self
             .sequence
@@ -545,8 +548,11 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
             let mut matched_count = 0;
             while let Some(row) = rows.next().map_err(index_error)? {
                 let bytes: Vec<u8> = row.get(0).map_err(index_error)?;
-                let id = Uuid::from_slice(&bytes).map_err(|_| {
-                    return Error::invalid("canonical operation identifier index is invalid");
+                let id = Uuid::from_slice(&bytes).map_err(|source| {
+                    return Error::invalid_with_source(
+                        "canonical operation identifier index is invalid",
+                        source,
+                    );
                 })?;
                 if previous == Some(id) {
                     continue;
@@ -761,7 +767,7 @@ mod tests {
         let error = read_mutation_journal(&path).expect_err("old version must be rejected");
         assert!(matches!(
             error,
-            Error::InvalidEvidence { reason }
+            Error::InvalidEvidence { reason, .. }
                 if reason.contains("unsupported mutation journal format")
                     && reason.contains("version 1")
         ));
@@ -823,7 +829,7 @@ mod tests {
             .expect_err("oversized record");
         assert!(matches!(
             error,
-            Error::InvalidEvidence { reason }
+            Error::InvalidEvidence { reason, .. }
                 if reason == "mutation journal byte budget would be exceeded"
         ));
         assert_eq!(
@@ -978,7 +984,7 @@ mod tests {
         let error = validate_mutation_journal(session).expect_err("host op must be rejected");
         assert!(matches!(
             error,
-            Error::InvalidEvidence { reason }
+            Error::InvalidEvidence { reason, .. }
                 if reason == "mutation journal operation IDs do not match its canonical range"
         ));
     }
@@ -1095,7 +1101,7 @@ mod tests {
         let error = validate_mutation_journal(session).expect_err("out of order must fail");
         assert!(matches!(
             error,
-            Error::InvalidEvidence { reason }
+            Error::InvalidEvidence { reason, .. }
                 if reason == "mutation journal operation IDs do not match its canonical range"
         ));
     }

@@ -110,9 +110,12 @@ fn append_root(
     session_manifest_hash: &str,
     source: RootSource<'_>,
 ) -> Result<ArtifactRootRecord> {
-    let directory_name = artifact_directory
-        .strip_prefix(session)
-        .map_err(|_| return Error::invalid("artifact directory is outside its source session"))?;
+    let directory_name = artifact_directory.strip_prefix(session).map_err(|source| {
+        return Error::invalid_with_source(
+            "artifact directory is outside its source session",
+            source,
+        );
+    })?;
 
     let directory_name = normalized_relative_path(directory_name)?;
     let session_fd = open_directory_path(session, false)?;

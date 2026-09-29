@@ -1,6 +1,6 @@
 //! Atomic multi-format publication for one semantic observation.
 
-use crate::{Error, Result};
+use crate::{error::finish_with_cleanup, Error, Result};
 use std::{
     collections::BTreeSet,
     fs,
@@ -126,10 +126,11 @@ pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Resul
             return Err(save_error("saved artifact contains a non-regular member"));
         }
 
-        let name = entry
-            .file_name()
-            .into_string()
-            .map_err(|_| return save_error("saved artifact contains a non-UTF-8 member name"))?;
+        let name = entry.file_name().into_string().map_err(|name| {
+            return save_error(format!(
+                "saved artifact contains a non-UTF-8 member name {name:?}"
+            ));
+        })?;
 
         if name != "save-manifest.json" {
             observed_members.insert(name);
@@ -263,17 +264,11 @@ pub fn save(
 
     let save_manifest = match publish {
         Ok(value) => value,
-        Err(error) => {
-            let _ = fs::remove_dir_all(&staging);
-
-            return Err(error);
-        }
+        Err(error) => return finish_with_cleanup(Err(error), remove_staging(&staging)),
     };
 
     if let Err(error) = commit_directory(parent, &staging, destination) {
-        let _ = fs::remove_dir_all(&staging);
-
-        return Err(error.into());
+        return finish_with_cleanup(Err(error.into()), remove_staging(&staging));
     }
     return Ok(SaveOutcome {
         directory: destination.to_path_buf(),
@@ -403,17 +398,11 @@ pub fn save_screenshot_batch(
 
     let manifest = match publish {
         Ok(value) => value,
-        Err(error) => {
-            let _ = fs::remove_dir_all(&staging);
-
-            return Err(error);
-        }
+        Err(error) => return finish_with_cleanup(Err(error), remove_staging(&staging)),
     };
 
     if let Err(error) = commit_directory(parent, &staging, destination) {
-        let _ = fs::remove_dir_all(&staging);
-
-        return Err(error.into());
+        return finish_with_cleanup(Err(error.into()), remove_staging(&staging));
     }
     return Ok(manifest);
 }
@@ -647,6 +636,10 @@ fn render_error(error: RenderError) -> Error {
     return save_error(format!("semantic rendering failed: {error}"));
 }
 
+fn remove_staging(staging: &Path) -> Result<()> {
+    return fs::remove_dir_all(staging).map_err(|source| return filesystem_error(staging, source));
+}
+
 fn filesystem_error(path: impl Into<PathBuf>, source: io::Error) -> Error {
     return Error::Filesystem {
         path: path.into(),
@@ -657,5 +650,6 @@ fn filesystem_error(path: impl Into<PathBuf>, source: io::Error) -> Error {
 fn save_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
+        source: None,
     };
 }

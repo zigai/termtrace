@@ -126,7 +126,7 @@ fn rust_test_helper_retains_verified_failure_artifacts() {
         session
             .output()
             .wait_for(b"READY", Duration::from_secs(5))
-            .map_err(|_| return "READY was not observed")?;
+            .expect("observe READY");
 
         return Err("PRIMARY_FAILURE_SENTINEL");
     });
@@ -307,6 +307,10 @@ fn rust_test_helper_timeout_retains_evidence_and_reaps_session() {
         let mut files = BTreeMap::new();
 
         while let Some(path) = pending.pop() {
+            #[expect(
+                clippy::redundant_else,
+                reason = "directories are expanded and files are read, never both; the `if` branch does not diverge, and the flagged `return` belongs to the `map` closure"
+            )]
             if path.is_dir() {
                 pending.extend(
                     fs::read_dir(path)
@@ -347,7 +351,7 @@ fn rust_test_helper_preserves_body_failure_when_cleanup_fails() {
         test.session_mut()
             .expect("open test session")
             .force_close()
-            .map_err(|_| return "fixture force-close failed")?;
+            .expect("force-close fixture");
 
         return Err("PRIMARY_CLEANUP_FAILURE_SENTINEL");
     });

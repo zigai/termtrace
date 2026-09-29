@@ -236,6 +236,7 @@ pub(super) fn validate_video_probe(
     {
         return Err(Error::InvalidReplay {
             reason: format!("video probe does not match {width}x{height} at {rate} with packets"),
+            source: None,
         });
     }
     return Ok(());
@@ -260,6 +261,7 @@ pub(super) fn validate_screenshot_probe(
     {
         return Err(Error::InvalidReplay {
             reason: "screenshot dimensions or codec do not match".to_owned(),
+            source: None,
         });
     }
     return Ok(());
@@ -317,6 +319,7 @@ fn first_stream(probe: &serde_json::Value) -> Result<&serde_json::Value> {
         .ok_or_else(|| {
             return Error::InvalidReplay {
                 reason: "media probe has no stream".to_owned(),
+                source: None,
             };
         });
 }

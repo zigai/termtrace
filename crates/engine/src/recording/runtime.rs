@@ -7,7 +7,7 @@ use super::{
     model::{RuntimeMessage, TerminalGeometry},
     presentation::{process_semantic_bytes, process_semantic_output, resize_semantic},
     process::RuntimeWorkers,
-    support::terminal_error,
+    support::{finish_with_cleanup, terminal_error},
     termination::{Effect, Fact, Tick},
 };
 use crate::{Error, Result};
@@ -67,11 +67,7 @@ pub(super) fn consume_runtime(
     let (workers, receiver) = match started {
         Ok(started) => started,
         Err(error) => {
-            actor.spawned.kill_process_group();
-            let _ = actor.spawned.child.kill();
-            let _ = actor.spawned.child.wait();
-
-            return Err(error);
+            return finish_with_cleanup(Err(error), actor.spawned.reap_after_failure());
         }
     };
 
@@ -187,16 +183,15 @@ pub(super) fn consume_runtime(
             .cloned()
             .ok_or_else(|| return terminal_error("wait for child", "missing exit status"));
     })();
+    let result = match result {
+        Err(error) if actor.failure_policy == RecordingFailurePolicy::Preserve => {
+            super::degraded::preserve_terminal(actor, &receiver, &error);
 
-    if let Err(error) = &result
-        && actor.failure_policy == RecordingFailurePolicy::Preserve
-    {
-        super::degraded::preserve_terminal(actor, &receiver, error);
-    } else if result.is_err() {
-        actor.spawned.kill_process_group();
-        let _ = actor.spawned.child.kill();
-        let _ = actor.spawned.child.wait();
-    }
+            Err(error)
+        }
+        Err(error) => finish_with_cleanup(Err(error), actor.spawned.reap_after_failure()),
+        Ok(status) => Ok(status),
+    };
 
     let status = workers.finish(receiver, result)?;
 

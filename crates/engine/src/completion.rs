@@ -26,6 +26,7 @@ pub(crate) fn published(session: &Path) -> Result<Option<SessionCompletion>> {
             },
             other => Error::InvalidEvidence {
                 reason: other.to_string(),
+                source: None,
             },
         };
     });

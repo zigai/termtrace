@@ -302,6 +302,10 @@ impl EventLogWriter {
     /// Append output with the collector's read-completion timestamp.
     ///
     /// The observation and append times are both retained; the durability policy is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `event` is not an output event or cannot be persisted.
     pub fn append_observed_output(
         &mut self,
         event: Event,

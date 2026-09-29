@@ -13,7 +13,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use termtrace_model::value::geometry::TerminalGeometryReport;
+use termtrace_model::{error::ThreadPanic, value::geometry::TerminalGeometryReport};
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -64,7 +64,8 @@ impl RawTerminalGuard {
 
 impl Drop for RawTerminalGuard {
     fn drop(&mut self) {
-        let _ = self.restore();
+        // Drop has no error channel; explicit `restore` calls report failures.
+        drop(self.restore());
     }
 }
 
@@ -103,16 +104,18 @@ impl TerminalInputDrain {
                 .or_else(|error| {
                     if error == Errno::EPIPE {
                         return Ok(());
-                    } else {
-                        return Err(error);
                     }
+                    return Err(error);
                 })
                 .map_err(|error| return terminal_error("cancel playback input drain", error));
         });
 
         let joined = self.thread.take().map_or(Ok(()), |handle| {
-            return handle.join().map_err(|_| {
-                return terminal_error("join playback input drain", "thread panicked");
+            return handle.join().map_err(|payload| {
+                return Error::ThreadPanicked {
+                    operation: "join playback input drain",
+                    source: ThreadPanic::from_payload(payload),
+                };
             })?;
         });
 
@@ -122,7 +125,8 @@ impl TerminalInputDrain {
 
 impl Drop for TerminalInputDrain {
     fn drop(&mut self) {
-        let _ = self.stop();
+        // Drop has no error channel; explicit `stop` calls report failures.
+        drop(self.stop());
     }
 }
 

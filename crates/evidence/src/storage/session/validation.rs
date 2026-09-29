@@ -31,6 +31,7 @@ pub(super) fn validate_replay_profile_file(
                 "recorded Ghostty replay profile `{}` hash does not match session provenance",
                 profile_path.display()
             ),
+            source: None,
         });
     }
     return Ok(());

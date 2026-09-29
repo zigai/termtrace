@@ -41,8 +41,10 @@ impl SessionRegistry {
 
     /// Atomically retarget an alias when its current immutable session ID matches.
     ///
-    /// Returns an error when the caller no longer owns the alias or successor
-    /// validation/publication fails.
+    /// # Errors
+    ///
+    /// Returns an error when `alias` is invalid, the caller no longer owns the alias, or successor
+    /// validation or publication fails.
     pub fn retarget(
         &self,
         alias: &str,
@@ -305,7 +307,7 @@ impl SessionRegistry {
 
         let registered_unix_ns = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| return Error::ClockBeforeEpoch)?
+            .map_err(|source| return Error::ClockBeforeEpoch { source })?
             .as_nanos();
 
         let recorder = recorder_identity(&canonical);

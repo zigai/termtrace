@@ -63,6 +63,11 @@ pub(super) fn snapshot_path(
 }
 
 /// Compare or explicitly update one deterministic frame snapshot file.
+///
+/// # Errors
+/// Returns an error when the frame cannot be normalized, the snapshot path has no parent, or the
+/// snapshot cannot be written or read or exceeds 4 MiB, and a mismatch when the reviewed snapshot
+/// is missing or differs.
 #[allow(
     clippy::verbose_file_reads,
     reason = "reviewed snapshots must be opened with no-follow semantics"
@@ -199,5 +204,6 @@ pub(super) fn open_regular_file_nofollow(path: &Path) -> Result<(File, u64)> {
 pub(super) fn testing_error(reason: impl Into<String>) -> Error {
     return Error::InvalidOperation {
         reason: reason.into(),
+        source: None,
     };
 }

@@ -6,6 +6,7 @@ use nix::{
     poll::{poll, PollFd, PollFlags, PollTimeout},
 };
 use std::{
+    error::Error as StdError,
     io::{self, Read as _, Write as _},
     os::fd::AsFd,
     path::Path,
@@ -34,6 +35,9 @@ pub enum DriverError {
     InvalidProtocol {
         /// Bounded diagnostic without raw response contents.
         reason: String,
+        /// Lower-level failure, when it cannot carry raw response contents.
+        #[source]
+        source: Option<Box<dyn StdError + Send + Sync>>,
     },
     /// Process-driver I/O failed or exceeded its deadline.
     #[error("driver transport failed during `{phase}`: {source}")]
@@ -64,6 +68,12 @@ pub struct Driver {
 
 impl Driver {
     /// Start the installed executable and validate its protocol handshake.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DriverError::Transport` when the executable cannot be started or its pipes cannot
+    /// be made nonblocking, and `DriverError::InvalidProtocol` when a pipe is missing or the
+    /// handshake is invalid or incompatible.
     pub fn spawn(binary: impl AsRef<Path>) -> Result<Self> {
         let mut child = SupervisedChild::spawn(
             Command::new(binary.as_ref())
@@ -112,6 +122,10 @@ impl Driver {
     }
 
     /// Send one method with a fresh correlation ID and a total I/O deadline.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Self::send`].
     pub fn request(&mut self, method: DriverMethod, timeout: Duration) -> Result<DriverResponse> {
         return self.send(
             &DriverRequest {
@@ -127,6 +141,13 @@ impl Driver {
     ///
     /// After uncertain delivery, retry only according to the returned driver or
     /// actor evidence; never generate a new ID merely because a timeout occurred.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DriverError::InvalidProtocol` when the driver is closed, the request version is
+    /// incompatible, the deadline overflows, the request exceeds the frame limit, or the response
+    /// is malformed or uncorrelated, and `DriverError::Transport` when I/O fails or `timeout`
+    /// elapses.
     pub fn send(&mut self, request: &DriverRequest, timeout: Duration) -> Result<DriverResponse> {
         if self.child.is_none() || request.version != DRIVER_PROTOCOL_VERSION {
             return Err(protocol(
@@ -138,16 +159,17 @@ impl Driver {
             .checked_add(timeout)
             .ok_or_else(|| return protocol("driver timeout exceeds clock range"))?;
 
-        let mut encoded = serde_json::to_vec(request)
-            .map_err(|_| return protocol("could not encode driver request"))?;
+        let mut encoded = serde_json::to_vec(request).map_err(|source| {
+            return protocol_with_source("could not encode driver request", source);
+        })?;
         encoded.push(b'\n');
         if u64::try_from(encoded.len()).unwrap_or(u64::MAX) > DRIVER_MAX_REQUEST_BYTES {
             return Err(protocol("driver request exceeds frame limit"));
         }
 
         let result = self.exchange(&encoded, deadline).and_then(|bytes| {
-            let response: DriverResponse = serde_json::from_slice(&bytes)
-                .map_err(|_| return protocol("driver response failed schema validation"))?;
+            let response: DriverResponse =
+                serde_json::from_slice(&bytes).map_err(undecodable_response)?;
 
             if response.version != DRIVER_PROTOCOL_VERSION
                 || response.request_id != request.request_id
@@ -250,6 +272,12 @@ impl Driver {
     }
 
     /// Close input, allow owned-session finalization, and reap the process.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DriverError::Transport` when the process cannot be polled or does not exit within
+    /// `timeout`, after which it is killed, and `DriverError::InvalidProtocol` when it exits
+    /// unsuccessfully.
     pub fn close(&mut self, timeout: Duration) -> Result<()> {
         let Some(mut child) = self.child.take() else {
             return Ok(());
@@ -329,8 +357,11 @@ fn ready(
             .ok_or_else(|| {
                 return transport(phase, dispatched, io::Error::from(io::ErrorKind::TimedOut));
             })?;
-        let timeout = PollTimeout::try_from(remaining.min(Duration::from_secs(60)))
-            .map_err(|_| return protocol("invalid driver poll duration"))?;
+
+        let timeout =
+            PollTimeout::try_from(remaining.min(Duration::from_secs(60))).map_err(|source| {
+                return protocol_with_source("invalid driver poll duration", source);
+            })?;
 
         let mut descriptors = [PollFd::new(file.as_fd(), flags)];
 
@@ -351,7 +382,26 @@ fn ready(
 fn protocol(reason: &str) -> DriverError {
     return DriverError::InvalidProtocol {
         reason: reason.to_owned(),
+        source: None,
     };
+}
+
+fn protocol_with_source(
+    reason: &str,
+    source: impl Into<Box<dyn StdError + Send + Sync>>,
+) -> DriverError {
+    return DriverError::InvalidProtocol {
+        reason: reason.to_owned(),
+        source: Some(source.into()),
+    };
+}
+
+/// Reject a driver response that does not decode as the response schema.
+///
+/// `InvalidProtocol` promises a bounded diagnostic without raw response contents, and decoder
+/// errors can quote response values, so the decoder's detail is deliberately dropped here.
+fn undecodable_response(_: serde_json::Error) -> DriverError {
+    return protocol("driver response failed schema validation");
 }
 
 fn transport(phase: &'static str, request_dispatched: bool, source: io::Error) -> DriverError {

@@ -1,8 +1,11 @@
 //! Failures produced by semantic and native media operations.
 
-use std::{io, path::PathBuf, result::Result as StdResult};
+use std::{
+    error::Error as StdError, io, path::PathBuf, result::Result as StdResult, time::SystemTimeError,
+};
 use termtrace_engine::Error as EngineError;
 use termtrace_evidence::Error as EvidenceError;
+use termtrace_model::error::ThreadPanic;
 use termtrace_render::Error as RenderError;
 use termtrace_terminal::Error as TerminalError;
 
@@ -32,6 +35,8 @@ pub enum Error {
     InvalidReplay {
         /// Actionable reason the input was rejected.
         reason: String,
+        /// Lower-level failure that exposed the violation, when one exists.
+        source: Option<Box<dyn StdError + Send + Sync>>,
     },
     /// A media operation requires a completed recording.
     #[error("session `{}` is incomplete", session.display())]
@@ -53,9 +58,20 @@ pub enum Error {
         /// Actionable failure reason.
         reason: String,
     },
+    /// A media worker thread panicked before it could be joined cleanly.
+    #[error("terminal operation `{operation}` failed: {source}")]
+    ThreadPanicked {
+        /// Join operation that failed.
+        operation: &'static str,
+        /// Captured panic.
+        source: ThreadPanic,
+    },
     /// The system clock cannot be represented relative to the Unix epoch.
     #[error("system clock is before the Unix epoch")]
-    ClockBeforeEpoch,
+    ClockBeforeEpoch {
+        /// Underlying clock comparison failure.
+        source: SystemTimeError,
+    },
     /// A required external media command failed.
     #[error("{operation} failed: {reason}")]
     ExternalCommand {

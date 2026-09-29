@@ -12,6 +12,11 @@ use termtrace_model::{
 use termtrace_terminal::GhosttyVt;
 
 /// Require one capability from an exact bounded report.
+///
+/// # Errors
+///
+/// Returns `Error::InvalidReplay` when `id` is not a known capability and
+/// `Error::CapabilityBlocked` when the capability is not ready.
 pub fn require(report: &CapabilityReport, id: &str) -> Result<()> {
     let capability = report.capability(id).ok_or_else(|| {
         return Error::InvalidReplay {
@@ -19,6 +24,7 @@ pub fn require(report: &CapabilityReport, id: &str) -> Result<()> {
                 "unknown runtime capability `{id}`; expected one of {}",
                 CAPABILITY_IDS.join(", ")
             ),
+            source: None,
         };
     })?;
 

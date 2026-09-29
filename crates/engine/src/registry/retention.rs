@@ -301,7 +301,7 @@ impl SessionRegistry {
                 RegistryRecord::Reservation(reservation) => {
                     if reservation.lease_expires_unix_ns < now_unix_ns {
                         if apply {
-                            let _ = fs::remove_file(&path);
+                            remove_registry_record(&path)?;
                         }
 
                         removed_stale_aliases = removed_stale_aliases.saturating_add(1);
@@ -320,7 +320,7 @@ impl SessionRegistry {
 
                     if should_reap {
                         if apply {
-                            let _ = fs::remove_file(&path);
+                            remove_registry_record(&path)?;
                         }
 
                         removed_stale_aliases = removed_stale_aliases.saturating_add(1);
@@ -415,4 +415,18 @@ pub(super) fn validate_gc_candidate(candidate: &GarbageCollectionCandidate) -> R
         ));
     }
     return Ok(());
+}
+
+/// Remove a stale registry record; one another process already removed is equally gone.
+fn remove_registry_record(path: &Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => return Ok(()),
+        Err(source) if source.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    }
 }

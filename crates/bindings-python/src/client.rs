@@ -63,6 +63,10 @@ impl PyTermtrace {
     }
 
     /// Launch a new recorded command session.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the command cannot be launched and recorded.
     #[pyo3(signature = (command, rows = None, cols = None, env = None, cwd = None))]
     pub fn record(
         &self,
@@ -99,6 +103,10 @@ impl PyTermtrace {
     }
 
     /// Attach to an existing session directory.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when `session_path` is not an attachable session.
     pub fn attach(&self, py: Python<'_>, session_path: String) -> PyResult<PySession> {
         let terminal = self.terminal.clone();
         let path = PathBuf::from(session_path);
@@ -116,6 +124,10 @@ impl PyTermtrace {
     }
 
     /// Verify an evidence bundle (.tar.zst or directory) and return whether it passed integrity verification.
+    ///
+    /// # Errors
+    ///
+    /// Never raises; failed verification returns `False`.
     #[pyo3(signature = (bundle_path, source_session = None))]
     pub fn verify_bundle(
         &self,
@@ -140,6 +152,11 @@ impl PyTermtrace {
     }
 
     /// Verify a completed session's structure and evidence bindings offline.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the verification report cannot be serialized;
+    /// verification findings are part of the returned report.
     #[pyo3(signature = (session_path, level = None))]
     pub fn verify_session(
         &self,
@@ -175,6 +192,11 @@ impl PyTermtrace {
     }
 
     /// Recover the longest integrity-checked event prefix from a damaged session.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when no integrity-checked prefix can be recovered and
+    /// published to `destination`, or the report cannot be serialized.
     pub fn recover_session(
         &self,
         py: Python<'_>,
@@ -198,6 +220,11 @@ impl PyTermtrace {
     }
 
     /// List registered sessions in the default user registry.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the default registry cannot be opened or read, or
+    /// the entries cannot be serialized.
     #[pyo3(signature = (include_all = None))]
     pub fn registry_list(&self, py: Python<'_>, include_all: Option<bool>) -> PyResult<String> {
         let all = include_all.unwrap_or(false);
@@ -217,6 +244,11 @@ impl PyTermtrace {
     }
 
     /// Resolve a friendly session name to its registered session path.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the default registry cannot be opened; an
+    /// unresolvable name returns `None`.
     pub fn registry_resolve(&self, py: Python<'_>, name: String) -> PyResult<Option<String>> {
         py.detach(move || {
             let reg = RegistryService::open_default().map_err(to_py_err)?;
@@ -232,6 +264,12 @@ impl PyTermtrace {
     }
 
     /// Register a friendly name for an existing canonical session directory.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the default registry cannot be opened, `name` is
+    /// invalid or already registered, `session_path` is not a registrable session, or the entry
+    /// cannot be serialized.
     pub fn registry_register(
         &self,
         py: Python<'_>,
@@ -255,6 +293,11 @@ impl PyTermtrace {
     }
 
     /// Remove a friendly name binding.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the default registry cannot be opened; a failed
+    /// removal returns `False`.
     pub fn registry_remove(&self, py: Python<'_>, name: String) -> PyResult<bool> {
         py.detach(move || {
             let reg = RegistryService::open_default().map_err(to_py_err)?;
@@ -265,6 +308,11 @@ impl PyTermtrace {
     }
 
     /// Plan or execute garbage collection over completed sessions.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the default registry cannot be opened, garbage
+    /// collection cannot be planned or applied, or the report cannot be serialized.
     #[pyo3(signature = (older_than_days = None, keep_latest = None, max_completed_bytes = None, apply = None))]
     pub fn registry_gc(
         &self,
@@ -295,6 +343,11 @@ impl PyTermtrace {
     }
 
     /// Bundle an aggregate tmux recording into an evidentiary streaming bundle.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the aggregate tmux recording cannot be bundled or
+    /// published, or the report cannot be serialized.
     pub fn tmux_bundle(
         &self,
         py: Python<'_>,
@@ -318,6 +371,10 @@ impl PyTermtrace {
     }
 
     /// Verify an aggregate tmux streaming bundle against its manifest.
+    ///
+    /// # Errors
+    ///
+    /// Never raises; failed verification returns `False`.
     pub fn tmux_verify_bundle(
         &self,
         py: Python<'_>,
@@ -335,6 +392,10 @@ impl PyTermtrace {
     }
 
     /// Probe runtime system capabilities across engine, media, and evidence signers.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass only when the capability report cannot be serialized.
     pub fn probe_capabilities(&self, py: Python<'_>) -> PyResult<String> {
         py.detach(move || {
             let report = SystemService::probe_capabilities();

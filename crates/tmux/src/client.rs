@@ -482,8 +482,9 @@ fn parse_row(row: &[u8]) -> Result<PaneRow> {
     };
 
     let text = |field: &[u8]| -> Result<String> {
-        return String::from_utf8(field.to_vec())
-            .map_err(|_| return Error::Tmux("tmux returned a non-UTF-8 pane field".to_owned()));
+        return String::from_utf8(field.to_vec()).map_err(|source| {
+            return Error::invalid_with_source("tmux returned a non-UTF-8 pane field", source);
+        });
     };
 
     let number = |field: &[u8]| -> Option<u32> {
@@ -586,6 +587,10 @@ pub fn shell_quote(bytes: &[u8]) -> Vec<u8> {
 pub fn config_quote(bytes: &[u8]) -> String {
     let mut quoted = String::from("\"");
     for byte in bytes {
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "`fmt::Write` for `String` never fails, as documented on `format!`, and `drop_non_drop` rejects dropping the unit result"
+        )]
         let _ = write!(quoted, "\\{byte:03o}");
     }
 

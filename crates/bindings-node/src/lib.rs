@@ -184,6 +184,11 @@ pub struct JsScreen {
 #[napi]
 impl JsScreen {
     /// Return the current presented screen frame.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session cannot be attached, the frame cannot be captured, or the background
+    /// worker panics.
     #[napi]
     pub async fn frame(&self) -> napi::Result<JsFrame> {
         let terminal = self.terminal.clone();
@@ -206,6 +211,11 @@ impl JsScreen {
     }
 
     /// Return the plain text of the latest presented frame.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session cannot be attached, the frame cannot be captured, or the background
+    /// worker panics.
     #[napi]
     pub async fn text(&self) -> napi::Result<String> {
         let terminal = self.terminal.clone();
@@ -223,6 +233,11 @@ impl JsScreen {
     }
 
     /// Wait until the presented screen contains the specified text pattern.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session cannot be attached, the text is not presented before the timeout, or
+    /// the background worker panics.
     #[napi]
     pub async fn wait_for_text(
         &self,
@@ -256,6 +271,11 @@ impl JsScreen {
     }
 
     /// Wait until the presented screen remains unchanged for the default idle interval.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session cannot be attached, the screen does not settle before the timeout, or
+    /// the background worker panics.
     #[napi]
     pub async fn wait_for_idle(&self, timeout_ms: Option<u32>) -> napi::Result<JsResolvedState> {
         let terminal = self.terminal.clone();
@@ -320,6 +340,10 @@ impl JsActionBuilder {
     }
 
     /// Append a key chord (e.g. 'Enter', 'ctrl+c', 'ctrl+shift+F5').
+    ///
+    /// # Errors
+    ///
+    /// Fails when `key` is not a valid key chord or names an unknown key.
     #[napi]
     pub fn send_key(&self, key: String) -> napi::Result<()> {
         let chord = parse_key(&key)?;
@@ -367,6 +391,11 @@ impl JsActionBuilder {
     }
 
     /// Execute the action sequence and return the terminating screen frame.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session cannot be attached, the recorder rejects or cannot complete the
+    /// queued actions, or the background worker panics.
     #[napi]
     pub async fn execute(&self) -> napi::Result<Option<JsResolvedState>> {
         let request = std::mem::take(
@@ -429,6 +458,12 @@ impl JsSession {
     }
 
     /// Click mouse button at a terminal cell.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `column` or `row` exceeds 65535, `button` is unknown, the session cannot be
+    /// attached, the recorder rejects the click (with `strict`, when the application does not
+    /// report mouse input), or the background worker panics.
     #[napi]
     pub async fn pointer_click(
         &self,
@@ -439,11 +474,13 @@ impl JsSession {
     ) -> napi::Result<()> {
         let terminal = self.terminal.clone();
         let path = self.session_path.clone();
-        let col_val = u16::try_from(column).map_err(|_| {
-            return napi::Error::from_reason(format!("column {column} exceeds maximum 65535"));
+        let col_val = u16::try_from(column).map_err(|error| {
+            return napi::Error::from_reason(format!(
+                "column {column} exceeds maximum 65535: {error}"
+            ));
         })?;
-        let row_val = u16::try_from(row).map_err(|_| {
-            return napi::Error::from_reason(format!("row {row} exceeds maximum 65535"));
+        let row_val = u16::try_from(row).map_err(|error| {
+            return napi::Error::from_reason(format!("row {row} exceeds maximum 65535: {error}"));
         })?;
         let btn = match button
             .as_deref()
@@ -478,6 +515,12 @@ impl JsSession {
     }
 
     /// Scroll mouse wheel at a terminal cell.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `column` or `row` exceeds 65535, the session cannot be attached, the recorder
+    /// rejects the scroll (with `strict`, when the application does not report mouse input), or the
+    /// background worker panics.
     #[napi]
     pub async fn pointer_scroll(
         &self,
@@ -488,11 +531,13 @@ impl JsSession {
     ) -> napi::Result<()> {
         let terminal = self.terminal.clone();
         let path = self.session_path.clone();
-        let col_val = u16::try_from(column).map_err(|_| {
-            return napi::Error::from_reason(format!("column {column} exceeds maximum 65535"));
+        let col_val = u16::try_from(column).map_err(|error| {
+            return napi::Error::from_reason(format!(
+                "column {column} exceeds maximum 65535: {error}"
+            ));
         })?;
-        let row_val = u16::try_from(row).map_err(|_| {
-            return napi::Error::from_reason(format!("row {row} exceeds maximum 65535"));
+        let row_val = u16::try_from(row).map_err(|error| {
+            return napi::Error::from_reason(format!("row {row} exceeds maximum 65535: {error}"));
         })?;
         let line_count = i16::try_from(lines.unwrap_or(1)).unwrap_or(1);
         let is_strict = strict.unwrap_or(false);
@@ -511,6 +556,11 @@ impl JsSession {
     }
 
     /// Report terminal focus state.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session cannot be attached, the recorder rejects the focus report (with
+    /// `strict`, when the application does not report focus), or the background worker panics.
     #[napi]
     pub async fn pointer_focus(&self, focused: bool, strict: Option<bool>) -> napi::Result<()> {
         let terminal = self.terminal.clone();
@@ -531,6 +581,11 @@ impl JsSession {
     }
 
     /// Atomically publish visual representations (PNG, SVG, HTML, TXT, JSON) of a state point.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a format name is unknown, the state cannot be resolved or rendered, the
+    /// destination cannot be published, or the background worker panics.
     #[napi]
     pub async fn save(
         &self,
@@ -586,6 +641,11 @@ impl JsSession {
     }
 
     /// Export session terminal playback as an asciicast v2 file.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the event log cannot be read or the cast cannot be written, or the background
+    /// worker panics.
     #[napi]
     pub async fn export_asciicast(&self, output_path: String) -> napi::Result<()> {
         let session_path = PathBuf::from(&self.session_path);
@@ -601,6 +661,10 @@ impl JsSession {
     }
 
     /// Create a compressed evidence bundle (.tar.zst) for archiving or forensics.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the bundle cannot be created or published, or the background worker panics.
     #[napi]
     pub async fn create_bundle(&self, output_path: String) -> napi::Result<()> {
         let session_path = PathBuf::from(&self.session_path);
@@ -617,6 +681,11 @@ impl JsSession {
     }
 
     /// Compute semantic difference between two presented states and return JSON.
+    ///
+    /// # Errors
+    ///
+    /// Fails when either state hash cannot be resolved, the session's evidence cannot be validated
+    /// or replayed, the report cannot be serialized, or the background worker panics.
     #[napi]
     pub async fn diff(&self, from_hash: String, to_hash: String) -> napi::Result<String> {
         let session_path = PathBuf::from(&self.session_path);
@@ -639,6 +708,11 @@ impl JsSession {
     }
 
     /// Read raw child PTY output bytes using an optional byte offset cursor.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `offset` is negative or beyond the JavaScript safe-integer range, the output page
+    /// cannot be read, or the background worker panics.
     #[napi]
     pub async fn read_output(
         &self,
@@ -678,6 +752,11 @@ impl JsSession {
     }
 
     /// Wait for exact child output bytes to appear in the canonical stream.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `pattern` is empty, the event log is invalid, the child exits or the session
+    /// completes before the bytes appear, the timeout elapses, or the background worker panics.
     #[napi]
     pub async fn wait_for_output(
         &self,
@@ -699,6 +778,11 @@ impl JsSession {
     }
 
     /// Read canonical event records as pretty JSON starting at an optional event sequence.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `cursor` is negative or beyond the JavaScript safe-integer range, the event page
+    /// cannot be read or serialized, or the background worker panics.
     #[napi]
     pub async fn read_events(
         &self,
@@ -733,6 +817,11 @@ impl JsSession {
     }
 
     /// Explain VT and semantic evidence around a target state point.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the target state cannot be resolved, the session's evidence cannot be validated
+    /// or replayed, the report cannot be serialized, or the background worker panics.
     #[napi]
     pub async fn explain(
         &self,
@@ -757,6 +846,11 @@ impl JsSession {
     }
 
     /// Run conservative evidence-backed rendering diagnostics on the session.
+    ///
+    /// # Errors
+    ///
+    /// Fails when visual or canonical evidence fails validation or replay, the report cannot be
+    /// serialized, or the background worker panics.
     #[napi]
     pub async fn diagnose(&self, broad_change_percent: Option<u32>) -> napi::Result<String> {
         let session_path = PathBuf::from(&self.session_path);
@@ -774,6 +868,11 @@ impl JsSession {
     }
 
     /// Perform full triage analysis on the most recent canonical action.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the most recent action cannot be analyzed from validated evidence, the report
+    /// cannot be serialized, or the background worker panics.
     #[napi]
     pub async fn last_action(&self, broad_change_percent: Option<u32>) -> napi::Result<String> {
         let session_path = PathBuf::from(&self.session_path);
@@ -790,6 +889,11 @@ impl JsSession {
     }
 
     /// Build a bounded page of timeline entries as pretty JSON.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the session's evidence cannot be read, validated, or replayed, the page cannot be
+    /// serialized, or the background worker panics.
     #[napi]
     pub async fn timeline_page(
         &self,
@@ -852,6 +956,10 @@ impl JsRecording {
     }
 
     /// Access screen inspection capabilities.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached.
     #[napi]
     pub fn screen(&self) -> napi::Result<JsScreen> {
         if !self.is_active() {
@@ -867,6 +975,10 @@ impl JsRecording {
     }
 
     /// Create an action builder for input automation.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached.
     #[napi]
     pub fn actions(&self) -> napi::Result<JsActionBuilder> {
         if !self.is_active() {
@@ -882,6 +994,10 @@ impl JsRecording {
     }
 
     /// Get a logical session reference.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached.
     #[napi]
     pub fn session(&self) -> napi::Result<JsSession> {
         if !self.is_active() {
@@ -898,6 +1014,11 @@ impl JsRecording {
     }
 
     /// Click mouse button at a terminal cell.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `JsSession::pointer_click`.
     #[napi]
     pub async fn pointer_click(
         &self,
@@ -912,6 +1033,11 @@ impl JsRecording {
     }
 
     /// Scroll mouse wheel at a terminal cell.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `JsSession::pointer_scroll`.
     #[napi]
     pub async fn pointer_scroll(
         &self,
@@ -926,6 +1052,11 @@ impl JsRecording {
     }
 
     /// Report terminal focus state.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `JsSession::pointer_focus`.
     #[napi]
     pub async fn pointer_focus(&self, focused: bool, strict: Option<bool>) -> napi::Result<()> {
         let sess = self.session()?;
@@ -934,6 +1065,11 @@ impl JsRecording {
     }
 
     /// Atomically publish visual representations (PNG, SVG, HTML, TXT, JSON) of a state point.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `JsSession::save`.
     #[napi]
     pub async fn save(
         &self,
@@ -950,6 +1086,11 @@ impl JsRecording {
     }
 
     /// Read raw child PTY output bytes using an optional byte offset cursor.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `JsSession::read_output`.
     #[napi]
     pub async fn read_output(
         &self,
@@ -962,6 +1103,11 @@ impl JsRecording {
     }
 
     /// Wait for exact child output bytes to appear in the canonical stream.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `JsSession::wait_for_output`.
     #[napi]
     pub async fn wait_for_output(
         &self,
@@ -974,6 +1120,11 @@ impl JsRecording {
     }
 
     /// Read canonical event records as pretty JSON starting at an optional event sequence.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `JsSession::read_events`.
     #[napi]
     pub async fn read_events(
         &self,
@@ -986,6 +1137,11 @@ impl JsRecording {
     }
 
     /// Explain VT and semantic evidence around a target state point.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `JsSession::explain`.
     #[napi]
     pub async fn explain(
         &self,
@@ -998,6 +1154,11 @@ impl JsRecording {
     }
 
     /// Run conservative evidence-backed rendering diagnostics on the session.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `JsSession::diagnose`.
     #[napi]
     pub async fn diagnose(&self, broad_change_percent: Option<u32>) -> napi::Result<String> {
         let sess = self.session()?;
@@ -1006,6 +1167,11 @@ impl JsRecording {
     }
 
     /// Perform full triage analysis on the most recent canonical action.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `JsSession::last_action`.
     #[napi]
     pub async fn last_action(&self, broad_change_percent: Option<u32>) -> napi::Result<String> {
         let sess = self.session()?;
@@ -1014,6 +1180,11 @@ impl JsRecording {
     }
 
     /// Stop the recording session and wait for validated completion evidence.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recorder does not stop with validated completion within the timeout, leaving
+    /// the recording attached, or the background worker panics.
     #[napi]
     pub async fn stop(&self, timeout_ms: Option<u32>) -> napi::Result<()> {
         let timeout = timeout_ms.map_or(defaults::STOP_TIMEOUT, |millis| {
@@ -1039,6 +1210,11 @@ impl JsRecording {
     }
 
     /// Forcefully terminate and reap the recorded process group and owned recorder.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the process group or recorder cannot be terminated and reaped, leaving the
+    /// recording attached.
     #[napi]
     pub fn force_close(&self) -> napi::Result<()> {
         let Some(mut session) = self.take() else {
@@ -1054,12 +1230,20 @@ impl JsRecording {
     }
 
     /// Explicit resource management disposal for `await using`.
+    ///
+    /// # Errors
+    ///
+    /// Fails as `JsRecording::stop` with the default timeout.
     #[napi]
     pub async fn async_dispose(&self) -> napi::Result<()> {
         return self.stop(None).await;
     }
 
     /// Detach the recording so it continues running in the background.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached.
     #[napi]
     pub fn detach(&self) -> napi::Result<()> {
         let session = self.take().ok_or_else(|| {
@@ -1108,6 +1292,11 @@ impl JsTermtrace {
     }
 
     /// Launch a new recorded command session.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `rows` or `cols` exceeds 65535, the command cannot be launched and recorded, or
+    /// the background worker panics.
     #[napi]
     pub async fn record(
         &self,
@@ -1121,8 +1310,10 @@ impl JsTermtrace {
         let cmd_os: Vec<OsString> = command.into_iter().map(OsString::from).collect();
         let geometry = |value: Option<u32>, default: u16, name: &str| {
             return value.map_or(Ok(default), |value| {
-                return u16::try_from(value).map_err(|_| {
-                    return napi::Error::from_reason(format!("{name} {value} exceeds 65535"));
+                return u16::try_from(value).map_err(|error| {
+                    return napi::Error::from_reason(format!(
+                        "{name} {value} exceeds 65535: {error}"
+                    ));
                 });
             });
         };
@@ -1152,6 +1343,10 @@ impl JsTermtrace {
     }
 
     /// Attach to an existing session directory.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `session_path` is not an attachable session or the background worker panics.
     #[napi]
     pub async fn attach(&self, session_path: String) -> napi::Result<JsSession> {
         let terminal = self.terminal.clone();
@@ -1173,6 +1368,10 @@ impl JsTermtrace {
     }
 
     /// Verify an evidence bundle (.tar.zst or directory) and return whether it passed integrity verification.
+    ///
+    /// # Errors
+    ///
+    /// Fails only when the background worker panics; failed verification returns `false`.
     #[napi]
     pub async fn verify_bundle(
         &self,
@@ -1198,6 +1397,11 @@ impl JsTermtrace {
     }
 
     /// Verify a completed session's structure and evidence bindings offline.
+    ///
+    /// # Errors
+    ///
+    /// Fails only when the report cannot be serialized or the background worker panics;
+    /// verification findings are part of the returned report.
     #[napi]
     pub async fn verify_session(
         &self,
@@ -1230,6 +1434,11 @@ impl JsTermtrace {
     }
 
     /// Recover the longest integrity-checked event prefix from a damaged session.
+    ///
+    /// # Errors
+    ///
+    /// Fails when no integrity-checked prefix can be recovered and published to `destination`, the
+    /// report cannot be serialized, or the background worker panics.
     #[napi]
     pub async fn recover_session(
         &self,
@@ -1250,6 +1459,11 @@ impl JsTermtrace {
     }
 
     /// List registered sessions in the default user registry.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the default registry cannot be opened or read, the entries cannot be serialized,
+    /// or the background worker panics.
     #[napi]
     pub async fn registry_list(&self, include_all: Option<bool>) -> napi::Result<String> {
         let all = include_all.unwrap_or(false);
@@ -1266,6 +1480,11 @@ impl JsTermtrace {
     }
 
     /// Resolve a friendly session name to its registered session path.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the default registry cannot be opened or the background worker panics; an
+    /// unresolvable name returns `null`.
     #[napi]
     pub async fn registry_resolve(&self, name: String) -> napi::Result<Option<String>> {
         return tokio::task::spawn_blocking(move || {
@@ -1284,6 +1503,11 @@ impl JsTermtrace {
     }
 
     /// Register a friendly name for an existing canonical session directory.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the default registry cannot be opened, `name` is invalid or already registered,
+    /// `session_path` is not a registrable session, or the background worker panics.
     #[napi]
     pub async fn registry_register(
         &self,
@@ -1304,6 +1528,11 @@ impl JsTermtrace {
     }
 
     /// Remove a friendly name binding.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the default registry cannot be opened or the background worker panics; a failed
+    /// removal returns `false`.
     #[napi]
     pub async fn registry_remove(&self, name: String) -> napi::Result<bool> {
         return tokio::task::spawn_blocking(move || {
@@ -1317,6 +1546,11 @@ impl JsTermtrace {
     }
 
     /// Plan or execute garbage collection over completed sessions.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the default registry cannot be opened, garbage collection cannot be planned or
+    /// applied, the report cannot be serialized, or the background worker panics.
     #[napi]
     pub async fn registry_gc(
         &self,
@@ -1342,6 +1576,11 @@ impl JsTermtrace {
     }
 
     /// Bundle an aggregate tmux recording into an evidentiary streaming bundle.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the aggregate tmux recording cannot be bundled or published, the report cannot be
+    /// serialized, or the background worker panics.
     #[napi]
     pub async fn tmux_bundle(
         &self,
@@ -1362,6 +1601,10 @@ impl JsTermtrace {
     }
 
     /// Verify an aggregate tmux streaming bundle against its manifest.
+    ///
+    /// # Errors
+    ///
+    /// Fails only when the background worker panics; failed verification returns `false`.
     #[napi]
     pub async fn tmux_verify_bundle(
         &self,
@@ -1381,6 +1624,10 @@ impl JsTermtrace {
     }
 
     /// Probe runtime system capabilities across engine, media, and evidence signers.
+    ///
+    /// # Errors
+    ///
+    /// Fails only when the report cannot be serialized or the background worker panics.
     #[napi]
     pub async fn probe_capabilities(&self) -> napi::Result<String> {
         return tokio::task::spawn_blocking(move || {

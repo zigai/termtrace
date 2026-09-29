@@ -19,6 +19,7 @@ use std::{
 };
 use termtrace_control::control_endpoint_is_reachable;
 use termtrace_model::{
+    error::ThreadPanic,
     execution::{
         layout::SessionLayout,
         session::{TmuxPaneLaunchKind, TmuxPaneProvenance, TMUX_PANE_PROVENANCE_VERSION},
@@ -93,8 +94,12 @@ impl PaneRecording {
 /// # Errors
 /// Returns a missing or disabled integration, a foreign executable, or tmux failures.
 pub fn prepare(request: PaneRunRequest) -> Result<PaneLaunch> {
-    let pane = env::var("TMUX_PANE")
-        .map_err(|_| return Error::invalid("termtrace tmux run must execute inside a tmux pane"))?;
+    let pane = env::var("TMUX_PANE").map_err(|source| {
+        return Error::invalid_with_source(
+            "termtrace tmux run must execute inside a tmux pane",
+            source,
+        );
+    })?;
 
     if !valid_identifier(&pane, b'%') {
         return Err(Error::invalid(
@@ -142,8 +147,11 @@ pub fn prepare(request: PaneRunRequest) -> Result<PaneLaunch> {
     let provenance = capture_provenance(&client, &pane, launch_kind)?;
     let configured_term = client.option_text(options::TERM)?;
     let term = if configured_term.is_empty() {
-        env::var("TERM").map_err(|_| {
-            return Error::invalid("tmux pane did not provide a terminal identity in TERM");
+        env::var("TERM").map_err(|source| {
+            return Error::invalid_with_source(
+                "tmux pane did not provide a terminal identity in TERM",
+                source,
+            );
         })?
     } else {
         configured_term
@@ -404,9 +412,11 @@ impl Publication {
     pub fn finish(self) -> Result<()> {
         let _cancelled = self.cancel.try_send(());
 
-        return self
-            .thread
-            .join()
-            .map_err(|_| return Error::invalid("tmux recording publication thread panicked"))?;
+        return self.thread.join().map_err(|payload| {
+            return Error::invalid_with_source(
+                "tmux recording publication thread panicked",
+                ThreadPanic::from_payload(payload),
+            );
+        })?;
     }
 }

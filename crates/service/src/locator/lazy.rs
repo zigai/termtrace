@@ -24,11 +24,17 @@ impl Session {
     }
 
     /// Bind a nonempty literal text query without performing I/O.
+    ///
+    /// # Errors
+    /// Returns `QueryError::InvalidQuery` when `text` is empty.
     pub fn get_by_text(&self, text: impl Into<String>) -> Result<Locator<'_>, QueryError> {
         return Ok(self.locator(LocatorSpec::text(text)?));
     }
 
     /// Bind an already compiled host-native regular expression without performing I/O.
+    ///
+    /// # Errors
+    /// Returns `QueryError::InvalidQuery` when `regex` can produce a zero-width match.
     pub fn get_by_regex(&self, regex: Regex) -> Result<Locator<'_>, QueryError> {
         return Ok(self.locator(LocatorSpec::regex(regex)?));
     }
@@ -40,6 +46,9 @@ impl Session {
     }
 
     /// Bind one exact absolute region without performing I/O.
+    ///
+    /// # Errors
+    /// Returns `QueryError::InvalidQuery` when `region` is empty.
     pub fn region(&self, region: ScreenRegion) -> Result<Locator<'_>, QueryError> {
         return Ok(self.locator(LocatorSpec::default().in_region(region)?));
     }
@@ -66,6 +75,10 @@ impl<'session> Locator<'session> {
     }
 
     /// Compose another pure specification without performing I/O.
+    ///
+    /// # Errors
+    /// Returns `QueryError::InvalidQuery` when both specifications have text matchers, their row
+    /// scopes conflict, or their regions do not intersect.
     pub fn and(&self, other: LocatorSpec) -> Result<Self, QueryError> {
         return Ok(Self {
             session: self.session,
@@ -74,6 +87,10 @@ impl<'session> Locator<'session> {
     }
 
     /// Capture exactly one latest-presented frame and evaluate it once.
+    ///
+    /// # Errors
+    /// Returns `LocatorError::Capture` when the frame cannot be captured and `LocatorError::Query`
+    /// when the specification does not fit the captured frame.
     pub fn evaluate(&self) -> Result<QueryResult, LocatorError> {
         let frame = self
             .session
@@ -87,16 +104,26 @@ impl<'session> Locator<'session> {
     }
 
     /// Evaluate all matches after exactly one capture.
+    ///
+    /// # Errors
+    /// Returns the errors of [`Self::evaluate`].
     pub fn all(&self) -> Result<Arc<[ScreenMatch]>, LocatorError> {
         return Ok(self.evaluate()?.matches);
     }
 
     /// Count matches after exactly one capture.
+    ///
+    /// # Errors
+    /// Returns the errors of [`Self::evaluate`].
     pub fn count(&self) -> Result<usize, LocatorError> {
         return Ok(self.evaluate()?.count());
     }
 
     /// Strictly require one match after exactly one capture.
+    ///
+    /// # Errors
+    /// Returns the errors of [`Self::evaluate`], and `LocatorError::Query` when there is not
+    /// exactly one match.
     pub fn single(&self) -> Result<ScreenMatch, LocatorError> {
         return self
             .evaluate()?
@@ -106,6 +133,9 @@ impl<'session> Locator<'session> {
     }
 
     /// Explicitly select the first match after exactly one capture.
+    ///
+    /// # Errors
+    /// Returns the errors of [`Self::evaluate`], and `LocatorError::Query` when there is no match.
     pub fn first(&self) -> Result<ScreenMatch, LocatorError> {
         return self
             .evaluate()?
@@ -115,6 +145,10 @@ impl<'session> Locator<'session> {
     }
 
     /// Explicitly select one zero-based match after exactly one capture.
+    ///
+    /// # Errors
+    /// Returns the errors of [`Self::evaluate`], and `LocatorError::Query` when `index` is out of
+    /// bounds.
     pub fn nth(&self, index: usize) -> Result<ScreenMatch, LocatorError> {
         return self
             .evaluate()?
@@ -124,6 +158,9 @@ impl<'session> Locator<'session> {
     }
 
     /// Poll exact one-frame evaluations and return the satisfying frame without recapture.
+    ///
+    /// # Errors
+    /// Returns the errors of [`Self::wait_stable`].
     pub fn wait(
         &self,
         timeout: Duration,
@@ -133,6 +170,11 @@ impl<'session> Locator<'session> {
     }
 
     /// Poll until a query remains satisfied in one unchanged semantic state.
+    ///
+    /// # Errors
+    /// Returns `LocatorError::Query` when `timeout` or `interval` is zero, `stable_for` exceeds
+    /// `timeout`, or the deadline overflows, `LocatorError::Timeout` with the last frame when the
+    /// query is not satisfied in time, and capture or query errors as they occur.
     pub fn wait_stable(
         &self,
         timeout: Duration,

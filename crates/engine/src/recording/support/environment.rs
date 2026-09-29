@@ -79,7 +79,7 @@ pub fn read_environment_spec(path: &Path) -> Result<EnvironmentSpec> {
 ///
 /// Returns an error for oversized input, invalid JSON, or invalid environment policy.
 pub fn parse_environment_spec(bytes: &[u8], source_path: &Path) -> Result<EnvironmentSpec> {
-    if bytes.len() > MAX_SPEC_BYTES as usize {
+    if usize::try_from(MAX_SPEC_BYTES).is_ok_and(|max| return bytes.len() > max) {
         return Err(environment_error(
             "specification exceeds the 4 MiB safety limit",
         ));

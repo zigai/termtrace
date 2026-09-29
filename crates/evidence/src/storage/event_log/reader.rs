@@ -372,6 +372,12 @@ impl EventLogCursor {
     /// This validates only a suffix: it can never finish as full-log operation verification.
     /// The caller must obtain the position from the live actor, not imported file metadata,
     /// and validate the suffix against a later actor boundary before publishing records.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the source identity differs from the actor's, the cursor has already
+    /// read records or `position` precedes the bytes read so far, the cursor hash is not valid
+    /// BLAKE3 hex, or seeking fails.
     pub fn resume_live_suffix(
         &mut self,
         position: &LiveEventCursor,
@@ -388,8 +394,13 @@ impl EventLogCursor {
             ));
         }
 
-        let hash = Hash::from_hex(&position.event_hash).map_err(|_| {
-            return invalid_log(&self.path, self.line_number, "invalid live cursor hash");
+        let hash = Hash::from_hex(&position.event_hash).map_err(|source| {
+            return Error::InvalidEventLog {
+                path: self.path.clone(),
+                line: self.line_number,
+                reason: "invalid live cursor hash".to_owned(),
+                source: Some(Box::new(source)),
+            };
         })?;
 
         self.file
@@ -414,6 +425,11 @@ impl EventLogCursor {
     }
 
     /// Require the path still names the actor's descriptor and the same canonical header.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the opened file's device, inode, or header hash differs from the
+    /// actor's, or the path no longer names the opened file at its read length.
     pub fn validate_live_source(&self, device: u64, inode: u64, header_hash: &str) -> Result<()> {
         if self.opened_metadata.dev() != device
             || self.opened_metadata.ino() != inode
@@ -429,6 +445,11 @@ impl EventLogCursor {
     }
 
     /// Reject replacement, symlinks, and truncation of the open source.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the path cannot be inspected, no longer names the opened regular file,
+    /// or is shorter than the bytes already read.
     pub fn validate_source_identity(&self) -> Result<()> {
         let current = symlink_metadata(&self.path).map_err(|source| {
             return Error::Filesystem {
@@ -469,6 +490,11 @@ impl EventLogCursor {
     }
 
     /// Require the validated suffix to end at an independently trusted actor position.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the source identity changed, or the validated suffix's sequence, hash,
+    /// offset, or timestamp differs from `boundary`.
     pub fn validate_live_boundary(&self, boundary: &LiveEventCursor) -> Result<()> {
         self.validate_boundary(boundary.next_event_seq, &boundary.event_hash)?;
         if self.position_offset() != boundary.file_offset
@@ -484,6 +510,11 @@ impl EventLogCursor {
     }
 
     /// Compare a validated chain endpoint with a separately validated authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the source identity changed or the validated chain does not end at
+    /// `next_event_seq` with `event_hash`.
     pub fn validate_boundary(&self, next_event_seq: u64, event_hash: &str) -> Result<()> {
         self.validate_source_identity()?;
         if self.validation.expected_seq != next_event_seq
@@ -640,6 +671,11 @@ impl EventLogCursor {
     }
 
     /// Require a complete file rather than an appendable live prefix.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the cursor was resumed from a live suffix, the file ends in an
+    /// unterminated record, or the file changed after it was opened.
     pub fn finish(self) -> Result<Vec<PendingOperation>> {
         if !self.validation.validate_operations {
             return Err(invalid_log(

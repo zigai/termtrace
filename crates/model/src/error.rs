@@ -1,6 +1,6 @@
 //! Validation errors for caller-authored model values.
 
-use std::{error::Error as StdError, fmt};
+use std::{any::Any, error::Error as StdError, fmt};
 
 /// A precise failure to validate a caller-authored model value.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -97,3 +97,41 @@ impl fmt::Display for ModelValidationError {
 }
 
 impl StdError for ModelValidationError {}
+
+/// A joined thread panicked, retaining the panic message when the payload carried one.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadPanic {
+    message: Option<String>,
+}
+
+impl ThreadPanic {
+    /// Capture the panic message from the payload returned by `JoinHandle::join`.
+    #[must_use]
+    pub fn from_payload(payload: Box<dyn Any + Send>) -> Self {
+        let message = match payload.downcast::<String>() {
+            Ok(message) => Some(*message),
+            Err(payload) => payload
+                .downcast_ref::<&str>()
+                .map(|message| return (*message).to_owned()),
+        };
+
+        return Self { message };
+    }
+
+    /// Panic message, when the payload was a string.
+    #[must_use]
+    pub fn message(&self) -> Option<&str> {
+        return self.message.as_deref();
+    }
+}
+
+impl fmt::Display for ThreadPanic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.message {
+            Some(message) => return write!(f, "thread panicked: {message}"),
+            None => return f.write_str("thread panicked with a non-string payload"),
+        }
+    }
+}
+
+impl StdError for ThreadPanic {}

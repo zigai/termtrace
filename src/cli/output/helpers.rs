@@ -26,6 +26,10 @@ pub(in crate::cli) fn id_list(values: &[u64]) -> String {
             output.push(',');
         }
 
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "`fmt::Write` for `String` never fails, as documented on `format!`, and `drop_non_drop` rejects dropping the unit result"
+        )]
         let _ = write!(output, "{value}");
     }
 

@@ -11,6 +11,10 @@ use termtrace_sdk::input::{ActRequest, KeyChord};
 use termtrace_sdk::screen::ScreenPredicate;
 
 /// Parse one key chord with the shared grammar, e.g. `Enter`, `ctrl+c`, `ctrl+shift+F5`.
+///
+/// # Errors
+///
+/// Returns `ValueError` when `key` is not a valid key chord or names an unknown key.
 pub fn parse_key(key: &str) -> PyResult<KeyChord> {
     return KeyChord::parse(key)
         .map_err(|error| return PyValueError::new_err(error.to_string()))?
@@ -69,6 +73,10 @@ impl PyActionBuilder {
     }
 
     /// Append a key chord (e.g. 'Enter', 'ctrl+c', 'ctrl+shift+F5').
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` when `key` is not a valid key chord or names an unknown key.
     pub fn send_key(mut slf: PyRefMut<'_, Self>, key: String) -> PyResult<PyRefMut<'_, Self>> {
         let chord = parse_key(&key)?;
         slf.request = std::mem::take(&mut slf.request).key(chord);
@@ -96,6 +104,10 @@ impl PyActionBuilder {
     }
 
     /// Wait until the screen contains the specified pattern after applying input.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` when `timeout_secs` is negative, not finite, or out of range.
     #[pyo3(signature = (pattern, timeout_secs = None))]
     pub fn until_screen(
         mut slf: PyRefMut<'_, Self>,
@@ -109,6 +121,10 @@ impl PyActionBuilder {
     }
 
     /// Wait until the screen is idle and unchanged after applying input.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` when `timeout_secs` is negative, not finite, or out of range.
     #[pyo3(signature = (stable_for_ms = None, timeout_secs = None))]
     pub fn until_idle(
         mut slf: PyRefMut<'_, Self>,
@@ -122,6 +138,11 @@ impl PyActionBuilder {
     }
 
     /// Execute the action sequence and return the terminating screen frame.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the session cannot be attached or the recorder
+    /// rejects or cannot complete the queued actions.
     pub fn execute(&mut self, py: Python<'_>) -> PyResult<Option<PyResolvedState>> {
         let request = std::mem::take(&mut self.request);
 

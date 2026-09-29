@@ -159,8 +159,9 @@ fn terminal_pid(root: Option<u32>) -> StdResult<Option<(u32, PathBuf)>, String> 
 
 fn mapped_fonts(pid: u32) -> StdResult<BTreeSet<(PathBuf, u64, Option<u64>)>, String> {
     let maps = read_bounded(&PathBuf::from(format!("/proc/{pid}/maps")), 4 * 1024 * 1024)?;
-    let text = str::from_utf8(&maps)
-        .map_err(|_| return "process_maps_path_encoding_unavailable".to_owned())?;
+    let text = str::from_utf8(&maps).map_err(limitation(|| {
+        return "process_maps_path_encoding_unavailable".to_owned();
+    }))?;
 
     let mut paths = BTreeSet::new();
     for line in text.lines() {
@@ -218,10 +219,10 @@ fn resource_identity(
     budget: &mut u64,
     cancelled: &AtomicBool,
 ) -> StdResult<ResourceIdentity, String> {
-    let mut file = File::open(opened_path).map_err(|_| format!("{kind}_unreadable"))?;
+    let mut file = File::open(opened_path).map_err(limitation(|| format!("{kind}_unreadable")))?;
     let before = file
         .metadata()
-        .map_err(|_| format!("{kind}_metadata_unavailable"))?;
+        .map_err(limitation(|| format!("{kind}_metadata_unavailable")))?;
 
     if !before.is_file() || before.len() > MAX_RESOURCE_BYTES {
         return Err(format!("{kind}_not_regular_or_exceeds_256_MiB"));
@@ -249,7 +250,7 @@ fn resource_identity(
 
         let count = file
             .read(&mut buffer)
-            .map_err(|_| format!("{kind}_hash_unavailable"))?;
+            .map_err(limitation(|| format!("{kind}_hash_unavailable")))?;
         if count == 0 {
             break;
         }
@@ -269,7 +270,7 @@ fn resource_identity(
 
     let after = file
         .metadata()
-        .map_err(|_| format!("{kind}_metadata_unavailable"))?;
+        .map_err(limitation(|| format!("{kind}_metadata_unavailable")))?;
 
     if total != before.len()
         || before.len() != after.len()
@@ -292,12 +293,22 @@ fn read_bounded(path: &Path, limit: u64) -> StdResult<Vec<u8>, String> {
     let mut bytes = Vec::new();
     File::open(path)
         .and_then(|file| return file.take(limit + 1).read_to_end(&mut bytes))
-        .map_err(|_| return "native_resource_inventory_unavailable".to_owned())?;
+        .map_err(limitation(|| {
+            return "native_resource_inventory_unavailable".to_owned();
+        }))?;
 
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
         return Err("native_resource_inventory_exceeds_byte_budget".to_owned());
     }
     return Ok(bytes);
+}
+
+/// Map an inventory failure to its stable limitation code.
+///
+/// Capture reports record limitations as stable machine-readable codes, so the underlying error
+/// is deliberately not carried across this boundary.
+fn limitation<E>(code: impl FnOnce() -> String) -> impl FnOnce(E) -> String {
+    return move |_| return code();
 }
 
 #[cfg(test)]

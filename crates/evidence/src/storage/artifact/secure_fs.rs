@@ -287,6 +287,7 @@ pub fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> R
         return Err(Error::InvalidEvidence {
             reason: "staging and destination directories must be direct session children"
                 .to_owned(),
+            source: None,
         });
     }
 
@@ -294,12 +295,14 @@ pub fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> R
     let staging_name = staging.file_name().ok_or_else(|| {
         return Error::InvalidEvidence {
             reason: "staging directory has no basename".to_owned(),
+            source: None,
         };
     })?;
 
     let destination_name = destination.file_name().ok_or_else(|| {
         return Error::InvalidEvidence {
             reason: "artifact directory has no basename".to_owned(),
+            source: None,
         };
     })?;
 

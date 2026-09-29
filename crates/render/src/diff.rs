@@ -57,21 +57,21 @@ fn render_diff_scene(
     };
 
     let after_label_x = before_width.saturating_add(4);
-    let _ = write!(
+    write!(
         svg,
         "<rect width=\"100%\" height=\"100%\" fill=\"#202020\"/>\n<text x=\"4\" y=\"20\" fill=\"white\" font-family=\"{label_font}\" font-size=\"14\">before</text>\n<text x=\"{after_label_x}\" y=\"20\" fill=\"white\" font-family=\"{label_font}\" font-size=\"14\">after</text>\n"
-    );
+    )?;
 
     for (state, x, viewport_width) in [
         (before, 0, before_width),
         (after, before_width, after_width),
     ] {
         let viewport_height = u32::from(state.rows).saturating_mul(CELL_HEIGHT);
-        let _ = writeln!(
+        writeln!(
             svg,
             "<svg x=\"{x}\" y=\"{HEADER}\" width=\"{viewport_width}\" height=\"{viewport_height}\" viewBox=\"0 0 {viewport_width} {viewport_height}\" overflow=\"hidden\">"
-        );
-        write_scene_content(&mut svg, state, font_set, embed_font);
+        )?;
+        write_scene_content(&mut svg, state, font_set, embed_font)?;
         svg.push_str("</svg>\n");
     }
 
@@ -79,10 +79,10 @@ fn render_diff_scene(
         for cell in &row.cells {
             let x = before_width.saturating_add(u32::from(cell.column).saturating_mul(CELL_WIDTH));
             let y = HEADER.saturating_add(u32::from(row.row).saturating_mul(CELL_HEIGHT));
-            let _ = writeln!(
+            writeln!(
                 svg,
                 "<rect x=\"{x}\" y=\"{y}\" width=\"{CELL_WIDTH}\" height=\"{CELL_HEIGHT}\" fill=\"none\" stroke=\"#ff3b30\" stroke-width=\"2\"/>"
-            );
+            )?;
         }
     }
 

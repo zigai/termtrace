@@ -36,11 +36,21 @@ impl Instrumentation {
     }
 
     /// Append one discrete event independently of the terminal output stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidRequest` when the event fails validation or the monotonic clock
+    /// overflows, and the control error when the session cannot receive it.
     pub fn event(&self, name: &str, attributes: BTreeMap<String, Value>) -> Result<()> {
         return self.emit(ApplicationEventKind::Event, name, None, None, attributes);
     }
 
     /// Begin a span; retain its UUID and explicitly call [`Self::end_span`].
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidRequest` when the event fails validation or the monotonic clock
+    /// overflows, and the control error when the session cannot receive it.
     pub fn start_span(
         &self,
         name: &str,
@@ -60,6 +70,11 @@ impl Instrumentation {
     }
 
     /// End a span. Missing ends remain incomplete evidence if the application crashes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidRequest` when the event fails validation or the monotonic clock
+    /// overflows, and the control error when the session cannot receive it.
     pub fn end_span(
         &self,
         name: &str,
@@ -86,9 +101,10 @@ impl Instrumentation {
         let data = ApplicationEvent {
             process_instance_id: self.process_instance_id,
             process_id: process::id(),
-            monotonic_ns: u64::try_from(self.started.elapsed().as_nanos()).map_err(|_| {
+            monotonic_ns: u64::try_from(self.started.elapsed().as_nanos()).map_err(|source| {
                 return Error::InvalidRequest {
                     reason: "application monotonic clock overflow".to_owned(),
+                    source: Some(Box::new(source)),
                 };
             })?,
             kind,
@@ -101,6 +117,7 @@ impl Instrumentation {
         data.validate().map_err(|reason| {
             return Error::InvalidRequest {
                 reason: reason.to_owned(),
+                source: None,
             };
         })?;
 

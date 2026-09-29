@@ -314,9 +314,8 @@ impl TryFrom<ConformanceQuery> for LocatorSpec {
                             g: 30,
                             b: 28,
                         });
-                    } else {
-                        return None;
                     }
+                    return None;
                 });
 
                 return Ok(LocatorSpec::default().with_style(StyleFilter {

@@ -58,7 +58,7 @@ pub(super) fn render_svg_scene(
         write_font_faces(&mut svg, font_set);
     }
 
-    write_scene_content(&mut svg, state, font_set, embed_font);
+    write_scene_content(&mut svg, state, font_set, embed_font)?;
     svg.push_str("</svg>\n");
 
     return Ok(svg.into_bytes());
@@ -69,18 +69,20 @@ pub(super) fn write_scene_content(
     state: &SemanticState,
     font_set: &SemanticFontSet,
     embed_font: bool,
-) {
-    let _ = writeln!(
+) -> Result<()> {
+    writeln!(
         svg,
         "<rect width=\"100%\" height=\"100%\" fill=\"{}\"/>",
         HexColor(state.colors.background)
-    );
+    )?;
 
     for row in &state.grid {
-        write_row_content(svg, state, font_set, row, embed_font);
+        write_row_content(svg, state, font_set, row, embed_font)?;
     }
 
-    write_cursor(svg, state, font_set, embed_font);
+    write_cursor(svg, state, font_set, embed_font)?;
+
+    return Ok(());
 }
 
 struct ResolvedCell<'cell> {
@@ -212,7 +214,7 @@ fn write_row_content(
     font_set: &SemanticFontSet,
     row: &RowState,
     embed_font: bool,
-) {
+) -> Result<()> {
     let mut resolved_cells = Vec::with_capacity(row.cells.len());
     for cell in &row.cells {
         if let Some(resolved) = resolve_cell(state, font_set, row.row, cell, embed_font) {
@@ -221,7 +223,7 @@ fn write_row_content(
     }
 
     if resolved_cells.is_empty() {
-        return;
+        return Ok(());
     }
 
     // 1. Coalesced Background Rectangles
@@ -238,7 +240,7 @@ fn write_row_content(
             }
 
             if let Some(run) = current_bg.take() {
-                emit_bg_rect(svg, &run);
+                emit_bg_rect(svg, &run)?;
             }
 
             current_bg = Some(BgRun {
@@ -248,12 +250,12 @@ fn write_row_content(
                 color: resolved.background,
             });
         } else if let Some(run) = current_bg.take() {
-            emit_bg_rect(svg, &run);
+            emit_bg_rect(svg, &run)?;
         }
     }
 
     if let Some(run) = current_bg {
-        emit_bg_rect(svg, &run);
+        emit_bg_rect(svg, &run)?;
     }
 
     // 2. Coalesced Text Glyphs
@@ -283,7 +285,7 @@ fn write_row_content(
             }
 
             if let Some(run) = current_text.take() {
-                emit_text_run(svg, &run);
+                emit_text_run(svg, &run)?;
             }
 
             current_text = Some(TextRun {
@@ -302,19 +304,21 @@ fn write_row_content(
                 text: resolved.cell.grapheme.to_string(),
             });
         } else if let Some(run) = current_text.take() {
-            emit_text_run(svg, &run);
+            emit_text_run(svg, &run)?;
         }
     }
 
     if let Some(run) = current_text {
-        emit_text_run(svg, &run);
+        emit_text_run(svg, &run)?;
     }
 
     // 3. Coalesced Decorations
-    write_row_decorations(svg, &resolved_cells);
+    write_row_decorations(svg, &resolved_cells)?;
+
+    return Ok(());
 }
 
-fn write_row_decorations(svg: &mut String, resolved_cells: &[ResolvedCell<'_>]) {
+fn write_row_decorations(svg: &mut String, resolved_cells: &[ResolvedCell<'_>]) -> Result<()> {
     // Underlines
     let mut current_underline: Option<UnderlineRun> = None;
     for resolved in resolved_cells {
@@ -331,7 +335,7 @@ fn write_row_decorations(svg: &mut String, resolved_cells: &[ResolvedCell<'_>]) 
             }
 
             if let Some(run) = current_underline.take() {
-                emit_underline_run(svg, &run);
+                emit_underline_run(svg, &run)?;
             }
 
             current_underline = Some(UnderlineRun {
@@ -343,12 +347,12 @@ fn write_row_decorations(svg: &mut String, resolved_cells: &[ResolvedCell<'_>]) 
                 opacity: resolved.opacity,
             });
         } else if let Some(run) = current_underline.take() {
-            emit_underline_run(svg, &run);
+            emit_underline_run(svg, &run)?;
         }
     }
 
     if let Some(run) = current_underline {
-        emit_underline_run(svg, &run);
+        emit_underline_run(svg, &run)?;
     }
 
     // Strikethrough
@@ -365,7 +369,7 @@ fn write_row_decorations(svg: &mut String, resolved_cells: &[ResolvedCell<'_>]) 
             }
 
             if let Some(run) = current_strike.take() {
-                emit_simple_line_run(svg, &run);
+                emit_simple_line_run(svg, &run)?;
             }
 
             current_strike = Some(SimpleLineRun {
@@ -377,12 +381,12 @@ fn write_row_decorations(svg: &mut String, resolved_cells: &[ResolvedCell<'_>]) 
                 opacity: resolved.opacity,
             });
         } else if let Some(run) = current_strike.take() {
-            emit_simple_line_run(svg, &run);
+            emit_simple_line_run(svg, &run)?;
         }
     }
 
     if let Some(run) = current_strike {
-        emit_simple_line_run(svg, &run);
+        emit_simple_line_run(svg, &run)?;
     }
 
     // Overline
@@ -399,7 +403,7 @@ fn write_row_decorations(svg: &mut String, resolved_cells: &[ResolvedCell<'_>]) 
             }
 
             if let Some(run) = current_overline.take() {
-                emit_simple_line_run(svg, &run);
+                emit_simple_line_run(svg, &run)?;
             }
 
             current_overline = Some(SimpleLineRun {
@@ -411,17 +415,19 @@ fn write_row_decorations(svg: &mut String, resolved_cells: &[ResolvedCell<'_>]) 
                 opacity: resolved.opacity,
             });
         } else if let Some(run) = current_overline.take() {
-            emit_simple_line_run(svg, &run);
+            emit_simple_line_run(svg, &run)?;
         }
     }
 
     if let Some(run) = current_overline {
-        emit_simple_line_run(svg, &run);
+        emit_simple_line_run(svg, &run)?;
     }
+
+    return Ok(());
 }
 
-fn emit_bg_rect(svg: &mut String, run: &BgRun) {
-    let _ = writeln!(
+fn emit_bg_rect(svg: &mut String, run: &BgRun) -> Result<()> {
+    writeln!(
         svg,
         "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\"/>",
         run.x,
@@ -429,13 +435,15 @@ fn emit_bg_rect(svg: &mut String, run: &BgRun) {
         run.width,
         SEMANTIC_CELL_HEIGHT,
         HexColor(run.color)
-    );
+    )?;
+
+    return Ok(());
 }
 
-fn emit_text_run(svg: &mut String, run: &TextRun) {
+fn emit_text_run(svg: &mut String, run: &TextRun) -> Result<()> {
     let escaped = EscapedXml(&run.text);
     let text_y = run.y.saturating_add(u32::from(run.baseline));
-    let _ = writeln!(
+    writeln!(
         svg,
         "<text x=\"{}\" y=\"{text_y}\" fill=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" opacity=\"{}\"{} xml:space=\"preserve\">{escaped}</text>",
         run.x,
@@ -446,41 +454,42 @@ fn emit_text_run(svg: &mut String, run: &TextRun) {
         run.font_style,
         run.opacity,
         run.shape_rendering
-    );
+    )?;
+
+    return Ok(());
 }
 
-fn emit_underline_run(svg: &mut String, run: &UnderlineRun) {
+fn emit_underline_run(svg: &mut String, run: &UnderlineRun) -> Result<()> {
     let x_end = run.x.saturating_add(run.span);
     match run.underline {
         1 => {
             let y = run.y.saturating_add(23);
-            let _ = writeln!(
+            writeln!(
                 svg,
                 "<line x1=\"{}\" y1=\"{y}\" x2=\"{x_end}\" y2=\"{y}\" stroke=\"{}\" stroke-width=\"1\" opacity=\"{}\"/>",
                 run.x,
                 HexColor(run.color),
                 run.opacity
-            );
+            )?;
         }
         2 => {
             let y1 = run.y.saturating_add(21);
             let y2 = run.y.saturating_add(23);
 
-            let _ = writeln!(
+            writeln!(
                 svg,
                 "<line x1=\"{}\" y1=\"{y1}\" x2=\"{x_end}\" y2=\"{y1}\" stroke=\"{}\" stroke-width=\"1\" opacity=\"{}\"/>",
                 run.x,
                 HexColor(run.color),
                 run.opacity
-            );
-
-            let _ = writeln!(
+            )?;
+            writeln!(
                 svg,
                 "<line x1=\"{}\" y1=\"{y2}\" x2=\"{x_end}\" y2=\"{y2}\" stroke=\"{}\" stroke-width=\"1\" opacity=\"{}\"/>",
                 run.x,
                 HexColor(run.color),
                 run.opacity
-            );
+            )?;
         }
         3 => {
             let y = run.y.saturating_add(22);
@@ -489,62 +498,66 @@ fn emit_underline_run(svg: &mut String, run: &UnderlineRun) {
 
             let mut path = format!("M {} {y}", run.x);
             for start in (run.x..x_end).step_by(3) {
-                let _ = write!(
+                write!(
                     path,
                     " Q {start}.75 {upper_y} {}.5 {y} Q {}.25 {lower_y} {} {y}",
                     start.saturating_add(1),
                     start.saturating_add(2),
                     start.saturating_add(3)
-                );
+                )?;
             }
 
-            let _ = writeln!(
+            writeln!(
                 svg,
                 "<path d=\"{path}\" fill=\"none\" stroke=\"{}\" stroke-width=\"1\" opacity=\"{}\"/>",
                 HexColor(run.color),
                 run.opacity
-            );
+            )?;
         }
         4 => {
             let y = run.y.saturating_add(23);
-            let _ = writeln!(
+            writeln!(
                 svg,
                 "<line x1=\"{}\" y1=\"{y}\" x2=\"{x_end}\" y2=\"{y}\" stroke=\"{}\" stroke-width=\"1\" opacity=\"{}\" stroke-dasharray=\"1 2\" stroke-linecap=\"round\"/>",
                 run.x,
                 HexColor(run.color),
                 run.opacity
-            );
+            )?;
         }
         5 => {
             let y = run.y.saturating_add(23);
-            let _ = writeln!(
+            writeln!(
                 svg,
                 "<line x1=\"{}\" y1=\"{y}\" x2=\"{x_end}\" y2=\"{y}\" stroke=\"{}\" stroke-width=\"1\" opacity=\"{}\" stroke-dasharray=\"4 2\"/>",
                 run.x,
                 HexColor(run.color),
                 run.opacity
-            );
+            )?;
         }
         _ => {}
     }
+
+    return Ok(());
 }
 
-fn emit_simple_line_run(svg: &mut String, run: &SimpleLineRun) {
+fn emit_simple_line_run(svg: &mut String, run: &SimpleLineRun) -> Result<()> {
     let y = run.y.saturating_add(run.y_offset);
     let x_end = run.x.saturating_add(run.span);
-    let _ = writeln!(
+    writeln!(
         svg,
         "<line x1=\"{}\" y1=\"{y}\" x2=\"{x_end}\" y2=\"{y}\" stroke=\"{}\" stroke-width=\"1\" opacity=\"{}\"/>",
         run.x,
         HexColor(run.color),
         run.opacity
-    );
+    )?;
+
+    return Ok(());
 }
 
-fn write_glyph(svg: &mut String, resolved: &ResolvedCell<'_>, color: Rgb) {
+fn write_glyph(svg: &mut String, resolved: &ResolvedCell<'_>, color: Rgb) -> Result<()> {
     let escaped = EscapedXml(&resolved.cell.grapheme);
     let text_y = resolved.y.saturating_add(u32::from(resolved.baseline));
-    let _ = writeln!(
+    writeln!(
         svg,
         "<text x=\"{}\" y=\"{text_y}\" fill=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" opacity=\"{}\"{} xml:space=\"preserve\">{escaped}</text>",
         resolved.x,
@@ -555,7 +568,9 @@ fn write_glyph(svg: &mut String, resolved: &ResolvedCell<'_>, color: Rgb) {
         resolved.font_style,
         resolved.opacity,
         resolved.shape_rendering
-    );
+    )?;
+
+    return Ok(());
 }
 
 fn write_cursor(
@@ -563,19 +578,19 @@ fn write_cursor(
     state: &SemanticState,
     font_set: &SemanticFontSet,
     embed_font: bool,
-) {
+) -> Result<()> {
     if !state.cursor.visible || !state.cursor.in_viewport {
-        return;
+        return Ok(());
     }
 
     let (Some(column), Some(row)) = (state.cursor.column, state.cursor.row) else {
-        return;
+        return Ok(());
     };
 
     let is_wide_tail = state.cursor.wide_tail == Some(true);
     let column = if is_wide_tail {
         let Some(lead_column) = column.checked_sub(1) else {
-            return;
+            return Ok(());
         };
         lead_column
     } else {
@@ -587,43 +602,43 @@ fn write_cursor(
         .iter()
         .find(|candidate| return candidate.row == row)
     else {
-        return;
+        return Ok(());
     };
     let Some(cell) = row_state
         .cells
         .iter()
         .find(|candidate| return candidate.column == column)
     else {
-        return;
+        return Ok(());
     };
     let Some(resolved) = resolve_cell(state, font_set, row, cell, embed_font) else {
-        return;
+        return Ok(());
     };
 
     let cursor_color = state.colors.cursor.unwrap_or(state.colors.foreground);
 
     match state.cursor.style {
         CursorStyle::Bar => {
-            let _ = writeln!(
+            writeln!(
                 svg,
                 "<rect x=\"{}\" y=\"{}\" width=\"2\" height=\"{}\" fill=\"{}\"/>",
                 resolved.x,
                 resolved.y,
                 SEMANTIC_CELL_HEIGHT,
                 HexColor(cursor_color)
-            );
+            )?;
         }
         CursorStyle::Underline => {
             let cursor_y = resolved
                 .y
                 .saturating_add(u32::from(SEMANTIC_CELL_HEIGHT.saturating_sub(2)));
-            let _ = writeln!(
+            writeln!(
                 svg,
                 "<rect x=\"{}\" y=\"{cursor_y}\" width=\"{}\" height=\"2\" fill=\"{}\"/>",
                 resolved.x,
                 SEMANTIC_CELL_WIDTH,
                 HexColor(cursor_color)
-            );
+            )?;
         }
         CursorStyle::Block => {
             let span = if is_wide_tail || cell.wide_kind == WideKind::Wide {
@@ -631,18 +646,17 @@ fn write_cursor(
             } else {
                 u32::from(SEMANTIC_CELL_WIDTH)
             };
-
-            let _ = writeln!(
+            writeln!(
                 svg,
                 "<rect x=\"{}\" y=\"{}\" width=\"{span}\" height=\"{}\" fill=\"{}\"/>",
                 resolved.x,
                 resolved.y,
                 SEMANTIC_CELL_HEIGHT,
                 HexColor(cursor_color)
-            );
+            )?;
 
             if !cell.grapheme.is_empty() && !cell.style.invisible {
-                write_glyph(svg, &resolved, resolved.background);
+                write_glyph(svg, &resolved, resolved.background)?;
             }
         }
         CursorStyle::HollowBlock => {
@@ -650,13 +664,15 @@ fn write_cursor(
             let y = f64::from(resolved.y) + 0.5;
             let width = SEMANTIC_CELL_WIDTH.saturating_sub(1);
             let height = SEMANTIC_CELL_HEIGHT.saturating_sub(1);
-            let _ = writeln!(
+            writeln!(
                 svg,
                 "<rect x=\"{x}\" y=\"{y}\" width=\"{width}\" height=\"{height}\" fill=\"none\" stroke=\"{}\" stroke-width=\"1\"/>",
                 HexColor(cursor_color)
-            );
+            )?;
         }
     }
+
+    return Ok(());
 }
 
 pub(crate) fn is_terminal_graphic(grapheme: &str) -> bool {
@@ -997,23 +1013,20 @@ mod tests {
             .glyph_index('A')
             .and_then(|g| return regular.glyph_hor_advance(g))
             .expect("glyph advance");
-
-        let scaled_advance = (f32::from(advance) * (SEMANTIC_FONT_SIZE as f32)
+        let scaled_advance = (f32::from(advance) * f32::from(SEMANTIC_FONT_SIZE)
             / f32::from(regular.units_per_em()))
-        .round() as u16;
-
-        assert_eq!(scaled_advance, SEMANTIC_CELL_WIDTH);
+        .round();
+        assert!((scaled_advance - f32::from(SEMANTIC_CELL_WIDTH)).abs() < f32::EPSILON);
 
         let symbols =
             ttf_parser::Face::parse(font_set.face_bytes(SemanticFontRole::SymbolsFallback), 0)
                 .expect("parse symbols font");
 
         let symbols_height = (f32::from(symbols.ascender() - symbols.descender())
-            * (SEMANTIC_SYMBOLS_FONT_SIZE as f32)
+            * f32::from(SEMANTIC_SYMBOLS_FONT_SIZE)
             / f32::from(symbols.units_per_em()))
-        .round() as u16;
-
-        assert!(symbols_height <= SEMANTIC_CELL_HEIGHT);
+        .round();
+        assert!(symbols_height <= f32::from(SEMANTIC_CELL_HEIGHT));
     }
 
     #[test]

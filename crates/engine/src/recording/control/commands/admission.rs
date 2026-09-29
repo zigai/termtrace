@@ -1,10 +1,10 @@
 use super::{
     action, actor_boundaries, compile_action_postcondition, compile_screen_predicate,
-    control_error_code, control_error_response, control_rejected, mpsc, mutation_failure_effect,
-    presented_state_hash, screen_frame_error_response, terminal_error, valid_blake3_hash,
-    validate_screen_region, AdmittedAction, ControlCommand, ControlErrorDetails, ControlRequest,
-    ControlResponse, ControlResult, Duration, Error, InputSequenceExecution, Instant,
-    MutationEffect, PendingInputSequence, Result, ScreenWaiter, SessionActor,
+    control_error_code, control_error_response, control_rejected, deliver_response, mpsc,
+    mutation_failure_effect, presented_state_hash, screen_frame_error_response, terminal_error,
+    valid_blake3_hash, validate_screen_region, AdmittedAction, ControlCommand, ControlErrorDetails,
+    ControlRequest, ControlResponse, ControlResult, Duration, Error, InputSequenceExecution,
+    Instant, MutationEffect, PendingInputSequence, Result, ScreenWaiter, SessionActor,
     CONTROL_PROTOCOL_VERSION, MAX_SCREEN_WAITERS,
 };
 
@@ -24,7 +24,7 @@ impl SessionActor<'_> {
                 MutationEffect::NotApplied,
             );
 
-            let _ = response_sender.send(response);
+            deliver_response(&response_sender, response);
 
             return Ok(());
         }
@@ -38,7 +38,7 @@ impl SessionActor<'_> {
                 request.expected_presented_state_hash.as_deref(),
             )?;
             if let Some(response) = prior {
-                let _ = response_sender.send(response);
+                deliver_response(&response_sender, response);
 
                 return Ok(());
             }
@@ -51,7 +51,7 @@ impl SessionActor<'_> {
                     MutationEffect::NotApplied,
                 );
 
-                let _ = response_sender.send(response);
+                deliver_response(&response_sender, response);
 
                 return Ok(());
             }
@@ -71,7 +71,7 @@ impl SessionActor<'_> {
                 MutationEffect::NotApplied,
             );
 
-            let _ = response_sender.send(response);
+            deliver_response(&response_sender, response);
 
             return Ok(());
         }
@@ -103,7 +103,7 @@ impl SessionActor<'_> {
                         MutationEffect::NotApplied,
                     );
 
-                    let _ = response_sender.send(response);
+                    deliver_response(&response_sender, response);
 
                     return Ok(());
                 }
@@ -123,7 +123,7 @@ impl SessionActor<'_> {
                     MutationEffect::NotApplied,
                 );
 
-                let _ = response_sender.send(response);
+                deliver_response(&response_sender, response);
 
                 return Ok(());
             }
@@ -136,7 +136,7 @@ impl SessionActor<'_> {
                     MutationEffect::NotApplied,
                 );
 
-                let _ = response_sender.send(response);
+                deliver_response(&response_sender, response);
 
                 return Ok(());
             }
@@ -172,7 +172,7 @@ impl SessionActor<'_> {
                     MutationEffect::NotApplied,
                 );
 
-                let _ = response_sender.send(response);
+                deliver_response(&response_sender, response);
 
                 return Ok(());
             }
@@ -191,7 +191,7 @@ impl SessionActor<'_> {
                     MutationEffect::NotApplied,
                 );
 
-                let _ = response_sender.send(response);
+                deliver_response(&response_sender, response);
 
                 return Ok(());
             }
@@ -204,7 +204,7 @@ impl SessionActor<'_> {
                     MutationEffect::NotApplied,
                 );
 
-                let _ = response_sender.send(response);
+                deliver_response(&response_sender, response);
 
                 return Ok(());
             }
@@ -230,7 +230,7 @@ impl SessionActor<'_> {
                 MutationEffect::NotApplied,
             );
 
-            let _ = response_sender.send(response);
+            deliver_response(&response_sender, response);
 
             return Ok(());
         }
@@ -345,7 +345,7 @@ impl SessionActor<'_> {
                             )?;
                         }
 
-                        let _ = response_sender.send(response);
+                        deliver_response(&response_sender, response);
 
                         return match error {
                             Error::ControlRejected { .. } | Error::ScreenFrame(_) => Ok(()),
@@ -442,7 +442,10 @@ impl SessionActor<'_> {
         match outcome {
             Ok(_)
             | Err(
-                Error::ControlRejected { .. } | Error::GhosttyVt { .. } | Error::ScreenFrame(_),
+                Error::ControlRejected { .. }
+                | Error::GhosttyVt { .. }
+                | Error::InvalidTerminalText { .. }
+                | Error::ScreenFrame(_),
             ) => {
                 return Ok(());
             }

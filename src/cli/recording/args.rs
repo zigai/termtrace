@@ -248,7 +248,7 @@ pub(in crate::cli) struct RecordingArgs {
     #[arg(long, value_enum, default_value_t = GeometryMode::Manual)]
     pub(in crate::cli) geometry: GeometryMode,
 
-    /// Intended capture viewport as WIDTHxHEIGHT; required for fitted geometry.
+    /// Intended capture viewport as `WIDTHxHEIGHT`; required for fitted geometry.
     #[arg(long, value_parser = parse_capture_target)]
     pub(in crate::cli) viewport: Option<CaptureTarget>,
 

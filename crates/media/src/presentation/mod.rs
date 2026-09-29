@@ -32,6 +32,7 @@ const NANOS_PER_SECOND: u64 = 1_000_000_000;
 fn plan_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
         reason: reason.into(),
+        source: None,
     };
 }
 

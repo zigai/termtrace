@@ -39,6 +39,11 @@ pub struct ScenarioSuiteOptions {
 }
 
 /// Read, expand, shard, and execute scenario documents with bounded concurrency.
+///
+/// # Errors
+///
+/// Returns an error when the suite options are invalid, a scenario document cannot be read or its
+/// matrix expanded, or a scenario cannot be executed.
 pub fn run_suite(
     scenario_paths: impl IntoIterator<Item = PathBuf>,
     options: &ScenarioSuiteOptions,
@@ -268,6 +273,10 @@ pub fn scenario_junit(report: &ScenarioSuiteReport) -> String {
 }
 
 /// Securely publish deterministic JUnit XML for a suite report.
+///
+/// # Errors
+///
+/// Returns an error when the report cannot be securely written to `path`.
 pub fn write_scenario_junit(path: impl AsRef<Path>, report: &ScenarioSuiteReport) -> Result<()> {
     write_secure(path.as_ref(), scenario_junit(report).as_bytes())
         .map_err(|error| return operation("write JUnit report", error))?;

@@ -227,6 +227,11 @@ fn edit_clip(range: SourceRange, hold_ms: u64) -> EditClip {
 }
 
 /// List every canonical marker without claiming native presentation.
+///
+/// # Errors
+///
+/// Returns an error when `fps` is zero or the session's canonical markers cannot be read and
+/// verified.
 pub fn markers(session: impl AsRef<Path>, fps: u16) -> Result<Vec<MarkerRecord>> {
     if fps == 0 {
         return Err(plan_error("marker frame rate must be nonzero"));
@@ -301,6 +306,11 @@ fn bind_marker_state(marker: &mut MarkerRecord, state: Option<&(u64, String)>) {
 }
 
 /// Resolve a strict edit plan against the default verified native capture.
+///
+/// # Errors
+///
+/// Returns an error when the edit plan is invalid for the session or its verified native capture
+/// cannot be resolved.
 pub fn plan(session: impl AsRef<Path>, edit: &EditPlan) -> Result<PresentationPlan> {
     return plan_with_source(session, edit, PresentationSourceRequest::Native);
 }

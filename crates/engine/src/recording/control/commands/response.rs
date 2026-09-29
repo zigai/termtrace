@@ -117,12 +117,16 @@ pub(super) fn control_error_code(error: &Error) -> &str {
         Error::GhosttyVt { operation, .. } if operation.contains("mouse") => {
             return "pointer_encoding_failed";
         }
-        Error::GhosttyVt { .. } => return "terminal_encoding_failed",
+        Error::GhosttyVt { .. } | Error::InvalidTerminalText { .. } => {
+            return "terminal_encoding_failed";
+        }
         Error::EventLogPoisoned { .. } | Error::InvalidEventLog { .. } => {
             return "event_log_failed"
         }
         Error::Filesystem { .. } => return "io_failed",
-        Error::TerminalOperation { .. } => return "terminal_operation_failed",
+        Error::TerminalOperation { .. } | Error::ThreadPanicked { .. } => {
+            return "terminal_operation_failed";
+        }
         _ => return "internal_error",
     }
 }

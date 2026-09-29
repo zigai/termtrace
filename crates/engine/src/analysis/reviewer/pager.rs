@@ -92,7 +92,7 @@ impl ReviewEntry {
 /// Contiguous exact semantic entries; no sampled-away intermediate states.
 #[derive(Debug)]
 pub struct ReviewPage {
-    /// At most REVIEW_PAGE_STATES consecutive entries.
+    /// At most `REVIEW_PAGE_STATES` consecutive entries.
     pub entries: VecDeque<ReviewEntry>,
     /// Exact selected semantic ordinal.
     pub selected: u64,
@@ -140,6 +140,11 @@ pub enum ReviewQuery {
 ///
 /// No all-state history or on-disk index is constructed. Source scans and semantic
 /// replay check cancellation; unchanged output bytes remain cancellable too.
+///
+/// # Errors
+///
+/// Returns an error when `cancelled` is set, a search query is empty or longer than 4096 bytes, the
+/// session is not a valid completed session or changes while it is read, or semantic replay fails.
 pub fn load_review_page(
     session: &Path,
     query: &ReviewQuery,

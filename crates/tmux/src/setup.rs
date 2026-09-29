@@ -10,7 +10,7 @@ use crate::{
 use std::{
     env,
     ffi::{OsStr, OsString},
-    fmt::Write as _,
+    fmt::{self, Write as _},
     os::unix::ffi::{OsStrExt as _, OsStringExt as _},
     path::{Path, PathBuf},
     str::FromStr,
@@ -189,7 +189,7 @@ impl PreparedTmuxSetup {
             coverage: client
                 .option_text(options::COVERAGE)?
                 .parse()
-                .map_err(Error::Invalid)?,
+                .map_err(Error::invalid)?,
             aggregate_manifest: client.option_path(options::AGGREGATE_MANIFEST)?,
             cell_width: client.parse_option(options::CELL_WIDTH)?,
             cell_height: client.parse_option(options::CELL_HEIGHT)?,
@@ -252,24 +252,27 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
         }
 
         for (name, value) in self.option_values()? {
-            let _ = writeln!(output, "set-option -gq {name} {}", config_quote(&value));
+            writeln!(output, "set-option -gq {name} {}", config_quote(&value))
+                .map_err(config_format_error)?;
         }
 
         let hook = hook_command();
         for name in GUARDED_HOOKS {
-            let _ = writeln!(
+            writeln!(
                 output,
                 "set-hook -g {} {}",
                 hook_name(name),
                 config_quote(hook.as_bytes()),
-            );
+            )
+            .map_err(config_format_error)?;
         }
 
-        let _ = writeln!(
+        writeln!(
             output,
             "run-shell -b {}",
             config_quote(self.watchdog_command().as_bytes()),
-        );
+        )
+        .map_err(config_format_error)?;
 
         return Ok(output.into_bytes());
     }
@@ -508,15 +511,24 @@ fn remove(client: &TmuxClient, original_command: &[u8]) -> Result<()> {
         client.set_option("default-command", OsStr::from_bytes(original_command))?;
     }
 
+    // Removal continues past individual failures so every remaining hook and option is cleared.
     for name in GUARDED_HOOKS {
-        let _ = client.unset_hook(name);
+        if let Err(error) = client.unset_hook(name) {
+            tracing::warn!(%error, hook = name, "could not unset termtrace tmux hook");
+        }
     }
 
     for name in options::RESERVED {
-        let _ = client.unset_option(name);
+        if let Err(error) = client.unset_option(name) {
+            tracing::warn!(%error, option = name, "could not unset termtrace tmux option");
+        }
     }
 
     return Ok(());
+}
+
+fn config_format_error(source: fmt::Error) -> Error {
+    return Error::invalid_with_source("could not format tmux configuration", source);
 }
 
 /// Guard hook command run for every new pane.
