@@ -25,7 +25,7 @@ validate:
 
 # Run fast hermetic Rust tests for each change (requires bootstrap)
 test:
-  cargo test --locked --workspace --lib --bins --test execution_lifecycle
+  cargo nextest run --locked --workspace --lib --bins --test execution_lifecycle
   PYTHONPATH=benchmarks uv run --project benchmarks python3 -m unittest benchmarks/test_acceptance.py
 
 # Run CLI/tmux integration on each pull request (requires bootstrap, tmux, and Ghostty on PATH)
@@ -54,7 +54,7 @@ lint:
 
 # Format Rust and shell scripts
 format:
-  cargo fmt --all
+  cargo statement-spacing fix --format-first
   shfmt -i 4 -ci -w benchmarks examples fixtures scripts tests install.sh
 
 # Run the complete native recording, replay, video, and screenshot verification test
@@ -97,7 +97,6 @@ security:
   cargo audit --file fuzz/Cargo.lock
 # Run required local checks for each change (requires bootstrap and shfmt)
 check: architecture lint validate test
-  cargo fmt --all -- --check
   cargo statement-spacing check
   shfmt -i 4 -ci -d benchmarks examples fixtures scripts tests install.sh
 
