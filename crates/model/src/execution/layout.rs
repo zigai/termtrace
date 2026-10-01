@@ -140,6 +140,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn session_paths_preserve_the_storage_contract() {
+        let root = Path::new("recording");
+        let layout = SessionLayout::new(root);
+
+        for (actual, filename) in [
+            (layout.manifest(), "session.json"),
+            (layout.event_log(), "events.jsonl"),
+            (layout.completion(), "completion.json"),
+            (layout.mutation_journal(), "requests.jsonl"),
+            (layout.ghostty_replay_profile(), "ghostty-profile.ghostty"),
+            (layout.failure_diagnostic(), "failure.json"),
+            (layout.recovery_diagnostic(), "recovery.json"),
+            (layout.evidence_receipt(), "evidence-receipt.json"),
+            (layout.artifact_root_log(), "artifact-roots.jsonl"),
+            (layout.artifact_root_lock(), ".artifact-roots.lock"),
+            (layout.derived(), "derived"),
+            (layout.derived_cache(), "derived-cache"),
+        ] {
+            assert_eq!(actual, root.join(filename), "{filename}");
+        }
+    }
+
+    #[test]
     fn every_named_file_has_a_role() {
         for name in [
             MANIFEST,
