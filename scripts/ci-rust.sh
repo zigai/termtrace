@@ -13,6 +13,7 @@ bash tests/install.sh
 
 python3 -m py_compile examples/apps/terminal_showcase.py
 python3 scripts/check-architecture.py
+python3 -m unittest discover -s scripts -p test_check_architecture.py
 
 scripts/bootstrap.sh
 bash scripts/check-github-action-pins.sh

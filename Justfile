@@ -18,6 +18,7 @@ generate:
 # Enforce the complete allowlist of direct internal Cargo dependencies
 architecture:
   python3 scripts/check-architecture.py
+  python3 -m unittest discover -s scripts -p test_check_architecture.py
 
 # Compile every Rust target and feature without running tests
 validate:
