@@ -3,7 +3,7 @@ use super::{
         ghostty_overrides, spawn_geometry_probe, spawn_xvfb, wait_for_json, wait_for_success,
         wait_for_x_socket, DisplayLease,
     },
-    profile::materialize_profile,
+    profile::materialize,
     Error, Result,
 };
 use std::{env::temp_dir, fs, path::Path, time::Duration};
@@ -228,7 +228,7 @@ pub(super) fn solve_geometry_with(
     ));
 }
 
-pub(super) fn validate_capture_geometry(
+pub(super) fn validate_capture(
     expected: SessionGeometry,
     source: GeometrySource,
     reported: TerminalGeometryReport,
@@ -275,7 +275,7 @@ fn probe_staged(
         &profile.effective_config,
     )?;
 
-    let root = materialize_profile(&staging.join("ghostty-profile"), &profile.replay_config)?;
+    let root = materialize(&staging.join("ghostty-profile"), &profile.replay_config)?;
     let lease = DisplayLease::acquire()?;
     let display = format!(":{}", lease.number);
     let scaling = if target.width >= 2880 || target.height >= 1800 {

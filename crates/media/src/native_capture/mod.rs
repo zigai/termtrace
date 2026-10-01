@@ -2,6 +2,7 @@
 
 mod capability;
 mod capture;
+mod capture_io;
 mod geometry;
 mod index;
 mod media;
@@ -12,7 +13,6 @@ mod profile;
 mod resources;
 #[cfg(test)]
 mod tests;
-mod util;
 mod validation;
 mod worker;
 

@@ -1,5 +1,8 @@
 use super::{
-    geometry::validate_capture_geometry,
+    capture_io::{
+        command_output, command_output_in_profile, outcome, secure_permissions, unix_now_ns,
+    },
+    geometry::validate_capture,
     index::{
         validate_acquisition_frames, validate_replay_manifest, write_video_map, StateIndexSource,
     },
@@ -11,8 +14,7 @@ use super::{
         ghostty_overrides, spawn_ghostty, spawn_xvfb, stop_ffmpeg, wait_for_file,
         wait_for_playback_handshake, wait_for_success, wait_for_x_socket, DisplayLease,
     },
-    profile::materialize_profile,
-    util::{command_output, command_output_in_profile, outcome, secure_permissions, unix_now_ns},
+    profile::materialize,
     validate_visual_manifest, Error, Result,
 };
 use crate::error::finish_with_cleanup;
@@ -277,10 +279,7 @@ fn capture_staged(
             });
         }
 
-        Some(materialize_profile(
-            &staging.join("ghostty-profile"),
-            &replay,
-        )?)
+        Some(materialize(&staging.join("ghostty-profile"), &replay)?)
     } else {
         None
     };
@@ -363,7 +362,7 @@ fn capture_staged(
     let geometry_report =
         super::process::wait_for_json(&geometry_path, &mut ghostty, Duration::from_secs(20))?;
 
-    validate_capture_geometry(
+    validate_capture(
         manifest.geometry,
         manifest.geometry_provenance.source,
         geometry_report,

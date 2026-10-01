@@ -1,6 +1,6 @@
 use super::{
+    capture_io::{external_error, unix_now_ns},
     process::ManagedChild,
-    util::{external_error, unix_now_ns},
     Error, Result,
 };
 #[cfg(target_os = "linux")]
@@ -43,7 +43,7 @@ struct ResourceReport {
 
 /// Snapshot mapped font identities and the executable of this capture's owned terminal.
 /// A map is evidence of resource availability, not which glyphs consumed it.
-pub(super) fn capture_resources(
+pub(super) fn snapshot_mapped(
     process: &ManagedChild,
     staging: &Path,
     cancelled: &AtomicBool,

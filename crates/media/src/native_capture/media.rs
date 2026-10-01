@@ -1,6 +1,6 @@
 use super::{
+    capture_io::{external_error, unix_now_ns},
     process::{probe_output, probe_output_with_check, wait_for_success, ManagedChild},
-    util::{external_error, unix_now_ns},
     Error, Result,
 };
 use std::{

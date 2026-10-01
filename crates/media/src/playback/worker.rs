@@ -1,6 +1,6 @@
 use super::{
     runtime::{emit_endpoint, emit_event},
-    terminal::{query_terminal, resize_and_query, RawTerminalGuard, TerminalInputDrain},
+    terminal::{query, resize_and_query, RawTerminalGuard, TerminalInputDrain},
 };
 use crate::{error::finish_with_cleanup, Error, Result};
 use serde::{Deserialize, Serialize};
@@ -211,7 +211,7 @@ fn advance(
     let mut drain = TerminalInputDrain::start(terminal_input)?;
     let result = advance_events(session, endpoint, last, resizes);
     let position = finish_with_cleanup(result, drain.stop())?;
-    let geometry = query_terminal()?;
+    let geometry = query()?;
 
     if (geometry.cols, geometry.rows) != (endpoint.cols, endpoint.rows) {
         return Err(invalid(

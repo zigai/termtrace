@@ -1,8 +1,8 @@
 use super::{
-    util::{external_error, read_json, status_error_with_logs},
+    capture_io::{external_error, read_json, status_error_with_logs},
     Error, Result,
 };
-use crate::helper::{flag, geometry_probe, playback};
+use crate::helper_protocol::{flag, geometry_probe, playback};
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use serde::de::DeserializeOwned;
 use std::{

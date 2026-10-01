@@ -155,7 +155,7 @@ fn append_semantic_change_visualization(
         (None, input.to_owned())
     };
 
-    for (index, box_) in boxes.iter().enumerate() {
+    for (index, scheduled_box) in boxes.iter().enumerate() {
         let next = format!("change{index}");
         let (color, thickness) = match change.mode {
             ChangeMode::DirtyRows => ("orange@0.28", "fill"),
@@ -166,12 +166,12 @@ fn append_semantic_change_visualization(
         };
         filters.push(format!(
             "[{prior}]drawbox=x={}:y={}:w={}:h={}:color={color}:t={thickness}:enable='between(n,{},{})'[{next}]",
-            box_.region.x,
-            box_.region.y,
-            box_.region.width,
-            box_.region.height,
-            box_.start_frame,
-            box_.end_frame,
+            scheduled_box.region.x,
+            scheduled_box.region.y,
+            scheduled_box.region.width,
+            scheduled_box.region.height,
+            scheduled_box.start_frame,
+            scheduled_box.end_frame,
         ));
 
         prior = next;

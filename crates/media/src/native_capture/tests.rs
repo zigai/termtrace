@@ -1,5 +1,5 @@
 use super::{
-    geometry::{solve_geometry_with, validate_capture_geometry},
+    geometry::{solve_geometry_with, validate_capture},
     process::{wait_for_playback_handshake, ManagedChild},
 };
 use std::{process::Command, time::Duration};
@@ -12,7 +12,7 @@ use termtrace_model::{
 
 #[test]
 fn capture_geometry_error_reports_actual_and_recorded_grids() {
-    let error = validate_capture_geometry(
+    let error = validate_capture(
         SessionGeometry {
             cols: 180,
             rows: 50,

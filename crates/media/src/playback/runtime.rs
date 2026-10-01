@@ -1,4 +1,4 @@
-use super::terminal::{query_terminal, resize_and_query, RawTerminalGuard, TerminalInputDrain};
+use super::terminal::{query, resize_and_query, RawTerminalGuard, TerminalInputDrain};
 use crate::{error::finish_with_cleanup, Error, Result};
 use std::{
     collections::HashMap,
@@ -181,7 +181,7 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
 
         validate_playback_boundary(&cursor, &log)?;
 
-        let reported = query_terminal()?;
+        let reported = query()?;
         if (reported.cols, reported.rows) != grid {
             return Err(Error::InvalidReplay {
                 reason: format!(
@@ -197,7 +197,7 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
     let result = timed_playback(options, &log, source_range, &mut resize_intents);
     finish_with_cleanup(result, drain.stop())?;
 
-    query_terminal()?;
+    query()?;
 
     write_secure(&options.ready_file, b"ready\n")?;
     thread::sleep(options.final_hold);

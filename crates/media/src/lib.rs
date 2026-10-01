@@ -4,7 +4,7 @@
 
 pub mod capability;
 mod error;
-pub mod helper;
+pub mod helper_protocol;
 pub mod native_capture;
 pub mod playback;
 pub mod presentation;

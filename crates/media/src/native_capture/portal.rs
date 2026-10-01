@@ -1,6 +1,6 @@
 use super::{
+    capture_io::{check_cancelled, external_error},
     process::{owned_command, probe_output, ManagedChild},
-    util::{check_cancelled, external_error},
     Error, Result,
 };
 use std::{

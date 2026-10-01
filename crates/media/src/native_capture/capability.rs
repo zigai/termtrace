@@ -1,10 +1,10 @@
 use super::{
+    capture_io::external_error,
     media::{validate_screenshot_probe, validate_video_probe},
     process::{
         ghostty_overrides, probe_output, spawn_xvfb, wait_for_file, wait_for_x_socket,
         DisplayLease, ManagedChild,
     },
-    util::external_error,
     Result,
 };
 use std::{

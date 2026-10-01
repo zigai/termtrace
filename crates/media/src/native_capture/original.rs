@@ -1,5 +1,9 @@
 use super::{
     capture::{preserve_failed, require_native_tools, validate_options},
+    capture_io::{
+        check_cancelled, command_output, command_output_in_profile, external_error, outcome,
+        secure_permissions,
+    },
     index::{validate_acquisition_frames, write_original_acquisition_map},
     media::{
         capture_screenshot, probe_screenshot, probe_variable_video, probe_video, spawn_video_ffmpeg,
@@ -9,12 +13,8 @@ use super::{
         ghostty_overrides, owned_command, probe_output, spawn_xvfb, stop_ffmpeg, wait_for_x_socket,
         DisplayLease, ManagedChild,
     },
-    profile::materialize_profile,
-    resources::capture_resources,
-    util::{
-        check_cancelled, command_output, command_output_in_profile, external_error, outcome,
-        secure_permissions,
-    },
+    profile::materialize,
+    resources::snapshot_mapped,
     validate_visual_manifest, Error, Result,
 };
 use std::{
@@ -237,7 +237,7 @@ fn capture_staged(
     arguments: impl FnOnce(&Path) -> Vec<OsString>,
     staging: &Path,
 ) -> Result<(Vec<u8>, SessionCompletion)> {
-    let root = materialize_profile(&staging.join("ghostty-profile"), profile)?;
+    let root = materialize(&staging.join("ghostty-profile"), profile)?;
     let effective = command_output_in_profile("ghostty", &["+show-config"], Some(&root))?;
     let effective_hash = blake3::hash(&effective).to_hex().to_string();
     write_secure(&staging.join(GHOSTTY_EFFECTIVE_CONFIG_NAME), &effective)?;
@@ -435,7 +435,7 @@ fn capture_staged(
         capture_screenshot(options, staging, display, &screenshot)?;
     }
 
-    capture_resources(&ghostty, staging, cancelled, "after_execution")?;
+    snapshot_mapped(&ghostty, staging, cancelled, "after_execution")?;
 
     stop_ffmpeg(&mut ffmpeg, Duration::from_secs(10), staging)?;
     ghostty.terminate();

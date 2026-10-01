@@ -1,17 +1,17 @@
 use super::{
     capture::preserve_failed,
+    capture_io::{
+        check_cancelled, command_output, command_output_in_profile, external_error, read_json,
+        secure_permissions, unix_now_ns,
+    },
     media::{capture_stable_x11_frame_with_check, probe_screenshot},
     process::{
         ghostty_overrides, owned_command, spawn_xvfb, wait_for_x_socket, DisplayLease, ManagedChild,
     },
-    profile::materialize_profile,
-    util::{
-        check_cancelled, command_output, command_output_in_profile, external_error, read_json,
-        secure_permissions, unix_now_ns,
-    },
+    profile::materialize,
     validate_visual_manifest, Error, Result,
 };
-use crate::helper::{flag, playback_worker};
+use crate::helper_protocol::{flag, playback_worker};
 use crate::playback::worker::{WorkerRequest, WorkerResponse};
 use serde::Serialize;
 use std::{
@@ -122,7 +122,7 @@ impl NativeReplayWorker {
                 return Err(failure("recorded replay profile hash differs"));
             }
 
-            Some(materialize_profile(&work.0.join("profile"), &bytes)?)
+            Some(materialize(&work.0.join("profile"), &bytes)?)
         } else {
             None
         };
@@ -205,7 +205,7 @@ impl NativeReplayWorker {
             })?
             .ok_or_else(|| return failure("worker startup timed out"))?;
 
-        super::geometry::validate_capture_geometry(
+        super::geometry::validate_capture(
             manifest.geometry,
             manifest.geometry_provenance.source,
             report,
@@ -539,7 +539,7 @@ impl NativeReplayWorker {
         )?;
 
         write_json(&staging.join("replay-endpoint.json"), endpoint)?;
-        super::resources::capture_resources(
+        super::resources::snapshot_mapped(
             &self.ghostty,
             staging,
             &self.cancelled,
