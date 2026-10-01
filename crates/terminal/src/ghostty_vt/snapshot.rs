@@ -1,12 +1,12 @@
 //! Semantic snapshot extraction and Ghostty formatter output.
 
 use super::{
-    sys,
-    terminal::check,
-    types::{
+    state::{
         CellState, CellStyle, ColorSpec, ColorState, CursorState, CursorStyle, DirtyState, Format,
         ModeState, Rgb, RowState, SemanticState, TerminalMetadata, TerminalMode, WideKind,
     },
+    sys,
+    terminal::check,
 };
 use crate::{Error, Result};
 use compact_str::CompactString;

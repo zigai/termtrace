@@ -1,9 +1,9 @@
 //! Typed focus, key, and mouse encoding through the pinned Ghostty API.
 
 use super::{
+    state::{EncodedKey, FocusEvent, KeyModifiers, MouseAction, MouseButton, NamedKey},
     sys,
     terminal::check,
-    types::{EncodedKey, FocusEvent, KeyModifiers, MouseAction, MouseButton, NamedKey},
 };
 use crate::{Error, Result};
 use std::{

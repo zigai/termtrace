@@ -12,10 +12,10 @@
 
 mod input;
 mod snapshot;
+mod state;
 mod sys;
 mod terminal;
-mod types;
 
 pub use input::encode_focus;
+pub use state::{supported_geometry_cell_count, Format};
 pub use terminal::GhosttyVt;
-pub use types::{supported_geometry_cell_count, Format};

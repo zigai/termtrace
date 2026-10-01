@@ -1,11 +1,12 @@
 //! Terminal-handle lifecycle, bounded VT ingestion, and host resource policy.
 
 use super::{
-    input, snapshot, sys,
-    types::{
+    input, snapshot,
+    state::{
         supported_geometry_cell_count, EncodedKey, Format, KeyModifiers, MouseAction, MouseButton,
         NamedKey, SemanticState,
     },
+    sys,
 };
 use crate::{Error, Result};
 use std::{ffi::c_void, mem::take, ptr, slice};
