@@ -37,13 +37,13 @@ impl ResponseWriter {
     }
 }
 
-mod helpers;
+mod formatting;
 mod human;
 mod io_core;
 mod pagination;
 mod sink;
 
-pub(super) use helpers::{
+pub(super) use formatting::{
     id_list, optional_display, projection_warning, quoted_text, row_text, stable_enum_label,
     write_projection_warning,
 };
