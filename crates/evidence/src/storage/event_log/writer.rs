@@ -1,6 +1,6 @@
 use super::{
+    model::SessionClock,
     segments::SegmentWriter,
-    types::SessionClock,
     validation::{
         invalid_log, validate_event_geometry, validate_header, validate_parent_directory,
         OWNER_FILE_MODE,

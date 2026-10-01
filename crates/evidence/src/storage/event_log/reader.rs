@@ -1,7 +1,7 @@
 use super::{
+    model::{EventLog, EventLogSummary},
     operations::validate_operation_transition,
     segments::{canonical_source_fingerprint, CanonicalLogFile, SegmentWriter},
-    types::{EventLog, EventLogSummary},
     validation::{
         invalid_log, parse_json_line, read_line, validate_event_geometry, validate_header,
         validate_parent_directory, MAX_LINE_BYTES, OWNER_FILE_MODE,
