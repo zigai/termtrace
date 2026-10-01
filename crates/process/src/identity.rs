@@ -45,7 +45,7 @@ impl ProcessIdentity {
 
     /// Whether this exact process is still running and not a zombie.
     #[must_use]
-    pub fn still_running(&self) -> bool {
+    pub fn is_running(&self) -> bool {
         return ProcessStatus::read(self.pid).is_ok_and(|status| {
             return status.running && status.start_ticks == self.start_ticks;
         });
@@ -142,17 +142,17 @@ mod tests {
             .expect("spawn");
 
         let identity = ProcessIdentity::of(child.id()).expect("identity");
-        assert!(identity.still_running());
+        assert!(identity.is_running());
         assert!(!ProcessIdentity {
             start_ticks: identity.start_ticks + 1,
             ..identity
         }
-        .still_running());
+        .is_running());
 
         child.kill().expect("kill");
         child.wait().expect("reap");
 
-        assert!(!identity.still_running());
+        assert!(!identity.is_running());
         assert!(ProcessIdentity::of(identity.pid).is_err());
     }
 

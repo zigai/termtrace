@@ -48,7 +48,7 @@ impl ControlStripper {
 
     /// Whether a recognized alternate-screen transition was observed.
     #[must_use]
-    pub fn alternate_screen_observed(&self) -> bool {
+    pub fn has_observed_alternate_screen(&self) -> bool {
         return self.alternate_screen_observed;
     }
 
@@ -186,7 +186,7 @@ mod tests {
         output.extend(stripper.feed(b"9h\x1b[31mred\x1b[0m\n"));
 
         assert_eq!(output, b"before\nred\n");
-        assert!(stripper.alternate_screen_observed());
+        assert!(stripper.has_observed_alternate_screen());
         assert_eq!(stripper.source_byte_count(), 28);
         assert_eq!(stripper.output_byte_count(), 11);
     }
@@ -197,7 +197,7 @@ mod tests {
         let output = stripper
             .feed(b"\x01\x7f\x80\x9b31mA\x9d0;title\x07B\x90payload\x1b\\C\x9fpayload\x1b\\D");
         assert_eq!(output, b"ABCD");
-        assert!(!stripper.alternate_screen_observed());
+        assert!(!stripper.has_observed_alternate_screen());
     }
 
     #[test]
@@ -211,12 +211,12 @@ mod tests {
     #[test]
     fn recognizes_each_supported_alternate_screen_sequence() {
         let untouched = ControlStripper::default();
-        assert!(!untouched.alternate_screen_observed());
+        assert!(!untouched.has_observed_alternate_screen());
 
         for sequence in [b"\x1b[?47h".as_slice(), b"\x1b[?1047h", b"\x1b[?1049h"] {
             let mut stripper = ControlStripper::default();
             assert!(stripper.feed(sequence).is_empty());
-            assert!(stripper.alternate_screen_observed());
+            assert!(stripper.has_observed_alternate_screen());
         }
     }
 
@@ -228,7 +228,7 @@ mod tests {
 
         let mut stripper = ControlStripper::default();
         assert!(stripper.feed(&sequence).is_empty());
-        assert!(!stripper.alternate_screen_observed());
+        assert!(!stripper.has_observed_alternate_screen());
     }
 
     #[test]
@@ -248,7 +248,7 @@ mod tests {
         ) {
             let mut contiguous = ControlStripper::default();
             let expected = contiguous.feed(&bytes);
-            let expected_alternate_screen = contiguous.alternate_screen_observed();
+            let expected_alternate_screen = contiguous.has_observed_alternate_screen();
 
             let mut chunked = ControlStripper::default();
             let mut actual = Vec::new();
@@ -258,7 +258,7 @@ mod tests {
 
             prop_assert_eq!(&actual, &expected);
             prop_assert_eq!(
-                chunked.alternate_screen_observed(),
+                chunked.has_observed_alternate_screen(),
                 expected_alternate_screen
             );
             prop_assert_eq!(chunked.source_byte_count(), bytes.len() as u64);

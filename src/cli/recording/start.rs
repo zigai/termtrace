@@ -245,7 +245,7 @@ fn start_postcondition(
         .wait_screen(predicate, Duration::ZERO, synchronization.timeout)
         .into_diagnostic()?;
 
-    let matched = waited.satisfied();
+    let matched = waited.is_satisfied();
 
     return Ok((
         matched,

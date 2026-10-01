@@ -1,6 +1,6 @@
 //! Terminal presentation parsing and semantic-state tracking.
 
-use super::{control::MutationHistory, input::apply_input, model::TerminalGeometry};
+use super::{control::MutationHistory, input::apply, model::TerminalGeometry};
 use crate::{Error, Result};
 use std::{cell::RefCell, io::Write, mem::take, slice};
 use termtrace_evidence::event_log::EventLogWriter;
@@ -287,7 +287,7 @@ pub(super) fn process_semantic_bytes(
                     response: ByteString::from(response.as_slice()),
                     responder: "pinned-libghostty-vt".to_owned(),
                 })?;
-                apply_input(
+                apply(
                     writer,
                     event_log,
                     operation_id,

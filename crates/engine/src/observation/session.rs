@@ -24,7 +24,7 @@ use termtrace_model::{
     execution::event::Event,
     execution::layout::SessionLayout,
     execution::session::SessionCompletion,
-    protocol::control::ControlData,
+    protocol::control::ControlPayload,
     terminal::observation::{
         CaptureQuality, Observation, ObservationFrame, ObservationIntegrity, ObservationResolution,
         ObservationSourceKind, StatePoint, TruthLayer,
@@ -221,7 +221,7 @@ pub fn observe_completed_with_formats(
 /// is not a live snapshot.
 pub fn observation_from_live_snapshot(
     session: &Path,
-    snapshot: ControlData,
+    snapshot: ControlPayload,
 ) -> Result<Observation> {
     let canonical = session.canonicalize().map_err(|source| {
         return Error::Filesystem {
@@ -231,7 +231,7 @@ pub fn observation_from_live_snapshot(
     })?;
 
     let manifest = read_manifest(&canonical)?;
-    let ControlData::Snapshot {
+    let ControlPayload::Snapshot {
         semantic_state_zstd: _,
         viewport_text,
         state_hash,
@@ -703,8 +703,10 @@ fn semantic_state_with_hash_for_session_inner(
 ///
 /// Returns an error when the control payload is not a snapshot, decompression
 /// fails, the decoded state exceeds 32 MiB, or its JSON is invalid.
-pub fn semantic_state_from_live_snapshot(snapshot: ControlData) -> Result<(SemanticState, String)> {
-    let ControlData::Snapshot {
+pub fn semantic_state_from_live_snapshot(
+    snapshot: ControlPayload,
+) -> Result<(SemanticState, String)> {
+    let ControlPayload::Snapshot {
         semantic_state_zstd,
         state_hash,
         ..
@@ -762,7 +764,7 @@ mod tests {
             event_hash: "0".repeat(64),
             output_bytes: 0,
         };
-        let snapshot = ControlData::Snapshot {
+        let snapshot = ControlPayload::Snapshot {
             semantic_state_zstd: ByteString::from(compressed),
             viewport_text: String::new(),
             state_hash: "0".repeat(64),

@@ -32,7 +32,7 @@ use termtrace_evidence::{
 use termtrace_model::{
     execution::session::SessionCompletion,
     protocol::control::{
-        ControlCommand, ControlData, ControlRequest, ProcessSignal, ScreenPredicate,
+        ControlCommand, ControlPayload, ControlRequest, ProcessSignal, ScreenPredicate,
         ScreenWaitQuality, StableCaptureQuality,
     },
     terminal::{
@@ -90,7 +90,7 @@ pub struct StopRequest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StopOutcome {
     /// The actor acknowledged the request; completion was not awaited.
-    Requested(Box<ControlData>),
+    Requested(Box<ControlPayload>),
     /// Validated completion evidence, published before or after the request.
     Completed(Box<SessionCompletion>),
 }
@@ -101,7 +101,9 @@ impl Session {
         let ownership = recorder.map_or(Ownership::Attached, |process| {
             let recorded_group =
                 match send_request(&path, &ControlRequest::new(ControlCommand::Status)) {
-                    Ok(ControlData::Status { pid, .. }) => pid.and_then(ProcessGroup::from_leader),
+                    Ok(ControlPayload::Status { pid, .. }) => {
+                        pid.and_then(ProcessGroup::from_leader)
+                    }
                     _ => None,
                 };
 
@@ -156,7 +158,7 @@ impl Session {
 
     /// Whether this handle launched the recording, and so owns its evidence.
     #[must_use]
-    pub const fn launched(&self) -> bool {
+    pub const fn is_launched(&self) -> bool {
         return matches!(self.ownership, Ownership::Launched(_));
     }
 
@@ -207,7 +209,7 @@ impl Session {
     /// # Errors
     ///
     /// Returns the transport failure or the actor's rejection.
-    pub fn control(&self, request: &ControlRequest) -> Result<ControlData> {
+    pub fn control(&self, request: &ControlRequest) -> Result<ControlPayload> {
         return Ok(send_request(&self.path, request)?);
     }
 
@@ -245,7 +247,7 @@ impl Session {
         });
         wire.request_id = request_id;
         wire.expected_presented_state_hash = request.guard.if_state;
-        let ControlData::ActionApplied {
+        let ControlPayload::ActionApplied {
             input,
             postcondition,
             boundaries,
@@ -267,7 +269,7 @@ impl Session {
             boundaries,
         };
 
-        if !outcome.matched() && !request.allow_incomplete {
+        if !outcome.is_matched() && !request.allow_incomplete {
             return Err(Error::PostconditionIncomplete {
                 result: Box::new(outcome),
             });
@@ -300,7 +302,7 @@ impl Session {
             }
         };
 
-        let ControlData::ScreenWait {
+        let ControlPayload::ScreenWait {
             predicate,
             matched,
             first_match_monotonic_ns,
@@ -388,7 +390,7 @@ impl Session {
 
         let capture = match self.reach_within(&request, timing)? {
             Reached::Live(data) => {
-                let ControlData::StableSnapshot {
+                let ControlPayload::StableSnapshot {
                     frame,
                     semantic_state_zstd,
                     first_observed_monotonic_ns,
@@ -504,7 +506,7 @@ impl Session {
         if self.live_selectable(&point, include_hidden)? {
             let request = ControlRequest::new(ControlCommand::ScreenFrame { projection });
             if let Reached::Live(data) = self.reach(&request)? {
-                let ControlData::ScreenFrame { frame } = *data else {
+                let ControlPayload::ScreenFrame { frame } = *data else {
                     return Err(client_error("actor returned the wrong rich-screen payload"));
                 };
 

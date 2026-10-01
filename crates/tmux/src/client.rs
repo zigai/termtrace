@@ -189,7 +189,7 @@ impl TmuxClient {
     }
 
     /// Whether the current integration version is enabled.
-    pub fn integration_enabled(&self) -> bool {
+    pub fn is_integration_enabled(&self) -> bool {
         return self.option_text(options::VERSION).ok().as_deref()
             == Some(options::INTEGRATION_VERSION);
     }

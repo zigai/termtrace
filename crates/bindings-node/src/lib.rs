@@ -259,7 +259,7 @@ impl JsScreen {
                 })
                 .map_err(to_napi_err)?;
 
-            if !outcome.satisfied() {
+            if !outcome.is_satisfied() {
                 return Err(unsatisfied_wait(format!(
                     "timed out waiting for pattern: '{pattern}'"
                 )));
@@ -1323,7 +1323,7 @@ impl JsTermtrace {
         );
         spec.working_directory = cwd.map(PathBuf::from);
         for (name, value) in env.unwrap_or_default() {
-            spec = spec.set_environment(name, value.into_bytes());
+            spec = spec.environment_variable(name, value.into_bytes());
         }
 
         return tokio::task::spawn_blocking(move || {

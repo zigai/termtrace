@@ -1,7 +1,7 @@
 //! Child-process lifecycle, runtime workers, and session cleanup.
 
 use super::{
-    control::{spawn_control_server, ControlWorker},
+    control::{spawn, ControlWorker},
     environment::EffectiveEnvironment,
     model::{RecordOptions, RuntimeMessage, SpawnedCommand, TerminalGeometry},
     support::{finish_with_cleanup, poll_ready, terminal_error, thread_panicked},
@@ -577,7 +577,7 @@ impl RuntimeWorkers {
         host_signals: Signals,
     ) -> Result<(Self, mpsc::Receiver<RuntimeMessage>)> {
         let signals = spawn_host_signals(host_signals, sender.clone())?;
-        let control = match spawn_control_server(control_socket, sender.clone()) {
+        let control = match spawn(control_socket, sender.clone()) {
             Ok(worker) => worker,
             Err(error) => {
                 drop(receiver);

@@ -183,7 +183,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
         }
         TmuxSubcommand::Scope(arguments) => {
             let client = arguments.connection.client();
-            if !client.integration_enabled() {
+            if !client.is_integration_enabled() {
                 return Err(miette::miette!(
                     "tmux recording is not enabled for this server"
                 ));

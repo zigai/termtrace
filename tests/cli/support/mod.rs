@@ -127,7 +127,7 @@ pub(crate) use termtrace_model::{
         CaptureTarget, GeometrySource, SessionCompletion, SessionManifest, TmuxPaneLaunchKind,
     },
     protocol::control::{
-        ControlCommand, ControlData, ControlRequest, ControlResult, ScreenMode, ScreenPredicate,
+        ControlCommand, ControlPayload, ControlRequest, ControlResult, ScreenMode, ScreenPredicate,
         ScreenWaitQuality, StableCaptureQuality, StateHashComparison,
     },
     terminal::analysis::DiagnosticCheck,
@@ -136,7 +136,9 @@ pub(crate) use termtrace_model::{
         IndexOptions, ReplayManifest, SourceRange, StateRecord, StateSelection, StateSelector,
         GHOSTTY_REVISION,
     },
-    terminal::screen::{ScreenFrameData, ScreenFrameSource, ScreenProjectionRequest, ScreenRegion},
+    terminal::screen::{
+        ScreenFrameContent, ScreenFrameSource, ScreenProjectionRequest, ScreenRegion,
+    },
     terminal::state::{KeyModifiers, NamedKey},
     value::ByteString,
 };

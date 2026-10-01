@@ -64,7 +64,7 @@ impl ResolvedGhosttyProfile {
 /// # Errors
 ///
 /// Returns the error reported by `resolve_effective`.
-pub fn resolve_profile(
+pub fn resolve(
     base_effective_config: &[u8],
     source_config: Option<ByteString>,
     overrides: GhosttyVisualOverrides,
@@ -94,7 +94,7 @@ pub fn resolve_profile(
 /// Returns an error when the provenance does not name the canonical replay profile, `replay_config`
 /// does not match its recorded hash, `resolve_effective` fails, or the resolved effective
 /// configuration does not match its recorded hash.
-pub fn restore_profile(
+pub fn restore(
     replay_config: Vec<u8>,
     provenance: GhosttyVisualProvenance,
     resolve_effective: impl FnOnce(&[u8]) -> Result<Vec<u8>>,
@@ -129,7 +129,7 @@ pub fn restore_profile(
 ///
 /// Returns an error when the profile fails validation, the pinned engine's built-in colors cannot
 /// be read, or the effective configuration contains invalid color settings.
-pub fn terminal_colors_for_profile(profile: &ResolvedGhosttyProfile) -> Result<TerminalColors> {
+pub fn terminal_colors(profile: &ResolvedGhosttyProfile) -> Result<TerminalColors> {
     profile.validate()?;
 
     return terminal_colors_from_config(&profile.effective_config);
@@ -364,7 +364,7 @@ mod tests {
         }
 
         let replay_config = b"background = #000000\nkeybind = alt+f24=text:\\x1b\\x1b[24;2~\n";
-        let profile = resolve_profile(
+        let profile = resolve(
             replay_config,
             None,
             GhosttyVisualOverrides::default(),
@@ -387,7 +387,7 @@ mod tests {
             blake3::hash(&profile.effective_config).to_hex().to_string()
         );
 
-        let restored = restore_profile(
+        let restored = restore(
             profile.replay_config.clone(),
             profile.provenance.clone(),
             |config| return Ok(escape_backslashes(config)),
@@ -403,7 +403,7 @@ mod tests {
             b"config-file = /isolated/config\nconfig-default-files = false\nbackground = #000000"
                 .to_vec();
 
-        let profile = resolve_profile(
+        let profile = resolve(
             &replay_config,
             None,
             GhosttyVisualOverrides::default(),
@@ -419,7 +419,7 @@ mod tests {
 
     #[test]
     fn constructed_profile_validation_binds_both_byte_sequences() {
-        let profile = resolve_profile(
+        let profile = resolve(
             b"background = #000000\n",
             None,
             GhosttyVisualOverrides::default(),
@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn restore_rejects_tampered_replay_profile_before_querying_ghostty() {
-        let profile = resolve_profile(
+        let profile = resolve(
             b"background = #000000\n",
             None,
             GhosttyVisualOverrides::default(),
@@ -461,7 +461,7 @@ mod tests {
 
         let mut tampered = profile.replay_config;
         tampered.extend_from_slice(b"foreground = #ffffff\n");
-        let error = restore_profile(tampered, profile.provenance, |_| -> Result<Vec<u8>> {
+        let error = restore(tampered, profile.provenance, |_| -> Result<Vec<u8>> {
             panic!("Ghostty query must not run for unauthenticated replay bytes");
         })
         .expect_err("tampered replay profile must fail");
@@ -471,7 +471,7 @@ mod tests {
     #[test]
     fn restore_rejects_changed_effective_ghostty_output() {
         let replay_config = b"background = #000000\n".to_vec();
-        let profile = resolve_profile(
+        let profile = resolve(
             &replay_config,
             None,
             GhosttyVisualOverrides::default(),
@@ -479,7 +479,7 @@ mod tests {
         )
         .expect("valid replay profile");
 
-        let error = restore_profile(replay_config, profile.provenance, |_| {
+        let error = restore(replay_config, profile.provenance, |_| {
             return Ok(b"background = #ffffff\n".to_vec());
         })
         .expect_err("changed effective output must fail");

@@ -62,7 +62,7 @@ pub fn supervise(
     command: &mut Command,
     cancelled: &AtomicBool,
 ) -> io::Result<Option<ExitStatus>> {
-    if !owner.still_running() {
+    if !owner.is_running() {
         return Ok(None);
     }
 
@@ -72,7 +72,7 @@ pub fn supervise(
             return Ok(Some(Some(status)));
         }
 
-        if cancelled.load(Ordering::Relaxed) || !owner.still_running() {
+        if cancelled.load(Ordering::Relaxed) || !owner.is_running() {
             return Ok(Some(None));
         }
         return Ok(None);

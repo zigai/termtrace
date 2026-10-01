@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Duration::ZERO,
         Duration::from_secs(5),
     )?;
-    assert!(ready.satisfied());
+    assert!(ready.is_satisfied());
 
     let frame = live_session.frame(Default::default())?;
     let enter = KeyChord::parse("enter")?.ok_or("enter is a key")?;

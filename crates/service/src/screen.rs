@@ -4,7 +4,7 @@ use crate::defaults;
 use std::time::Duration;
 use termtrace_model::{
     protocol::control::StableCaptureQuality,
-    terminal::screen::{ScreenFrame, ScreenFrameData, ScreenProjectionRequest},
+    terminal::screen::{ScreenFrame, ScreenFrameContent, ScreenProjectionRequest},
     value::ByteString,
 };
 
@@ -53,21 +53,21 @@ pub struct StableScreenCapture {
 #[must_use]
 pub fn frame_text(frame: &ScreenFrame) -> String {
     return match &frame.data {
-        ScreenFrameData::Text { rows } => rows
+        ScreenFrameContent::Text { rows } => rows
             .iter()
             .map(|row| return row.text.as_str())
             .collect::<Vec<_>>()
             .join("\n"),
-        ScreenFrameData::Spans { rows } => rows
+        ScreenFrameContent::Spans { rows } => rows
             .iter()
             .map(|row| return row.text.as_str())
             .collect::<Vec<_>>()
             .join("\n"),
-        ScreenFrameData::Cells { rows } => rows
+        ScreenFrameContent::Cells { rows } => rows
             .iter()
             .map(|row| return row.text.as_str())
             .collect::<Vec<_>>()
             .join("\n"),
-        ScreenFrameData::None => String::new(),
+        ScreenFrameContent::None => String::new(),
     };
 }

@@ -6,8 +6,8 @@ use std::{
     time::{Duration, Instant},
 };
 use termtrace_sdk::{
-    ByteString, Client, ControlCommand, ControlRequest, ControlResult, Driver, DriverData,
-    DriverMethod, DriverResult, instrumentation::Instrumentation,
+    instrumentation::Instrumentation, ByteString, Client, ControlCommand, ControlRequest,
+    ControlResult, Driver, DriverMethod, DriverPayload, DriverResult,
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Duration::from_secs(10),
     )?;
     let DriverResult::Ok {
-        data: DriverData::Attached { handle, .. },
+        data: DriverPayload::Attached { handle, .. },
     } = response.result
     else {
         return Err("driver did not attach".into());
@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     assert!(matches!(
         response.result,
         DriverResult::Ok {
-            data: DriverData::OutputWait { .. }
+            data: DriverPayload::OutputWait { .. }
         }
     ));
 

@@ -17,7 +17,7 @@ use termtrace_model::{
         session::{SessionCompletion, SessionManifest, SessionPhase},
     },
     protocol::control::{
-        ControlCommand, ControlData, ControlRequest, DEFAULT_CONTROL_RESPONSE_TIMEOUT,
+        ControlCommand, ControlPayload, ControlRequest, DEFAULT_CONTROL_RESPONSE_TIMEOUT,
         MAX_CONTROL_MESSAGE_BYTES,
     },
 };
@@ -40,7 +40,7 @@ pub struct PhaseObservation {
 #[derive(Debug)]
 pub enum Reached {
     /// The live actor answered.
-    Live(Box<ControlData>),
+    Live(Box<ControlPayload>),
     /// The session had completed, before the request or while it was failing.
     Completed(Box<SessionCompletion>),
 }
@@ -158,7 +158,7 @@ pub fn request_or_completed(
 }
 
 /// Phase decided by evidence alone; a published session without completion is `Incomplete`.
-pub(crate) fn evidence_phase(session: &Path) -> PhaseObservation {
+pub(crate) fn observe_evidence(session: &Path) -> PhaseObservation {
     return decided_by_evidence(session)
         .unwrap_or_else(|| return observed(SessionPhase::Incomplete, None));
 }

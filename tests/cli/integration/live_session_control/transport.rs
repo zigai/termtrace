@@ -64,7 +64,7 @@ fn live_control_drives_and_audits_a_detached_session() {
     let first_boundary = match send_request(&session, &ControlRequest::new(ControlCommand::Status))
         .expect("first observer-free status")
     {
-        ControlData::Status { boundaries, .. } => Some(boundaries),
+        ControlPayload::Status { boundaries, .. } => Some(boundaries),
         _ => None,
     }
     .expect("status response data");
@@ -74,7 +74,7 @@ fn live_control_drives_and_audits_a_detached_session() {
         match send_request(&session, &ControlRequest::new(ControlCommand::Status))
             .expect("second observer-free status")
         {
-            ControlData::Status { boundaries, .. } => Some(boundaries),
+            ControlPayload::Status { boundaries, .. } => Some(boundaries),
             _ => None,
         }
         .expect("status response data");
@@ -265,7 +265,7 @@ fn live_control_uses_a_bounded_endpoint_for_long_evidence_paths() {
 
     assert!(matches!(
         send_request(&session, &ControlRequest::new(ControlCommand::Ping)),
-        Ok(ControlData::Acknowledged { .. })
+        Ok(ControlPayload::Acknowledged { .. })
     ));
 
     send_request(&session, &ControlRequest::new(ControlCommand::Stop))

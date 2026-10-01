@@ -11,9 +11,9 @@ use std::{
     io::{BufRead, BufWriter, Write},
     path::PathBuf,
 };
-use termtrace_model::protocol::control::ControlData;
+use termtrace_model::protocol::control::ControlPayload;
 use termtrace_model::protocol::driver::{
-    DriverData, DriverRequest, DriverResponse, DriverResult, DRIVER_MAX_REQUEST_BYTES,
+    DriverPayload, DriverRequest, DriverResponse, DriverResult, DRIVER_MAX_REQUEST_BYTES,
     DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
 };
 use termtrace_model::protocol::mutation::MutationEffect;
@@ -205,12 +205,12 @@ pub(super) fn bounded_response_with_bytes(response: DriverResponse) -> (DriverRe
     let rich_screen_response = matches!(
         &response.result,
         DriverResult::Ok {
-            data: DriverData::ScreenFrame { .. }
-                | DriverData::Control {
-                    data: ControlData::ScreenFrame { .. }
-                        | ControlData::StableSnapshot { .. }
-                        | ControlData::ScreenWait { .. }
-                        | ControlData::ActionApplied { .. },
+            data: DriverPayload::ScreenFrame { .. }
+                | DriverPayload::Control {
+                    data: ControlPayload::ScreenFrame { .. }
+                        | ControlPayload::StableSnapshot { .. }
+                        | ControlPayload::ScreenWait { .. }
+                        | ControlPayload::ActionApplied { .. },
                 },
         }
     );
@@ -243,25 +243,25 @@ fn undelivered_effect(result: &DriverResult) -> MutationEffect {
         DriverResult::Error { effect, .. } => *effect,
         DriverResult::Ok {
             data:
-                DriverData::Control {
+                DriverPayload::Control {
                     data:
-                        ControlData::EventCursor { .. }
-                        | ControlData::Status { .. }
-                        | ControlData::Snapshot { .. }
-                        | ControlData::ScreenFrame { .. }
-                        | ControlData::StableSnapshot { .. }
-                        | ControlData::ScreenWait { .. },
+                        ControlPayload::EventCursor { .. }
+                        | ControlPayload::Status { .. }
+                        | ControlPayload::Snapshot { .. }
+                        | ControlPayload::ScreenFrame { .. }
+                        | ControlPayload::StableSnapshot { .. }
+                        | ControlPayload::ScreenWait { .. },
                 }
-                | DriverData::Hello { .. }
-                | DriverData::OutputWait { .. }
-                | DriverData::Completion { .. }
-                | DriverData::Observation { .. }
-                | DriverData::ScreenFrame { .. }
-                | DriverData::Timeline { .. }
-                | DriverData::Diff { .. }
-                | DriverData::Diagnose { .. }
-                | DriverData::Events { .. }
-                | DriverData::Verification { .. },
+                | DriverPayload::Hello { .. }
+                | DriverPayload::OutputWait { .. }
+                | DriverPayload::Completion { .. }
+                | DriverPayload::Observation { .. }
+                | DriverPayload::ScreenFrame { .. }
+                | DriverPayload::Timeline { .. }
+                | DriverPayload::Diff { .. }
+                | DriverPayload::Diagnose { .. }
+                | DriverPayload::Events { .. }
+                | DriverPayload::Verification { .. },
         } => MutationEffect::NotApplied,
         DriverResult::Ok { .. } => MutationEffect::Applied,
     };

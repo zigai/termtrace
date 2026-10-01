@@ -20,8 +20,8 @@ fuzz_target!(|input: &[u8]| {
 
     assert_eq!(actual, expected);
     assert_eq!(
-        chunked.alternate_screen_observed(),
-        contiguous.alternate_screen_observed()
+        chunked.has_observed_alternate_screen(),
+        contiguous.has_observed_alternate_screen()
     );
     assert_eq!(chunked.source_byte_count(), bytes.len() as u64);
     assert_eq!(chunked.output_byte_count(), actual.len() as u64);

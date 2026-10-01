@@ -72,7 +72,7 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
                 .expect("ping after rejected input");
             assert!(matches!(
                 send_request(&session, &ControlRequest::new(ControlCommand::Status)),
-                Ok(ControlData::Status { .. })
+                Ok(ControlPayload::Status { .. })
             ));
         }
 

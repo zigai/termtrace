@@ -2,7 +2,7 @@ use crate::cli::output::ResponseWriter;
 
 pub(super) mod args;
 
-use crate::cli::command::completion_command;
+use crate::cli::command::completion;
 use crate::cli::{
     agent::serve as serve_driver,
     output::{write_json_line, write_json_pretty, write_stdout},
@@ -134,7 +134,7 @@ pub(super) fn run_completions(
     response: &mut ResponseWriter,
     arguments: CompletionsArgs,
 ) -> Result<ExitCode> {
-    let mut command = completion_command();
+    let mut command = completion();
     let mut output = Vec::new();
     generate(arguments.shell, &mut command, "termtrace", &mut output);
 

@@ -30,7 +30,7 @@ use termtrace_model::{
     execution::{event::Event, layout::SessionLayout},
     protocol::control::{ControlCommand, ControlRequest, ScreenPredicate},
     terminal::analysis::DiagnosticCheck,
-    terminal::screen::{ScreenFrame, ScreenFrameData},
+    terminal::screen::{ScreenFrame, ScreenFrameContent},
     terminal::state::{KeyChord, KeyModifiers},
 };
 use termtrace_service::{
@@ -252,7 +252,7 @@ fn execute_step(
                 )
                 .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
 
-            if !matched.satisfied() {
+            if !matched.is_satisfied() {
                 return Err(step_failure(
                     index,
                     step,
@@ -440,19 +440,19 @@ fn step_failure(
 
 fn rich_frame_snapshot(frame: &ScreenFrame) -> ScenarioFrameSnapshot {
     let viewport_text = match &frame.data {
-        ScreenFrameData::Text { rows } => rows
+        ScreenFrameContent::Text { rows } => rows
             .iter()
             .map(|row| return row.text.as_str())
             .collect::<Vec<&str>>(),
-        ScreenFrameData::Spans { rows } => rows
+        ScreenFrameContent::Spans { rows } => rows
             .iter()
             .map(|row| return row.text.as_str())
             .collect::<Vec<&str>>(),
-        ScreenFrameData::Cells { rows } => rows
+        ScreenFrameContent::Cells { rows } => rows
             .iter()
             .map(|row| return row.text.as_str())
             .collect::<Vec<&str>>(),
-        ScreenFrameData::None => Vec::new(),
+        ScreenFrameContent::None => Vec::new(),
     }
     .join("\n");
 

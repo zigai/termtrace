@@ -2,7 +2,7 @@ use super::*;
 
 /// Parse one `send` input atom: a key chord, `text:`, `paste:`, `raw:`, `raw-file:`, or one
 /// printable character.
-pub(super) fn input_atom_for_cli(atom: &str) -> Result<InputAtom> {
+pub(super) fn parse_atom(atom: &str) -> Result<InputAtom> {
     if let Some(chord) = KeyChord::parse(atom).into_diagnostic()? {
         return Ok(InputAtom::Key(chord));
     }

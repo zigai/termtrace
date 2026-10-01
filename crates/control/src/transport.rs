@@ -1,7 +1,7 @@
 //! Blocking client transport for the versioned live-session control protocol.
 
 use crate::{
-    phase::{evidence_phase, read_manifest},
+    phase::{observe_evidence, read_manifest},
     Error, Result,
 };
 use nix::{
@@ -27,7 +27,7 @@ use std::{
 use termtrace_model::{
     execution::session::SessionPhase,
     protocol::control::{
-        is_control_frame, ControlCommand, ControlData, ControlRequest, ControlResponse,
+        is_control_frame, ControlCommand, ControlPayload, ControlRequest, ControlResponse,
         ControlResult, ScreenPredicate, CONTROL_PROTOCOL_VERSION, DEFAULT_CONTROL_RESPONSE_TIMEOUT,
         MAX_CONTROL_MESSAGE_BYTES,
     },
@@ -159,7 +159,7 @@ pub fn control_endpoint_is_reachable(session_directory: impl AsRef<Path>) -> boo
 pub fn request(
     session_directory: impl AsRef<Path>,
     command: ControlCommand,
-) -> Result<ControlData> {
+) -> Result<ControlPayload> {
     return send_request(session_directory, &ControlRequest::new(command));
 }
 
@@ -187,7 +187,7 @@ pub fn wait_for_screen(
         },
     )?;
 
-    let ControlData::ScreenWait {
+    let ControlPayload::ScreenWait {
         matched,
         first_match_monotonic_ns,
         observed_monotonic_ns,
@@ -225,12 +225,12 @@ pub fn wait_for_screen(
 pub fn send_request(
     session_directory: impl AsRef<Path>,
     request: &ControlRequest,
-) -> Result<ControlData> {
+) -> Result<ControlPayload> {
     return send_request_response(session_directory, request).and_then(accepted);
 }
 
 /// The actor's answer as data, or its rejection as [`Error::Rejected`].
-pub(crate) fn accepted(response: ControlResponse) -> Result<ControlData> {
+pub(crate) fn accepted(response: ControlResponse) -> Result<ControlPayload> {
     match response.result {
         ControlResult::Ok { data } => return Ok(data),
         ControlResult::Error {
@@ -516,7 +516,7 @@ fn exchange_stream(
 fn unavailable(session: &Path, source: IoError) -> Error {
     return Error::Unavailable {
         session: session.to_path_buf(),
-        phase: evidence_phase(session).phase,
+        phase: observe_evidence(session).phase,
         source,
     };
 }

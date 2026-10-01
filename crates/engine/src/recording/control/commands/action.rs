@@ -1,10 +1,10 @@
 use super::{
     actor_boundaries, control_error_code, control_error_response, evaluate_action_postcondition,
-    mpsc, mutation_failure_effect, presented_state_hash, screen_frame_error_response,
-    ActionInputResult, AdmittedAction, AdmittedPostcondition, ControlCommand, ControlData,
-    ControlErrorDetails, ControlRequest, ControlResponse, ControlResult, Duration, Error,
-    EventLogWriter, InputSequenceExecution, InputSequenceFailureDetails, Instant, MutationEffect,
-    Result, SessionActor, Uuid, CONTROL_PROTOCOL_VERSION,
+    mpsc, mutation_failure_effect, presented_state_hash, screen_frame_error, ActionInputResult,
+    AdmittedAction, AdmittedPostcondition, ControlCommand, ControlErrorDetails, ControlPayload,
+    ControlRequest, ControlResponse, ControlResult, Duration, Error, EventLogWriter,
+    InputSequenceExecution, InputSequenceFailureDetails, Instant, MutationEffect, Result,
+    SessionActor, Uuid, CONTROL_PROTOCOL_VERSION,
 };
 
 pub(in crate::recording) struct PendingInputSequence {
@@ -107,7 +107,7 @@ impl SessionActor<'_> {
                                     matching_state: None,
                                 });
                             } else {
-                                break Ok(ControlData::InputSequenceApplied {
+                                break Ok(ControlPayload::InputSequenceApplied {
                                     sequence_id: input.sequence_id,
                                     atom_count: input.atom_count,
                                     bytes_written: input.bytes_written,
@@ -138,7 +138,7 @@ impl SessionActor<'_> {
                         output_closed,
                     ) {
                         Ok(Some(postcondition)) => {
-                            break Ok(ControlData::ActionApplied {
+                            break Ok(ControlPayload::ActionApplied {
                                 input: waiting.input,
                                 postcondition,
                                 boundaries: actor_boundaries(&self.event_log),
@@ -264,7 +264,7 @@ pub(super) fn input_sequence_error_response(
                 }),
             },
         },
-        Error::ScreenFrame(error) => screen_frame_error_response(
+        Error::ScreenFrame(error) => screen_frame_error(
             request_id,
             error,
             current_state_hash,

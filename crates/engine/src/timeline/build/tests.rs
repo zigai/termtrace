@@ -1,7 +1,5 @@
 use super::*;
-use crate::replay::{
-    reset_test_replay_output_bytes, test_replay_output_bytes, write_cataloged_index,
-};
+use crate::replay::{reset_test_replay_output_bytes, test_replay_output_bytes, write_cataloged};
 use termtrace_model::execution::event::{EventLogHeader, EventRecord};
 use termtrace_model::value::ByteString;
 use uuid::Uuid;
@@ -115,7 +113,7 @@ fn indexed_control_log(temporary: &tempfile::TempDir) -> EventLog {
         source_path: Some(temporary.path().join("events.jsonl")),
     };
 
-    write_cataloged_index(temporary.path(), &log).expect("control-rich checkpoint index");
+    write_cataloged(temporary.path(), &log).expect("control-rich checkpoint index");
 
     return log;
 }
@@ -211,7 +209,7 @@ fn indexed_range_preserves_control_spanning_output_events() {
 
     let temporary = tempfile::TempDir::new().expect("indexed directory");
     log.source_path = Some(temporary.path().join("events.jsonl"));
-    write_cataloged_index(temporary.path(), &log).expect("spanning-control index");
+    write_cataloged(temporary.path(), &log).expect("spanning-control index");
 
     let range = Some(SourceRange {
         start_monotonic_ns: 350,
@@ -331,7 +329,7 @@ fn late_page_uses_checkpoint_and_retains_only_requested_entries() {
         source_path: Some(temporary.path().join("events.jsonl")),
     };
 
-    write_cataloged_index(temporary.path(), &log).expect("checkpointed index");
+    write_cataloged(temporary.path(), &log).expect("checkpointed index");
 
     reset_test_replay_output_bytes();
 

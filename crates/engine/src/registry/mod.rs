@@ -71,7 +71,7 @@ mod reservation;
 mod retention;
 mod store;
 
-use reservation::{system_time_unix_ns, valid_reservation, validate_alias};
+use reservation::{is_valid, system_time_unix_ns, validate_alias};
 use store::{
     ensure_owner_directory, inspect_entry, read_registry_record_nofollow, registry_error,
     sync_directory, sync_parent_directory, validate_owner_directory,

@@ -5,7 +5,7 @@ use std::path::Path;
 use termtrace_engine::{
     analysis::{
         diagnostics::{diagnose_session, explain_session},
-        last_action::analyze_last_action_session,
+        last_action::analyze_session,
         reviewer::{
             export_state as export_review_state, search as search_review,
             summarize as summarize_review,
@@ -74,7 +74,7 @@ impl AnalysisService {
     /// # Errors
     /// Returns an error if last-action inspection fails.
     pub fn last_action(session: &Path, broad_change_percent: u8) -> Result<LastActionAnalysis> {
-        return analyze_last_action_session(session, broad_change_percent).map_err(Error::from);
+        return analyze_session(session, broad_change_percent).map_err(Error::from);
     }
 
     /// List all canonical marker positions and nominal source frames.

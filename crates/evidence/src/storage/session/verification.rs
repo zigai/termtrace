@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     auxiliary::{
-        receipt::{read_receipt, receipt_payload, verify_ssh_receipt},
+        receipt::{payload, read_receipt, verify_ssh_receipt},
         request_journal::validate_mutation_journal,
     },
     storage::{
@@ -284,7 +284,7 @@ fn expected_receipt_payload(
         };
     })?;
 
-    return receipt_payload(
+    return payload(
         completion.session_id,
         completion,
         &completion_bytes,

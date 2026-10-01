@@ -43,7 +43,7 @@ impl ScreenWaitOutcome {
     /// while live, unsettled when no stability was requested, or a final screen that can no
     /// longer change because the child completed.
     #[must_use]
-    pub const fn satisfied(&self) -> bool {
+    pub const fn is_satisfied(&self) -> bool {
         return self.matched
             && matches!(
                 self.quality,

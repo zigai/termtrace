@@ -1,6 +1,6 @@
 use super::{
-    engine::validate_generated_replay_seed, invalid_replay, json_error, replay_for_index,
-    state_delta, trust::SourceIdentity, ReplaySeed,
+    between, engine::validate_generated_replay_seed, invalid_replay, json_error, replay_for_index,
+    trust::SourceIdentity, ReplaySeed,
 };
 use crate::completion;
 use crate::{timeline::resolve_source_range, Error, Result};
@@ -45,7 +45,7 @@ use control::write_control_index;
 use rank::TimelineRanks;
 use source::IndexSource;
 
-const REPLAY_CHECKPOINT_STATE_INTERVAL: u64 = 128;
+const REPLAY_CHECKPOINT_STATE_COUNT: u64 = 128;
 const INDEX_MANIFEST: &str = "manifest.json";
 const CHECKPOINTS: &str = "checkpoints.jsonl.zst";
 pub(crate) const CONTROL_INDEX: &str = "control-index.jsonl";
@@ -456,7 +456,7 @@ fn checkpoint_precedes_selector(record: &StateRecord, selector: &CheckpointSelec
 
 /// Write and catalog a session's default index for tests that exercise the trust rule.
 #[cfg(test)]
-pub(crate) fn write_cataloged_index(session: &Path, log: &EventLog) -> Result<PathBuf> {
+pub(crate) fn write_cataloged(session: &Path, log: &EventLog) -> Result<PathBuf> {
     use std::{fs::Permissions, os::unix::fs::PermissionsExt as _};
 
     fs_err::set_permissions(session, Permissions::from_mode(0o700)).map_err(|source| {
@@ -468,7 +468,7 @@ pub(crate) fn write_cataloged_index(session: &Path, log: &EventLog) -> Result<Pa
 
     let directory = SessionLayout::new(session).derived();
     create_private_directory(&directory)?;
-    write_index(&directory, log, None, true, StateSelection::All)?;
+    write(&directory, log, None, true, StateSelection::All)?;
     let manifest_bytes = fs_err::read(directory.join(INDEX_MANIFEST)).map_err(|source| {
         return Error::Filesystem {
             path: directory.join(INDEX_MANIFEST),
@@ -490,7 +490,7 @@ pub(crate) fn write_cataloged_index(session: &Path, log: &EventLog) -> Result<Pa
 }
 
 #[cfg(test)]
-pub(crate) fn write_index(
+pub(crate) fn write(
     directory: &Path,
     log: &EventLog,
     source_range: Option<SourceRange>,
@@ -535,7 +535,7 @@ fn write_source_index(
     sampling_stride_ns: Option<u64>,
 ) -> Result<(ReplayArtifacts, u64)> {
     write_control_index(directory, source, source_range)?;
-    let mut ranks = TimelineRanks::new(directory, source.records()?, source_range)?;
+    let mut ranks = TimelineRanks::open(directory, source.records()?, source_range)?;
     let states_path = directory.join("states.jsonl.zst");
     let states_file = secure_file(&states_path)?;
     let mut states = zstd::stream::write::Encoder::new(states_file, 3).map_err(|source| {
@@ -588,7 +588,7 @@ fn write_source_index(
      -> Result<()> {
         if state_selection == StateSelection::Presented {
             record.state_id = *retained_state_count;
-            record.delta = state_delta(previous_retained_state.as_ref(), state);
+            record.delta = between(previous_retained_state.as_ref(), state);
             *previous_retained_state = Some(state.clone());
         }
 
@@ -638,7 +638,7 @@ fn write_source_index(
         |record, state, engine| {
             let checkpoint_candidate = state_selection == StateSelection::All
                 && !state.modes.alternate_screen
-                && record.state_id % REPLAY_CHECKPOINT_STATE_INTERVAL == 0;
+                && record.state_id % REPLAY_CHECKPOINT_STATE_COUNT == 0;
 
             let mut checkpoint = false;
 

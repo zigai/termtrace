@@ -8,7 +8,7 @@ use termtrace_engine::observation::{
 };
 use termtrace_model::{
     terminal::screen::{
-        ScreenCell, ScreenCellRow, ScreenFrame, ScreenFrameData, ScreenFrameError, ScreenRegion,
+        ScreenCell, ScreenCellRow, ScreenFrame, ScreenFrameContent, ScreenFrameError, ScreenRegion,
         ScreenSnapshotOptions, ScreenSpan, ScreenSpanRow, ScreenTextRow, SpanCell,
     },
     terminal::state::{ColorSpec, CursorState, WideKind},
@@ -44,7 +44,7 @@ pub struct AssertionFrameIdentity {
 ///
 /// Only this type is suitable for conversion into a runner's negatable mismatch value.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ExpectationMismatch {
+pub struct ExpectationMismatchError {
     /// Stable expectation family.
     pub assertion: &'static str,
     /// Bounded expected summary.
@@ -59,7 +59,7 @@ pub struct ExpectationMismatch {
     pub truncated: bool,
 }
 
-impl fmt::Display for ExpectationMismatch {
+impl fmt::Display for ExpectationMismatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         return write!(
             f,
@@ -69,7 +69,7 @@ impl fmt::Display for ExpectationMismatch {
     }
 }
 
-impl StdError for ExpectationMismatch {}
+impl StdError for ExpectationMismatchError {}
 
 /// Assertion infrastructure failures that must never become a negatable mismatch.
 #[derive(Debug)]
@@ -79,7 +79,7 @@ pub enum AssertionError {
     /// Snapshot/detail/resource validation failure.
     Snapshot(ScreenFrameError),
     /// A valid expectation mismatch.
-    Mismatch(ExpectationMismatch),
+    Mismatch(ExpectationMismatchError),
 }
 
 impl fmt::Display for AssertionError {
@@ -142,13 +142,13 @@ pub fn normalized_snapshot(
 fn data_for_profile(
     frame: &ScreenFrame,
     profile: SnapshotProfile,
-) -> Result<ScreenFrameData, ScreenFrameError> {
+) -> Result<ScreenFrameContent, ScreenFrameError> {
     match (profile, &frame.data) {
-        (SnapshotProfile::Text, ScreenFrameData::Text { rows }) => {
-            return Ok(ScreenFrameData::Text { rows: rows.clone() });
+        (SnapshotProfile::Text, ScreenFrameContent::Text { rows }) => {
+            return Ok(ScreenFrameContent::Text { rows: rows.clone() });
         }
-        (SnapshotProfile::Text, ScreenFrameData::Spans { rows }) => {
-            return Ok(ScreenFrameData::Text {
+        (SnapshotProfile::Text, ScreenFrameContent::Spans { rows }) => {
+            return Ok(ScreenFrameContent::Text {
                 rows: rows
                     .iter()
                     .map(|row| {
@@ -162,8 +162,8 @@ fn data_for_profile(
                     .collect(),
             });
         }
-        (SnapshotProfile::Text, ScreenFrameData::Cells { rows }) => {
-            return Ok(ScreenFrameData::Text {
+        (SnapshotProfile::Text, ScreenFrameContent::Cells { rows }) => {
+            return Ok(ScreenFrameContent::Text {
                 rows: rows
                     .iter()
                     .map(|row| {
@@ -177,28 +177,28 @@ fn data_for_profile(
                     .collect(),
             });
         }
-        (SnapshotProfile::Spans, ScreenFrameData::Spans { rows }) => {
-            return Ok(ScreenFrameData::Spans { rows: rows.clone() });
+        (SnapshotProfile::Spans, ScreenFrameContent::Spans { rows }) => {
+            return Ok(ScreenFrameContent::Spans { rows: rows.clone() });
         }
-        (SnapshotProfile::Spans, ScreenFrameData::Cells { rows }) => {
-            return Ok(ScreenFrameData::Spans {
+        (SnapshotProfile::Spans, ScreenFrameContent::Cells { rows }) => {
+            return Ok(ScreenFrameContent::Spans {
                 rows: rows.iter().map(span_row_from_cells).collect(),
             });
         }
-        (SnapshotProfile::Cells, ScreenFrameData::Cells { rows }) => {
-            return Ok(ScreenFrameData::Cells { rows: rows.clone() });
+        (SnapshotProfile::Cells, ScreenFrameContent::Cells { rows }) => {
+            return Ok(ScreenFrameContent::Cells { rows: rows.clone() });
         }
-        (SnapshotProfile::Cells, ScreenFrameData::Spans { rows }) => {
-            return Ok(ScreenFrameData::Cells {
+        (SnapshotProfile::Cells, ScreenFrameContent::Spans { rows }) => {
+            return Ok(ScreenFrameContent::Cells {
                 rows: rows.iter().map(cell_row_from_spans).collect(),
             });
         }
-        (SnapshotProfile::Text, ScreenFrameData::None) => {
-            return Ok(ScreenFrameData::None);
+        (SnapshotProfile::Text, ScreenFrameContent::None) => {
+            return Ok(ScreenFrameContent::None);
         }
         (
             SnapshotProfile::Spans | SnapshotProfile::Cells,
-            ScreenFrameData::Text { .. } | ScreenFrameData::None,
+            ScreenFrameContent::Text { .. } | ScreenFrameContent::None,
         ) => {
             return Err(ScreenFrameError::Serialization);
         }
@@ -290,8 +290,8 @@ fn append_snapshot_grapheme(text: &mut String, grapheme: &str, wide_kind: WideKi
 /// Require at least one valid match.
 ///
 /// # Errors
-/// Returns an `ExpectationMismatch` when `result` has no matches.
-pub fn assert_exists(result: &QueryResult) -> Result<(), ExpectationMismatch> {
+/// Returns an `ExpectationMismatchError` when `result` has no matches.
+pub fn assert_exists(result: &QueryResult) -> Result<(), ExpectationMismatchError> {
     if result.count() > 0 {
         return Ok(());
     }
@@ -306,8 +306,8 @@ pub fn assert_exists(result: &QueryResult) -> Result<(), ExpectationMismatch> {
 /// Require no valid matches.
 ///
 /// # Errors
-/// Returns an `ExpectationMismatch` when `result` has any match.
-pub fn assert_not_exists(result: &QueryResult) -> Result<(), ExpectationMismatch> {
+/// Returns an `ExpectationMismatchError` when `result` has any match.
+pub fn assert_not_exists(result: &QueryResult) -> Result<(), ExpectationMismatchError> {
     if result.count() == 0 {
         return Ok(());
     }
@@ -322,8 +322,8 @@ pub fn assert_not_exists(result: &QueryResult) -> Result<(), ExpectationMismatch
 /// Require one exact match count.
 ///
 /// # Errors
-/// Returns an `ExpectationMismatch` when `result` does not have exactly `expected` matches.
-pub fn assert_count(result: &QueryResult, expected: usize) -> Result<(), ExpectationMismatch> {
+/// Returns an `ExpectationMismatchError` when `result` does not have exactly `expected` matches.
+pub fn assert_count(result: &QueryResult, expected: usize) -> Result<(), ExpectationMismatchError> {
     if result.count() == expected {
         return Ok(());
     }
@@ -338,8 +338,11 @@ pub fn assert_count(result: &QueryResult, expected: usize) -> Result<(), Expecta
 /// Require literal text to occur in the deterministic presented row stream.
 ///
 /// # Errors
-/// Returns an `ExpectationMismatch` when `expected` is empty or absent from the presented row text.
-pub fn assert_screen_text(frame: &ScreenFrame, expected: &str) -> Result<(), ExpectationMismatch> {
+/// Returns an `ExpectationMismatchError` when `expected` is empty or absent from the presented row text.
+pub fn assert_screen_text(
+    frame: &ScreenFrame,
+    expected: &str,
+) -> Result<(), ExpectationMismatchError> {
     let text = frame_text(frame);
     if !expected.is_empty() && text.contains(expected) {
         return Ok(());
@@ -355,11 +358,11 @@ pub fn assert_screen_text(frame: &ScreenFrame, expected: &str) -> Result<(), Exp
 /// Require exact text evidence on one already selected match.
 ///
 /// # Errors
-/// Returns an `ExpectationMismatch` when the match text differs from `expected`.
+/// Returns an `ExpectationMismatchError` when the match text differs from `expected`.
 pub fn assert_match_text(
     screen_match: &ScreenMatch,
     expected: &str,
-) -> Result<(), ExpectationMismatch> {
+) -> Result<(), ExpectationMismatchError> {
     if screen_match.text.as_ref() == expected {
         return Ok(());
     }
@@ -374,12 +377,12 @@ pub fn assert_match_text(
 /// Require every covered authoritative head cell to satisfy a complete appearance filter.
 ///
 /// # Errors
-/// Returns an `ExpectationMismatch` when the match covers no authoritative head cells or any
+/// Returns an `ExpectationMismatchError` when the match covers no authoritative head cells or any
 /// covered cell fails `expected`.
 pub fn assert_match_style(
     screen_match: &ScreenMatch,
     expected: &StyleFilter,
-) -> Result<(), ExpectationMismatch> {
+) -> Result<(), ExpectationMismatchError> {
     let mut covered = 0usize;
     let mut mismatched = 0usize;
 
@@ -421,11 +424,11 @@ pub fn assert_match_style(
 /// Require the complete exact cursor state.
 ///
 /// # Errors
-/// Returns an `ExpectationMismatch` when the frame's cursor differs from `expected` in any field.
+/// Returns an `ExpectationMismatchError` when the frame's cursor differs from `expected` in any field.
 pub fn assert_cursor(
     frame: &ScreenFrame,
     expected: &CursorState,
-) -> Result<(), ExpectationMismatch> {
+) -> Result<(), ExpectationMismatchError> {
     if &frame.cursor == expected {
         return Ok(());
     }
@@ -440,26 +443,26 @@ pub fn assert_cursor(
 /// Require no native soft-wrap or wrap-continuation facts.
 ///
 /// # Errors
-/// Returns an `ExpectationMismatch` naming the rows that carry soft-wrap or wrap-continuation
+/// Returns an `ExpectationMismatchError` naming the rows that carry soft-wrap or wrap-continuation
 /// facts.
-pub fn assert_no_wrapped_rows(frame: &ScreenFrame) -> Result<(), ExpectationMismatch> {
+pub fn assert_no_wrapped_rows(frame: &ScreenFrame) -> Result<(), ExpectationMismatchError> {
     let wrapped: Vec<u16> = match &frame.data {
-        ScreenFrameData::Text { rows } => rows
+        ScreenFrameContent::Text { rows } => rows
             .iter()
             .filter(|row| return row.soft_wrapped || row.wrap_continuation)
             .map(|row| return row.row)
             .collect(),
-        ScreenFrameData::Spans { rows } => rows
+        ScreenFrameContent::Spans { rows } => rows
             .iter()
             .filter(|row| return row.soft_wrapped || row.wrap_continuation)
             .map(|row| return row.row)
             .collect(),
-        ScreenFrameData::Cells { rows } => rows
+        ScreenFrameContent::Cells { rows } => rows
             .iter()
             .filter(|row| return row.soft_wrapped || row.wrap_continuation)
             .map(|row| return row.row)
             .collect(),
-        ScreenFrameData::None => Vec::new(),
+        ScreenFrameContent::None => Vec::new(),
     };
 
     if wrapped.is_empty() {
@@ -511,7 +514,7 @@ pub fn assert_neutral_region(
         }));
     }
 
-    if matches!(&frame.data, ScreenFrameData::Text { .. }) {
+    if matches!(&frame.data, ScreenFrameContent::Text { .. }) {
         return Err(AssertionError::Query(QueryError::InsufficientFrameDetail {
             reason: "neutral-region assertion requires spans or cells".to_owned(),
         }));
@@ -577,9 +580,9 @@ pub fn assert_neutral_region(
 /// Require a presentation-eligible frame outside synchronized-output suppression.
 ///
 /// # Errors
-/// Returns an `ExpectationMismatch` when the frame is not presented or synchronized output is
+/// Returns an `ExpectationMismatchError` when the frame is not presented or synchronized output is
 /// active.
-pub fn assert_no_presented_transient(frame: &ScreenFrame) -> Result<(), ExpectationMismatch> {
+pub fn assert_no_presented_transient(frame: &ScreenFrame) -> Result<(), ExpectationMismatchError> {
     if frame.presented && !frame.modes.synchronized_output {
         return Ok(());
     }
@@ -599,12 +602,12 @@ fn mismatch(
     expected: &str,
     actual: &str,
     frame: &ScreenFrame,
-) -> ExpectationMismatch {
+) -> ExpectationMismatchError {
     let (expected, expected_truncated) = bounded(expected);
     let (actual, actual_truncated) = bounded(actual);
     let (excerpt, excerpt_truncated) = bounded(&frame_excerpt(frame));
 
-    return ExpectationMismatch {
+    return ExpectationMismatchError {
         assertion,
         expected,
         actual,
@@ -620,43 +623,43 @@ fn mismatch(
 
 fn frame_text(frame: &ScreenFrame) -> String {
     return match &frame.data {
-        ScreenFrameData::Text { rows } => rows
+        ScreenFrameContent::Text { rows } => rows
             .iter()
             .map(|row| return row.text.as_str())
             .collect::<Vec<&str>>()
             .join("\n"),
-        ScreenFrameData::Spans { rows } => rows
+        ScreenFrameContent::Spans { rows } => rows
             .iter()
             .map(|row| return row.text.as_str())
             .collect::<Vec<&str>>()
             .join("\n"),
-        ScreenFrameData::Cells { rows } => rows
+        ScreenFrameContent::Cells { rows } => rows
             .iter()
             .map(|row| return row.text.as_str())
             .collect::<Vec<&str>>()
             .join("\n"),
-        ScreenFrameData::None => String::new(),
+        ScreenFrameContent::None => String::new(),
     };
 }
 
 fn frame_excerpt(frame: &ScreenFrame) -> String {
     let rows: Vec<(u16, &str)> = match &frame.data {
-        ScreenFrameData::Text { rows } => rows
+        ScreenFrameContent::Text { rows } => rows
             .iter()
             .take(MAX_EXCERPT_ROWS)
             .map(|row| return (row.row, row.text.as_str()))
             .collect(),
-        ScreenFrameData::Spans { rows } => rows
+        ScreenFrameContent::Spans { rows } => rows
             .iter()
             .take(MAX_EXCERPT_ROWS)
             .map(|row| return (row.row, row.text.as_str()))
             .collect(),
-        ScreenFrameData::Cells { rows } => rows
+        ScreenFrameContent::Cells { rows } => rows
             .iter()
             .take(MAX_EXCERPT_ROWS)
             .map(|row| return (row.row, row.text.as_str()))
             .collect(),
-        ScreenFrameData::None => Vec::new(),
+        ScreenFrameContent::None => Vec::new(),
     };
 
     return rows

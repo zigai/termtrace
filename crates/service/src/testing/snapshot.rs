@@ -37,7 +37,7 @@ impl From<AssertionError> for TerminalAssertionError {
     }
 }
 
-pub(super) fn snapshot_path(
+pub(super) fn path_for(
     snapshot_root: &Path,
     name: &str,
 ) -> StdResult<PathBuf, TerminalAssertionError> {
@@ -51,7 +51,7 @@ pub(super) fn snapshot_path(
         return Ok(snapshot_root.join(format!("{name}.json")));
     }
     return Err(TerminalAssertionError::Assertion(AssertionError::Mismatch(
-        ExpectationMismatch {
+        ExpectationMismatchError {
             assertion: "terminal_snapshot_name",
             expected: "1-128 ASCII letters, digits, '.', '_', or '-'".to_owned(),
             actual: bounded_text(name),
@@ -155,7 +155,7 @@ fn snapshot_mismatch(
     actual: String,
     excerpt: String,
 ) -> TerminalAssertionError {
-    return TerminalAssertionError::Assertion(AssertionError::Mismatch(ExpectationMismatch {
+    return TerminalAssertionError::Assertion(AssertionError::Mismatch(ExpectationMismatchError {
         assertion: "terminal_snapshot",
         expected: bounded_text(&expected),
         actual: bounded_text(&actual),

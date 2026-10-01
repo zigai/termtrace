@@ -25,7 +25,7 @@ use termtrace_model::{
         event::{event_type, Event, EventProjection, EventRecord},
         layout::SessionLayout,
     },
-    protocol::control::{ControlCommand, ControlData},
+    protocol::control::{ControlCommand, ControlPayload},
     protocol::output_projection::{OutputProjectionQuality, OutputProjectionReport},
 };
 use termtrace_sdk::defaults;
@@ -129,7 +129,7 @@ pub(in crate::cli) fn run_output(
         .validate_boundary(event_count, &completion.final_event_hash)
         .into_diagnostic()?;
     let _pending = cursor.finish().into_diagnostic()?;
-    let alternate_screen = stripper.alternate_screen_observed();
+    let alternate_screen = stripper.has_observed_alternate_screen();
     let quality = if !arguments.strip_controls {
         OutputProjectionQuality::ExactBytes
     } else if alternate_screen {
@@ -214,7 +214,7 @@ fn follow_output(
     )?;
 
     if strip_controls {
-        let quality = if stripper.alternate_screen_observed() {
+        let quality = if stripper.has_observed_alternate_screen() {
             OutputProjectionQuality::UnsuitableForFullScreen
         } else {
             OutputProjectionQuality::LossyLineOriented
@@ -397,7 +397,7 @@ fn follow_records(
         )
         .into_diagnostic()?;
         let (available, live_boundary, completed_hash) = if let Reached::Live(data) = reached {
-            let ControlData::EventCursor {
+            let ControlPayload::EventCursor {
                 device,
                 inode,
                 header_hash,

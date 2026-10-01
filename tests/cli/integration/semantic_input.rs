@@ -822,7 +822,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         .expect("hidden snapshot");
 
     let hidden_snapshot = match hidden {
-        ControlData::Snapshot {
+        ControlPayload::Snapshot {
             viewport_text,
             presented,
             ..
@@ -850,7 +850,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         .expect("committed snapshot");
 
     let viewport_text = match committed {
-        ControlData::Snapshot { viewport_text, .. } => Some(viewport_text),
+        ControlPayload::Snapshot { viewport_text, .. } => Some(viewport_text),
         _ => None,
     }
     .expect("snapshot response");

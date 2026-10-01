@@ -82,7 +82,7 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
     let state_hash = match send_request(line.path(), &ControlRequest::new(ControlCommand::Snapshot))
         .expect("line snapshot")
     {
-        ControlData::Snapshot { state_hash, .. } => state_hash,
+        ControlPayload::Snapshot { state_hash, .. } => state_hash,
         other => panic!("unexpected snapshot response: {other:?}"),
     };
 
@@ -150,7 +150,7 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
             Duration::from_secs(5),
         )
         .expect("completed final state is stable");
-    assert!(final_wait.satisfied());
+    assert!(final_wait.is_satisfied());
     assert!(matches!(
         final_wait.quality,
         ScreenWaitQuality::ChildCompleted | ScreenWaitQuality::Completed

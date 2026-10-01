@@ -7,7 +7,7 @@ pub(in crate::cli) fn run_record(
     arguments: RecordArgs,
 ) -> Result<ExitCode> {
     if arguments.original_native {
-        return super::original::run_original(response, arguments);
+        return super::original::run(response, arguments);
     }
 
     if arguments.detach.is_some() {
@@ -128,7 +128,7 @@ pub(in crate::cli) fn run_record(
             supplied_environment,
         )?;
 
-        return report_record_outcome(record_for_response(response, &options)?);
+        return report_record_outcome(run_with_response(response, &options)?);
     }
 
     let durability_policy = durability_policy_for(&arguments)?;
@@ -188,8 +188,7 @@ pub(in crate::cli) fn run_record(
         None
     };
 
-    let (geometry, geometry_provenance) =
-        resolve_record_geometry(&arguments, ghostty_profile.as_ref())?;
+    let (geometry, geometry_provenance) = resolve_record(&arguments, ghostty_profile.as_ref())?;
 
     let cell_width_px = geometry
         .pixel_width
@@ -203,10 +202,10 @@ pub(in crate::cli) fn run_record(
 
     let colors = ghostty_profile
         .as_ref()
-        .map_or_else(builtin_terminal_colors, terminal_colors_for_profile)
+        .map_or_else(builtin_terminal_colors, terminal_colors)
         .into_diagnostic()?;
 
-    let outcome = record_for_response(
+    let outcome = run_with_response(
         response,
         &RecordOptions {
             failure_policy: on_recording_error.map_or(
@@ -262,7 +261,7 @@ pub(super) fn durability_policy_for(arguments: &RecordingArgs) -> Result<Durabil
         ));
     }
 
-    let interval = arguments
+    let interval_ms = arguments
         .durability_max_interval_ms
         .unwrap_or(DEFAULT_DURABILITY_MAX_INTERVAL_MS);
 
@@ -270,15 +269,17 @@ pub(super) fn durability_policy_for(arguments: &RecordingArgs) -> Result<Durabil
         .durability_max_uncommitted_bytes
         .unwrap_or(DEFAULT_DURABILITY_MAX_UNCOMMITTED_BYTES);
 
-    if matches!(arguments.durability, DurabilityModeArg::Bounded) && (interval == 0 || bytes == 0) {
+    if matches!(arguments.durability, DurabilityModeArg::Bounded)
+        && (interval_ms == 0 || bytes == 0)
+    {
         return Err(miette::miette!(
             "bounded durability thresholds must be greater than zero"
         ));
     }
-    return Ok(arguments.durability.policy(interval, bytes));
+    return Ok(arguments.durability.policy(interval_ms, bytes));
 }
 
-pub(super) fn record_for_response(
+pub(super) fn run_with_response(
     response: &mut ResponseWriter,
     options: &RecordOptions,
 ) -> Result<RecordOutcome> {

@@ -28,7 +28,7 @@ use std::{
 use termtrace_engine::{
     analysis::{
         diagnostics::{diagnose_session, explain_session},
-        last_action::analyze_last_action_session,
+        last_action::analyze_session,
     },
     diff::diff_session_states_with_semantic_states,
     timeline::{
@@ -395,8 +395,8 @@ pub(in crate::cli) fn run_last_action_facade(
         format!("analyzing last action in {}...", resolved.path.display()),
     );
 
-    let analysis = analyze_last_action_session(&resolved.path, arguments.broad_change_percent)
-        .into_diagnostic()?;
+    let analysis =
+        analyze_session(&resolved.path, arguments.broad_change_percent).into_diagnostic()?;
 
     if arguments.json {
         return write_json_pretty(response, &analysis.inspection);
@@ -426,8 +426,8 @@ pub(in crate::cli) fn run_diagnose_last_action_facade(
         ),
     );
 
-    let analysis = analyze_last_action_session(&resolved.path, arguments.broad_change_percent)
-        .into_diagnostic()?;
+    let analysis =
+        analyze_session(&resolved.path, arguments.broad_change_percent).into_diagnostic()?;
 
     if arguments.json {
         return write_json_pretty(response, &analysis.diagnostics);

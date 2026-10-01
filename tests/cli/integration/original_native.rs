@@ -14,7 +14,7 @@ use termtrace_media::native_capture::{
 };
 use termtrace_model::artifact::visual::VisualManifest;
 use termtrace_model::protocol::driver::{
-    DriverData, DriverMethod, DriverResult, DriverScreenshotRenderer,
+    DriverMethod, DriverPayload, DriverResult, DriverScreenshotRenderer,
 };
 use termtrace_model::terminal::{observation::StatePoint, replay::ReplayEndpoint};
 use termtrace_sdk::Driver;
@@ -39,7 +39,7 @@ fn native_processes_stop_after_driver_is_killed() {
         .expect("attach");
 
     let DriverResult::Ok {
-        data: DriverData::Attached { handle, .. },
+        data: DriverPayload::Attached { handle, .. },
     } = response.result
     else {
         panic!("unexpected attach response");
@@ -63,7 +63,7 @@ fn native_processes_stop_after_driver_is_killed() {
         matches!(
             response.result,
             DriverResult::Ok {
-                data: DriverData::Artifact { .. }
+                data: DriverPayload::Artifact { .. }
             }
         ),
         "{:?}",
@@ -179,7 +179,7 @@ fn installed_driver_reuses_native_worker_and_restarts_for_backward_selection() {
         .expect("attach");
 
     let DriverResult::Ok {
-        data: DriverData::Attached { handle, .. },
+        data: DriverPayload::Attached { handle, .. },
     } = response.result
     else {
         panic!("unexpected attach response");
@@ -205,7 +205,7 @@ fn installed_driver_reuses_native_worker_and_restarts_for_backward_selection() {
             matches!(
                 response.result,
                 DriverResult::Ok {
-                    data: DriverData::Artifact { .. }
+                    data: DriverPayload::Artifact { .. }
                 }
             ),
             "{:?}",
@@ -230,7 +230,7 @@ fn installed_driver_reuses_native_worker_and_restarts_for_backward_selection() {
     assert!(matches!(
         response.result,
         DriverResult::Ok {
-            data: DriverData::Detached
+            data: DriverPayload::Detached
         }
     ));
 
@@ -259,7 +259,7 @@ fn native_live_prefix_excludes_hidden_bytes_and_remains_verifiable_after_complet
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let status = termtrace_sdk::request(&session, ControlCommand::Status).expect("status");
-        if let ControlData::Status { boundaries, .. } = status
+        if let ControlPayload::Status { boundaries, .. } = status
             && boundaries.durable.output_bytes >= 17
         {
             break;

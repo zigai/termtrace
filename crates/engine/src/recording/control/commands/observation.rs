@@ -2,7 +2,7 @@ use super::{
     action, actor_boundaries, compile_screen_predicate, control_rejected, encode_all,
     evaluate_screen_predicate, presented_state_hash, project_screen_frame, semantic_viewport_text,
     terminal_error, ActionPostcondition, ActionPostconditionResult, ActorBoundaries, ByteString,
-    CaptureQuality, CompiledScreenPredicate, ControlCommand, ControlData, Duration, Error,
+    CaptureQuality, CompiledScreenPredicate, ControlCommand, ControlPayload, Duration, Error,
     EventLogWriter, Instant, LiveTerminal, Result, ScreenFrame, ScreenFrameSource,
     ScreenPostconditionQuality, ScreenProjectionRequest, SessionActor, StableCaptureQuality, Uuid,
 };
@@ -273,16 +273,16 @@ impl SessionActor<'_> {
         &self,
         _request_id: Uuid,
         command: &ControlCommand,
-    ) -> Option<Result<ControlData>> {
+    ) -> Option<Result<ControlPayload>> {
         let outcome = match command {
-            ControlCommand::Ping => Ok(ControlData::Acknowledged {
+            ControlCommand::Ping => Ok(ControlPayload::Acknowledged {
                 boundaries: actor_boundaries(&self.event_log),
             }),
             ControlCommand::EventCursor { next_event_seq } => {
                 let (device, inode, header_hash) = self.event_log.source_identity();
                 let (start, durable) = self.event_log.follow_cursors(*next_event_seq);
 
-                Ok(ControlData::EventCursor {
+                Ok(ControlPayload::EventCursor {
                     device,
                     inode,
                     header_hash,
@@ -291,7 +291,7 @@ impl SessionActor<'_> {
                 })
             }
             ControlCommand::Status => sample_clock(&self.event_log).map(|clock_sample| {
-                return ControlData::Status {
+                return ControlPayload::Status {
                     pid: self.spawned.pid,
                     boundaries: actor_boundaries(&self.event_log),
                     clock_sample,
@@ -323,7 +323,7 @@ impl SessionActor<'_> {
                     Err(error) => return Some(Err(error)),
                 };
 
-                Ok(ControlData::Snapshot {
+                Ok(ControlPayload::Snapshot {
                     semantic_state_zstd: ByteString::from(compressed),
                     viewport_text: semantic_viewport_text(&self.live.presented),
                     state_hash,
@@ -349,7 +349,7 @@ impl SessionActor<'_> {
                     projection,
                     CaptureQuality::Live,
                 )
-                .map(|frame| return ControlData::ScreenFrame { frame })
+                .map(|frame| return ControlPayload::ScreenFrame { frame })
             }
             ControlCommand::WaitScreen { .. } | ControlCommand::CaptureStable { .. } => {
                 Err(control_rejected(

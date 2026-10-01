@@ -255,7 +255,7 @@ pub(in crate::cli) fn run_screen(
                 })
                 .to_owned(),
         )),
-        ScreenEncoding::Sparse => Some(sparse_screen(&observation.frame.viewport_text)),
+        ScreenEncoding::Sparse => Some(sparse(&observation.frame.viewport_text)),
         ScreenEncoding::Diff => {
             let since = arguments
                 .since
@@ -272,7 +272,7 @@ pub(in crate::cli) fn run_screen(
                 observe_validated_prefix(&session, point, false).into_diagnostic()?
             };
 
-            Some(diff_screen(
+            Some(difference(
                 &prior.frame.viewport_text,
                 &observation.frame.viewport_text,
                 since,
@@ -352,7 +352,7 @@ pub(super) struct DiffScreenResponse<'viewport> {
     rows: Vec<(usize, &'viewport str)>,
 }
 
-pub(super) fn sparse_screen(viewport_text: &str) -> serde_json::Value {
+pub(super) fn sparse(viewport_text: &str) -> serde_json::Value {
     let rows: Vec<(usize, &str)> = viewport_text
         .lines()
         .enumerate()
@@ -376,7 +376,7 @@ pub(super) fn sparse_screen(viewport_text: &str) -> serde_json::Value {
     return serde_json::to_value(&response).expect("sparse screen serialization");
 }
 
-pub(super) fn diff_screen(before: &str, after: &str, since: String) -> serde_json::Value {
+pub(super) fn difference(before: &str, after: &str, since: String) -> serde_json::Value {
     let before_rows: Vec<&str> = before.lines().collect();
     let after_rows: Vec<&str> = after.lines().collect();
     let row_count = before_rows.len().max(after_rows.len());

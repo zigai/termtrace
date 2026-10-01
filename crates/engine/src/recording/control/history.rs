@@ -1,14 +1,14 @@
 //! Durable mutation replay and bounded in-memory retry caching.
 
 use super::super::{
-    input::input_sequence_operation_id,
+    input::sequence_operation_id,
     support::{control_error_response, control_rejected},
 };
 use crate::Result;
 use std::collections::{HashMap, VecDeque};
 use termtrace_evidence::request_journal::{guarded_command_hash, MutationJournal};
 use termtrace_model::protocol::{
-    control::{ControlCommand, ControlData, ControlResponse, ControlResult},
+    control::{ControlCommand, ControlPayload, ControlResponse, ControlResult},
     mutation::MutationEffect,
 };
 use uuid::Uuid;
@@ -85,7 +85,7 @@ impl MutationHistory {
         if let ControlCommand::InputSequence { atoms, .. } | ControlCommand::Act { atoms, .. } =
             command
         {
-            let identifiers: Vec<_> = atoms.iter().map(input_sequence_operation_id).collect();
+            let identifiers: Vec<_> = atoms.iter().map(sequence_operation_id).collect();
             if !self.journal.reserve_operations(&identifiers)? {
                 return Err(control_rejected(
                     "operation_id_collision",
@@ -115,10 +115,10 @@ impl MutationHistory {
         {
             let attempted = match &response.result {
                 ControlResult::Ok { data } => match data {
-                    ControlData::InputSequenceApplied { atom_count, .. } => {
+                    ControlPayload::InputSequenceApplied { atom_count, .. } => {
                         usize::try_from(*atom_count).unwrap_or(usize::MAX)
                     }
-                    ControlData::ActionApplied { input, .. } => {
+                    ControlPayload::ActionApplied { input, .. } => {
                         usize::try_from(input.atom_count).unwrap_or(usize::MAX)
                     }
                     _ => 0,
@@ -139,7 +139,7 @@ impl MutationHistory {
             atoms
                 .iter()
                 .take(attempted)
-                .map(input_sequence_operation_id)
+                .map(sequence_operation_id)
                 .collect()
         } else {
             vec![request_id]
@@ -298,7 +298,7 @@ mod tests {
             version: CONTROL_PROTOCOL_VERSION,
             request_id,
             result: ControlResult::Ok {
-                data: ControlData::InputSequenceApplied {
+                data: ControlPayload::InputSequenceApplied {
                     sequence_id: request_id,
                     atom_count: 2,
                     bytes_written: 2,
@@ -365,7 +365,7 @@ mod tests {
             version: CONTROL_PROTOCOL_VERSION,
             request_id,
             result: ControlResult::Ok {
-                data: ControlData::ActionApplied {
+                data: ControlPayload::ActionApplied {
                     input: ActionInputResult {
                         sequence_id: request_id,
                         atom_count: 1,

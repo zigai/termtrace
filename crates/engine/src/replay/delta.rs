@@ -3,7 +3,7 @@ use termtrace_model::{
     terminal::state::SemanticState,
 };
 
-pub(super) fn state_delta(previous: Option<&SemanticState>, current: &SemanticState) -> StateDelta {
+pub(super) fn between(previous: Option<&SemanticState>, current: &SemanticState) -> StateDelta {
     return StateDelta {
         geometry: if previous
             .is_some_and(|state| return state.cols == current.cols && state.rows == current.rows)

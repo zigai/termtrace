@@ -19,7 +19,7 @@ use std::{
 };
 use termtrace_control::control_endpoint_is_reachable;
 use termtrace_model::{
-    error::ThreadPanic,
+    error::ThreadPanicError,
     execution::{
         layout::SessionLayout,
         session::{TmuxPaneLaunchKind, TmuxPaneProvenance, TMUX_PANE_PROVENANCE_VERSION},
@@ -108,7 +108,7 @@ pub fn prepare(request: PaneRunRequest) -> Result<PaneLaunch> {
     }
 
     let client = TmuxClient::inherited();
-    if !client.integration_enabled() {
+    if !client.is_integration_enabled() {
         return Err(Error::invalid(
             "tmux recording is not enabled for this server; run `termtrace tmux enable` or source a generated configuration",
         ));
@@ -415,7 +415,7 @@ impl Publication {
         return self.thread.join().map_err(|payload| {
             return Error::invalid_with_source(
                 "tmux recording publication thread panicked",
-                ThreadPanic::from_payload(payload),
+                ThreadPanicError::from_payload(payload),
             );
         })?;
     }

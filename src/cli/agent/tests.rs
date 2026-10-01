@@ -10,7 +10,7 @@ use std::{collections::BTreeMap, io, io::Cursor, path::PathBuf};
 use termtrace_control::Error as ControlError;
 use termtrace_engine::Error;
 use termtrace_model::protocol::driver::{
-    DriverData, DriverMethod, DriverRequest, DriverResponse, DriverResult,
+    DriverMethod, DriverPayload, DriverRequest, DriverResponse, DriverResult,
     DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
 };
 use termtrace_model::{
@@ -104,7 +104,7 @@ fn bounded_valid_frame_is_streamed_and_followed_by_another_request() {
     assert!(matches!(
         &responses[1].result,
         DriverResult::Ok {
-            data: DriverData::Hello {
+            data: DriverPayload::Hello {
                 max_request_bytes: DRIVER_MAX_REQUEST_BYTES,
                 max_response_bytes: DRIVER_MAX_RESPONSE_BYTES,
                 ..
@@ -145,7 +145,7 @@ fn oversized_frame_is_rejected_and_drained_before_the_next_request() {
     assert!(matches!(
         responses[1].result,
         DriverResult::Ok {
-            data: DriverData::Hello { .. }
+            data: DriverPayload::Hello { .. }
         }
     ));
 }
@@ -157,7 +157,7 @@ fn oversized_response_is_replaced_with_a_bounded_error() {
         version: DRIVER_PROTOCOL_VERSION,
         request_id,
         result: DriverResult::Ok {
-            data: DriverData::Hello {
+            data: DriverPayload::Hello {
                 driver_protocol_version: DRIVER_PROTOCOL_VERSION,
                 control_protocol_version: CONTROL_PROTOCOL_VERSION,
                 event_log_version: EVENT_LOG_VERSION,
@@ -263,7 +263,7 @@ fn response_cache_is_evicted_by_total_encoded_bytes() {
     assert!(matches!(
         evicted.result,
         DriverResult::Ok {
-            data: DriverData::Hello { .. }
+            data: DriverPayload::Hello { .. }
         }
     ));
 }

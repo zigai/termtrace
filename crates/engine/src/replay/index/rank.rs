@@ -26,7 +26,7 @@ pub(super) struct TimelineRanks<'source> {
 }
 
 impl<'source> TimelineRanks<'source> {
-    pub(super) fn new(
+    pub(super) fn open(
         directory: &Path,
         canonical: Records<'source>,
         source_range: Option<SourceRange>,

@@ -22,7 +22,7 @@ use termtrace_model::{
     artifact::save::{SaveFormat, SaveOutcome},
     execution::event::EventProjection,
     execution::session::{VerificationLevel, VerificationReport},
-    protocol::control::{ControlCommand, ControlData, ControlRequest, PointerOperation},
+    protocol::control::{ControlCommand, ControlPayload, ControlRequest, PointerOperation},
     terminal::analysis::{DiagnoseReport, DiagnosticCheck, ExplainReport},
     terminal::diff::SemanticDiff,
     terminal::inspection::WaitOutcome,

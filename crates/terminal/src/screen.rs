@@ -543,9 +543,9 @@ fn project_data(
     state: &SemanticState,
     region: ScreenRegion,
     detail: FrameDetail,
-) -> ScreenFrameData {
+) -> ScreenFrameContent {
     match detail {
-        FrameDetail::None => return ScreenFrameData::None,
+        FrameDetail::None => return ScreenFrameContent::None,
         FrameDetail::Text => {
             let rows: Vec<ScreenTextRow> = selected_rows(state, region)
                 .map(|row| {
@@ -558,7 +558,7 @@ fn project_data(
                 })
                 .collect();
 
-            return ScreenFrameData::Text { rows };
+            return ScreenFrameContent::Text { rows };
         }
         FrameDetail::Spans => {
             let rows: Vec<ScreenSpanRow> = selected_rows(state, region)
@@ -575,7 +575,7 @@ fn project_data(
                 })
                 .collect();
 
-            return ScreenFrameData::Spans { rows };
+            return ScreenFrameContent::Spans { rows };
         }
         FrameDetail::Cells => {
             let rows: Vec<ScreenCellRow> = selected_rows(state, region)
@@ -595,7 +595,7 @@ fn project_data(
                 })
                 .collect();
 
-            return ScreenFrameData::Cells { rows };
+            return ScreenFrameContent::Cells { rows };
         }
     }
 }
@@ -708,7 +708,7 @@ struct ScreenFrameHashInput<'frame> {
     cursor: &'frame CursorState,
     modes: &'frame ModeState,
     colors: &'frame ColorState,
-    data: &'frame ScreenFrameData,
+    data: &'frame ScreenFrameContent,
 }
 
 struct CountingHashWriter {
@@ -786,7 +786,7 @@ pub fn normalize_screen_frame_text(
     frame: &ScreenFrame,
     options: ScreenSnapshotOptions,
 ) -> Result<serde_json::Value, ScreenFrameError> {
-    let ScreenFrameData::Text { rows } = &frame.data else {
+    let ScreenFrameContent::Text { rows } = &frame.data else {
         return Err(ScreenFrameError::Serialization);
     };
 
@@ -803,7 +803,7 @@ pub fn normalize_screen_frame_spans(
     frame: &ScreenFrame,
     options: ScreenSnapshotOptions,
 ) -> Result<serde_json::Value, ScreenFrameError> {
-    let ScreenFrameData::Spans { rows } = &frame.data else {
+    let ScreenFrameContent::Spans { rows } = &frame.data else {
         return Err(ScreenFrameError::Serialization);
     };
 
@@ -820,7 +820,7 @@ pub fn normalize_screen_frame_cells(
     frame: &ScreenFrame,
     options: ScreenSnapshotOptions,
 ) -> Result<serde_json::Value, ScreenFrameError> {
-    let ScreenFrameData::Cells { rows } = &frame.data else {
+    let ScreenFrameContent::Cells { rows } = &frame.data else {
         return Err(ScreenFrameError::Serialization);
     };
 

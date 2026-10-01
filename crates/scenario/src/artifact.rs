@@ -20,7 +20,7 @@ use termtrace_evidence::{
 };
 use termtrace_model::scenario::{Scenario, ScenarioReport};
 use termtrace_model::{
-    protocol::control::ControlData, terminal::analysis::DiagnosticCheck,
+    protocol::control::ControlPayload, terminal::analysis::DiagnosticCheck,
     terminal::state::SemanticState, value::ByteString,
 };
 use zstd::stream::decode_all;
@@ -39,7 +39,7 @@ pub(crate) fn publish_failure(
     destination: &Path,
     scenario: &Scenario,
     report: &ScenarioReport,
-    final_snapshot: Option<&ControlData>,
+    final_snapshot: Option<&ControlPayload>,
 ) -> Result<()> {
     let parent = destination.parent().ok_or_else(|| {
         return invalid("scenario failure destination must have a parent directory");
@@ -87,7 +87,7 @@ fn populate_failure(
     temporary: &Path,
     scenario: &Scenario,
     report: &ScenarioReport,
-    final_snapshot: Option<&ControlData>,
+    final_snapshot: Option<&ControlPayload>,
 ) -> Result<()> {
     let mut redacted_scenario = scenario.clone();
     for value in redacted_scenario.launch.environment.set.values_mut() {
@@ -106,7 +106,7 @@ fn populate_failure(
     if let Some(snapshot) = final_snapshot {
         write_json(temporary.join("final-screen.json"), snapshot)?;
 
-        if let ControlData::Snapshot {
+        if let ControlPayload::Snapshot {
             semantic_state_zstd,
             viewport_text,
             ..

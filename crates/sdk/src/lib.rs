@@ -10,7 +10,7 @@ mod remote;
 pub use driver::{Driver, DriverError};
 pub use remote::Client;
 pub use termtrace_model::protocol::driver::{
-    DriverData, DriverMethod, DriverRequest, DriverResponse, DriverResult,
+    DriverMethod, DriverPayload, DriverRequest, DriverResponse, DriverResult,
 };
 pub use termtrace_model::{execution::session::ResourceLimits, value::ByteString};
 #[cfg(feature = "scenario")]
@@ -150,8 +150,8 @@ pub use termtrace_model::artifact::bundle::{
 };
 pub use termtrace_model::execution::environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec};
 pub use termtrace_model::protocol::control::{
-    ControlCommand, ControlData, ControlRequest, ControlResponse, ControlResult, PointerOperation,
-    ProcessSignal, ScreenMode, ScreenPredicate, StateHashComparison,
+    ControlCommand, ControlPayload, ControlRequest, ControlResponse, ControlResult,
+    PointerOperation, ProcessSignal, ScreenMode, ScreenPredicate, StateHashComparison,
 };
 pub use termtrace_model::protocol::mutation::{MutationEffect, Retry};
 pub use termtrace_model::terminal::observation::StatePoint;

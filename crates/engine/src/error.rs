@@ -5,7 +5,7 @@ use std::{
     time::SystemTimeError,
 };
 use termtrace_model::{
-    error::{ModelValidationError, ThreadPanic},
+    error::{ModelValidationError, ThreadPanicError},
     terminal::screen::ScreenFrameError,
 };
 use uuid::Uuid;
@@ -104,7 +104,7 @@ pub enum Error {
         /// Name of the join operation.
         operation: &'static str,
         /// Captured panic.
-        source: ThreadPanic,
+        source: ThreadPanicError,
     },
     /// Libghostty-vt returned text that is not valid UTF-8.
     InvalidTerminalText {

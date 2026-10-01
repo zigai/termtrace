@@ -19,7 +19,7 @@ use std::{
 use termtrace_model::artifact::metadata::{
     ArtifactMember, ArtifactRootRecord, ArtifactSensitivity, ArtifactSourceRange,
 };
-use termtrace_model::error::ThreadPanic;
+use termtrace_model::error::ThreadPanicError;
 use termtrace_model::execution::{
     event::Event,
     event_log::CanonicalBoundary,
@@ -91,7 +91,7 @@ pub fn collect_artifact_members(directory: &Path) -> Result<Vec<ArtifactMember>>
             indexed.append(&mut handle.join().map_err(|payload| {
                 return Error::invalid_with_source(
                     "artifact hashing worker panicked",
-                    ThreadPanic::from_payload(payload),
+                    ThreadPanicError::from_payload(payload),
                 );
             })??);
         }

@@ -100,11 +100,11 @@ impl StdError for ModelValidationError {}
 
 /// A joined thread panicked, retaining the panic message when the payload carried one.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ThreadPanic {
+pub struct ThreadPanicError {
     message: Option<String>,
 }
 
-impl ThreadPanic {
+impl ThreadPanicError {
     /// Capture the panic message from the payload returned by `JoinHandle::join`.
     #[must_use]
     pub fn from_payload(payload: Box<dyn Any + Send>) -> Self {
@@ -125,7 +125,7 @@ impl ThreadPanic {
     }
 }
 
-impl fmt::Display for ThreadPanic {
+impl fmt::Display for ThreadPanicError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.message {
             Some(message) => return write!(f, "thread panicked: {message}"),
@@ -134,4 +134,4 @@ impl fmt::Display for ThreadPanic {
     }
 }
 
-impl StdError for ThreadPanic {}
+impl StdError for ThreadPanicError {}

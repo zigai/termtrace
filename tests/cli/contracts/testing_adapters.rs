@@ -13,7 +13,7 @@ use tempfile::TempDir;
 use termtrace_media::save::verify_saved_artifact;
 use termtrace_model::{
     artifact::save::SaveManifest,
-    terminal::screen::{ScreenFrameData, ScreenProjectionRequest},
+    terminal::screen::{ScreenFrameContent, ScreenProjectionRequest},
 };
 use termtrace_sdk::{
     assertions::SnapshotProfile,
@@ -72,7 +72,7 @@ fn rust_test_helper_discards_styled_stable_attempt_after_snapshot() {
                 },
             )?;
 
-            let ScreenFrameData::Spans { rows } = &capture.frame.data else {
+            let ScreenFrameContent::Spans { rows } = &capture.frame.data else {
                 panic!("stable frame did not return span detail");
             };
 

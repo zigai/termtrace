@@ -23,7 +23,7 @@ mod session_helpers;
 mod tmux;
 mod tooling;
 
-use command::{requested_quiet_mode, root_command, Cli};
+use command::{requested_quiet_mode, root, Cli};
 use output::{finish_response, write_clap_error, ResponseMode, ResponseWriter};
 
 fn init_diagnostics(level: tracing::Level) {
@@ -45,7 +45,7 @@ fn init_diagnostics(level: tracing::Level) {
 
 pub(crate) fn run() -> ExitCode {
     let quiet = requested_quiet_mode();
-    let matches = match root_command().try_get_matches() {
+    let matches = match root().try_get_matches() {
         Ok(matches) => matches,
         Err(error) => return write_clap_error(error, quiet),
     };

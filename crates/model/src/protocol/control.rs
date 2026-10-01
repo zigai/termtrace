@@ -602,7 +602,8 @@ pub struct LiveEventCursor {
 /// Successful response payload.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ControlData {
+#[schemars(rename = "ControlData")]
+pub enum ControlPayload {
     /// Read-only actor authority for a durable event-file suffix.
     EventCursor {
         /// Device of the writer's open file descriptor.
@@ -951,7 +952,7 @@ pub enum ControlResult {
     /// Command was accepted and completely applied.
     Ok {
         /// Command-specific data.
-        data: ControlData,
+        data: ControlPayload,
     },
     /// Command was rejected or failed.
     Error {

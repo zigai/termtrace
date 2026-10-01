@@ -7,7 +7,7 @@ use crate::{
     execution::session::{
         CaptureTarget, ResourceLimits, SessionCompletion, VerificationLevel, VerificationReport,
     },
-    protocol::control::{ControlCommand, ControlData, ControlErrorDetails},
+    protocol::control::{ControlCommand, ControlErrorDetails, ControlPayload},
     protocol::mutation::MutationEffect,
     terminal::analysis::{DiagnoseReport, DiagnosticCheck},
     terminal::diff::SemanticDiff,
@@ -237,7 +237,7 @@ pub enum DriverResult {
     /// Successful method result.
     Ok {
         /// Method-specific data.
-        data: DriverData,
+        data: DriverPayload,
     },
     /// Stable structured failure.
     Error {
@@ -258,7 +258,8 @@ pub enum DriverResult {
 /// Typed driver result payload.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum DriverData {
+#[schemars(rename = "DriverData")]
+pub enum DriverPayload {
     /// Protocol/version handshake.
     Hello {
         /// Driver protocol version.
@@ -290,7 +291,7 @@ pub enum DriverData {
     /// Result forwarded from the live actor.
     Control {
         /// Exact actor result data.
-        data: ControlData,
+        data: ControlPayload,
     },
     /// Exact canonical output wait result.
     OutputWait {

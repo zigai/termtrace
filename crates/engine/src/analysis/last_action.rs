@@ -29,7 +29,7 @@ use uuid::Uuid;
 
 mod stream;
 
-pub use stream::analyze_last_action_session;
+pub use stream::analyze_session;
 
 const MAX_ACTION_WARNINGS: usize = 16;
 const MAX_ACTION_FINDINGS: usize = 32;
@@ -49,7 +49,7 @@ fn task_error(reason: impl Into<String>) -> Error {
 ///
 /// Returns an error when the percentage is outside `1..=100`, no completed input action
 /// exists, or the session evidence cannot be replayed or inspected.
-pub fn analyze_last_action(
+pub fn analyze(
     session: &Path,
     log: &EventLog,
     broad_change_percent: u8,

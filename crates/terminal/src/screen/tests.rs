@@ -128,7 +128,7 @@ fn spans_expand_losslessly_and_keep_trailing_blank_cells() {
     let frame = project_screen_frame(&state, &request, source(1), true, CaptureQuality::Live)
         .expect("project spans");
 
-    let ScreenFrameData::Spans { rows } = &frame.data else {
+    let ScreenFrameContent::Spans { rows } = &frame.data else {
         panic!("span detail");
     };
 
@@ -284,7 +284,7 @@ fn span_boundaries_preserve_complete_selection_appearance() {
         CaptureQuality::Live,
     )
     .expect("span frame");
-    let ScreenFrameData::Spans { rows } = frame.data else {
+    let ScreenFrameContent::Spans { rows } = frame.data else {
         panic!("span detail");
     };
 

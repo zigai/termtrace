@@ -3,7 +3,7 @@
 use super::super::{
     actor::SessionActor,
     input::{
-        apply_input, apply_resize, interpolate_cell, mode_hash, mouse_button_name, prepare_bytes,
+        apply, apply_resize, interpolate_cell, mode_hash, mouse_button_name, prepare_bytes,
         prepare_key, prepare_paste, InputSequenceExecution,
     },
     model::TerminalGeometry,
@@ -29,7 +29,7 @@ use termtrace_model::{
     execution::event::{Event, InputDescriptor, InputKind, InputSource, OperationStatus},
     protocol::control::{
         ActionInputResult, ActionPostcondition, ActionPostconditionResult, ControlCommand,
-        ControlData, ControlErrorDetails, ControlRequest, ControlResponse, ControlResult,
+        ControlErrorDetails, ControlPayload, ControlRequest, ControlResponse, ControlResult,
         InputSequenceFailureDetails, PointerOperation, ProcessSignal, ScreenFrameFailureDetails,
         ScreenPostconditionQuality, StableCaptureQuality, CONTROL_PROTOCOL_VERSION,
     },
@@ -61,5 +61,5 @@ use observation::{
     compile_action_postcondition, evaluate_action_postcondition, AdmittedAction,
     AdmittedPostcondition,
 };
-pub(in crate::recording::control) use response::screen_frame_error_response;
+pub(in crate::recording::control) use response::screen_frame_error;
 use response::{control_error_code, mutation_failure_effect};

@@ -8,7 +8,7 @@ use termtrace_model::{
         ActionPostconditionResult, ScreenPostconditionQuality, StableCaptureQuality,
     },
     terminal::observation::CaptureQuality,
-    terminal::screen::{FrameDetail, ScreenFrame, ScreenFrameData, ScreenFrameSource},
+    terminal::screen::{FrameDetail, ScreenFrame, ScreenFrameContent, ScreenFrameSource},
 };
 use termtrace_sdk::{MutationEffect, MutationGuard, Retry};
 use uuid::Uuid;
@@ -377,15 +377,15 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
 
 fn frame_contains(frame: &ScreenFrame, expected: &str) -> bool {
     match &frame.data {
-        ScreenFrameData::Text { rows } => {
+        ScreenFrameContent::Text { rows } => {
             return rows.iter().any(|row| return row.text.contains(expected));
         }
-        ScreenFrameData::Spans { rows } => {
+        ScreenFrameContent::Spans { rows } => {
             return rows.iter().any(|row| return row.text.contains(expected));
         }
-        ScreenFrameData::Cells { rows } => {
+        ScreenFrameContent::Cells { rows } => {
             return rows.iter().any(|row| return row.text.contains(expected));
         }
-        ScreenFrameData::None => return false,
+        ScreenFrameContent::None => return false,
     }
 }

@@ -37,7 +37,7 @@ use std::{
 };
 use termtrace_control::is_completed;
 use termtrace_engine::{
-    analysis::profile::{builtin_terminal_colors, terminal_colors_for_profile},
+    analysis::profile::{builtin_terminal_colors, terminal_colors},
     inspection::wait_for_completion,
     recording::{
         inherited_geometry, parse_environment_spec, read_environment_spec, record_with_output,
@@ -83,7 +83,7 @@ mod record;
 mod restart;
 mod start;
 
-use geometry::resolve_record_geometry;
+use geometry::resolve_record;
 pub(super) use geometry::run_geometry_probe;
 use record::durability_policy_for;
 pub(super) use record::run_record;

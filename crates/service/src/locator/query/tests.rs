@@ -81,7 +81,7 @@ fn conflicting_composition_is_rejected_without_observation() {
 #[test]
 fn spacer_heads_remain_queryable_at_wrap_edges() {
     let mut frame = fixture_frame();
-    let ScreenFrameData::Spans { rows } = &mut frame.data else {
+    let ScreenFrameContent::Spans { rows } = &mut frame.data else {
         panic!("spans frame");
     };
     let span = rows[0].spans.first_mut().expect("row span");
@@ -135,7 +135,7 @@ fn overlapping_matches_stop_at_aggregate_work_budget() {
         bottom: 1,
     };
     frame.returned_region = frame.requested_region;
-    let ScreenFrameData::Spans { rows } = &mut frame.data else {
+    let ScreenFrameContent::Spans { rows } = &mut frame.data else {
         panic!("spans frame");
     };
     rows.truncate(1);

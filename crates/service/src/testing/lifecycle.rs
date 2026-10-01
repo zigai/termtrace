@@ -1,7 +1,7 @@
 use super::*;
 use super::{
     evidence::{bounded_secondary, capture_failure_artifacts, write_evidence_manifest},
-    snapshot::{bounded_text, snapshot_path},
+    snapshot::{bounded_text, path_for},
 };
 
 /// Evidence retention requested for an owned terminal test.
@@ -245,7 +245,7 @@ impl TerminalTest {
         profile: SnapshotProfile,
         options: ScreenSnapshotOptions,
     ) -> StdResult<(), TerminalAssertionError> {
-        let path = snapshot_path(&self.snapshot_root, name)?;
+        let path = path_for(&self.snapshot_root, name)?;
 
         return assert_snapshot_file(frame, &path, profile, options, self.update_snapshots);
     }
@@ -525,8 +525,8 @@ mod tests {
 
     #[test]
     fn snapshot_names_cannot_escape_the_reviewed_root() {
-        let error = snapshot_path(Path::new("snapshots"), "../escape")
-            .expect_err("path traversal must fail");
+        let error =
+            path_for(Path::new("snapshots"), "../escape").expect_err("path traversal must fail");
         assert!(error.to_string().contains("terminal_snapshot_name"));
     }
 }

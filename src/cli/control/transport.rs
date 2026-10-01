@@ -3,13 +3,13 @@ use std::{ffi::OsString, fmt::Write as _, os::unix::ffi::OsStringExt as _};
 use termtrace_engine::registry::SessionRegistry;
 use termtrace_model::protocol::control::ClockSample;
 
-pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Value> {
+pub(super) fn compact_control_data(data: &ControlPayload) -> Result<serde_json::Value> {
     let value = match data {
-        ControlData::Acknowledged { boundaries } => serde_json::json!({
+        ControlPayload::Acknowledged { boundaries } => serde_json::json!({
             "kind": "acknowledged",
             "boundary": compact_boundaries(boundaries),
         }),
-        ControlData::InputApplied {
+        ControlPayload::InputApplied {
             operation_id,
             input_kind,
             bytes_written,
@@ -26,7 +26,7 @@ pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Val
             "result_event_seq": result_event_seq,
             "boundary": compact_boundaries(boundaries),
         }),
-        ControlData::InputSequenceApplied {
+        ControlPayload::InputSequenceApplied {
             sequence_id,
             atom_count,
             bytes_written,
@@ -45,7 +45,7 @@ pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Val
             "pace_ns": pace_ns,
             "boundary": compact_boundaries(boundaries),
         }),
-        ControlData::InputNoop {
+        ControlPayload::InputNoop {
             input_kind,
             reason,
             terminal_modes_hash,
@@ -57,7 +57,7 @@ pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Val
             "terminal_modes_hash": terminal_modes_hash,
             "boundary": compact_boundaries(boundaries),
         }),
-        ControlData::Activated {
+        ControlPayload::Activated {
             operation_id,
             text,
             start_column,
@@ -86,7 +86,7 @@ pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Val
             "result_event_seq": result_event_seq,
             "boundary": compact_boundaries(boundaries),
         }),
-        ControlData::Status {
+        ControlPayload::Status {
             pid,
             boundaries,
             clock_sample,
@@ -96,7 +96,7 @@ pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Val
             "boundary": compact_boundaries(boundaries),
             "clock_sample": clock_sample,
         }),
-        ControlData::Snapshot {
+        ControlPayload::Snapshot {
             viewport_text,
             state_hash,
             presented,
@@ -120,12 +120,12 @@ pub(super) fn compact_control_data(data: &ControlData) -> Result<serde_json::Val
             "modes": modes,
             "boundary": compact_boundaries(boundaries),
         }),
-        ControlData::ActionApplied { .. }
-        | ControlData::EventCursor { .. }
-        | ControlData::ScreenFrame { .. }
-        | ControlData::StableSnapshot { .. }
-        | ControlData::ScreenWait { .. } => serde_json::to_value(data).into_diagnostic()?,
-        ControlData::Marked {
+        ControlPayload::ActionApplied { .. }
+        | ControlPayload::EventCursor { .. }
+        | ControlPayload::ScreenFrame { .. }
+        | ControlPayload::StableSnapshot { .. }
+        | ControlPayload::ScreenWait { .. } => serde_json::to_value(data).into_diagnostic()?,
+        ControlPayload::Marked {
             label,
             event_seq,
             boundaries,
@@ -290,7 +290,7 @@ pub(in crate::cli) fn run_status(
     }
 
     let data = request(resolved.path, ControlCommand::Status).into_diagnostic()?;
-    if let ControlData::Status {
+    if let ControlPayload::Status {
         pid,
         boundaries,
         clock_sample,

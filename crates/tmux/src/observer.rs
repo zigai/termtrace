@@ -395,7 +395,7 @@ pub fn watchdog(client: &TmuxClient) -> Result<()> {
         return Ok(());
     };
 
-    while client.integration_enabled() {
+    while client.is_integration_enabled() {
         if ObserverRole::Supervisor
             .holder(&integration.output_root, &identity)
             .is_none()
@@ -411,7 +411,7 @@ pub fn watchdog(client: &TmuxClient) -> Result<()> {
             }
         }
 
-        if client.integration_enabled() {
+        if client.is_integration_enabled() {
             thread::sleep(SUPERVISOR_INTERVAL);
         }
     }

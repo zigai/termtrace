@@ -85,7 +85,7 @@ impl PyTermtrace {
         );
         spec.working_directory = cwd.map(PathBuf::from);
         for (name, value) in env.unwrap_or_default() {
-            spec = spec.set_environment(name, value.into_bytes());
+            spec = spec.environment_variable(name, value.into_bytes());
         }
 
         py.detach(move || {

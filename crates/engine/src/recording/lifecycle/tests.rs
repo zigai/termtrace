@@ -1,5 +1,5 @@
 use super::super::{
-    control::{spawn_control_server, MutationHistory},
+    control::{spawn, MutationHistory},
     input::encode_paste,
     model::RuntimeMessage,
 };
@@ -35,7 +35,7 @@ use termtrace_model::{
         GeometryProvenance, ResourceLimitKind, ResourceLimits, SessionCompletion, SessionManifest,
     },
     protocol::control::{
-        ControlCommand, ControlData, ControlRequest, ControlResponse, ControlResult,
+        ControlCommand, ControlPayload, ControlRequest, ControlResponse, ControlResult,
         CONTROL_PROTOCOL_VERSION,
     },
     terminal::observation::ActorBoundaries,
@@ -58,7 +58,7 @@ fn cached_test_response(request_id: Uuid, next_event_seq: u64) -> ControlRespons
         version: CONTROL_PROTOCOL_VERSION,
         request_id,
         result: ControlResult::Ok {
-            data: ControlData::Acknowledged {
+            data: ControlPayload::Acknowledged {
                 boundaries: ActorBoundaries {
                     durable: boundary.clone(),
                     observed: boundary,
@@ -944,7 +944,7 @@ fn preserves_complete_osc_query_when_response_precedes_st() {
 fn graceful_control_shutdown_drains_an_inflight_request() {
     let (sender, receiver) = mpsc::sync_channel(1);
     let socket_name = control_socket_name(Uuid::now_v7());
-    let worker = spawn_control_server(&socket_name, sender).expect("control server");
+    let worker = spawn(&socket_name, sender).expect("control server");
     let socket = control_socket_address(&socket_name);
     let client = thread::spawn(move || {
         let mut stream = UnixStream::connect_addr(&socket).expect("connect control client");
@@ -983,7 +983,7 @@ fn graceful_control_shutdown_drains_an_inflight_request() {
 fn control_server_accepts_a_second_request_while_the_first_is_pending() {
     let (sender, receiver) = mpsc::sync_channel(1);
     let socket_name = control_socket_name(Uuid::now_v7());
-    let worker = spawn_control_server(&socket_name, sender).expect("control server");
+    let worker = spawn(&socket_name, sender).expect("control server");
     let socket = control_socket_address(&socket_name);
     let first_socket = socket.clone();
     let first_client = thread::spawn(move || {

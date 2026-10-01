@@ -14,7 +14,7 @@ use termtrace_engine::{
     Result as EngineResult,
 };
 use termtrace_model::{
-    protocol::control::{ControlCommand, ControlData},
+    protocol::control::{ControlCommand, ControlPayload},
     terminal::{observation::StatePoint, replay::SourceRange},
     value::ByteString,
 };
@@ -81,7 +81,7 @@ pub(super) fn resolve_cli_range(
                 ));
             }
             Ok(Reached::Live(data)) => {
-                let ControlData::Status { boundaries, .. } = *data else {
+                let ControlPayload::Status { boundaries, .. } = *data else {
                     return Err(miette::miette!(
                         "live status returned an unexpected response"
                     ));

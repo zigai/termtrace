@@ -25,10 +25,7 @@ use uuid::Uuid;
 /// # Errors
 /// Rejects invalid thresholds, incomplete or changing evidence, missing input results,
 /// and failures to replay or create the temporary disk index.
-pub fn analyze_last_action_session(
-    session: &Path,
-    broad_change_percent: u8,
-) -> Result<LastActionAnalysis> {
+pub fn analyze_session(session: &Path, broad_change_percent: u8) -> Result<LastActionAnalysis> {
     if !(1..=100).contains(&broad_change_percent) {
         return Err(task_error(
             "broad-change percentage must be between 1 and 100",

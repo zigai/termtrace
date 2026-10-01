@@ -5,7 +5,7 @@ use std::{
 };
 use termtrace_engine::Error as EngineError;
 use termtrace_evidence::Error as EvidenceError;
-use termtrace_model::error::ThreadPanic;
+use termtrace_model::error::ThreadPanicError;
 use termtrace_render::Error as RenderError;
 use termtrace_terminal::Error as TerminalError;
 
@@ -64,7 +64,7 @@ pub enum Error {
         /// Join operation that failed.
         operation: &'static str,
         /// Captured panic.
-        source: ThreadPanic,
+        source: ThreadPanicError,
     },
     /// The system clock cannot be represented relative to the Unix epoch.
     #[error("system clock is before the Unix epoch")]

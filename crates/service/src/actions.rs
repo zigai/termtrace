@@ -277,7 +277,7 @@ pub struct ActOutcome {
 impl ActOutcome {
     /// Whether the requested postcondition held.
     #[must_use]
-    pub const fn matched(&self) -> bool {
+    pub const fn is_matched(&self) -> bool {
         return match &self.postcondition {
             ActionPostconditionResult::None { matched, .. }
             | ActionPostconditionResult::Idle { matched, .. }

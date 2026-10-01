@@ -24,7 +24,7 @@ use termtrace_model::{
     execution::layout::SessionLayout,
     execution::request_journal::MutationJournalRecord,
     protocol::control::{
-        ControlCommand, ControlData, ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES,
+        ControlCommand, ControlPayload, ControlResponse, ControlResult, MAX_CONTROL_MESSAGE_BYTES,
     },
     terminal::observation::ActorBoundaries,
 };
@@ -600,19 +600,19 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
 fn response_boundaries(response: &ControlResponse) -> Option<&ActorBoundaries> {
     return match &response.result {
         ControlResult::Ok { data } => match data {
-            ControlData::Acknowledged { boundaries }
-            | ControlData::InputApplied { boundaries, .. }
-            | ControlData::InputSequenceApplied { boundaries, .. }
-            | ControlData::ActionApplied { boundaries, .. }
-            | ControlData::InputNoop { boundaries, .. }
-            | ControlData::Activated { boundaries, .. }
-            | ControlData::Snapshot { boundaries, .. }
-            | ControlData::Status { boundaries, .. }
-            | ControlData::Marked { boundaries, .. } => Some(boundaries),
-            ControlData::ScreenFrame { .. }
-            | ControlData::EventCursor { .. }
-            | ControlData::StableSnapshot { .. }
-            | ControlData::ScreenWait { .. } => None,
+            ControlPayload::Acknowledged { boundaries }
+            | ControlPayload::InputApplied { boundaries, .. }
+            | ControlPayload::InputSequenceApplied { boundaries, .. }
+            | ControlPayload::ActionApplied { boundaries, .. }
+            | ControlPayload::InputNoop { boundaries, .. }
+            | ControlPayload::Activated { boundaries, .. }
+            | ControlPayload::Snapshot { boundaries, .. }
+            | ControlPayload::Status { boundaries, .. }
+            | ControlPayload::Marked { boundaries, .. } => Some(boundaries),
+            ControlPayload::ScreenFrame { .. }
+            | ControlPayload::EventCursor { .. }
+            | ControlPayload::StableSnapshot { .. }
+            | ControlPayload::ScreenWait { .. } => None,
         },
         ControlResult::Error {
             details: Some(details),

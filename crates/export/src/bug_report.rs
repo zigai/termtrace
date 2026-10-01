@@ -4,7 +4,7 @@ use crate::{Error, Result};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use termtrace_engine::{
-    analysis::last_action::analyze_last_action_session, observation::observe_session,
+    analysis::last_action::analyze_session, observation::observe_session,
     replay::inspect_completed_session,
 };
 use termtrace_evidence::{
@@ -65,7 +65,7 @@ pub fn create(
     }
 
     let analysis = has_input
-        .then(|| return analyze_last_action_session(&canonical, 50))
+        .then(|| return analyze_session(&canonical, 50))
         .transpose()?;
 
     let observation = observe_session(&canonical, StatePoint::LatestPresented)?;

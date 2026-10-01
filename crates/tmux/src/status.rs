@@ -71,7 +71,7 @@ pub struct PaneCoverage {
 
 impl PaneCoverage {
     /// Selected but not recorded.
-    pub fn uncovered(&self) -> bool {
+    pub fn is_uncovered(&self) -> bool {
         return self.selected && !self.recorded;
     }
 }
@@ -100,7 +100,7 @@ pub fn classify(
 pub fn uncovered(panes: &[PaneCoverage]) -> BTreeSet<String> {
     return panes
         .iter()
-        .filter(|pane| return pane.uncovered())
+        .filter(|pane| return pane.is_uncovered())
         .map(|pane| return pane.row.snapshot.pane_id.clone())
         .collect();
 }
@@ -228,7 +228,10 @@ pub fn observe(client: &TmuxClient) -> Result<TmuxStatusReport> {
 
     let selected_panes = panes.iter().filter(|pane| return pane.selected).count();
     let recorded_panes = panes.iter().filter(|pane| return pane.recorded).count();
-    let unrecorded_panes = panes.iter().filter(|pane| return pane.uncovered()).count();
+    let unrecorded_panes = panes
+        .iter()
+        .filter(|pane| return pane.is_uncovered())
+        .count();
     let pane_count = panes.len();
 
     return Ok(TmuxStatusReport {

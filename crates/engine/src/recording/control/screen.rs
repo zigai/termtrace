@@ -5,7 +5,7 @@ use super::super::{
     presentation::LiveTerminal,
     support::{actor_boundaries, control_error_response, deliver_response, terminal_error},
 };
-use super::commands::screen_frame_error_response;
+use super::commands::screen_frame_error;
 use crate::Result;
 use std::{
     collections::BTreeMap,
@@ -15,7 +15,7 @@ use std::{
 };
 use termtrace_model::{
     protocol::control::{
-        ControlData, ControlResponse, ControlResult, ScreenMode, ScreenPredicate,
+        ControlPayload, ControlResponse, ControlResult, ScreenMode, ScreenPredicate,
         ScreenWaitQuality, StableCaptureQuality, StateHashComparison, CONTROL_PROTOCOL_VERSION,
     },
     protocol::mutation::MutationEffect,
@@ -152,7 +152,7 @@ impl SessionActor<'_> {
             ) {
                 Ok(frame) => frame,
                 Err(error) => {
-                    let response = screen_frame_error_response(
+                    let response = screen_frame_error(
                         waiter.request_id,
                         &error,
                         state_hash.clone(),
@@ -180,7 +180,7 @@ impl SessionActor<'_> {
                     ScreenWaitQuality::Deadline
                 };
 
-                ControlData::ScreenWait {
+                ControlPayload::ScreenWait {
                     predicate: predicate.predicate,
                     matched,
                     first_match_monotonic_ns: waiter
@@ -210,7 +210,7 @@ impl SessionActor<'_> {
                     return terminal_error("compress presented state", error.to_string());
                 })?;
 
-                ControlData::StableSnapshot {
+                ControlPayload::StableSnapshot {
                     frame,
                     semantic_state_zstd: ByteString::from(compressed),
                     first_observed_monotonic_ns: waiter

@@ -113,7 +113,7 @@ impl PyScreen {
             .wait_screen(predicate, Duration::ZERO, timeout)
             .map_err(to_py_err)?;
 
-        if !outcome.satisfied() {
+        if !outcome.is_satisfied() {
             return Err(unsatisfied_wait(format!(
                 "timed out waiting for pattern: '{pattern}'"
             )));

@@ -20,10 +20,7 @@ impl Drop for CancellationSignals {
     }
 }
 
-pub(super) fn run_original(
-    response: &mut ResponseWriter,
-    mut arguments: RecordArgs,
-) -> Result<ExitCode> {
+pub(super) fn run(response: &mut ResponseWriter, mut arguments: RecordArgs) -> Result<ExitCode> {
     let backend = match arguments.original_backend {
         Some(super::args::OriginalBackendArg::WaylandPortal) => {
             if arguments.original_fps.is_some() {

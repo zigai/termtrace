@@ -1,9 +1,9 @@
 use super::{
-    actor_boundaries, apply_input, apply_resize, control_rejected, encode_focus, find_text_regions,
+    actor_boundaries, apply, apply_resize, control_rejected, encode_focus, find_text_regions,
     finish_with_cleanup, interpolate_cell, mode_hash, mouse_button_name, prepare_bytes,
     prepare_key, prepare_paste, presented_state_hash, resize_semantic,
     supported_geometry_cell_count, terminal_error, validate_control_input, ByteString,
-    ControlCommand, ControlData, Errno, Error, Event, EventLogWriter, Fact, FocusEvent,
+    ControlCommand, ControlPayload, Errno, Error, Event, EventLogWriter, Fact, FocusEvent,
     InputDescriptor, InputKind, InputSource, Instant, MouseAction, MouseButton, OperationStatus,
     PointerOperation, ProcessSignal, Result, SessionActor, TerminalGeometry, Uuid,
 };
@@ -15,7 +15,7 @@ impl SessionActor<'_> {
         &mut self,
         request_id: Uuid,
         command: &ControlCommand,
-    ) -> Result<ControlData> {
+    ) -> Result<ControlPayload> {
         if let Some(outcome) = self.execute_observation_command(request_id, command) {
             return outcome;
         }
@@ -28,7 +28,7 @@ impl SessionActor<'_> {
             } => {
                 validate_control_input(data.as_bytes(), caller_intent.as_deref())?;
                 let input = prepare_bytes(data.as_bytes(), *input_kind, &mut self.live.semantic)?;
-                let applied = apply_input(
+                let applied = apply(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
                     request_id,
@@ -41,7 +41,7 @@ impl SessionActor<'_> {
                     &input.data,
                 )?;
 
-                return Ok(ControlData::InputApplied {
+                return Ok(ControlPayload::InputApplied {
                     operation_id: request_id,
                     input_kind: *input_kind,
                     data: data.clone(),
@@ -59,7 +59,7 @@ impl SessionActor<'_> {
             }
             ControlCommand::Key { key, modifiers } => {
                 let input = prepare_key(*key, *modifiers, &mut self.live.semantic, Error::from)?;
-                let applied = apply_input(
+                let applied = apply(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
                     request_id,
@@ -72,7 +72,7 @@ impl SessionActor<'_> {
                     &input.data,
                 )?;
 
-                return Ok(ControlData::InputApplied {
+                return Ok(ControlPayload::InputApplied {
                     operation_id: request_id,
                     input_kind: InputKind::Keys,
                     data: ByteString::new(input.data.into_owned()),
@@ -85,7 +85,7 @@ impl SessionActor<'_> {
             ControlCommand::Paste { data } => {
                 validate_control_input(data.as_bytes(), Some("paste"))?;
                 let input = prepare_paste(data.as_bytes(), &mut self.live.semantic)?;
-                let applied = apply_input(
+                let applied = apply(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
                     request_id,
@@ -98,7 +98,7 @@ impl SessionActor<'_> {
                     &input.data,
                 )?;
 
-                return Ok(ControlData::InputApplied {
+                return Ok(ControlPayload::InputApplied {
                     operation_id: request_id,
                     input_kind: InputKind::Paste,
                     data: ByteString::new(input.data.into_owned()),
@@ -123,7 +123,7 @@ impl SessionActor<'_> {
                             "the application has not enabled DEC focus reporting mode 1004",
                         ));
                     }
-                    return Ok(ControlData::InputNoop {
+                    return Ok(ControlPayload::InputNoop {
                         input_kind: InputKind::Focus,
                         reason: "focus_reporting_disabled".to_owned(),
                         terminal_modes_hash,
@@ -133,7 +133,7 @@ impl SessionActor<'_> {
 
                 let encoded =
                     encode_focus(if *focused { FocusEvent::In } else { FocusEvent::Out })?;
-                let applied = apply_input(
+                let applied = apply(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
                     request_id,
@@ -150,7 +150,7 @@ impl SessionActor<'_> {
                     encoded.as_bytes(),
                 )?;
 
-                return Ok(ControlData::InputApplied {
+                return Ok(ControlPayload::InputApplied {
                     operation_id: request_id,
                     input_kind: InputKind::Focus,
                     data: encoded,
@@ -191,7 +191,7 @@ impl SessionActor<'_> {
                             "the application has not enabled a DEC mouse tracking mode",
                         ));
                     }
-                    return Ok(ControlData::InputNoop {
+                    return Ok(ControlPayload::InputNoop {
                         input_kind: InputKind::Pointer,
                         reason: "pointer_reporting_disabled".to_owned(),
                         terminal_modes_hash,
@@ -383,7 +383,7 @@ impl SessionActor<'_> {
                             "the current tracking mode suppressed this pointer operation",
                         ));
                     }
-                    return Ok(ControlData::InputNoop {
+                    return Ok(ControlPayload::InputNoop {
                         input_kind: InputKind::Pointer,
                         reason: "pointer_has_no_output".to_owned(),
                         terminal_modes_hash,
@@ -391,7 +391,7 @@ impl SessionActor<'_> {
                     });
                 }
 
-                let applied = apply_input(
+                let applied = apply(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
                     request_id,
@@ -419,7 +419,7 @@ impl SessionActor<'_> {
                     &encoded,
                 )?;
 
-                return Ok(ControlData::InputApplied {
+                return Ok(ControlPayload::InputApplied {
                     operation_id: request_id,
                     input_kind: InputKind::Pointer,
                     data: ByteString::new(encoded),
@@ -511,7 +511,7 @@ impl SessionActor<'_> {
                             "the application has not enabled a DEC mouse tracking mode",
                         ));
                     }
-                    return Ok(ControlData::InputNoop {
+                    return Ok(ControlPayload::InputNoop {
                         input_kind: InputKind::Pointer,
                         reason: "pointer_reporting_disabled".to_owned(),
                         terminal_modes_hash,
@@ -545,7 +545,7 @@ impl SessionActor<'_> {
                             "the current tracking mode suppressed the activation click",
                         ));
                     }
-                    return Ok(ControlData::InputNoop {
+                    return Ok(ControlPayload::InputNoop {
                         input_kind: InputKind::Pointer,
                         reason: "pointer_has_no_output".to_owned(),
                         terminal_modes_hash,
@@ -553,7 +553,7 @@ impl SessionActor<'_> {
                     });
                 }
 
-                let applied = apply_input(
+                let applied = apply(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
                     request_id,
@@ -577,7 +577,7 @@ impl SessionActor<'_> {
                     &encoded,
                 )?;
 
-                return Ok(ControlData::Activated {
+                return Ok(ControlPayload::Activated {
                     operation_id: request_id,
                     text: text.clone(),
                     start_column: region.start_column,
@@ -622,7 +622,7 @@ impl SessionActor<'_> {
                     self.live.replace_presented(latest);
                 }
 
-                return Ok(ControlData::Acknowledged {
+                return Ok(ControlPayload::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),
                 });
             }
@@ -635,7 +635,7 @@ impl SessionActor<'_> {
                     false,
                 )?;
 
-                return Ok(ControlData::Acknowledged {
+                return Ok(ControlPayload::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),
                 });
             }
@@ -648,7 +648,7 @@ impl SessionActor<'_> {
                     data: data.clone(),
                 })?;
 
-                return Ok(ControlData::Acknowledged {
+                return Ok(ControlPayload::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),
                 });
             }
@@ -666,7 +666,7 @@ impl SessionActor<'_> {
                     label: label.to_owned(),
                 })?;
 
-                return Ok(ControlData::Marked {
+                return Ok(ControlPayload::Marked {
                     label: label.to_owned(),
                     event_seq,
                     boundaries: actor_boundaries(&self.event_log),
@@ -684,7 +684,7 @@ impl SessionActor<'_> {
                 self.termination
                     .observe(Fact::SignalForwarded { at: Instant::now() });
 
-                return Ok(ControlData::Acknowledged {
+                return Ok(ControlPayload::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),
                 });
             }

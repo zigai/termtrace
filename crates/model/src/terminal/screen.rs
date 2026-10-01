@@ -242,7 +242,8 @@ pub struct ScreenCellRow {
 /// Structurally discriminated rich row payload.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "detail", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ScreenFrameData {
+#[schemars(rename = "ScreenFrameData")]
+pub enum ScreenFrameContent {
     /// Observation metadata only; no cell or text payload.
     None,
     /// Convenience text and authoritative wrap facts.
@@ -302,7 +303,7 @@ pub struct ScreenFrame {
     /// Current/default colors and complete palette.
     pub colors: ColorState,
     /// Structurally matched detail payload.
-    pub data: ScreenFrameData,
+    pub data: ScreenFrameContent,
     /// Projection identity in the `termtrace-screen-frame-v1` hash domain.
     pub frame_hash: String,
 }
@@ -316,8 +317,8 @@ impl ScreenFrame {
         mut visit: impl FnMut(ScreenRowMetadata<'_>, u16, &str, WideKind, &ScreenAppearance),
     ) {
         match &self.data {
-            ScreenFrameData::None | ScreenFrameData::Text { .. } => {}
-            ScreenFrameData::Spans { rows } => {
+            ScreenFrameContent::None | ScreenFrameContent::Text { .. } => {}
+            ScreenFrameContent::Spans { rows } => {
                 for row in rows {
                     let metadata = ScreenRowMetadata {
                         row: row.row,
@@ -343,7 +344,7 @@ impl ScreenFrame {
                     }
                 }
             }
-            ScreenFrameData::Cells { rows } => {
+            ScreenFrameContent::Cells { rows } => {
                 for row in rows {
                     let metadata = ScreenRowMetadata {
                         row: row.row,

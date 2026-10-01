@@ -20,7 +20,7 @@ use termtrace_model::{
     execution::session::CaptureTarget,
     protocol::{
         capability::NATIVE_SCREENSHOT_CAPABILITY,
-        control::{ControlCommand, ControlData},
+        control::{ControlCommand, ControlPayload},
     },
     terminal::observation::StatePoint,
 };
@@ -55,7 +55,7 @@ pub(super) fn run(
                 ));
             }
 
-            let ControlData::Status { boundaries, .. } = *data else {
+            let ControlPayload::Status { boundaries, .. } = *data else {
                 return Err(miette::miette!(
                     "live status returned an unexpected response"
                 ));

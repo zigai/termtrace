@@ -332,7 +332,7 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
     let temporary = tempfile::TempDir::new().expect("temporary directory");
     log.source_path = Some(temporary.path().join("events.jsonl"));
     let directory =
-        index::write_cataloged_index(temporary.path(), &log).expect("periodic checkpoint index");
+        index::write_cataloged(temporary.path(), &log).expect("periodic checkpoint index");
 
     let entries: Vec<StateIndexEntry> = fs_err::read_to_string(directory.join("state-index.jsonl"))
         .expect("state index")
@@ -444,7 +444,7 @@ fn periodic_checkpoint_reconstructs_scrolling_grid() {
     let temporary = tempfile::TempDir::new().expect("temporary directory");
     let directory = temporary.path().join("derived");
     create_private_directory(&directory).expect("private derived directory");
-    index::write_index(&directory, &log, None, true, StateSelection::All)
+    index::write(&directory, &log, None, true, StateSelection::All)
         .expect("scrolling grids must produce validated periodic checkpoints");
 
     let checkpoint_count = fs_err::read_to_string(directory.join("state-index.jsonl"))
@@ -500,7 +500,7 @@ fn row_delta_emits_and_reconstructs_wrap_facts_without_cell_changes() {
     let mut current = previous.clone();
     current.grid[0].soft_wrapped = !current.grid[0].soft_wrapped;
     current.grid[0].wrap_continuation = !current.grid[0].wrap_continuation;
-    let delta = state_delta(Some(&previous), &current);
+    let delta = between(Some(&previous), &current);
     assert_eq!(delta.rows.len(), 1);
     assert!(delta.rows[0].cells.is_empty());
     assert_eq!(delta.rows[0].soft_wrapped, current.grid[0].soft_wrapped);

@@ -3,7 +3,7 @@
 use crate::{
     assertions::{
         assert_cursor, assert_screen_text, normalized_snapshot, AssertionError,
-        AssertionFrameIdentity, ExpectationMismatch, SnapshotProfile,
+        AssertionFrameIdentity, ExpectationMismatchError, SnapshotProfile,
     },
     client::{LaunchSpec, Session, StopRequest, Terminal},
     defaults,

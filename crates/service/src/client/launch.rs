@@ -95,7 +95,11 @@ impl LaunchSpec {
 
     /// Set one child variable without putting its value in process arguments or logs.
     #[must_use]
-    pub fn set_environment(mut self, name: impl Into<String>, value: impl Into<Vec<u8>>) -> Self {
+    pub fn environment_variable(
+        mut self,
+        name: impl Into<String>,
+        value: impl Into<Vec<u8>>,
+    ) -> Self {
         self.environment
             .set
             .insert(name.into(), ByteString::new(value.into()));

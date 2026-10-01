@@ -3,7 +3,7 @@
 use miette::{IntoDiagnostic as _, Result};
 use std::process::ExitCode;
 use termtrace_engine::{
-    analysis::profile::{builtin_terminal_colors, terminal_colors_for_profile},
+    analysis::profile::{builtin_terminal_colors, terminal_colors},
     recording::{inherited_geometry, record, resolve_ghostty_profile, RecordOptions},
     registry::SessionRegistry,
 };
@@ -58,7 +58,7 @@ fn record_pane(mut recording: PaneRecording) -> Result<ExitCode> {
 
     let colors = ghostty_profile
         .as_ref()
-        .map_or_else(builtin_terminal_colors, terminal_colors_for_profile)
+        .map_or_else(builtin_terminal_colors, terminal_colors)
         .into_diagnostic()?;
 
     let registry = SessionRegistry::open(&recording.output_root).into_diagnostic()?;

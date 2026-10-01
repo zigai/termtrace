@@ -308,7 +308,7 @@ fn follow_test_marker(session: &Path, label: &str) -> u64 {
     )
     .expect("durable marker");
 
-    let ControlData::Marked { event_seq, .. } = data else {
+    let ControlPayload::Marked { event_seq, .. } = data else {
         panic!("unexpected marker response");
     };
 
@@ -338,7 +338,7 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
     wait_for_output(&session, b"PREFIX_READY", Duration::from_secs(30))
         .expect("canonical prefix exceeds retained cursor history");
 
-    let ControlData::Status { boundaries, .. } =
+    let ControlPayload::Status { boundaries, .. } =
         send_request(&session, &ControlRequest::new(ControlCommand::Status)).expect("status")
     else {
         panic!("status response");
@@ -346,7 +346,7 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
     let resume = boundaries.durable.next_event_seq;
     let race_marker = follow_test_marker(&session, "between-status-and-follow");
 
-    let ControlData::EventCursor {
+    let ControlPayload::EventCursor {
         start: Some(start),
         durable,
         ..
@@ -372,7 +372,7 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
             &ControlRequest::new(ControlCommand::EventCursor { next_event_seq: 0 })
         )
         .expect("historical cursor"),
-        ControlData::EventCursor { start: None, .. }
+        ControlPayload::EventCursor { start: None, .. }
     ));
 
     let historical = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
@@ -450,7 +450,7 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
     let resume = follow_test_marker(&session, "prior") + 1;
     follow_test_marker(&session, "genuine");
 
-    let ControlData::EventCursor {
+    let ControlPayload::EventCursor {
         start: Some(start), ..
     } = send_request(
         &session,

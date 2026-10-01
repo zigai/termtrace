@@ -44,7 +44,7 @@ pub(in crate::cli) fn run_wait(
         .wait_screen(predicate, arguments.stable_for, timeout)
         .into_diagnostic()?;
 
-    let satisfied = outcome.satisfied();
+    let satisfied = outcome.is_satisfied();
 
     if arguments.json {
         write_json_pretty(response, &outcome)?;

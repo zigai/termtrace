@@ -14,7 +14,7 @@ mod engine;
 mod index;
 pub(crate) mod trust;
 
-use delta::state_delta;
+use delta::between;
 use engine::replay_for_index;
 #[cfg(test)]
 use engine::validate_replay_seed;
@@ -38,7 +38,7 @@ use engine::{
 #[cfg(test)]
 pub(crate) use engine::{reset_test_replay_output_bytes, test_replay_output_bytes};
 #[cfg(test)]
-pub(crate) use index::write_cataloged_index;
+pub(crate) use index::write_cataloged;
 pub use index::{
     derived_directory_name, derived_directory_name_for, index_session, index_session_for_video,
     index_session_range, index_session_with_options, index_session_with_stride,

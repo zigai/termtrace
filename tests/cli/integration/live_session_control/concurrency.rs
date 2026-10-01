@@ -29,7 +29,7 @@ fn concurrent_client_launches_keep_environment_snapshots_isolated() {
                 ])
                 .clear_environment()
                 .copy_environment("PATH")
-                .set_environment("ISOLATED_ID", value.into_bytes())
+                .environment_variable("ISOLATED_ID", value.into_bytes())
                 .color_policy(ColorPolicy::Never)
                 .output_byte_budget(1_000_000);
 

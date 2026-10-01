@@ -27,13 +27,13 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         }),
     )
     .expect("stable capture");
-    let ControlData::StableSnapshot { frame, quality, .. } = capture else {
+    let ControlPayload::StableSnapshot { frame, quality, .. } = capture else {
         panic!("wrong stable capture payload");
     };
 
     assert_eq!(quality, StableCaptureQuality::Stable);
 
-    let ScreenFrameData::Spans { rows } = &frame.data else {
+    let ScreenFrameContent::Spans { rows } = &frame.data else {
         panic!("default projection should return spans");
     };
 
@@ -117,7 +117,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     .expect("typed deadline capture");
     assert!(matches!(
         deadline,
-        ControlData::StableSnapshot {
+        ControlPayload::StableSnapshot {
             quality: StableCaptureQuality::Deadline,
             ..
         }
@@ -158,7 +158,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         }),
     )
     .expect("typed child completion");
-    let ControlData::StableSnapshot { quality, frame, .. } = completed else {
+    let ControlPayload::StableSnapshot { quality, frame, .. } = completed else {
         panic!("unexpected completed-child outcome: {completed:?}");
     };
 
@@ -202,7 +202,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         }),
     )
     .expect("typed output closure");
-    let ControlData::StableSnapshot {
+    let ControlPayload::StableSnapshot {
         quality: StableCaptureQuality::OutputClosed,
         frame,
         ..

@@ -96,7 +96,7 @@ fn an_unreachable_incomplete_session_reports_unavailable_without_mutation() {
     let session_id = write_manifest(temporary.path());
     let mut session = Session::attach(temporary.path(), "termtrace").expect("attach");
     assert_eq!(session.session_id(), session_id);
-    assert!(!session.launched());
+    assert!(!session.is_launched());
     assert_eq!(session.phase().phase, SessionPhase::Incomplete);
 
     let observed = session

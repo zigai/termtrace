@@ -26,7 +26,7 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
     let snapshot = send_request(&session, &ControlRequest::new(ControlCommand::Snapshot))
         .expect("presented snapshot");
 
-    let ControlData::Snapshot { state_hash, .. } = snapshot else {
+    let ControlPayload::Snapshot { state_hash, .. } = snapshot else {
         panic!("expected snapshot response");
     };
 
@@ -199,7 +199,7 @@ fn rejected_control_requests_do_not_terminate_the_recorder_actor() {
 
         assert!(matches!(
             send_request(&session, &ControlRequest::new(ControlCommand::Status)),
-            Ok(ControlData::Status { .. })
+            Ok(ControlPayload::Status { .. })
         ));
 
         send_request(

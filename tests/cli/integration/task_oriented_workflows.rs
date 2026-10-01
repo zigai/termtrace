@@ -704,11 +704,11 @@ fn last_action_uses_the_full_journaled_multi_atom_request_boundary() {
         .session_path();
 
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical source");
-    let legacy = last_action::analyze_last_action(&session, &log, 50)
-        .expect("materialized last-action analysis");
+    let legacy =
+        last_action::analyze(&session, &log, 50).expect("materialized last-action analysis");
 
-    let streamed = last_action::analyze_last_action_session(&session, 50)
-        .expect("streamed last-action analysis");
+    let streamed =
+        last_action::analyze_session(&session, 50).expect("streamed last-action analysis");
     assert_eq!(
         serde_json::to_value(&streamed).expect("streamed JSON"),
         serde_json::to_value(&legacy).expect("materialized JSON")

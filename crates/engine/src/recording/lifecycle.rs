@@ -66,7 +66,7 @@ thread_local! {
     static POISON_FATAL_APPEND: Cell<bool> = const { Cell::new(false) };
 }
 
-use super::runtime::consume_runtime;
+use super::runtime::run;
 
 #[derive(serde::Serialize)]
 struct IncompleteSessionDiagnostic<'diagnostic> {
@@ -261,7 +261,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
     );
     actor.failure_policy = options.failure_policy;
     actor.live.suppress_mirrored_queries = options.forward_stdin;
-    let runtime = match consume_runtime(
+    let runtime = match run(
         &mut actor,
         options.forward_stdin,
         TerminalGeometry::from(pty_size),

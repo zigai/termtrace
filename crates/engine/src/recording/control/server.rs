@@ -26,13 +26,13 @@ use std::{
 };
 use termtrace_model::{
     protocol::control::{
-        ActionPostconditionResult, ControlData, ControlErrorDetails, ControlRequest,
+        ActionPostconditionResult, ControlErrorDetails, ControlPayload, ControlRequest,
         ControlResponse, ControlResult, ScreenFrameFailureDetails, CONTROL_PROTOCOL_VERSION,
         MAX_CONTROL_MESSAGE_BYTES,
     },
     protocol::mutation::MutationEffect,
     terminal::observation::ActorBoundaries,
-    terminal::screen::{FrameDetail, ScreenFrame, ScreenFrameData, ScreenFrameSource},
+    terminal::screen::{FrameDetail, ScreenFrame, ScreenFrameContent, ScreenFrameSource},
 };
 
 pub(in crate::recording) struct ControlWorker {
@@ -64,7 +64,7 @@ impl Drop for ConnectionPermit<'_> {
     }
 }
 
-pub(in crate::recording) fn spawn_control_server(
+pub(in crate::recording) fn spawn(
     socket_name: &str,
     sender: mpsc::SyncSender<RuntimeMessage>,
 ) -> Result<ControlWorker> {
@@ -666,10 +666,10 @@ fn oversized_response_error(
         );
     };
     let detail = match &frame.data {
-        ScreenFrameData::None => FrameDetail::None,
-        ScreenFrameData::Text { .. } => FrameDetail::Text,
-        ScreenFrameData::Spans { .. } => FrameDetail::Spans,
-        ScreenFrameData::Cells { .. } => FrameDetail::Cells,
+        ScreenFrameContent::None => FrameDetail::None,
+        ScreenFrameContent::Text { .. } => FrameDetail::Text,
+        ScreenFrameContent::Spans { .. } => FrameDetail::Spans,
+        ScreenFrameContent::Cells { .. } => FrameDetail::Cells,
     };
 
     return (
@@ -695,25 +695,25 @@ fn oversized_response_error(
 }
 
 fn rich_response_context(
-    data: &ControlData,
+    data: &ControlPayload,
 ) -> Option<(&ScreenFrame, ActorBoundaries, &'static str)> {
     let (frame, boundaries, scope) = match data {
-        ControlData::ScreenFrame { frame } => (
+        ControlPayload::ScreenFrame { frame } => (
             frame,
             actor_frame_boundaries(frame)?,
             "screen_frame_response",
         ),
-        ControlData::StableSnapshot { frame, .. } => (
+        ControlPayload::StableSnapshot { frame, .. } => (
             frame,
             actor_frame_boundaries(frame)?,
             "stable_snapshot_response",
         ),
-        ControlData::ScreenWait { frame, .. } => (
+        ControlPayload::ScreenWait { frame, .. } => (
             frame,
             actor_frame_boundaries(frame)?,
             "screen_wait_response",
         ),
-        ControlData::ActionApplied {
+        ControlPayload::ActionApplied {
             postcondition,
             boundaries,
             ..
@@ -825,7 +825,7 @@ mod tests {
             version: CONTROL_PROTOCOL_VERSION,
             request_id: Uuid::nil(),
             result: ControlResult::Ok {
-                data: ControlData::ScreenFrame { frame },
+                data: ControlPayload::ScreenFrame { frame },
             },
         };
         let (code, _, details) =
@@ -847,7 +847,7 @@ mod tests {
             version: CONTROL_PROTOCOL_VERSION,
             request_id: Uuid::nil(),
             result: ControlResult::Ok {
-                data: ControlData::Acknowledged {
+                data: ControlPayload::Acknowledged {
                     boundaries: boundaries(),
                 },
             },
@@ -864,7 +864,7 @@ mod tests {
             version: CONTROL_PROTOCOL_VERSION,
             request_id: Uuid::nil(),
             result: ControlResult::Ok {
-                data: ControlData::ActionApplied {
+                data: ControlPayload::ActionApplied {
                     input: ActionInputResult {
                         sequence_id: Uuid::nil(),
                         atom_count: 1,
@@ -923,7 +923,7 @@ mod tests {
             version: CONTROL_PROTOCOL_VERSION,
             request_id: Uuid::nil(),
             result: ControlResult::Ok {
-                data: ControlData::ActionApplied {
+                data: ControlPayload::ActionApplied {
                     input: ActionInputResult {
                         sequence_id: Uuid::nil(),
                         atom_count: 1,
@@ -968,7 +968,7 @@ mod tests {
             version: CONTROL_PROTOCOL_VERSION,
             request_id: Uuid::nil(),
             result: ControlResult::Ok {
-                data: ControlData::ActionApplied {
+                data: ControlPayload::ActionApplied {
                     input: ActionInputResult {
                         sequence_id: Uuid::nil(),
                         atom_count: 1,
@@ -1027,7 +1027,7 @@ mod tests {
     fn incomplete_request_read_is_interrupted_promptly_on_shutdown() {
         let (sender, _receiver) = mpsc::sync_channel(1);
         let socket_name = format!("termtrace-test-h1-{}", Uuid::now_v7());
-        let worker = spawn_control_server(&socket_name, sender).expect("control server");
+        let worker = spawn(&socket_name, sender).expect("control server");
         let socket = control_socket_address(&socket_name).expect("socket address");
         let mut client = UnixStream::connect_addr(&socket).expect("connect client");
         client.write_all(b"{\"version\":5").expect("partial write");

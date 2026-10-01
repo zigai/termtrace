@@ -17,7 +17,7 @@ use std::{
 use termtrace_model::protocol::{
     control::CONTROL_PROTOCOL_VERSION,
     driver::{
-        DriverData, DriverMethod, DriverRequest, DriverResponse, DriverResult,
+        DriverMethod, DriverPayload, DriverRequest, DriverResponse, DriverResult,
         DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES, DRIVER_PROTOCOL_VERSION,
     },
 };
@@ -109,7 +109,7 @@ impl Driver {
         if !matches!(
             response.result,
             DriverResult::Ok {
-                data: DriverData::Hello {
+                data: DriverPayload::Hello {
                     driver_protocol_version: DRIVER_PROTOCOL_VERSION,
                     control_protocol_version: CONTROL_PROTOCOL_VERSION,
                     ..

@@ -4,7 +4,7 @@ use crate::cli::parsers::{
 };
 use clap::{Args, Parser, ValueEnum};
 use std::{ffi::OsString, path::PathBuf, time::Duration};
-use termtrace_media::helper;
+use termtrace_media::helper_protocol;
 use termtrace_model::execution::session::RecordingFailurePolicy;
 use termtrace_model::{
     execution::environment::ColorPolicy,
@@ -18,7 +18,7 @@ use termtrace_sdk::defaults;
 #[derive(Debug, Args)]
 pub(in crate::cli) struct GeometryProbeArgs {
     /// New file receiving the measured terminal geometry.
-    #[arg(long = helper::geometry_probe::OUT)]
+    #[arg(long = helper_protocol::geometry_probe::OUT)]
     pub(in crate::cli) out: PathBuf,
 }
 

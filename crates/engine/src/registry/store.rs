@@ -180,7 +180,7 @@ impl SessionRegistry {
                 })
             }
             RegistryRecord::Reservation(reservation) => {
-                if !valid_reservation(alias, &reservation) {
+                if !is_valid(alias, &reservation) {
                     return Ok(RegistrySessionResolution {
                         session: reservation.session_path(),
                         lifecycle: SessionPhase::Incompatible,

@@ -3,7 +3,7 @@
 use super::{
     actor::SessionActor,
     control::apply_signal,
-    input::{apply_input, apply_resize},
+    input::{apply, apply_resize},
     model::{RuntimeMessage, TerminalGeometry},
     presentation::{process_semantic_bytes, process_semantic_output, resize_semantic},
     process::RuntimeWorkers,
@@ -43,7 +43,7 @@ pub(super) struct RuntimeOutcome {
 ///
 /// Returns an error when configuration is invalid, secure artifacts cannot be
 /// created, PTY setup or child execution fails, output cannot be mirrored, or
-pub(super) fn consume_runtime(
+pub(super) fn run(
     actor: &mut SessionActor<'_>,
     forward_stdin: bool,
     initial_geometry: TerminalGeometry,
@@ -432,7 +432,7 @@ impl SessionActor<'_> {
             RuntimeMessage::Input(data) => {
                 let operation_id = Uuid::now_v7();
                 self.mutation_history.reserve_operation(operation_id)?;
-                apply_input(
+                apply(
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
                     operation_id,

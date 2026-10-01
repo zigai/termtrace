@@ -53,7 +53,7 @@ impl SessionRegistry {
         if path.exists() {
             match read_registry_record_nofollow(&path)? {
                 RegistryRecord::Reservation(reservation)
-                    if valid_reservation(alias, &reservation)
+                    if is_valid(alias, &reservation)
                         && reservation.lease_expires_unix_ns <= now =>
                 {
                     fs::remove_file(&path).map_err(|source| {
@@ -65,9 +65,7 @@ impl SessionRegistry {
 
                     sync_parent_directory(&path)?;
                 }
-                RegistryRecord::Reservation(reservation)
-                    if !valid_reservation(alias, &reservation) =>
-                {
+                RegistryRecord::Reservation(reservation) if !is_valid(alias, &reservation) => {
                     return Err(registry_error(
                         "reserve session alias",
                         "existing alias reservation is incompatible",
@@ -114,7 +112,7 @@ impl SessionRegistry {
             ));
         };
 
-        if !valid_reservation(&reservation.alias, &current)
+        if !is_valid(&reservation.alias, &current)
             || current.owner_token != reservation.owner_token
             || current.created_unix_ns != reservation.created_unix_ns
             || current.lease_expires_unix_ns != reservation.lease_expires_unix_ns
@@ -167,8 +165,7 @@ impl SessionRegistry {
             ));
         };
 
-        if !valid_reservation(&reservation.alias, &current)
-            || current.owner_token != reservation.owner_token
+        if !is_valid(&reservation.alias, &current) || current.owner_token != reservation.owner_token
         {
             return Err(registry_error(
                 "release session alias",
@@ -215,7 +212,7 @@ pub(super) fn system_time_unix_ns() -> Result<u128> {
         .as_nanos());
 }
 
-pub(super) fn valid_reservation(alias: &str, reservation: &AliasReservation) -> bool {
+pub(super) fn is_valid(alias: &str, reservation: &AliasReservation) -> bool {
     return reservation.format == REGISTRY_RESERVATION_FORMAT
         && reservation.version == REGISTRY_RESERVATION_VERSION
         && reservation.alias == alias

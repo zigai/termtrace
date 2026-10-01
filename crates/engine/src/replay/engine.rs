@@ -1,4 +1,4 @@
-use super::{invalid_replay, state_delta, DerivedIndex, EndpointInspection};
+use super::{between, invalid_replay, DerivedIndex, EndpointInspection};
 use crate::{Error, Result};
 #[cfg(test)]
 use std::cell::Cell;
@@ -1902,7 +1902,7 @@ impl ReplayBuilder {
             return Ok(true);
         }
 
-        let delta = state_delta(self.previous.as_ref(), &state);
+        let delta = between(self.previous.as_ref(), &state);
         let record = StateRecord {
             state_id: self.state_count,
             event_seq,

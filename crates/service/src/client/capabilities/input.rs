@@ -1,5 +1,5 @@
 use super::super::{
-    ControlCommand, ControlData, ControlRequest, MouseButton, PointerOperation, Result, Session,
+    ControlCommand, ControlPayload, ControlRequest, MouseButton, PointerOperation, Result, Session,
 };
 
 /// Mode-aware cell pointer and focus operations.
@@ -19,7 +19,7 @@ impl Pointer<'_> {
         row: u16,
         button: MouseButton,
         strict: bool,
-    ) -> Result<ControlData> {
+    ) -> Result<ControlPayload> {
         return self
             .session
             .control(&ControlRequest::new(ControlCommand::Pointer {
@@ -35,7 +35,13 @@ impl Pointer<'_> {
     /// # Errors
     /// Returns an error when the recorder cannot be reached or rejects the request; with `strict`,
     /// a request the application does not report is rejected instead of returning a semantic no-op.
-    pub fn scroll(&self, column: u16, row: u16, lines: i16, strict: bool) -> Result<ControlData> {
+    pub fn scroll(
+        &self,
+        column: u16,
+        row: u16,
+        lines: i16,
+        strict: bool,
+    ) -> Result<ControlPayload> {
         return self
             .session
             .control(&ControlRequest::new(ControlCommand::Pointer {
@@ -51,7 +57,7 @@ impl Pointer<'_> {
     /// # Errors
     /// Returns an error when the recorder cannot be reached or rejects the request; with `strict`,
     /// a request the application does not report is rejected instead of returning a semantic no-op.
-    pub fn focus(&self, focused: bool, strict: bool) -> Result<ControlData> {
+    pub fn focus(&self, focused: bool, strict: bool) -> Result<ControlPayload> {
         return self
             .session
             .control(&ControlRequest::new(ControlCommand::Focus {

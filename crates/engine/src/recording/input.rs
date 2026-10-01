@@ -58,7 +58,7 @@ pub(super) fn semantic_key_name(key: NamedKey) -> String {
     };
 }
 
-pub(super) fn semantic_key_input(key: NamedKey, modifiers: KeyModifiers) -> String {
+pub(super) fn semantic_key(key: NamedKey, modifiers: KeyModifiers) -> String {
     let mut parts: Vec<&str> = Vec::with_capacity(5);
 
     if modifiers.control {
@@ -136,7 +136,7 @@ pub(super) fn encode_paste(data: &[u8], bracketed: bool) -> Result<Vec<u8>> {
         .collect());
 }
 
-pub(super) fn apply_input(
+pub(super) fn apply(
     writer: &mut dyn Write,
     event_log: &mut EventLogWriter,
     operation_id: Uuid,
@@ -261,7 +261,7 @@ impl InputSequenceExecution {
                 return Err(Error::InputSequenceIncomplete {
                     sequence_id: self.sequence_id,
                     failed_atom_index: u32::try_from(self.next_atom_index).unwrap_or(u32::MAX),
-                    failed_operation_id: input_sequence_operation_id(source_atom),
+                    failed_operation_id: sequence_operation_id(source_atom),
                     atoms_applied: u32::try_from(self.next_atom_index).unwrap_or(u32::MAX),
                     bytes_written: self.total_bytes_written,
                     failed_atom_bytes_written: 0,
@@ -277,10 +277,10 @@ impl InputSequenceExecution {
             Err(error) => return Err(error),
         };
 
-        let applied = match apply_input(
+        let applied = match apply(
             writer,
             event_log,
-            input_sequence_operation_id(source_atom),
+            sequence_operation_id(source_atom),
             InputSource::Agent,
             atom.input_kind,
             atom.descriptor,
@@ -325,7 +325,7 @@ impl InputSequenceExecution {
 
         if self.include_atom_outcomes {
             self.outcomes.push(InputSequenceAtomOutcome {
-                operation_id: input_sequence_operation_id(source_atom),
+                operation_id: sequence_operation_id(source_atom),
                 input_kind: atom.input_kind,
                 bytes_written: applied.bytes_written,
                 intent_event_seq: applied.intent_event_seq,
@@ -381,7 +381,7 @@ fn validate_input_sequence(atoms: &[InputSequenceAtom], pace_ns: u64) -> Result<
 
     let mut operation_ids = HashSet::with_capacity(atoms.len());
     for atom in atoms {
-        if !operation_ids.insert(input_sequence_operation_id(atom)) {
+        if !operation_ids.insert(sequence_operation_id(atom)) {
             return Err(control_rejected(
                 "invalid_input_sequence",
                 "input sequence operation identifiers must be unique",
@@ -489,7 +489,7 @@ pub(super) fn prepare_key(
             terminal_modes_hash: terminal_modes_hash.clone(),
         },
         terminal_modes_hash,
-        semantic_input: Some(semantic_key_input(key, modifiers)),
+        semantic_input: Some(semantic_key(key, modifiers)),
         data: Cow::Owned(encoded.data.into_bytes()),
     });
 }
@@ -521,7 +521,7 @@ pub(super) fn mode_hash(modes: &ModeState, operation: &'static str) -> Result<St
     return Ok(blake3::hash(&mode_bytes).to_hex().to_string());
 }
 
-pub(super) fn input_sequence_operation_id(atom: &InputSequenceAtom) -> Uuid {
+pub(super) fn sequence_operation_id(atom: &InputSequenceAtom) -> Uuid {
     return match atom {
         InputSequenceAtom::Bytes { operation_id, .. }
         | InputSequenceAtom::Key { operation_id, .. }

@@ -6,7 +6,7 @@ pub(in crate::cli) fn run_restart(
     arguments: RestartArgs,
 ) -> Result<ExitCode> {
     let registry = SessionRegistry::open_default().into_diagnostic()?;
-    let overrides = restart_overrides_from_args(&arguments)?;
+    let overrides = overrides_from_args(&arguments)?;
     let encoded_overrides = serde_json::to_string(&overrides).into_diagnostic()?;
     let predecessor_entry = registry.resolve(&arguments.name).into_diagnostic()?;
     let predecessor = predecessor_entry.session_path();
@@ -34,7 +34,7 @@ pub(in crate::cli) fn run_restart(
     let executable = env::current_exe().into_diagnostic()?;
     let mut recorder = spawn_detached(
         &executable,
-        restart_record_arguments(
+        record_arguments(
             &arguments.name,
             &paths.session,
             &predecessor,
@@ -120,7 +120,7 @@ pub(in crate::cli) fn run_restart(
     return write_stdout(response, format!("Restarted session {}\n", arguments.name));
 }
 
-pub(super) fn restart_record_arguments(
+pub(super) fn record_arguments(
     alias: &str,
     session: &Path,
     predecessor: &Path,
@@ -214,7 +214,7 @@ pub(super) fn restarted_record_options(
 
         environment
     } else {
-        restart_environment(&manifest, &term, predecessor)?
+        environment(&manifest, &term, predecessor)?
     };
 
     let mut options = RecordOptions {
@@ -279,7 +279,7 @@ pub(super) fn restarted_record_options(
     return Ok(options);
 }
 
-pub(super) fn restart_environment(
+pub(super) fn environment(
     manifest: &SessionManifest,
     term: &str,
     predecessor: &Path,
@@ -330,7 +330,7 @@ fn matches_predecessor_environment(
     return Ok(effective.policy().effective_digest == manifest.child_environment.effective_digest);
 }
 
-pub(super) fn restart_overrides_from_args(arguments: &RestartArgs) -> Result<RestartOverrides> {
+pub(super) fn overrides_from_args(arguments: &RestartArgs) -> Result<RestartOverrides> {
     if arguments
         .command
         .first()
@@ -435,7 +435,7 @@ pub(super) fn apply_restart_overrides(
             ));
         }
 
-        let interval = overrides
+        let interval_ms = overrides
             .durability_max_interval_ms
             .or(options.durability_policy.maximum_interval_ms)
             .unwrap_or(50);
@@ -444,7 +444,7 @@ pub(super) fn apply_restart_overrides(
             .durability_max_uncommitted_bytes
             .or(options.durability_policy.maximum_uncommitted_bytes)
             .unwrap_or(65_536);
-        options.durability_policy = mode.policy(interval, bytes);
+        options.durability_policy = mode.policy(interval_ms, bytes);
     } else if overrides.durability_max_interval_ms.is_some()
         || overrides.durability_max_uncommitted_bytes.is_some()
     {

@@ -4,7 +4,7 @@ use std::time::Duration;
 use termtrace_model::{
     protocol::control::{InputSequenceAtom, ScreenPredicate},
     terminal::screen::{
-        FrameDetail, ScreenFrame, ScreenFrameData, ScreenProjectionRequest, ScreenSpanRow,
+        FrameDetail, ScreenFrame, ScreenFrameContent, ScreenProjectionRequest, ScreenSpanRow,
         ScreenTextRow,
     },
     terminal::state::{KeyChord, KeyModifiers, NamedKey},
@@ -104,11 +104,11 @@ fn fixture_frame() -> ScreenFrame {
 #[test]
 fn test_frame_text_extraction_from_variants() {
     let mut frame = fixture_frame();
-    frame.data = ScreenFrameData::None;
+    frame.data = ScreenFrameContent::None;
 
     assert_eq!(frame_text(&frame), "");
 
-    frame.data = ScreenFrameData::Text {
+    frame.data = ScreenFrameContent::Text {
         rows: vec![
             ScreenTextRow {
                 row: 0,
@@ -127,7 +127,7 @@ fn test_frame_text_extraction_from_variants() {
 
     assert_eq!(frame_text(&frame), "First row\nSecond row");
 
-    frame.data = ScreenFrameData::Spans {
+    frame.data = ScreenFrameContent::Spans {
         rows: vec![ScreenSpanRow {
             row: 0,
             soft_wrapped: false,

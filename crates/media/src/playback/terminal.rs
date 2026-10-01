@@ -13,7 +13,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use termtrace_model::{error::ThreadPanic, value::geometry::TerminalGeometryReport};
+use termtrace_model::{error::ThreadPanicError, value::geometry::TerminalGeometryReport};
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -114,7 +114,7 @@ impl TerminalInputDrain {
             return handle.join().map_err(|payload| {
                 return Error::ThreadPanicked {
                     operation: "join playback input drain",
-                    source: ThreadPanic::from_payload(payload),
+                    source: ThreadPanicError::from_payload(payload),
                 };
             })?;
         });
@@ -145,10 +145,10 @@ pub(super) fn resize_and_query(cols: u16, rows: u16) -> Result<TerminalGeometryR
 
     thread::sleep(Duration::from_millis(150));
 
-    return query_terminal();
+    return query();
 }
 
-pub(super) fn query_terminal() -> Result<TerminalGeometryReport> {
+pub(super) fn query() -> Result<TerminalGeometryReport> {
     let mut output = io::stdout().lock();
     output
         .write_all(b"\x1b[14t\x1b[16t\x1b[18t")

@@ -1,7 +1,7 @@
 use super::finish_with_cleanup;
 use crate::{
     analysis::profile::{
-        builtin_terminal_colors, escape_config_string, resolve_profile, restore_profile,
+        builtin_terminal_colors, escape_config_string, resolve, restore,
         terminal_colors_from_config, ResolvedGhosttyProfile,
     },
     Error, Result,
@@ -55,7 +55,7 @@ pub fn resolve_ghostty_profile(
         (query_default_config()?, None)
     };
 
-    return resolve_profile(&base, source_config, overrides, query_isolated_config);
+    return resolve(&base, source_config, overrides, query_isolated_config);
 }
 
 /// Restore and validate a profile persisted in a canonical recording.
@@ -68,7 +68,7 @@ pub fn restore_ghostty_profile(
     replay_config: Vec<u8>,
     provenance: GhosttyVisualProvenance,
 ) -> Result<ResolvedGhosttyProfile> {
-    return restore_profile(replay_config, provenance, query_isolated_config);
+    return restore(replay_config, provenance, query_isolated_config);
 }
 
 /// Read ambient Ghostty colors, falling back only when the ambient probe fails.
@@ -96,7 +96,7 @@ pub fn resolved_terminal_colors() -> Result<TerminalColors> {
     return terminal_colors_from_config(&output.stdout);
 }
 
-fn materialize_profile(root: &Path, config: &[u8]) -> Result<PathBuf> {
+fn materialize(root: &Path, config: &[u8]) -> Result<PathBuf> {
     create_private_directory(root)?;
     let ghostty = root.join("ghostty");
     create_private_directory(&ghostty)?;
@@ -116,7 +116,7 @@ fn query_default_config() -> Result<Vec<u8>> {
 
 fn query_isolated_config(config: &[u8]) -> Result<Vec<u8>> {
     let root = temp_dir().join(format!("termtrace-ghostty-profile-{}", Uuid::now_v7()));
-    let result = materialize_profile(&root, config).and_then(|_| {
+    let result = materialize(&root, config).and_then(|_| {
         return Command::new("ghostty")
             .arg("+show-config")
             .env("XDG_CONFIG_HOME", &root)

@@ -3,7 +3,7 @@ use nix::poll::{PollFd, PollFlags};
 use std::{any::Any, sync::mpsc};
 use termtrace_evidence::event_log::EventLogWriter;
 use termtrace_model::{
-    error::ThreadPanic,
+    error::ThreadPanicError,
     protocol::{
         control::{ControlResponse, ControlResult, CONTROL_PROTOCOL_VERSION},
         mutation::MutationEffect,
@@ -96,7 +96,7 @@ pub(in crate::recording) fn thread_panicked(
 ) -> Error {
     return Error::ThreadPanicked {
         operation,
-        source: ThreadPanic::from_payload(payload),
+        source: ThreadPanicError::from_payload(payload),
     };
 }
 

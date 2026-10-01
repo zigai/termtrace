@@ -63,7 +63,7 @@ fn file_index_matches_memory_and_excludes_later_appends() {
 
         create_private_directory(&stream).expect("stream directory");
 
-        write_index(&memory, &log, range, false, StateSelection::All).expect("memory index");
+        write(&memory, &log, range, false, StateSelection::All).expect("memory index");
         write_source_index(
             &stream,
             &IndexSource::File(&event_path, &summary),

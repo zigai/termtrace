@@ -1,7 +1,7 @@
 //! Lazy session-bound locators over pure rich-frame queries.
 
 use super::query::{
-    query_frame, LocatorSpec, QueryDescription, QueryError, QueryResult, ScreenMatch, StyleFilter,
+    evaluate, LocatorSpec, QueryDescription, QueryError, QueryResult, ScreenMatch, StyleFilter,
 };
 use crate::{client::Session, screen::StableCaptureOptions};
 use regex::Regex;
@@ -100,7 +100,7 @@ impl<'session> Locator<'session> {
             })
             .map_err(LocatorError::Capture)?;
 
-        return query_frame(Arc::new(frame), self.spec.clone()).map_err(LocatorError::Query);
+        return evaluate(Arc::new(frame), self.spec.clone()).map_err(LocatorError::Query);
     }
 
     /// Evaluate all matches after exactly one capture.
@@ -255,7 +255,7 @@ impl<'session> Locator<'session> {
                 });
             }
 
-            let result = query_frame(frame, self.spec.clone()).map_err(LocatorError::Query)?;
+            let result = evaluate(frame, self.spec.clone()).map_err(LocatorError::Query)?;
             let evaluated_at = Instant::now();
 
             if evaluated_at >= deadline {

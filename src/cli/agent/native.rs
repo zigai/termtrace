@@ -11,7 +11,7 @@ use termtrace_engine::Error as EngineError;
 use termtrace_media::native_capture::{native_capture_target, CaptureOutcome, NativeReplayWorker};
 use termtrace_model::{
     execution::session::CaptureTarget,
-    protocol::control::{ControlCommand, ControlData},
+    protocol::control::{ControlCommand, ControlPayload},
     terminal::{observation::StatePoint, replay::ReplayEndpoint},
 };
 use termtrace_sdk::{Error, Result};
@@ -48,7 +48,7 @@ impl Driver {
                     .into());
                 }
 
-                let ControlData::Status { boundaries, .. } = *data else {
+                let ControlPayload::Status { boundaries, .. } = *data else {
                     return Err(EngineError::InvalidReplay {
                         reason: "live status returned an unexpected response".to_owned(),
                         source: None,

@@ -29,7 +29,7 @@ use termtrace_engine::{
 use termtrace_model::{
     execution::session::SessionPhase,
     protocol::control::{
-        ActionPostconditionResult, ControlCommand, ControlData, ControlRequest,
+        ActionPostconditionResult, ControlCommand, ControlPayload, ControlRequest,
         InputSequenceAtomOutcome, ScreenPostconditionQuality, ScreenPredicate,
         StableCaptureQuality, StateHashComparison,
     },

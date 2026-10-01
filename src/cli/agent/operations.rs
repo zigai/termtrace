@@ -23,7 +23,7 @@ use termtrace_media::{
     save::{save, verify_saved_artifact},
 };
 use termtrace_model::protocol::driver::{
-    DriverData, DriverMethod, DriverRequest, DriverResponse, DriverResult,
+    DriverMethod, DriverPayload, DriverRequest, DriverResponse, DriverResult,
     DriverScreenshotRenderer, DRIVER_MAX_REQUEST_BYTES, DRIVER_MAX_RESPONSE_BYTES,
     DRIVER_PROTOCOL_VERSION,
 };
@@ -49,9 +49,9 @@ use uuid::Uuid;
 
 impl Driver {
     pub(super) fn execute(&mut self, request: &DriverRequest) -> DriverResponse {
-        let result = (|| -> StdResult<DriverData, Box<DriverResult>> {
+        let result = (|| -> StdResult<DriverPayload, Box<DriverResult>> {
             return match &request.method {
-                DriverMethod::Hello => Ok(DriverData::Hello {
+                DriverMethod::Hello => Ok(DriverPayload::Hello {
                     driver_protocol_version: DRIVER_PROTOCOL_VERSION,
                     control_protocol_version: CONTROL_PROTOCOL_VERSION,
                     event_log_version: EVENT_LOG_VERSION,
@@ -114,7 +114,7 @@ impl Driver {
 
                     session
                         .control(&control)
-                        .map(|data| return DriverData::Control { data })
+                        .map(|data| return DriverPayload::Control { data })
                         .map_err(|error| return session_failure(error, session))
                 }
                 DriverMethod::WaitOutput {
@@ -129,14 +129,14 @@ impl Driver {
                         data.as_bytes(),
                         Duration::from_millis(*timeout_ms),
                     )
-                    .map(|outcome| return DriverData::OutputWait { outcome })
+                    .map(|outcome| return DriverPayload::OutputWait { outcome })
                     .map_err(|error| return session_failure(error, session))
                 }
                 DriverMethod::Completion { handle } => {
                     let session = self.session(handle)?;
 
                     read_completion(session.path())
-                        .map(|completion| return DriverData::Completion { completion })
+                        .map(|completion| return DriverPayload::Completion { completion })
                         .map_err(|error| return session_failure(error, session))
                 }
                 DriverMethod::Complete { handle, timeout_ms } => {
@@ -144,12 +144,12 @@ impl Driver {
 
                     session
                         .complete(Duration::from_millis(*timeout_ms))
-                        .map(|completion| return DriverData::Completion { completion })
+                        .map(|completion| return DriverPayload::Completion { completion })
                         .map_err(|error| return session_failure(error, session))
                 }
                 DriverMethod::DiscardCompleted { handle } => {
                     let session = self.session_mut(handle)?;
-                    if !session.launched() {
+                    if !session.is_launched() {
                         return Err(driver_failure(
                             "evidence_not_driver_owned",
                             "only evidence launched by this driver can be discarded",
@@ -164,7 +164,7 @@ impl Driver {
                     self.close_native(handle);
                     self.sessions.remove(handle);
 
-                    Ok(DriverData::Discarded {
+                    Ok(DriverPayload::Discarded {
                         evidence_removed: true,
                     })
                 }
@@ -178,7 +178,7 @@ impl Driver {
                     session
                         .observe(point.clone(), *include_hidden)
                         .map(|observation| {
-                            return DriverData::Observation {
+                            return DriverPayload::Observation {
                                 observation: Box::new(observation),
                             };
                         })
@@ -194,7 +194,7 @@ impl Driver {
 
                     session
                         .frame_at(point.clone(), *include_hidden, *projection)
-                        .map(|frame| return DriverData::ScreenFrame { frame })
+                        .map(|frame| return DriverPayload::ScreenFrame { frame })
                         .map_err(|error| return session_failure(error, session))
                 }
                 DriverMethod::Timeline {
@@ -216,7 +216,7 @@ impl Driver {
 
                     build_session_timeline_page(path, *all_states, *controls, None, *offset, *limit)
                         .map(|page| {
-                            return DriverData::Timeline {
+                            return DriverPayload::Timeline {
                                 entries: page.entries,
                                 next_offset: page.next_offset,
                             };
@@ -230,7 +230,7 @@ impl Driver {
 
                     diff_session_states_with_semantic_states(path, from.clone(), to.clone())
                         .map(|(difference, _, _)| {
-                            return DriverData::Diff {
+                            return DriverPayload::Diff {
                                 difference: Box::new(difference),
                             };
                         })
@@ -263,7 +263,7 @@ impl Driver {
                         *broad_change_percent,
                         &visual_evidence,
                     )
-                    .map(|report| return DriverData::Diagnose { report })
+                    .map(|report| return DriverPayload::Diagnose { report })
                     .map_err(|error| {
                         return driver_failure_from_error(error, Some(path.clone()));
                     })
@@ -302,7 +302,7 @@ impl Driver {
                         .last()
                         .map_or(*from_event_seq, |event| return event.seq.saturating_add(1));
 
-                    Ok(DriverData::Events {
+                    Ok(DriverPayload::Events {
                         events,
                         next_event_seq,
                     })
@@ -329,7 +329,7 @@ impl Driver {
                         .and_then(|outcome| {
                             verify_saved_artifact(&outcome.directory, &outcome.manifest)?;
 
-                            return Ok(DriverData::Artifact {
+                            return Ok(DriverPayload::Artifact {
                                 artifact_type: "semantic_screenshot".to_owned(),
                                 directory: outcome.directory.clone(),
                                 primary: outcome.directory.join("screen.png"),
@@ -355,7 +355,7 @@ impl Driver {
 
                             self.native_screenshot(*handle, &path, point, destination, *viewport)
                                 .map(|outcome| {
-                                    return DriverData::Artifact {
+                                    return DriverPayload::Artifact {
                                         artifact_type: "native_screenshot".to_owned(),
                                         directory: outcome.directory.clone(),
                                         primary: outcome.screenshot,
@@ -372,7 +372,7 @@ impl Driver {
                 DriverMethod::Verify { handle, level } => {
                     let path = &self.session(handle)?.path().to_path_buf();
 
-                    Ok(DriverData::Verification {
+                    Ok(DriverPayload::Verification {
                         report: Box::new(verify_session(path, *level)),
                     })
                 }
@@ -402,7 +402,7 @@ impl Driver {
                         ));
                     }
 
-                    Ok(DriverData::Bundle {
+                    Ok(DriverPayload::Bundle {
                         directory: destination.clone(),
                         manifest: verified,
                     })
@@ -419,7 +419,7 @@ impl Driver {
 
                     let _path = session.detach();
 
-                    Ok(DriverData::Detached)
+                    Ok(DriverPayload::Detached)
                 }
             };
         })();
@@ -450,7 +450,7 @@ impl Driver {
         });
     }
 
-    fn attach(&mut self, reference: &Path) -> StdResult<DriverData, Box<DriverResult>> {
+    fn attach(&mut self, reference: &Path) -> StdResult<DriverPayload, Box<DriverResult>> {
         let binary = env::current_exe().map_err(|error| {
             return driver_failure("attach_failed", error.to_string(), None);
         })?;
@@ -472,7 +472,7 @@ impl Driver {
         working_directory: Option<&Path>,
         environment: EnvironmentSpec,
         resource_limits: &ResourceLimits,
-    ) -> StdResult<DriverData, Box<DriverResult>> {
+    ) -> StdResult<DriverPayload, Box<DriverResult>> {
         if command.is_empty() || cols == 0 || rows == 0 {
             return Err(driver_failure(
                 "invalid_launch",
@@ -503,9 +503,9 @@ impl Driver {
         return Ok(self.insert(session));
     }
 
-    fn insert(&mut self, session: Session) -> DriverData {
+    fn insert(&mut self, session: Session) -> DriverPayload {
         let handle = Uuid::now_v7();
-        let data = DriverData::Attached {
+        let data = DriverPayload::Attached {
             handle,
             session_id: session.session_id(),
             completed: is_completed(session.path()),

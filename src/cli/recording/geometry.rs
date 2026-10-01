@@ -8,7 +8,7 @@ pub(in crate::cli) fn run_geometry_probe(arguments: GeometryProbeArgs) -> Result
     cfmakeraw(&mut raw);
     tcsetattr(&stdin, SetArg::TCSANOW, &raw).into_diagnostic()?;
 
-    let report = query_terminal_geometry();
+    let report = query_terminal();
     let restored = tcsetattr(&stdin, SetArg::TCSANOW, &original).into_diagnostic();
     let report = match (report, restored) {
         (Ok(report), Ok(())) => report,
@@ -34,7 +34,7 @@ pub(in crate::cli) fn run_geometry_probe(arguments: GeometryProbeArgs) -> Result
     return Ok(ExitCode::SUCCESS);
 }
 
-pub(super) fn query_terminal_geometry() -> Result<TerminalGeometryReport> {
+pub(super) fn query_terminal() -> Result<TerminalGeometryReport> {
     let mut output = io::stdout().lock();
     output
         .write_all(b"\x1b[14t\x1b[16t\x1b[18t")
@@ -48,7 +48,7 @@ pub(super) fn query_terminal_geometry() -> Result<TerminalGeometryReport> {
     let mut buffer = [0_u8; 128];
 
     loop {
-        if let Some(report) = parse_terminal_geometry(&bytes)? {
+        if let Some(report) = parse_terminal(&bytes)? {
             return Ok(report);
         }
 
@@ -87,7 +87,7 @@ pub(super) fn query_terminal_geometry() -> Result<TerminalGeometryReport> {
     }
 }
 
-pub(super) fn parse_terminal_geometry(bytes: &[u8]) -> Result<Option<TerminalGeometryReport>> {
+pub(super) fn parse_terminal(bytes: &[u8]) -> Result<Option<TerminalGeometryReport>> {
     let mut text_size = None;
     let mut cell_size = None;
     let mut grid_size = None;
@@ -140,7 +140,7 @@ pub(super) fn parse_terminal_geometry(bytes: &[u8]) -> Result<Option<TerminalGeo
     }));
 }
 
-pub(super) fn resolve_record_geometry(
+pub(super) fn resolve_record(
     arguments: &RecordingArgs,
     ghostty_profile: Option<&ResolvedGhosttyProfile>,
 ) -> Result<(SessionGeometry, GeometryProvenance)> {

@@ -1,7 +1,7 @@
 use super::{
     action, actor_boundaries, compile_action_postcondition, compile_screen_predicate,
     control_error_code, control_error_response, control_rejected, deliver_response, mpsc,
-    mutation_failure_effect, presented_state_hash, screen_frame_error_response, terminal_error,
+    mutation_failure_effect, presented_state_hash, screen_frame_error, terminal_error,
     valid_blake3_hash, validate_screen_region, AdmittedAction, ControlCommand, ControlErrorDetails,
     ControlRequest, ControlResponse, ControlResult, Duration, Error, InputSequenceExecution,
     Instant, MutationEffect, PendingInputSequence, Result, ScreenWaiter, SessionActor,
@@ -114,7 +114,7 @@ impl SessionActor<'_> {
                 self.live.presented.cols,
                 self.live.presented.rows,
             ) {
-                let response = screen_frame_error_response(
+                let response = screen_frame_error(
                     request.request_id,
                     &error,
                     presented_state_hash(&self.live)?,
@@ -182,7 +182,7 @@ impl SessionActor<'_> {
                 self.live.presented.cols,
                 self.live.presented.rows,
             ) {
-                let response = screen_frame_error_response(
+                let response = screen_frame_error(
                     request.request_id,
                     &error,
                     presented_state_hash(&self.live)?,
@@ -317,7 +317,7 @@ impl SessionActor<'_> {
                     }
                     Err(error) => {
                         let response = match &error {
-                            Error::ScreenFrame(error) => screen_frame_error_response(
+                            Error::ScreenFrame(error) => screen_frame_error(
                                 request.request_id,
                                 error,
                                 current_state_hash,
@@ -407,7 +407,7 @@ impl SessionActor<'_> {
                 request_id: request.request_id,
                 result: ControlResult::Ok { data: data.clone() },
             },
-            (Err(Error::ScreenFrame(error)), _) => screen_frame_error_response(
+            (Err(Error::ScreenFrame(error)), _) => screen_frame_error(
                 request.request_id,
                 error,
                 current_state_hash,

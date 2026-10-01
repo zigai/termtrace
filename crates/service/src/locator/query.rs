@@ -4,7 +4,7 @@ use regex::Regex;
 use std::{error::Error as StdError, fmt, ops::RangeInclusive, sync::Arc};
 use termtrace_model::{
     terminal::screen::{
-        ScreenAppearance, ScreenFrame, ScreenFrameData, ScreenRegion, MAX_SCREEN_FRAME_CELLS,
+        ScreenAppearance, ScreenFrame, ScreenFrameContent, ScreenRegion, MAX_SCREEN_FRAME_CELLS,
         MAX_SCREEN_FRAME_JSON_BYTES,
     },
     terminal::state::{ColorSpec, Rgb, WideKind},
@@ -707,11 +707,11 @@ pub trait ScreenFrameQuery {
 
 impl ScreenFrameQuery for ScreenFrame {
     fn query(&self, spec: LocatorSpec) -> Result<QueryResult, QueryError> {
-        return query_frame(Arc::new(self.clone()), spec);
+        return evaluate(Arc::new(self.clone()), spec);
     }
 }
 
-pub(super) fn query_frame(
+pub(super) fn evaluate(
     frame: Arc<ScreenFrame>,
     spec: LocatorSpec,
 ) -> Result<QueryResult, QueryError> {
@@ -1151,7 +1151,7 @@ fn make_match(frame: &Arc<ScreenFrame>, spec: &LocatorSpec, cells: &[&LogicalCel
 
 // Kept as one narrow adapter over the authoritative rich-frame representation.
 fn logical_rows(frame: &ScreenFrame) -> Result<Vec<LogicalRow>, QueryError> {
-    if matches!(&frame.data, ScreenFrameData::Text { .. }) {
+    if matches!(&frame.data, ScreenFrameContent::Text { .. }) {
         return Err(QueryError::InsufficientFrameDetail {
             reason: "text detail has no authoritative cell-to-column or appearance map".to_owned(),
         });

@@ -99,7 +99,7 @@ fn build_payload(session: &Path, signer_key_id: &str) -> Result<EvidenceReceiptP
         .map_err(|source| return Error::ClockBeforeEpoch { source })?
         .as_nanos();
 
-    return receipt_payload(
+    return payload(
         manifest.session_id,
         &completion,
         &completion_bytes,
@@ -110,7 +110,7 @@ fn build_payload(session: &Path, signer_key_id: &str) -> Result<EvidenceReceiptP
     );
 }
 
-pub(crate) fn receipt_payload(
+pub(crate) fn payload(
     session_id: Uuid,
     completion: &SessionCompletion,
     completion_bytes: &[u8],

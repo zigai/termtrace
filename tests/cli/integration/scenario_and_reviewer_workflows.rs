@@ -235,11 +235,11 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
     assert!(failure.join("final-screen.txt").is_file());
     assert!(failure.join("final-screen.png").is_file());
 
-    let final_snapshot: ControlData = serde_json::from_slice(
+    let final_snapshot: ControlPayload = serde_json::from_slice(
         &fs_err::read(failure.join("final-screen.json")).expect("final screen snapshot"),
     )
     .expect("final screen snapshot JSON");
-    let ControlData::Snapshot {
+    let ControlPayload::Snapshot {
         viewport_text,
         cols,
         rows,

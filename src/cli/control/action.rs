@@ -1,5 +1,5 @@
 use super::args::SendArgs;
-use super::input::input_atom_for_cli;
+use super::input::parse_atom;
 use super::*;
 use std::mem::take;
 use termtrace_model::{
@@ -139,7 +139,7 @@ fn send_steps(arguments: &SendArgs) -> Result<Vec<SendStep>> {
                 steps.push(SendStep::Control(command, label));
             }
             None if atom == "-" => atoms.push(InputAtom::Bytes(stdin_bytes.clone())),
-            None => atoms.push(input_atom_for_cli(atom)?),
+            None => atoms.push(parse_atom(atom)?),
         }
     }
 
@@ -185,7 +185,7 @@ pub(in crate::cli) fn run_send(
         ));
     }
 
-    let postcondition = action_condition(&arguments);
+    let postcondition = condition(&arguments);
     let total_steps = steps.len();
 
     for (index, step) in steps.into_iter().enumerate() {
@@ -227,7 +227,7 @@ pub(in crate::cli) fn run_send(
                     } else {
                         ActionCondition::None
                     },
-                    projection: action_projection(&arguments),
+                    projection: projection(&arguments),
                     allow_incomplete: true,
                 };
                 let outcome = match session.act(action) {
@@ -258,14 +258,18 @@ pub(in crate::cli) fn run_send(
                     );
                 }
 
-                let output = action_applied_response(&outcome)?;
+                let output = applied_response(&outcome)?;
                 if arguments.json {
                     write_json_pretty(response, &output)?;
                 } else {
                     write_stdout(response, human_action_summary(&output))?;
                 }
 
-                return Ok(if outcome.matched() { ExitCode::SUCCESS } else { ExitCode::FAILURE });
+                return Ok(if outcome.is_matched() {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::FAILURE
+                });
             }
         }
     }
@@ -290,7 +294,7 @@ fn write_trailing_postcondition(
         } => match session.capture_stable(StableCaptureOptions {
             stable_for: *stable_for,
             timeout: *timeout,
-            projection: action_projection(arguments),
+            projection: projection(arguments),
             allow_incomplete: true,
         }) {
             Ok(capture) => (
@@ -303,7 +307,7 @@ fn write_trailing_postcondition(
         ActionCondition::Screen { predicate, timeout } => {
             match session.wait_screen(predicate.clone(), Duration::ZERO, *timeout) {
                 Ok(wait) => (
-                    wait.satisfied(),
+                    wait.is_satisfied(),
                     "screen",
                     stable_enum_label(&wait.quality)?,
                 ),
@@ -346,7 +350,7 @@ fn write_send_failure(
     request_id: uuid::Uuid,
     error: &SessionError,
 ) -> Result<ExitCode> {
-    let output = action_error_response(request_id, error, is_completed(session.path()));
+    let output = error_response(request_id, error, is_completed(session.path()));
 
     if arguments.json {
         write_json_pretty(response, &output)?;
@@ -357,7 +361,7 @@ fn write_send_failure(
     return Ok(ExitCode::FAILURE);
 }
 
-pub(super) fn action_condition(arguments: &SendArgs) -> ActionCondition {
+pub(super) fn condition(arguments: &SendArgs) -> ActionCondition {
     let timeout = arguments.timeout.unwrap_or(defaults::WAIT_TIMEOUT);
 
     if let Some(stable_for) = arguments.until_idle {
@@ -385,7 +389,7 @@ pub(super) fn action_condition(arguments: &SendArgs) -> ActionCondition {
     return ActionCondition::None;
 }
 
-pub(super) fn action_projection(arguments: &SendArgs) -> ScreenProjectionRequest {
+pub(super) fn projection(arguments: &SendArgs) -> ScreenProjectionRequest {
     if arguments.verbose {
         return ScreenProjectionRequest::default();
     }
@@ -445,9 +449,9 @@ pub(super) struct ActionAppliedOutput<'data> {
     pub(super) code: Option<&'static str>,
 }
 
-pub(super) fn action_applied_response(outcome: &ActOutcome) -> Result<serde_json::Value> {
+pub(super) fn applied_response(outcome: &ActOutcome) -> Result<serde_json::Value> {
     let input = &outcome.input;
-    let matched = outcome.matched();
+    let matched = outcome.is_matched();
     let (postcondition, ended) = match &outcome.postcondition {
         ActionPostconditionResult::None { matched, .. } => (
             ActionPostconditionSummary::None {
@@ -553,7 +557,7 @@ pub(super) struct ActionErrorOutput<'data> {
     pub(super) boundaries: Option<&'data ActorBoundaries>,
 }
 
-pub(super) fn action_error_response(
+pub(super) fn error_response(
     request_id: uuid::Uuid,
     error: &SessionError,
     ended: bool,
@@ -609,7 +613,7 @@ pub(super) fn action_error_response(
 
 #[cfg(test)]
 mod action_response_tests {
-    use super::{action_applied_response, action_error_response, action_projection};
+    use super::{applied_response, error_response, projection};
     use crate::cli::control::args::SendArgs;
     use std::{path::PathBuf, time::Duration};
     use termtrace_model::{
@@ -690,7 +694,7 @@ mod action_response_tests {
             postcondition,
             boundaries: boundaries(),
         };
-        let response = action_applied_response(&outcome).expect("action response");
+        let response = applied_response(&outcome).expect("action response");
         assert_eq!(response["ok"], false);
         assert_eq!(response["code"], "postcondition_failed");
         assert_eq!(response["request_id"], request_id.to_string());
@@ -741,7 +745,7 @@ mod action_response_tests {
             details: Some(Box::new(details)),
         });
 
-        let response = action_error_response(request_id, &error, false);
+        let response = error_response(request_id, &error, false);
         assert_eq!(response["code"], "input_sequence_incomplete");
         assert_eq!(response["request_id"], request_id.to_string());
         assert_eq!(response["input"]["effect"]["kind"], "unknown");
@@ -780,15 +784,12 @@ mod action_response_tests {
 
     #[test]
     fn action_projection_selects_lightweight_detail_by_default() {
-        assert_eq!(
-            action_projection(&send_args(false)).detail,
-            FrameDetail::None
-        );
+        assert_eq!(projection(&send_args(false)).detail, FrameDetail::None);
     }
 
     #[test]
     fn action_projection_preserves_full_rich_spans_when_verbose_requested() {
-        let projection = action_projection(&send_args(true));
+        let projection = projection(&send_args(true));
         assert_eq!(projection.detail, FrameDetail::Spans);
         assert!(projection.region.is_none());
     }

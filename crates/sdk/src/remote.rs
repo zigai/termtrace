@@ -7,7 +7,7 @@ use std::{
 };
 use termtrace_control::{ExchangeTiming, Result};
 use termtrace_model::protocol::control::{
-    ControlCommand, ControlData, ControlRequest, ControlResponse,
+    ControlCommand, ControlPayload, ControlRequest, ControlResponse,
 };
 
 /// Lightweight connection configuration for a canonical live session.
@@ -48,7 +48,7 @@ impl Client {
     ///
     /// Returns the control error when the session cannot be reached, the exchange fails or times
     /// out, or the actor rejects the command.
-    pub fn request(&self, command: ControlCommand) -> Result<ControlData> {
+    pub fn request(&self, command: ControlCommand) -> Result<ControlPayload> {
         return termtrace_control::request(&self.session, command);
     }
 
