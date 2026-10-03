@@ -17,8 +17,7 @@ generate:
 
 # Enforce the complete allowlist of direct internal Cargo dependencies
 architecture:
-  python3 scripts/check-architecture.py
-  python3 -m unittest discover -s scripts -p test_check_architecture.py
+  cargo test --locked --test architecture
 
 # Compile every Rust target and feature without running tests
 validate:
@@ -26,7 +25,7 @@ validate:
 
 # Run fast hermetic Rust tests for each change (requires bootstrap)
 test:
-  cargo nextest run --locked --workspace --lib --bins --test execution_lifecycle
+  cargo nextest run --locked --workspace --lib --bins --test execution_lifecycle --test architecture
   PYTHONPATH=benchmarks uv run --project benchmarks python3 -m unittest benchmarks/test_acceptance.py
 
 # Run CLI/tmux integration on each pull request (requires bootstrap, tmux, and Ghostty on PATH)
@@ -97,7 +96,7 @@ security:
   cargo audit --file Cargo.lock
   cargo audit --file fuzz/Cargo.lock
 # Run required local checks for each change (requires bootstrap and shfmt)
-check: architecture lint validate test
+check: lint validate test
   cargo statement-spacing check
   shfmt -i 4 -ci -d benchmarks examples fixtures scripts tests install.sh
 

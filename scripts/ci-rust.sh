@@ -12,8 +12,6 @@ done
 bash tests/install.sh
 
 python3 -m py_compile examples/apps/terminal_showcase.py
-python3 scripts/check-architecture.py
-python3 -m unittest discover -s scripts -p test_check_architecture.py
 
 scripts/bootstrap.sh
 bash scripts/check-github-action-pins.sh
@@ -24,5 +22,5 @@ cargo statement-spacing check
 cargo fmt --manifest-path tests/consumers/rust/Cargo.toml -- --check
 cargo test --locked -p termtrace-sdk --no-default-features
 cargo clippy --locked -p termtrace-sdk --no-default-features --all-targets -- -D warnings
-cargo test --locked --workspace --lib --bins --test execution_lifecycle
+cargo test --locked --workspace --lib --bins --test execution_lifecycle --test architecture
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
