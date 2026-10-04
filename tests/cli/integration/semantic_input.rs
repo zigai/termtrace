@@ -3,6 +3,7 @@
 use crate::support::*;
 use std::ffi::OsStr;
 use termtrace_model::protocol::control::{derive_input_operation_id, InputSequenceAtom};
+use termtrace_sdk::MutationGuard;
 use uuid::Uuid;
 
 #[test]
@@ -177,7 +178,6 @@ fn act_accepts_natural_modifier_aliases_and_single_character_text() {
 }
 
 #[test]
-#[ignore = "control focus removed in flat CLI"]
 fn focus_events_are_mode_gated_encoded_and_audited() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("focus-session");
@@ -199,15 +199,13 @@ fn focus_events_are_mode_gated_encoded_and_audited() {
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("focus mode ready");
 
-    for direction in ["in", "out"] {
-        let mut focus = Command::cargo_bin("termtrace").expect("binary should build");
-        focus
-            .args(["control", "focus"])
-            .arg(&session)
-            .arg(direction)
-            .arg("--strict")
-            .assert()
-            .success();
+    let terminal = ClientTerminal::new(binary, temporary.path().join("evidence-root"));
+    let live = terminal.attach(&session).expect("attach focus session");
+
+    for focused in [true, false] {
+        live.pointer()
+            .focus(focused, true, &MutationGuard::default())
+            .expect("report focus change");
     }
 
     let output = child.wait_with_output().expect("focus fixture completion");
@@ -370,8 +368,7 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
 }
 
 #[test]
-#[ignore = "control pointer scroll removed in flat CLI"]
-fn pointer_scroll_accepts_separated_and_equals_negative_values() {
+fn pointer_scroll_encodes_negative_wheel_ticks() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("pointer-scroll-session");
     let binary = env!("CARGO_BIN_EXE_termtrace");
@@ -400,21 +397,17 @@ fn pointer_scroll_accepts_separated_and_equals_negative_values() {
     wait_for_control(&session);
     wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("pointer mode ready");
 
-    let mut separated = Command::cargo_bin("termtrace").expect("binary should build");
-    separated
-        .args(["control", "pointer"])
-        .arg(&session)
-        .args(["scroll", "--cell", "2,3", "--lines", "-2", "--strict"])
-        .assert()
-        .success();
+    let terminal = ClientTerminal::new(binary, temporary.path().join("evidence-root"));
+    let live = terminal
+        .attach(&session)
+        .expect("attach pointer scroll session");
 
-    let mut equals = Command::cargo_bin("termtrace").expect("binary should build");
-    equals
-        .args(["control", "pointer"])
-        .arg(&session)
-        .args(["scroll", "--cell", "4,5", "--lines=-3", "--strict"])
-        .assert()
-        .success();
+    live.pointer()
+        .scroll(2, 3, -2, true, &MutationGuard::default())
+        .expect("scroll two ticks up");
+    live.pointer()
+        .scroll(4, 5, -3, true, &MutationGuard::default())
+        .expect("scroll three ticks up");
 
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
     stop.arg("stop")
