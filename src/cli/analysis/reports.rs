@@ -157,10 +157,6 @@ fn run_all_timeline(
         range,
         |entry| {
             if total >= arguments.page.offset {
-                #[expect(
-                    clippy::redundant_else,
-                    reason = "JSON lines and text output are exclusive; the `if` branch continues after its `?`, and the flagged `return` belongs to the `map_err` closure"
-                )]
                 if arguments.jsonl {
                     write_json_line(response, &entry).map_err(|source| {
                         return EngineError::Filesystem {

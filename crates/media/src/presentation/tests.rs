@@ -420,7 +420,9 @@ fn semantic_change_filters_retain_state_provenance_and_hold() {
 
     let frames = rendered
         .stdout
-        .chunks_exact(80 * 40 * 3)
+        .as_chunks::<{ 80 * 40 * 3 }>()
+        .0
+        .iter()
         .collect::<Vec<_>>();
     assert_eq!(frames.len(), 6);
 

@@ -307,10 +307,6 @@ fn rust_test_helper_timeout_retains_evidence_and_reaps_session() {
         let mut files = BTreeMap::new();
 
         while let Some(path) = pending.pop() {
-            #[expect(
-                clippy::redundant_else,
-                reason = "directories are expanded and files are read, never both; the `if` branch does not diverge, and the flagged `return` belongs to the `map` closure"
-            )]
             if path.is_dir() {
                 pending.extend(
                     fs::read_dir(path)

@@ -50,7 +50,7 @@ struct ConnectionPermit<'counter> {
 impl<'counter> ConnectionPermit<'counter> {
     fn acquire(active: &'counter AtomicUsize, capacity: usize) -> Option<Self> {
         return active
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
                 return (count < capacity).then_some(count + 1);
             })
             .ok()

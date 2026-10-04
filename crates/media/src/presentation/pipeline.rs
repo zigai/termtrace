@@ -85,10 +85,6 @@ pub(super) fn export_with_capability_check(
     let _staging_cleanup = DirectoryCleanup(staging.clone());
     export_staged(plan, &staging)?;
     if destination.exists() || destination.symlink_metadata().is_ok() {
-        #[expect(
-            clippy::redundant_else,
-            reason = "an existing directory and file are removed differently; the `if` branch continues after its `?`, and the flagged `return` belongs to the `map_err` closure"
-        )]
         if destination.is_dir() {
             fs_err::remove_dir_all(destination).map_err(|source| {
                 return Error::Filesystem {

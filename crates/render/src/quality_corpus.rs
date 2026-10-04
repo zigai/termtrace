@@ -297,7 +297,9 @@ fn quality_corpus_is_deterministic_under_each_raster_profile() {
         assert_eq!(first_rgba, second_rgba);
         assert_eq!(first_rgba.len(), expected_rgba_len);
         assert!(first_rgba
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .all(|pixel| return pixel[3] == u8::MAX));
 
         match profile {

@@ -332,10 +332,6 @@ fn execute_step(
             let path = snapshot_path(failure_root, &snapshot.name)
                 .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
 
-            #[expect(
-                clippy::redundant_else,
-                reason = "snapshot update and comparison are exclusive; the `if` branch continues after its `?`, and the flagged `return` belongs to a `map_err` closure"
-            )]
             if update_snapshots {
                 if let Some(parent) = path.parent() {
                     fs_err::create_dir_all(parent).map_err(|error| {
