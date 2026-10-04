@@ -2,143 +2,7 @@ use super::*;
 use std::{ffi::OsString, fmt::Write as _, os::unix::ffi::OsStringExt as _};
 use termtrace_engine::registry::SessionRegistry;
 use termtrace_model::protocol::control::ClockSample;
-
-pub(super) fn compact_control_data(data: &ControlPayload) -> Result<serde_json::Value> {
-    let value = match data {
-        ControlPayload::Acknowledged { boundaries } => serde_json::json!({
-            "kind": "acknowledged",
-            "boundary": compact_boundaries(boundaries),
-        }),
-        ControlPayload::InputApplied {
-            operation_id,
-            input_kind,
-            bytes_written,
-            intent_event_seq,
-            result_event_seq,
-            boundaries,
-            ..
-        } => serde_json::json!({
-            "kind": "input_applied",
-            "operation_id": operation_id,
-            "input_kind": input_kind,
-            "bytes_written": bytes_written,
-            "intent_event_seq": intent_event_seq,
-            "result_event_seq": result_event_seq,
-            "boundary": compact_boundaries(boundaries),
-        }),
-        ControlPayload::InputSequenceApplied {
-            sequence_id,
-            atom_count,
-            bytes_written,
-            first_intent_event_seq,
-            last_result_event_seq,
-            pace_ns,
-            boundaries,
-            ..
-        } => serde_json::json!({
-            "kind": "input_sequence_applied",
-            "sequence_id": sequence_id,
-            "atom_count": atom_count,
-            "bytes_written": bytes_written,
-            "first_intent_event_seq": first_intent_event_seq,
-            "last_result_event_seq": last_result_event_seq,
-            "pace_ns": pace_ns,
-            "boundary": compact_boundaries(boundaries),
-        }),
-        ControlPayload::InputNoop {
-            input_kind,
-            reason,
-            terminal_modes_hash,
-            boundaries,
-        } => serde_json::json!({
-            "kind": "input_noop",
-            "input_kind": input_kind,
-            "reason": reason,
-            "terminal_modes_hash": terminal_modes_hash,
-            "boundary": compact_boundaries(boundaries),
-        }),
-        ControlPayload::Activated {
-            operation_id,
-            text,
-            start_column,
-            end_column,
-            row,
-            target_column,
-            presented_state_hash,
-            bytes_written,
-            intent_event_seq,
-            result_event_seq,
-            boundaries,
-            ..
-        } => serde_json::json!({
-            "kind": "activated",
-            "operation_id": operation_id,
-            "text": text,
-            "region": {
-                "start_column": start_column,
-                "end_column": end_column,
-                "row": row,
-                "target_column": target_column,
-            },
-            "presented_state_hash": presented_state_hash,
-            "bytes_written": bytes_written,
-            "intent_event_seq": intent_event_seq,
-            "result_event_seq": result_event_seq,
-            "boundary": compact_boundaries(boundaries),
-        }),
-        ControlPayload::Status {
-            pid,
-            boundaries,
-            clock_sample,
-        } => serde_json::json!({
-            "kind": "status",
-            "pid": pid,
-            "boundary": compact_boundaries(boundaries),
-            "clock_sample": clock_sample,
-        }),
-        ControlPayload::Snapshot {
-            viewport_text,
-            state_hash,
-            presented,
-            cols,
-            rows,
-            cursor_column,
-            cursor_row,
-            cursor_visible,
-            observed_monotonic_ns,
-            modes,
-            boundaries,
-            ..
-        } => serde_json::json!({
-            "kind": "snapshot",
-            "state_hash": state_hash,
-            "viewport_text": viewport_text,
-            "presented": presented,
-            "geometry": { "cols": cols, "rows": rows },
-            "cursor": { "column": cursor_column, "row": cursor_row, "visible": cursor_visible },
-            "observed_monotonic_ns": observed_monotonic_ns,
-            "modes": modes,
-            "boundary": compact_boundaries(boundaries),
-        }),
-        ControlPayload::ActionApplied { .. }
-        | ControlPayload::EventCursor { .. }
-        | ControlPayload::ScreenFrame { .. }
-        | ControlPayload::StableSnapshot { .. }
-        | ControlPayload::ScreenWait { .. } => serde_json::to_value(data).into_diagnostic()?,
-        ControlPayload::Marked {
-            label,
-            event_seq,
-            boundaries,
-        } => serde_json::json!({
-            "kind": "marked",
-            "label": label,
-            "event_seq": event_seq,
-            "boundary": compact_boundaries(boundaries),
-        }),
-    };
-
-    return Ok(value);
-}
+use termtrace_sdk::session::SessionStatus;
 
 pub(in crate::cli) fn run_status(
     response: &mut ResponseWriter,
@@ -289,12 +153,12 @@ pub(in crate::cli) fn run_status(
         );
     }
 
-    let data = request(resolved.path, ControlCommand::Status).into_diagnostic()?;
-    if let ControlPayload::Status {
+    let status = attach_session(&resolved.path)?.status().into_diagnostic()?;
+    if let SessionStatus::Live {
         pid,
         boundaries,
         clock_sample,
-    } = data
+    } = status
     {
         let status = LiveStatusResponse {
             kind: "status",
@@ -322,7 +186,7 @@ pub(in crate::cli) fn run_status(
     }
 
     return Err(miette::miette!(
-        "unexpected status response from recording actor"
+        "session {session_label} completed before its live status was read"
     ));
 }
 
@@ -352,7 +216,6 @@ pub(in crate::cli) fn run_stop(
             request_id: arguments.request_id,
             if_state: arguments.expected_presented_state_hash,
         },
-        policy: StopPolicy::Request,
     };
 
     let wait = arguments
@@ -380,9 +243,13 @@ pub(in crate::cli) fn run_stop(
     };
 
     let (payload, summary) = match outcome {
-        StopOutcome::Requested(acknowledgement) => {
-            (compact_control_data(&acknowledgement)?, "stop requested")
-        }
+        StopOutcome::Requested { boundaries } => (
+            serde_json::json!({
+                "kind": "acknowledged",
+                "boundary": compact_boundaries(&boundaries),
+            }),
+            "stop requested",
+        ),
         StopOutcome::Completed(completion) => (
             serde_json::json!({
                 "kind": "completed",

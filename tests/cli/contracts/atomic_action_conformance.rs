@@ -10,7 +10,10 @@ use termtrace_model::{
     terminal::observation::CaptureQuality,
     terminal::screen::{FrameDetail, ScreenFrame, ScreenFrameContent, ScreenFrameSource},
 };
-use termtrace_sdk::{MutationEffect, MutationGuard, Retry};
+use termtrace_sdk::{
+    session::{SendOutcome, SendRequest, SendStep},
+    MutationEffect, MutationGuard, Retry,
+};
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -165,6 +168,142 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
     session
         .stop(StopRequest::default(), Some(Duration::from_secs(5)))
         .expect("stop oversized action fixture");
+}
+
+fn marker_labels(session: &termtrace_sdk::Session) -> termtrace_sdk::Result<Vec<String>> {
+    let (events, _) = session.events().page(0, 4096, true)?;
+
+    return Ok(events
+        .into_iter()
+        .filter(|event| return event.event_type == "marker")
+        .filter_map(|event| {
+            return event.metadata?.get("label")?.as_str().map(str::to_owned);
+        })
+        .collect());
+}
+
+#[test]
+fn send_applies_mixed_steps_once_and_replays_them_on_retry() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let terminal = ClientTerminal::new(
+        env!("CARGO_BIN_EXE_termtrace"),
+        temporary.path().join("send-evidence"),
+    );
+
+    let mut session = terminal
+        .start(LaunchSpec::new([
+            OsString::from("/bin/sh"),
+            OsString::from("-c"),
+            OsString::from(
+                "trap 'exit 0' TERM; printf READY; count=0; while IFS= read -r line; do count=$((count + 1)); printf '\\r\\nCOUNT:%s:%s' \"$count\" \"$line\"; done",
+            ),
+        ]))
+        .expect("launch send fixture");
+
+    wait_for_output(session.path(), b"READY", Duration::from_secs(5)).expect("send fixture ready");
+    let initial = session
+        .frame(ScreenProjectionRequest::default())
+        .expect("initial send frame");
+
+    let request = SendRequest {
+        steps: vec![
+            SendStep::Command(ControlCommand::Mark {
+                label: "before".to_owned(),
+            }),
+            SendStep::Input(vec![
+                InputAtom::Text("first".to_owned()),
+                InputAtom::Key(ENTER),
+            ]),
+            SendStep::Command(ControlCommand::Mark {
+                label: "between".to_owned(),
+            }),
+            SendStep::Input(vec![
+                InputAtom::Text("second".to_owned()),
+                InputAtom::Key(ENTER),
+            ]),
+        ],
+        guard: MutationGuard {
+            request_id: Some(
+                Uuid::parse_str("019fddda-17c8-7000-87da-8785e71ab5e2").expect("send request UUID"),
+            ),
+            if_state: Some(initial.state_hash),
+        },
+        postcondition: ActionCondition::Screen {
+            predicate: ScreenPredicate::Contains {
+                text: "COUNT:2:second".to_owned(),
+            },
+            timeout: Duration::from_secs(5),
+        },
+        ..SendRequest::default()
+    };
+
+    let SendOutcome::Action(first) = session.send(request.clone()).expect("first send") else {
+        panic!("a send ending in input reports its action outcome");
+    };
+    assert!(first.is_matched());
+
+    let SendOutcome::Action(retry) = session.send(request).expect("retried send") else {
+        panic!("a retried send ending in input reports its action outcome");
+    };
+    assert_eq!(retry.request_id, first.request_id);
+    assert_eq!(retry.input, first.input);
+
+    let frame = session
+        .frame(ScreenProjectionRequest::default())
+        .expect("post-retry frame");
+    assert!(frame_contains(&frame, "COUNT:2:second"));
+    assert!(!frame_contains(&frame, "COUNT:3"));
+    assert_eq!(
+        marker_labels(&session).expect("read markers"),
+        ["before", "between"]
+    );
+
+    session
+        .stop(StopRequest::default(), Some(Duration::from_secs(5)))
+        .expect("stop send fixture");
+}
+
+#[test]
+fn send_reports_the_failed_step_after_applying_earlier_ones() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let terminal = ClientTerminal::new(
+        env!("CARGO_BIN_EXE_termtrace"),
+        temporary.path().join("send-failure-evidence"),
+    );
+
+    let mut session = terminal
+        .start(LaunchSpec::new([
+            OsString::from("/bin/sh"),
+            OsString::from("-c"),
+            OsString::from("trap 'exit 0' TERM; printf READY; while :; do sleep 1; done"),
+        ]))
+        .expect("launch send failure fixture");
+
+    wait_for_output(session.path(), b"READY", Duration::from_secs(5))
+        .expect("send failure fixture ready");
+
+    let failure = session
+        .send(SendRequest {
+            steps: vec![
+                SendStep::Command(ControlCommand::Mark {
+                    label: "applied".to_owned(),
+                }),
+                SendStep::Command(ControlCommand::Mark {
+                    label: "   ".to_owned(),
+                }),
+            ],
+            ..SendRequest::default()
+        })
+        .expect_err("a blank marker label is rejected");
+
+    assert_eq!(failure.step, 1);
+    assert_eq!(failure.error.code(), "invalid_marker");
+    assert_eq!(failure.error.effect(), MutationEffect::NotApplied);
+    assert_eq!(marker_labels(&session).expect("read markers"), ["applied"]);
+
+    session
+        .stop(StopRequest::default(), Some(Duration::from_secs(5)))
+        .expect("stop send failure fixture");
 }
 
 #[test]

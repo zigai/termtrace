@@ -5,16 +5,14 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
-use termtrace_control::{request_or_completed, Reached};
 use termtrace_engine::observation::{replay_endpoint_for_prefix, replay_endpoint_for_session};
 use termtrace_engine::Error as EngineError;
 use termtrace_media::native_capture::{native_capture_target, CaptureOutcome, NativeReplayWorker};
 use termtrace_model::{
     execution::session::CaptureTarget,
-    protocol::control::{ControlCommand, ControlPayload},
     terminal::{observation::StatePoint, replay::ReplayEndpoint},
 };
-use termtrace_sdk::{Error, Result};
+use termtrace_sdk::{session::SessionStatus, Error, Result};
 use uuid::Uuid;
 
 /// Keep at most one private terminal per language-driver process.
@@ -35,10 +33,19 @@ impl Driver {
         viewport: Option<CaptureTarget>,
     ) -> Result<CaptureOutcome> {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let boundary = match request_or_completed(session, ControlCommand::Status, Duration::ZERO)?
-        {
-            Reached::Completed(_) => None,
-            Reached::Live(data) => {
+        let status = self
+            .sessions
+            .get(&handle)
+            .ok_or_else(|| {
+                return Error::InvalidOperation {
+                    reason: "session handle is not attached".to_owned(),
+                    source: None,
+                };
+            })?
+            .status()?;
+        let boundary = match status {
+            SessionStatus::Completed(_) => None,
+            SessionStatus::Live { boundaries, .. } => {
                 if *point != StatePoint::LatestPresented {
                     return Err(EngineError::InvalidReplay {
                         reason: "live native capture requires the latest presented state"
@@ -47,14 +54,6 @@ impl Driver {
                     }
                     .into());
                 }
-
-                let ControlPayload::Status { boundaries, .. } = *data else {
-                    return Err(EngineError::InvalidReplay {
-                        reason: "live status returned an unexpected response".to_owned(),
-                        source: None,
-                    }
-                    .into());
-                };
 
                 Some(boundaries.durable)
             }

@@ -28,8 +28,9 @@ pub use termtrace_service::testing;
 #[cfg(feature = "local")]
 pub mod session {
     pub use termtrace_service::client::{
-        await_ready, LaunchSpec, LocatedSession, Readiness, Session, SessionTarget, StopOutcome,
-        StopPolicy, StopRequest, Terminal,
+        await_ready, CommandPostcondition, LaunchSpec, LocatedSession, Readiness, SendFailure,
+        SendOutcome, SendRequest, SendStep, Session, SessionStatus, SessionTarget, StopOutcome,
+        StopRequest, Terminal,
     };
 }
 
@@ -65,7 +66,7 @@ pub mod output {
 /// Filtered canonical event streams and cursors.
 #[cfg(feature = "local")]
 pub mod events {
-    pub use termtrace_service::client::Events;
+    pub use termtrace_service::client::{Events, FollowPosition};
     pub use termtrace_service::events::{EventCursor, EventPage, EventsService};
 }
 
@@ -132,8 +133,8 @@ pub mod advanced {
 pub use actions::{ActOutcome, ActRequest, ActionCondition, InputAtom, MutationGuard};
 #[cfg(feature = "local")]
 pub use client::{
-    Events, Evidence, LaunchSpec, Native, Output, Pointer, Semantic, Session, SessionTarget,
-    StopOutcome, StopPolicy, StopRequest, Terminal,
+    Events, Evidence, LaunchSpec, Native, Output, Pointer, Semantic, Session, SessionStatus,
+    SessionTarget, StopOutcome, StopRequest, Terminal,
 };
 #[cfg(feature = "local")]
 pub use locator::ScreenFrameQuery;

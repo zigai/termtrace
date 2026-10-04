@@ -4,7 +4,7 @@ use crate::{actions::ActOutcome, screen::StableScreenCapture};
 use std::{
     error::Error as StdError, io::Error as IoError, path::PathBuf, result::Result as StdResult,
 };
-use termtrace_control::Error as ControlError;
+pub use termtrace_control::Error as ControlError;
 use termtrace_model::{
     protocol::{
         control::{CommandError, ControlErrorDetails},

@@ -156,7 +156,9 @@ fn report_start_outcome(
                     false,
                     serde_json::json!({
                         "matched": false,
-                        "ended": is_completed(&entry.session_path()),
+                        "ended": attach_session(&entry.session_path())
+                            .and_then(|session| return session.completion().into_diagnostic())
+                            .is_ok_and(|completion| return completion.is_some()),
                         "error": error.to_string(),
                     }),
                 ),

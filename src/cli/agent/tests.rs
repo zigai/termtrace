@@ -7,7 +7,6 @@ use super::{
     serve,
 };
 use std::{collections::BTreeMap, io, io::Cursor, path::PathBuf};
-use termtrace_control::Error as ControlError;
 use termtrace_engine::Error;
 use termtrace_model::protocol::driver::{
     DriverMethod, DriverPayload, DriverRequest, DriverResponse, DriverResult,
@@ -18,6 +17,7 @@ use termtrace_model::{
     execution::session::ResourceLimits, protocol::control::CONTROL_PROTOCOL_VERSION,
     protocol::mutation::MutationEffect, terminal::replay::STATE_FORMAT_VERSION, value::ByteString,
 };
+use termtrace_service::ControlError;
 use uuid::Uuid;
 
 #[test]
@@ -320,6 +320,20 @@ fn retryable_transport_failures_are_not_cached_by_request_id() {
     };
 
     assert!(!driver_response_is_cacheable(&response));
+
+    let unreachable = DriverResponse {
+        version: DRIVER_PROTOCOL_VERSION,
+        request_id: Uuid::now_v7(),
+        result: *driver_failure_with_effect(
+            "control_unavailable",
+            "recorder is not reachable",
+            None,
+            MutationEffect::NotApplied,
+            None,
+        ),
+    };
+
+    assert!(!driver_response_is_cacheable(&unreachable));
 
     let actor_response = DriverResponse {
         version: DRIVER_PROTOCOL_VERSION,

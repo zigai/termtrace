@@ -1,6 +1,7 @@
 use super::super::{
-    ControlCommand, ControlPayload, ControlRequest, MouseButton, PointerOperation, Result, Session,
+    ControlCommand, ControlPayload, MouseButton, PointerOperation, Result, Session,
 };
+use crate::actions::MutationGuard;
 
 /// Mode-aware cell pointer and focus operations.
 pub struct Pointer<'session> {
@@ -19,10 +20,11 @@ impl Pointer<'_> {
         row: u16,
         button: MouseButton,
         strict: bool,
+        guard: &MutationGuard,
     ) -> Result<ControlPayload> {
         return self
             .session
-            .control(&ControlRequest::new(ControlCommand::Pointer {
+            .control(&guard.request(ControlCommand::Pointer {
                 column,
                 row,
                 operation: PointerOperation::Click { button },
@@ -41,10 +43,11 @@ impl Pointer<'_> {
         row: u16,
         lines: i16,
         strict: bool,
+        guard: &MutationGuard,
     ) -> Result<ControlPayload> {
         return self
             .session
-            .control(&ControlRequest::new(ControlCommand::Pointer {
+            .control(&guard.request(ControlCommand::Pointer {
                 column,
                 row,
                 operation: PointerOperation::Scroll { lines },
@@ -57,12 +60,14 @@ impl Pointer<'_> {
     /// # Errors
     /// Returns an error when the recorder cannot be reached or rejects the request; with `strict`,
     /// a request the application does not report is rejected instead of returning a semantic no-op.
-    pub fn focus(&self, focused: bool, strict: bool) -> Result<ControlPayload> {
+    pub fn focus(
+        &self,
+        focused: bool,
+        strict: bool,
+        guard: &MutationGuard,
+    ) -> Result<ControlPayload> {
         return self
             .session
-            .control(&ControlRequest::new(ControlCommand::Focus {
-                focused,
-                strict,
-            }));
+            .control(&guard.request(ControlCommand::Focus { focused, strict }));
     }
 }

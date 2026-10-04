@@ -8,7 +8,6 @@ use std::{
     result::Result as StdResult,
     time::Duration,
 };
-use termtrace_control::{is_completed, Error as ControlError};
 use termtrace_engine::{
     analysis::diagnostics::diagnose_session, diff::diff_session_states_with_semantic_states,
     inspection::wait_for_output, timeline::build_session_timeline_page,
@@ -43,7 +42,7 @@ use termtrace_model::{
 };
 use termtrace_sdk::{
     session::{LaunchSpec, Session, SessionTarget},
-    Error, Terminal,
+    Error, ErrorKind, Terminal,
 };
 use uuid::Uuid;
 
@@ -508,7 +507,9 @@ impl Driver {
         let data = DriverPayload::Attached {
             handle,
             session_id: session.session_id(),
-            completed: is_completed(session.path()),
+            completed: session
+                .completion()
+                .is_ok_and(|completion| return completion.is_some()),
             canonical_session: session.path().to_path_buf(),
         };
 
@@ -539,7 +540,7 @@ where
                 "required capability `{id}` is blocked ({code}): {detail}; fix: {remediation}; inspect with `termtrace doctor --require {id} --explain`"
             ),
         ),
-        Error::Control(control) => (control_code(control), error.to_string()),
+        Error::Control(_) | Error::Command(_) => (error.code(), error.to_string()),
         Error::ScreenFrame(ScreenFrameError::InvalidRegion { .. }) => {
             ("invalid_screen_region", error.to_string())
         }
@@ -559,35 +560,23 @@ where
     );
 }
 
-fn control_code(error: &ControlError) -> &str {
-    return match error {
-        ControlError::Unavailable { .. } => "control_unavailable",
-        ControlError::Timeout { .. } => "control_timeout",
-        ControlError::Transport { .. } => "control_transport",
-        ControlError::InvalidRequest { .. } => "invalid_control_request",
-        ControlError::InvalidProtocol { .. }
-        | ControlError::InvalidResponse { .. }
-        | ControlError::InvalidJson { .. } => "invalid_control_response",
-        ControlError::Rejected { code, .. } => code,
-        ControlError::Filesystem { .. } | ControlError::CompletionIdentity { .. } => {
-            "control_failed"
-        }
-    };
-}
-
+/// Whether a retry with the same request identity may replay this response: not when the
+/// effect is unknown, and not when the recorder could not be reached or understood.
 pub(super) fn driver_response_is_cacheable(response: &DriverResponse) -> bool {
-    return !matches!(
-        &response.result,
-        DriverResult::Error { code, .. }
-            if matches!(
-                code.as_str(),
-                "control_unavailable"
-                    | "control_timeout"
-                    | "control_transport"
-                    | "invalid_control_response"
-                    | "control_failed"
-            )
-    );
+    let DriverResult::Error { code, effect, .. } = &response.result else {
+        return true;
+    };
+
+    let transport_failure = [
+        ErrorKind::ControlUnavailable,
+        ErrorKind::ControlTimeout,
+        ErrorKind::ControlTransport,
+        ErrorKind::InvalidControlProtocol,
+    ]
+    .iter()
+    .any(|kind| return kind.as_str() == code);
+
+    return *effect != MutationEffect::Unknown && !transport_failure;
 }
 
 /// A failure the driver detected itself, before anything was applied.

@@ -6,7 +6,8 @@ use termtrace_model::{
     execution::event::InputKind,
     protocol::control::{
         derive_input_operation_id, ActionInputResult, ActionPostcondition,
-        ActionPostconditionResult, InputSequenceAtom, ScreenPredicate,
+        ActionPostconditionResult, ControlCommand, ControlRequest, InputSequenceAtom,
+        ScreenPredicate,
     },
     terminal::observation::ActorBoundaries,
     terminal::screen::{FrameDetail, ScreenFrame, ScreenProjectionRequest},
@@ -87,6 +88,23 @@ pub struct MutationGuard {
     pub request_id: Option<Uuid>,
     /// Presented-state hash that must still be current before mutation.
     pub if_state: Option<String>,
+}
+
+impl MutationGuard {
+    /// Wire request for `command` carrying this guard's identity and presented-state guard.
+    #[must_use]
+    pub fn request(&self, command: ControlCommand) -> ControlRequest {
+        let mut request = ControlRequest::new(command);
+        if let Some(request_id) = self.request_id {
+            request.request_id = request_id;
+        }
+
+        request
+            .expected_presented_state_hash
+            .clone_from(&self.if_state);
+
+        return request;
+    }
 }
 
 /// One actor-ordered input action and the condition that must hold afterward.

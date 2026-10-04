@@ -98,7 +98,7 @@ fn live_control_drives_and_audits_a_detached_session() {
 
     assert!(matches!(
         send_request(&session, &collision),
-        Err(termtrace_control::Error::Rejected { code, .. })
+        Err(termtrace_service::ControlError::Rejected { code, .. })
             if code == "request_id_collision"
     ));
 

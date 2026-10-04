@@ -31,7 +31,7 @@ use termtrace_sdk::artifacts::ArtifactService;
 use termtrace_sdk::client::{Session, Terminal};
 use termtrace_sdk::defaults;
 use termtrace_sdk::events::{EventCursor, EventsService};
-use termtrace_sdk::input::ActRequest;
+use termtrace_sdk::input::{ActRequest, MutationGuard};
 use termtrace_sdk::integrity::IntegrityService;
 use termtrace_sdk::output::{OutputCursor, OutputService};
 use termtrace_sdk::registry::RegistryService;
@@ -505,7 +505,7 @@ impl JsSession {
             let session = terminal.attach(path).map_err(to_napi_err)?;
             session
                 .pointer()
-                .click(col_val, row_val, btn, is_strict)
+                .click(col_val, row_val, btn, is_strict, &MutationGuard::default())
                 .map_err(to_napi_err)?;
 
             return Ok(());
@@ -546,7 +546,13 @@ impl JsSession {
             let session = terminal.attach(path).map_err(to_napi_err)?;
             session
                 .pointer()
-                .scroll(col_val, row_val, line_count, is_strict)
+                .scroll(
+                    col_val,
+                    row_val,
+                    line_count,
+                    is_strict,
+                    &MutationGuard::default(),
+                )
                 .map_err(to_napi_err)?;
 
             return Ok(());
@@ -571,7 +577,7 @@ impl JsSession {
             let session = terminal.attach(path).map_err(to_napi_err)?;
             session
                 .pointer()
-                .focus(focused, is_strict)
+                .focus(focused, is_strict, &MutationGuard::default())
                 .map_err(to_napi_err)?;
 
             return Ok(());

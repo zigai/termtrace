@@ -6,20 +6,17 @@ use std::{
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     process::ExitCode,
-    time::Duration,
 };
-use termtrace_control::{request_or_completed, Reached};
 use termtrace_engine::{
     timeline::{resolve_session_prefix_source_selection, resolve_session_source_selection},
     Result as EngineResult,
 };
 use termtrace_model::{
-    protocol::control::{ControlCommand, ControlPayload},
     terminal::{observation::StatePoint, replay::SourceRange},
     value::ByteString,
 };
 pub(super) use termtrace_sdk::session::LocatedSession as ResolvedSessionRef;
-use termtrace_sdk::session::{Session, SessionTarget};
+use termtrace_sdk::session::{Session, SessionStatus, SessionTarget};
 
 /// Locate a session reference and observe its phase without requiring it to be healthy.
 pub(super) fn resolve_session(target: PathBuf) -> Result<ResolvedSessionRef> {
@@ -69,31 +66,25 @@ pub(super) fn resolve_cli_range(
         return Ok((range.start_monotonic_ns, range.end_monotonic_ns));
     }
 
-    let live_event_count =
-        match request_or_completed(session, ControlCommand::Status, Duration::ZERO) {
-            Ok(Reached::Completed(_)) => {
-                return selection_bounds(resolve_session_source_selection(
-                    session,
-                    range.start_monotonic_ns,
-                    range.end_monotonic_ns,
-                    range.from_marker.as_deref(),
-                    range.to_marker.as_deref(),
-                ));
-            }
-            Ok(Reached::Live(data)) => {
-                let ControlPayload::Status { boundaries, .. } = *data else {
-                    return Err(miette::miette!(
-                        "live status returned an unexpected response"
-                    ));
-                };
-
-                Some(boundaries.durable.next_event_seq)
-            }
-            Err(error) => {
-                tracing::debug!(%error, "marker selection has no responsive control boundary");
-                None
-            }
-        };
+    let status = attach_session(session).and_then(|attached| {
+        return attached.status().into_diagnostic();
+    });
+    let live_event_count = match status {
+        Ok(SessionStatus::Completed(_)) => {
+            return selection_bounds(resolve_session_source_selection(
+                session,
+                range.start_monotonic_ns,
+                range.end_monotonic_ns,
+                range.from_marker.as_deref(),
+                range.to_marker.as_deref(),
+            ));
+        }
+        Ok(SessionStatus::Live { boundaries, .. }) => Some(boundaries.durable.next_event_seq),
+        Err(error) => {
+            tracing::debug!(%error, "marker selection has no responsive control boundary");
+            None
+        }
+    };
 
     return selection_bounds(resolve_session_prefix_source_selection(
         session,

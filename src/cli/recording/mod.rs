@@ -35,7 +35,6 @@ use std::{
     result::Result as StdResult,
     time::{Duration, Instant},
 };
-use termtrace_control::is_completed;
 use termtrace_engine::{
     analysis::profile::{builtin_terminal_colors, terminal_colors},
     inspection::wait_for_completion,

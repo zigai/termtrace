@@ -7,7 +7,6 @@ use tempfile::TempDir;
 fn allowed_dependencies(package: &str) -> Option<&'static [&'static str]> {
     return match package {
         "termtrace" => Some(&[
-            "termtrace-control",
             "termtrace-engine",
             "termtrace-evidence",
             "termtrace-export",

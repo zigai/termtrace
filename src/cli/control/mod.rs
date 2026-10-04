@@ -21,7 +21,6 @@ use std::{
     process::ExitCode,
     time::Duration,
 };
-use termtrace_control::{is_completed, request};
 use termtrace_engine::{
     inspection::{wait_for_completion, wait_for_output},
     observation::observe_validated_prefix,
@@ -29,18 +28,17 @@ use termtrace_engine::{
 use termtrace_model::{
     execution::session::SessionPhase,
     protocol::control::{
-        ActionPostconditionResult, ControlCommand, ControlPayload, ControlRequest,
-        InputSequenceAtomOutcome, ScreenPostconditionQuality, ScreenPredicate,
-        StableCaptureQuality, StateHashComparison,
+        ActionPostconditionResult, ControlCommand, InputSequenceAtomOutcome,
+        ScreenPostconditionQuality, ScreenPredicate, StableCaptureQuality, StateHashComparison,
     },
     terminal::observation::{ActorBoundaries, CaptureQuality, StatePoint},
     terminal::screen::{ScreenFrame, ScreenProjectionRequest},
     terminal::state::KeyChord,
 };
 use termtrace_sdk::{
-    actions::hash_only_projection, defaults, session::Session, ActOutcome, ActRequest,
-    ActionCondition, Error as SessionError, InputAtom, MutationGuard, StableCaptureOptions,
-    StopOutcome, StopPolicy, StopRequest,
+    actions::hash_only_projection, defaults, session::Session, ActOutcome, ActionCondition,
+    Error as SessionError, InputAtom, MutationGuard, StableCaptureOptions, StopOutcome,
+    StopRequest,
 };
 
 mod action;

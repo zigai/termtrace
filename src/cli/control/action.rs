@@ -7,6 +7,7 @@ use termtrace_model::{
     protocol::mutation::{MutationEffect, Retry},
     terminal::state::MouseButton,
 };
+use termtrace_sdk::session::{CommandPostcondition, SendOutcome, SendRequest, SendStep};
 
 fn parse_click_str(s: &str) -> Result<(u16, u16)> {
     let (x_str, y_str) = s
@@ -55,14 +56,8 @@ fn parse_signal_str(s: &str) -> Result<ProcessSignal> {
     };
 }
 
-/// One ordered piece of a `send`: a single control command, or a run of input atoms applied
-/// as one action.
-enum SendStep {
-    Control(ControlCommand, &'static str),
-    Act(Vec<InputAtom>),
-}
-
-fn send_steps(arguments: &SendArgs) -> Result<Vec<SendStep>> {
+/// Ordered `send` steps, each with the label reported for it.
+fn send_steps(arguments: &SendArgs) -> Result<Vec<(SendStep, &'static str)>> {
     let stdin_requested = arguments.stdin || arguments.atoms.iter().any(|atom| return atom == "-");
 
     let mut stdin_bytes = Vec::new();
@@ -76,20 +71,20 @@ fn send_steps(arguments: &SendArgs) -> Result<Vec<SendStep>> {
     let mut atoms = Vec::new();
 
     if let Some(resize) = &arguments.resize {
-        steps.push(SendStep::Control(parse_resize_str(resize)?, "resize"));
+        steps.push((SendStep::Command(parse_resize_str(resize)?), "resize"));
     }
 
     if let Some(signal) = &arguments.signal {
         let signal = parse_signal_str(signal)?;
-        steps.push(SendStep::Control(
-            ControlCommand::Signal { signal },
+        steps.push((
+            SendStep::Command(ControlCommand::Signal { signal }),
             "signal",
         ));
     }
 
     if let Some(label) = &arguments.mark {
         let label = label.clone();
-        steps.push(SendStep::Control(ControlCommand::Mark { label }, "mark"));
+        steps.push((SendStep::Command(ControlCommand::Mark { label }), "mark"));
     }
 
     for atom in &arguments.atoms {
@@ -133,10 +128,10 @@ fn send_steps(arguments: &SendArgs) -> Result<Vec<SendStep>> {
         match control {
             Some((command, label)) => {
                 if !atoms.is_empty() {
-                    steps.push(SendStep::Act(take(&mut atoms)));
+                    steps.push((SendStep::Input(take(&mut atoms)), "action"));
                 }
 
-                steps.push(SendStep::Control(command, label));
+                steps.push((SendStep::Command(command), label));
             }
             None if atom == "-" => atoms.push(InputAtom::Bytes(stdin_bytes.clone())),
             None => atoms.push(parse_atom(atom)?),
@@ -156,7 +151,7 @@ fn send_steps(arguments: &SendArgs) -> Result<Vec<SendStep>> {
     }
 
     if !atoms.is_empty() {
-        steps.push(SendStep::Act(atoms));
+        steps.push((SendStep::Input(atoms), "action"));
     }
 
     return Ok(steps);
@@ -172,13 +167,7 @@ pub(in crate::cli) fn run_send(
     }
 
     let session = attach_session(&resolved.path)?;
-    let request_id = arguments.request_id.unwrap_or_else(uuid::Uuid::now_v7);
-    let guard = MutationGuard {
-        request_id: Some(request_id),
-        if_state: arguments.if_state.clone(),
-    };
-
-    let steps = send_steps(&arguments)?;
+    let (steps, labels): (Vec<_>, Vec<_>) = send_steps(&arguments)?.into_iter().unzip();
     if steps.is_empty() {
         return Err(miette::miette!(
             "send requires at least one input atom or flag"
@@ -186,134 +175,101 @@ pub(in crate::cli) fn run_send(
     }
 
     let postcondition = condition(&arguments);
-    let total_steps = steps.len();
+    let request = SendRequest {
+        steps,
+        guard: MutationGuard {
+            request_id: arguments.request_id,
+            if_state: arguments.if_state.clone(),
+        },
+        intent: arguments.intent.clone(),
+        pace: arguments.pace,
+        verbose_atom_outcomes: arguments.verbose,
+        postcondition: postcondition.clone(),
+        projection: projection(&arguments),
+    };
 
-    for (index, step) in steps.into_iter().enumerate() {
-        let is_last = index + 1 == total_steps;
-        match step {
-            SendStep::Control(command, label) => {
-                let mut request = ControlRequest::new(command);
-                request.request_id = request_id;
-                request
-                    .expected_presented_state_hash
-                    .clone_from(&arguments.if_state);
+    let outcome = match session.send(request) {
+        Ok(outcome) => outcome,
+        Err(failure) => {
+            let label = labels.get(failure.step).copied().unwrap_or("send");
 
-                if let Err(error) = session.control(&request) {
-                    return write_send_failure(
-                        response, &arguments, &session, label, request_id, &error,
-                    );
-                }
-
-                if is_last {
-                    return write_trailing_postcondition(
-                        response,
-                        &session,
-                        &arguments,
-                        label,
-                        request_id,
-                        &postcondition,
-                    );
-                }
-            }
-            SendStep::Act(atoms) => {
-                let action = ActRequest {
-                    atoms,
-                    guard: guard.clone(),
-                    intent: arguments.intent.clone(),
-                    pace: arguments.pace,
-                    verbose_atom_outcomes: arguments.verbose,
-                    postcondition: if is_last {
-                        postcondition.clone()
-                    } else {
-                        ActionCondition::None
-                    },
-                    projection: projection(&arguments),
-                    allow_incomplete: true,
-                };
-                let outcome = match session.act(action) {
-                    Ok(outcome) => outcome,
-                    Err(error) => {
-                        return write_send_failure(
-                            response, &arguments, &session, "action", request_id, &error,
-                        );
-                    }
-                };
-
-                if !is_last {
-                    continue;
-                }
-
-                let direct_stream = arguments.atoms.is_empty()
-                    && (arguments.file.is_some() || arguments.stdin || arguments.text.is_some())
-                    && postcondition == ActionCondition::None;
-
-                if direct_stream {
-                    return write_json_line(
-                        response,
-                        &serde_json::json!({
-                            "kind": "input_sent",
-                            "request_id": outcome.input.sequence_id,
-                            "bytes_written": outcome.input.bytes_written,
-                        }),
-                    );
-                }
-
-                let output = applied_response(&outcome)?;
-                if arguments.json {
-                    write_json_pretty(response, &output)?;
-                } else {
-                    write_stdout(response, human_action_summary(&output))?;
-                }
-
-                return Ok(if outcome.is_matched() {
-                    ExitCode::SUCCESS
-                } else {
-                    ExitCode::FAILURE
-                });
-            }
+            return write_send_failure(
+                response,
+                &arguments,
+                &session,
+                label,
+                failure.request_id,
+                &failure.error,
+            );
         }
+    };
+
+    let outcome = match outcome {
+        SendOutcome::Command {
+            request_id,
+            postcondition,
+            ..
+        } => {
+            let label = labels.last().copied().unwrap_or("send");
+
+            return write_trailing_postcondition(
+                response,
+                &arguments,
+                label,
+                request_id,
+                postcondition,
+            );
+        }
+        SendOutcome::Action(outcome) => outcome,
+    };
+
+    let direct_stream = arguments.atoms.is_empty()
+        && (arguments.file.is_some() || arguments.stdin || arguments.text.is_some())
+        && postcondition == ActionCondition::None;
+
+    if direct_stream {
+        return write_json_line(
+            response,
+            &serde_json::json!({
+                "kind": "input_sent",
+                "request_id": outcome.input.sequence_id,
+                "bytes_written": outcome.input.bytes_written,
+            }),
+        );
     }
 
-    return Ok(ExitCode::SUCCESS);
+    let output = applied_response(&outcome)?;
+    if arguments.json {
+        write_json_pretty(response, &output)?;
+    } else {
+        write_stdout(response, human_action_summary(&output))?;
+    }
+
+    return Ok(if outcome.is_matched() { ExitCode::SUCCESS } else { ExitCode::FAILURE });
 }
 
-/// Wait for the requested postcondition after a trailing control command.
+/// Report the postcondition checked after a trailing control command.
 fn write_trailing_postcondition(
     response: &mut ResponseWriter,
-    session: &Session,
     arguments: &SendArgs,
     label: &'static str,
     request_id: uuid::Uuid,
-    postcondition: &ActionCondition,
+    postcondition: Option<Box<CommandPostcondition>>,
 ) -> Result<ExitCode> {
-    let (matched, kind, outcome) = match postcondition {
-        ActionCondition::None => (true, "none", "matched".to_owned()),
-        ActionCondition::Idle {
-            stable_for,
-            timeout,
-        } => match session.capture_stable(StableCaptureOptions {
-            stable_for: *stable_for,
-            timeout: *timeout,
-            projection: projection(arguments),
-            allow_incomplete: true,
-        }) {
-            Ok(capture) => (
-                capture.quality.is_settled(),
-                "idle",
-                capture.quality.as_str().to_owned(),
-            ),
-            Err(_) => (false, "idle", "error".to_owned()),
-        },
-        ActionCondition::Screen { predicate, timeout } => {
-            match session.wait_screen(predicate.clone(), Duration::ZERO, *timeout) {
-                Ok(wait) => (
-                    wait.is_satisfied(),
-                    "screen",
-                    stable_enum_label(&wait.quality)?,
-                ),
-                Err(_) => (false, "screen", "error".to_owned()),
-            }
-        }
+    let (matched, kind, outcome) = match postcondition.map(|postcondition| return *postcondition) {
+        None => (true, "none", "matched".to_owned()),
+        Some(CommandPostcondition::Idle(Ok(capture))) => (
+            capture.quality.is_settled(),
+            "idle",
+            capture.quality.as_str().to_owned(),
+        ),
+        Some(CommandPostcondition::Idle(Err(_))) => (false, "idle", "error".to_owned()),
+        Some(CommandPostcondition::Screen(Ok(wait))) => (
+            wait.is_satisfied(),
+            "screen",
+            stable_enum_label(&wait.quality)?,
+        ),
+        Some(CommandPostcondition::Screen(Err(_))) => (false, "screen", "error".to_owned()),
     };
 
     if arguments.json {
@@ -350,7 +306,10 @@ fn write_send_failure(
     request_id: uuid::Uuid,
     error: &SessionError,
 ) -> Result<ExitCode> {
-    let output = error_response(request_id, error, is_completed(session.path()));
+    let ended = session
+        .completion()
+        .is_ok_and(|completion| return completion.is_some());
+    let output = error_response(request_id, error, ended);
 
     if arguments.json {
         write_json_pretty(response, &output)?;
@@ -738,7 +697,7 @@ mod action_response_tests {
         }))
         .expect("failure details");
 
-        let error = Error::Control(termtrace_control::Error::Rejected {
+        let error = Error::Control(termtrace_service::ControlError::Rejected {
             code: "input_sequence_incomplete".to_owned(),
             message: "input stopped".to_owned(),
             effect: MutationEffect::Unknown,

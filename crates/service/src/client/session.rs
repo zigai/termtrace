@@ -31,12 +31,12 @@ use termtrace_evidence::{
 use termtrace_model::{
     execution::session::SessionCompletion,
     protocol::control::{
-        CommandError, ControlCommand, ControlPayload, ControlRequest, ProcessSignal,
-        ScreenPredicate, ScreenWaitQuality, StableCaptureQuality,
+        ClockSample, CommandError, ControlCommand, ControlPayload, ControlRequest, ScreenPredicate,
+        ScreenWaitQuality, StableCaptureQuality,
     },
     terminal::{
         inspection::ScreenWaitOutcome,
-        observation::{CaptureQuality, Observation, StatePoint},
+        observation::{ActorBoundaries, CaptureQuality, Observation, StatePoint},
         screen::{ScreenFrame, ScreenFrameSource, ScreenProjectionRequest},
         state::SemanticState,
     },
@@ -66,31 +66,38 @@ struct Recorder {
     recorded_group: Option<ProcessGroup>,
 }
 
-/// How [`Session::stop`] asks the recording to end.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum StopPolicy {
-    /// Ask the actor to stop the child and finalize evidence.
-    #[default]
-    Request,
-    /// Deliver one signal to the recorded process group and let it exit on its own.
-    Signal(ProcessSignal),
-}
-
-/// One stop request.
+/// One stop request: the actor stops the child and finalizes evidence.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct StopRequest {
     /// Request identity and presented-state guard.
     pub guard: MutationGuard,
-    /// How to ask the recording to end.
-    pub policy: StopPolicy,
 }
 
 /// What [`Session::stop`] observed.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StopOutcome {
     /// The actor acknowledged the request; completion was not awaited.
-    Requested(Box<ControlPayload>),
+    Requested {
+        /// Canonical positions when the actor acknowledged the stop.
+        boundaries: ActorBoundaries,
+    },
     /// Validated completion evidence, published before or after the request.
+    Completed(Box<SessionCompletion>),
+}
+
+/// What [`Session::status`] observed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SessionStatus {
+    /// The live actor answered.
+    Live {
+        /// Child process identifier when available.
+        pid: Option<u32>,
+        /// Durable and observed canonical positions.
+        boundaries: ActorBoundaries,
+        /// Mapping between session-relative and system monotonic time.
+        clock_sample: ClockSample,
+    },
+    /// The session has completed.
     Completed(Box<SessionCompletion>),
 }
 
@@ -212,6 +219,56 @@ impl Session {
         request.command.validate()?;
 
         return Ok(send_request(&self.path, request)?);
+    }
+
+    /// Read the live actor's status, or the completion of a session that has ended.
+    ///
+    /// Does not wait for a session whose actor is unreachable to publish completion.
+    ///
+    /// # Errors
+    ///
+    /// Returns the transport failure, the actor's rejection, or a completion-evidence failure.
+    pub fn status(&self) -> Result<SessionStatus> {
+        return match self.reach_or_completed(ControlCommand::Status, Duration::ZERO)? {
+            Reached::Live(payload) => match *payload {
+                ControlPayload::Status {
+                    pid,
+                    boundaries,
+                    clock_sample,
+                } => Ok(SessionStatus::Live {
+                    pid,
+                    boundaries,
+                    clock_sample,
+                }),
+                _ => Err(client_error("actor returned the wrong status payload")),
+            },
+            Reached::Completed(completion) => Ok(SessionStatus::Completed(completion)),
+        };
+    }
+
+    /// Published, identity-checked completion; `None` while the session has not completed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when completion or manifest evidence is unreadable or names a
+    /// different session.
+    pub fn completion(&self) -> Result<Option<SessionCompletion>> {
+        return Ok(read_completed(&self.path)?);
+    }
+
+    /// Send `command` to the live actor, or report completion published within `grace` of the
+    /// actor becoming unreachable.
+    pub(in crate::client) fn reach_or_completed(
+        &self,
+        command: ControlCommand,
+        grace: Duration,
+    ) -> Result<Reached> {
+        let request = ControlRequest::new(command);
+        request.command.validate()?;
+
+        let timing = ExchangeTiming::Timeout(request.command.client_response_timeout());
+
+        return Ok(send_or_completed(&self.path, &request, timing, grace)?);
     }
 
     fn reach(&self, request: &ControlRequest) -> Result<Reached> {
@@ -563,20 +620,15 @@ impl Session {
     ///
     /// Returns the actor's rejection, a transport failure, or a completion failure.
     pub fn stop(&mut self, request: StopRequest, wait: Option<Duration>) -> Result<StopOutcome> {
-        let command = match request.policy {
-            StopPolicy::Request => ControlCommand::Stop,
-            StopPolicy::Signal(signal) => ControlCommand::Signal { signal },
-        };
-
-        let mut wire = ControlRequest::new(command);
-        if let Some(request_id) = request.guard.request_id {
-            wire.request_id = request_id;
-        }
-
-        wire.expected_presented_state_hash = request.guard.if_state;
+        let wire = request.guard.request(ControlCommand::Stop);
 
         return match (self.reach(&wire)?, wait) {
-            (Reached::Live(acknowledgement), None) => Ok(StopOutcome::Requested(acknowledgement)),
+            (Reached::Live(acknowledgement), None) => match *acknowledgement {
+                ControlPayload::Acknowledged { boundaries } => {
+                    Ok(StopOutcome::Requested { boundaries })
+                }
+                _ => Err(client_error("actor returned the wrong stop payload")),
+            },
             (Reached::Live(_) | Reached::Completed(_), wait) => Ok(StopOutcome::Completed(
                 Box::new(self.complete(wait.unwrap_or(Duration::ZERO))?),
             )),

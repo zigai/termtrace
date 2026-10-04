@@ -404,7 +404,6 @@ fn execute_step(
                             request_id: Some(request_id),
                             if_state: None,
                         },
-                        ..StopRequest::default()
                     },
                     Some(Duration::from_millis(scenario.launch.timeout_ms)),
                 )

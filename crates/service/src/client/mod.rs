@@ -22,7 +22,7 @@ use termtrace_model::{
     artifact::save::{SaveFormat, SaveOutcome},
     execution::event::EventProjection,
     execution::session::{VerificationLevel, VerificationReport},
-    protocol::control::{ControlCommand, ControlPayload, ControlRequest, PointerOperation},
+    protocol::control::{ControlCommand, ControlPayload, PointerOperation},
     terminal::analysis::{DiagnoseReport, DiagnosticCheck, ExplainReport},
     terminal::diff::SemanticDiff,
     terminal::inspection::WaitOutcome,
@@ -33,13 +33,15 @@ use termtrace_model::{
 
 mod capabilities;
 mod launch;
+mod send;
 mod session;
 mod target;
 mod terminal;
 
-pub use capabilities::{Events, Evidence, Native, Output, Pointer, Semantic};
+pub use capabilities::{Events, Evidence, FollowPosition, Native, Output, Pointer, Semantic};
 pub use launch::{await_ready, LaunchSpec, Readiness};
-pub use session::{Session, StopOutcome, StopPolicy, StopRequest};
+pub use send::{CommandPostcondition, SendFailure, SendOutcome, SendRequest, SendStep};
+pub use session::{Session, SessionStatus, StopOutcome, StopRequest};
 pub use target::{LocatedSession, SessionTarget};
 pub use terminal::Terminal;
 

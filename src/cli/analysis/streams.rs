@@ -5,7 +5,7 @@ use crate::cli::{
         projection_warning, response_output, write_follow_json_line, write_follow_stdout,
         write_json_line, write_projection_warning,
     },
-    session_helpers::resolve_session_path,
+    session_helpers::{attach_session, resolve_session_path},
 };
 use miette::{IntoDiagnostic as _, Result};
 use std::{
@@ -15,7 +15,6 @@ use std::{
     thread,
     time::Duration,
 };
-use termtrace_control::{request_or_completed, Reached};
 use termtrace_engine::timeline::resolve_session_source_selection;
 use termtrace_evidence::{
     artifact::write_secure, event_log::EventLogCursor, session::validate_completed_session,
@@ -25,10 +24,9 @@ use termtrace_model::{
         event::{event_type, Event, EventProjection, EventRecord},
         layout::SessionLayout,
     },
-    protocol::control::{ControlCommand, ControlPayload},
     protocol::output_projection::{OutputProjectionQuality, OutputProjectionReport},
 };
-use termtrace_sdk::defaults;
+use termtrace_sdk::events::FollowPosition;
 use termtrace_terminal::ControlStripper;
 
 pub(in crate::cli) fn run_output(
@@ -382,6 +380,7 @@ fn follow_records(
     event_types: &[String],
     mut emit: impl FnMut(&mut ResponseWriter, EventRecord) -> Result<bool>,
 ) -> Result<ExitCode> {
+    let attached = attach_session(session)?;
     let mut cursor =
         EventLogCursor::open(SessionLayout::new(session).event_log()).into_diagnostic()?;
 
@@ -390,25 +389,15 @@ fn follow_records(
     let mut line = Vec::new();
 
     loop {
-        let reached = request_or_completed(
-            session,
-            ControlCommand::EventCursor { next_event_seq },
-            defaults::COMPLETION_GRACE,
-        )
-        .into_diagnostic()?;
-        let (available, live_boundary, completed_hash) = if let Reached::Live(data) = reached {
-            let ControlPayload::EventCursor {
-                device,
-                inode,
-                header_hash,
-                start,
-                durable,
-            } = *data
-            else {
-                return Err(miette::miette!(
-                    "live cursor returned an unexpected response"
-                ));
-            };
+        let position = attached.events().follow(next_event_seq).into_diagnostic()?;
+        let (available, live_boundary, completed_hash) = if let FollowPosition::Live {
+            device,
+            inode,
+            header_hash,
+            start,
+            durable,
+        } = position
+        {
             cursor
                 .validate_live_source(device, inode, &header_hash)
                 .into_diagnostic()?;

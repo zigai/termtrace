@@ -14,6 +14,7 @@ use termtrace_sdk::artifacts::ArtifactService;
 use termtrace_sdk::client::Terminal;
 use termtrace_sdk::defaults;
 use termtrace_sdk::events::{EventCursor, EventsService};
+use termtrace_sdk::input::MutationGuard;
 use termtrace_sdk::output::{OutputCursor, OutputService};
 
 /// A logical Termtrace session reference.
@@ -93,7 +94,7 @@ impl PySession {
             let session = terminal.attach(path).map_err(to_py_err)?;
             session
                 .pointer()
-                .click(column, row, btn, is_strict)
+                .click(column, row, btn, is_strict, &MutationGuard::default())
                 .map_err(to_py_err)?;
 
             return Ok(());
@@ -124,7 +125,13 @@ impl PySession {
             let session = terminal.attach(path).map_err(to_py_err)?;
             session
                 .pointer()
-                .scroll(column, row, line_count, is_strict)
+                .scroll(
+                    column,
+                    row,
+                    line_count,
+                    is_strict,
+                    &MutationGuard::default(),
+                )
                 .map_err(to_py_err)?;
 
             return Ok(());
@@ -152,7 +159,7 @@ impl PySession {
             let session = terminal.attach(path).map_err(to_py_err)?;
             session
                 .pointer()
-                .focus(focused, is_strict)
+                .focus(focused, is_strict, &MutationGuard::default())
                 .map_err(to_py_err)?;
 
             return Ok(());

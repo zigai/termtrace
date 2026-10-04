@@ -6,7 +6,7 @@ use crate::cli::{
     },
     analysis::reviewer::run as run_reviewer,
     output::{row_text, write_json_line, write_json_pretty, write_stdout},
-    session_helpers::{resolve_cli_range, resolve_session_path},
+    session_helpers::{attach_session, resolve_cli_range, resolve_session_path},
 };
 use miette::{IntoDiagnostic as _, Result};
 use std::{
@@ -14,7 +14,6 @@ use std::{
     process::ExitCode,
     time::Duration,
 };
-use termtrace_control::read_completed;
 use termtrace_engine::{
     analysis::reviewer::{
         export_state as export_review_state, search as search_review, summarize as summarize_review,
@@ -104,7 +103,8 @@ pub(in crate::cli) fn run_index(
     arguments: IndexArgs,
 ) -> Result<ExitCode> {
     if !arguments.live_snapshot
-        && read_completed(&arguments.session)
+        && attach_session(&arguments.session)?
+            .completion()
             .into_diagnostic()?
             .is_none()
     {

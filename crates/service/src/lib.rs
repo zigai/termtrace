@@ -33,10 +33,12 @@ pub use analysis::AnalysisService;
 pub use artifacts::ArtifactService;
 pub use assertions::{assert_screen_text, SnapshotProfile};
 pub use client::{
-    await_ready, Events, Evidence, LaunchSpec, LocatedSession, Native, Output, Pointer, Readiness,
-    Semantic, Session, SessionTarget, StopOutcome, StopPolicy, StopRequest, Terminal,
+    await_ready, CommandPostcondition, Events, Evidence, FollowPosition, LaunchSpec,
+    LocatedSession, Native, Output, Pointer, Readiness, Semantic, SendFailure, SendOutcome,
+    SendRequest, SendStep, Session, SessionStatus, SessionTarget, StopOutcome, StopRequest,
+    Terminal,
 };
-pub use error::{Error, ErrorKind, Result};
+pub use error::{ControlError, Error, ErrorKind, Result};
 pub use events::{EventCursor, EventPage, EventsService};
 pub use integrity::IntegrityService;
 pub use locator::ScreenFrameQuery;

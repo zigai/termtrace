@@ -5,7 +5,7 @@ mod native;
 mod output;
 mod semantic;
 
-pub use events::Events;
+pub use events::{Events, FollowPosition};
 pub use evidence::Evidence;
 pub use input::Pointer;
 pub use native::Native;

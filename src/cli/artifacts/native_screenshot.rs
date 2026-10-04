@@ -1,5 +1,6 @@
 use crate::cli::{
     output::{write_json_line, ResponseWriter},
+    session_helpers::attach_session,
     tooling::require_cli_capability,
 };
 use miette::{IntoDiagnostic as _, Result};
@@ -14,16 +15,12 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
-use termtrace_control::{request_or_completed, Reached};
 use termtrace_media::native_capture::{native_capture_target, NativeReplayWorker};
 use termtrace_model::{
-    execution::session::CaptureTarget,
-    protocol::{
-        capability::NATIVE_SCREENSHOT_CAPABILITY,
-        control::{ControlCommand, ControlPayload},
-    },
+    execution::session::CaptureTarget, protocol::capability::NATIVE_SCREENSHOT_CAPABILITY,
     terminal::observation::StatePoint,
 };
+use termtrace_sdk::session::SessionStatus;
 
 struct CancellationSignals(Vec<signal_hook::SigId>);
 
@@ -44,22 +41,14 @@ pub(super) fn run(
 ) -> Result<ExitCode> {
     require_cli_capability(NATIVE_SCREENSHOT_CAPABILITY)?;
 
-    let live_boundary = match request_or_completed(session, ControlCommand::Status, Duration::ZERO)
-        .into_diagnostic()?
-    {
-        Reached::Completed(_) => None,
-        Reached::Live(data) => {
+    let live_boundary = match attach_session(session)?.status().into_diagnostic()? {
+        SessionStatus::Completed(_) => None,
+        SessionStatus::Live { boundaries, .. } => {
             if points != [StatePoint::LatestPresented] {
                 return Err(miette::miette!(
                     "live native capture currently requires the latest presented state"
                 ));
             }
-
-            let ControlPayload::Status { boundaries, .. } = *data else {
-                return Err(miette::miette!(
-                    "live status returned an unexpected response"
-                ));
-            };
 
             Some(boundaries.durable)
         }
