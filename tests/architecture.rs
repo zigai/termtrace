@@ -4,6 +4,8 @@ use cargo_metadata::{Metadata, MetadataCommand};
 use std::{collections::BTreeMap, error::Error, path::Path};
 use tempfile::TempDir;
 
+const IGNORE_REASON_PREFIXES: [&str; 2] = ["requires ", "manual "];
+
 fn allowed_dependencies(package: &str) -> Option<&'static [&'static str]> {
     return match package {
         "termtrace" => Some(&[
@@ -141,6 +143,69 @@ fn violations(metadata: &Metadata) -> Result<Vec<String>, Box<dyn Error>> {
     return Ok(violations);
 }
 
+fn ignored_test_violations(root: &Path) -> Result<Vec<String>, Box<dyn Error>> {
+    let mut pending = vec![
+        root.join("build.rs"),
+        root.join("crates"),
+        root.join("src"),
+        root.join("tests"),
+    ];
+
+    let mut violations = Vec::new();
+    while let Some(path) = pending.pop() {
+        if path.is_dir() {
+            if path
+                .file_name()
+                .is_some_and(|name| return name == "target" || name == "node_modules")
+            {
+                continue;
+            }
+
+            for entry in fs_err::read_dir(&path)? {
+                pending.push(entry?.path());
+            }
+
+            continue;
+        }
+
+        if path
+            .extension()
+            .is_none_or(|extension| return extension != "rs")
+        {
+            continue;
+        }
+
+        let source = fs_err::read_to_string(&path)?;
+
+        for (index, line) in source.lines().enumerate() {
+            let Some(attribute) = line.trim_start().strip_prefix("#[ignore") else {
+                continue;
+            };
+            let reason = attribute
+                .strip_prefix(" = \"")
+                .and_then(|rest| return rest.split_once('"'))
+                .map(|(reason, _)| return reason);
+
+            if !reason.is_some_and(|reason| {
+                return IGNORE_REASON_PREFIXES
+                    .iter()
+                    .any(|prefix| return reason.starts_with(prefix));
+            }) {
+                violations.push(format!(
+                    "{}:{}: {}",
+                    path.strip_prefix(root)?.display(),
+                    index + 1,
+                    line.trim()
+                ));
+            }
+        }
+    }
+
+    violations.sort();
+
+    return Ok(violations);
+}
+
 fn metadata(manifest: &Path) -> Result<Metadata, cargo_metadata::Error> {
     return MetadataCommand::new()
         .manifest_path(manifest)
@@ -185,6 +250,17 @@ fn workspace_dependencies_follow_the_architecture() {
     let workspace = metadata(&manifest).expect("workspace metadata");
     let violations = violations(&workspace).expect("workspace package paths");
     assert!(violations.is_empty(), "{}", violations.join("\n"));
+}
+
+#[test]
+fn ignored_tests_name_a_missing_host_tool_or_a_manual_run() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let violations = ignored_test_violations(root).expect("scan Rust sources");
+    assert!(
+        violations.is_empty(),
+        "an ignore reason must start with one of {IGNORE_REASON_PREFIXES:?}:\n{}",
+        violations.join("\n")
+    );
 }
 
 #[test]

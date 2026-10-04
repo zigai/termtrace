@@ -113,7 +113,7 @@ fn file_index_matches_memory_and_excludes_later_appends() {
 }
 
 #[test]
-#[ignore = "million-event bounded-memory storage/index stress"]
+#[ignore = "manual million-event bounded-memory storage/index stress"]
 fn streaming_index_exceeds_materializing_reader_event_limit() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let session = temporary.path().join("session");
