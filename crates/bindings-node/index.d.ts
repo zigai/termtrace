@@ -26,7 +26,13 @@ export declare class ActionBuilder {
   ifState(stateHash: string): void
   /** Append UTF-8 text to send to the terminal. */
   sendText(text: string): void
-  /** Append a key chord (e.g. 'Enter', 'ctrl+c', 'ctrl+shift+F5'). */
+  /**
+   * Append a key chord (e.g. 'Enter', 'ctrl+c', 'ctrl+shift+F5').
+   *
+   * # Errors
+   *
+   * Fails when `key` is not a valid key chord or names an unknown key.
+   */
   sendKey(key: string): void
   /**
    * Set delay pacing between consecutive action atoms in milliseconds; paced text is typed
@@ -41,7 +47,14 @@ export declare class ActionBuilder {
   untilScreen(pattern: string, timeoutMs?: number | undefined | null): void
   /** Wait until the screen is idle and unchanged after applying input. */
   untilIdle(stableForMs?: number | undefined | null, timeoutMs?: number | undefined | null): void
-  /** Execute the action sequence and return the terminating screen frame. */
+  /**
+   * Execute the action sequence and return the terminating screen frame.
+   *
+   * # Errors
+   *
+   * Fails when the session cannot be attached, the recorder rejects or cannot complete the
+   * queued actions, or the background worker panics.
+   */
   execute(): Promise<ResolvedState | null>
 }
 export type JsActionBuilder = ActionBuilder
@@ -54,39 +67,153 @@ export declare class Recording {
   get path(): string
   /** Check if the recording session is still active. */
   isActive(): boolean
-  /** Access screen inspection capabilities. */
+  /**
+   * Access screen inspection capabilities.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached.
+   */
   screen(): Screen
-  /** Create an action builder for input automation. */
+  /**
+   * Create an action builder for input automation.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached.
+   */
   actions(): ActionBuilder
-  /** Get a logical session reference. */
+  /**
+   * Get a logical session reference.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached.
+   */
   session(): Session
-  /** Click mouse button at a terminal cell. */
+  /**
+   * Click mouse button at a terminal cell.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached, and otherwise as
+   * `JsSession::pointer_click`.
+   */
   pointerClick(column: number, row: number, button?: string | undefined | null, strict?: boolean | undefined | null): Promise<void>
-  /** Scroll mouse wheel at a terminal cell. */
+  /**
+   * Scroll mouse wheel at a terminal cell.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached, and otherwise as
+   * `JsSession::pointer_scroll`.
+   */
   pointerScroll(column: number, row: number, lines?: number | undefined | null, strict?: boolean | undefined | null): Promise<void>
-  /** Report terminal focus state. */
+  /**
+   * Report terminal focus state.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached, and otherwise as
+   * `JsSession::pointer_focus`.
+   */
   pointerFocus(focused: boolean, strict?: boolean | undefined | null): Promise<void>
-  /** Atomically publish visual representations (PNG, SVG, HTML, TXT, JSON) of a state point. */
+  /**
+   * Atomically publish visual representations (PNG, SVG, HTML, TXT, JSON) of a state point.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached, and otherwise as
+   * `JsSession::save`.
+   */
   save(destination: string, formats?: Array<string> | undefined | null, stateHash?: string | undefined | null, includeHidden?: boolean | undefined | null): Promise<string>
-  /** Read raw child PTY output bytes using an optional byte offset cursor. */
+  /**
+   * Read raw child PTY output bytes using an optional byte offset cursor.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached, and otherwise as
+   * `JsSession::read_output`.
+   */
   readOutput(offset?: number | undefined | null, limit?: number | undefined | null): Promise<JsOutputPage>
-  /** Wait for exact child output bytes to appear in the canonical stream. */
+  /**
+   * Wait for exact child output bytes to appear in the canonical stream.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached, and otherwise as
+   * `JsSession::wait_for_output`.
+   */
   waitForOutput(pattern: string, timeoutMs?: number | undefined | null): Promise<boolean>
-  /** Read canonical event records as pretty JSON starting at an optional event sequence. */
+  /**
+   * Read canonical event records as pretty JSON starting at an optional event sequence.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached, and otherwise as
+   * `JsSession::read_events`.
+   */
   readEvents(cursor?: number | undefined | null, limit?: number | undefined | null): Promise<string>
-  /** Explain VT and semantic evidence around a target state point. */
+  /**
+   * Explain VT and semantic evidence around a target state point.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached, and otherwise as
+   * `JsSession::explain`.
+   */
   explain(targetHash?: string | undefined | null, context?: number | undefined | null): Promise<string>
-  /** Run conservative evidence-backed rendering diagnostics on the session. */
+  /**
+   * Run conservative evidence-backed rendering diagnostics on the session.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached, and otherwise as
+   * `JsSession::diagnose`.
+   */
   diagnose(broadChangePercent?: number | undefined | null): Promise<string>
-  /** Perform full triage analysis on the most recent canonical action. */
+  /**
+   * Perform full triage analysis on the most recent canonical action.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached, and otherwise as
+   * `JsSession::last_action`.
+   */
   lastAction(broadChangePercent?: number | undefined | null): Promise<string>
-  /** Stop the recording session and wait for validated completion evidence. */
+  /**
+   * Stop the recording session and wait for validated completion evidence.
+   *
+   * # Errors
+   *
+   * Fails when the recorder does not stop with validated completion within the timeout, leaving
+   * the recording attached, or the background worker panics.
+   */
   stop(timeoutMs?: number | undefined | null): Promise<void>
-  /** Forcefully terminate and reap the recorded process group and owned recorder. */
+  /**
+   * Forcefully terminate and reap the recorded process group and owned recorder.
+   *
+   * # Errors
+   *
+   * Fails when the process group or recorder cannot be terminated and reaped, leaving the
+   * recording attached.
+   */
   forceClose(): void
-  /** Explicit resource management disposal for `await using`. */
+  /**
+   * Explicit resource management disposal for `await using`.
+   *
+   * # Errors
+   *
+   * Fails as `JsRecording::stop` with the default timeout.
+   */
   asyncDispose(): Promise<void>
-  /** Detach the recording so it continues running in the background. */
+  /**
+   * Detach the recording so it continues running in the background.
+   *
+   * # Errors
+   *
+   * Fails when the recording has already been stopped or detached.
+   */
   detach(): void
 }
 export type JsRecording = Recording
@@ -106,13 +233,41 @@ export type JsResolvedState = ResolvedState
 
 /** Screen inspection capability attached to a live or completed session. */
 export declare class Screen {
-  /** Return the current presented screen frame. */
+  /**
+   * Return the current presented screen frame.
+   *
+   * # Errors
+   *
+   * Fails when the session cannot be attached, the frame cannot be captured, or the background
+   * worker panics.
+   */
   frame(): Promise<ScreenFrame>
-  /** Return the plain text of the latest presented frame. */
+  /**
+   * Return the plain text of the latest presented frame.
+   *
+   * # Errors
+   *
+   * Fails when the session cannot be attached, the frame cannot be captured, or the background
+   * worker panics.
+   */
   text(): Promise<string>
-  /** Wait until the presented screen contains the specified text pattern. */
+  /**
+   * Wait until the presented screen contains the specified text pattern.
+   *
+   * # Errors
+   *
+   * Fails when the session cannot be attached, the text is not presented before the timeout, or
+   * the background worker panics.
+   */
   waitForText(pattern: string, timeoutMs?: number | undefined | null): Promise<ResolvedState>
-  /** Wait until the presented screen remains unchanged for the default idle interval. */
+  /**
+   * Wait until the presented screen remains unchanged for the default idle interval.
+   *
+   * # Errors
+   *
+   * Fails when the session cannot be attached, the screen does not settle before the timeout, or
+   * the background worker panics.
+   */
   waitForIdle(timeoutMs?: number | undefined | null): Promise<ResolvedState>
 }
 export type JsScreen = Screen
@@ -138,33 +293,132 @@ export declare class Session {
   screen(): Screen
   /** Create an action builder for input automation. */
   actions(): ActionBuilder
-  /** Click mouse button at a terminal cell. */
+  /**
+   * Click mouse button at a terminal cell.
+   *
+   * # Errors
+   *
+   * Fails when `column` or `row` exceeds 65535, `button` is unknown, the session cannot be
+   * attached, the recorder rejects the click (with `strict`, when the application does not
+   * report mouse input), or the background worker panics.
+   */
   pointerClick(column: number, row: number, button?: string | undefined | null, strict?: boolean | undefined | null): Promise<void>
-  /** Scroll mouse wheel at a terminal cell. */
+  /**
+   * Scroll mouse wheel at a terminal cell.
+   *
+   * # Errors
+   *
+   * Fails when `column` or `row` exceeds 65535, the session cannot be attached, the recorder
+   * rejects the scroll (with `strict`, when the application does not report mouse input), or the
+   * background worker panics.
+   */
   pointerScroll(column: number, row: number, lines?: number | undefined | null, strict?: boolean | undefined | null): Promise<void>
-  /** Report terminal focus state. */
+  /**
+   * Report terminal focus state.
+   *
+   * # Errors
+   *
+   * Fails when the session cannot be attached, the recorder rejects the focus report (with
+   * `strict`, when the application does not report focus), or the background worker panics.
+   */
   pointerFocus(focused: boolean, strict?: boolean | undefined | null): Promise<void>
-  /** Atomically publish visual representations (PNG, SVG, HTML, TXT, JSON) of a state point. */
+  /**
+   * Atomically publish visual representations (PNG, SVG, HTML, TXT, JSON) of a state point.
+   *
+   * # Errors
+   *
+   * Fails when a format name is unknown, the state cannot be resolved or rendered, the
+   * destination cannot be published, or the background worker panics.
+   */
   save(destination: string, formats?: Array<string> | undefined | null, stateHash?: string | undefined | null, includeHidden?: boolean | undefined | null): Promise<string>
-  /** Export session terminal playback as an asciicast v2 file. */
+  /**
+   * Export session terminal playback as an asciicast v2 file.
+   *
+   * # Errors
+   *
+   * Fails when the event log cannot be read or the cast cannot be written, or the background
+   * worker panics.
+   */
   exportAsciicast(outputPath: string): Promise<void>
-  /** Create a compressed evidence bundle (.tar.zst) for archiving or forensics. */
+  /**
+   * Create a compressed evidence bundle (.tar.zst) for archiving or forensics.
+   *
+   * # Errors
+   *
+   * Fails when the bundle cannot be created or published, or the background worker panics.
+   */
   createBundle(outputPath: string): Promise<void>
-  /** Compute semantic difference between two presented states and return JSON. */
+  /**
+   * Compute semantic difference between two presented states and return JSON.
+   *
+   * # Errors
+   *
+   * Fails when either state hash cannot be resolved, the session's evidence cannot be validated
+   * or replayed, the report cannot be serialized, or the background worker panics.
+   */
   diff(fromHash: string, toHash: string): Promise<string>
-  /** Read raw child PTY output bytes using an optional byte offset cursor. */
+  /**
+   * Read raw child PTY output bytes using an optional byte offset cursor.
+   *
+   * # Errors
+   *
+   * Fails when `offset` is negative or beyond the JavaScript safe-integer range, the output page
+   * cannot be read, or the background worker panics.
+   */
   readOutput(offset?: number | undefined | null, limit?: number | undefined | null): Promise<JsOutputPage>
-  /** Wait for exact child output bytes to appear in the canonical stream. */
+  /**
+   * Wait for exact child output bytes to appear in the canonical stream.
+   *
+   * # Errors
+   *
+   * Fails when `pattern` is empty, the event log is invalid, the child exits or the session
+   * completes before the bytes appear, the timeout elapses, or the background worker panics.
+   */
   waitForOutput(pattern: string, timeoutMs?: number | undefined | null): Promise<boolean>
-  /** Read canonical event records as pretty JSON starting at an optional event sequence. */
+  /**
+   * Read canonical event records as pretty JSON starting at an optional event sequence.
+   *
+   * # Errors
+   *
+   * Fails when `cursor` is negative or beyond the JavaScript safe-integer range, the event page
+   * cannot be read or serialized, or the background worker panics.
+   */
   readEvents(cursor?: number | undefined | null, limit?: number | undefined | null): Promise<string>
-  /** Explain VT and semantic evidence around a target state point. */
+  /**
+   * Explain VT and semantic evidence around a target state point.
+   *
+   * # Errors
+   *
+   * Fails when the target state cannot be resolved, the session's evidence cannot be validated
+   * or replayed, the report cannot be serialized, or the background worker panics.
+   */
   explain(targetHash?: string | undefined | null, context?: number | undefined | null): Promise<string>
-  /** Run conservative evidence-backed rendering diagnostics on the session. */
+  /**
+   * Run conservative evidence-backed rendering diagnostics on the session.
+   *
+   * # Errors
+   *
+   * Fails when visual or canonical evidence fails validation or replay, the report cannot be
+   * serialized, or the background worker panics.
+   */
   diagnose(broadChangePercent?: number | undefined | null): Promise<string>
-  /** Perform full triage analysis on the most recent canonical action. */
+  /**
+   * Perform full triage analysis on the most recent canonical action.
+   *
+   * # Errors
+   *
+   * Fails when the most recent action cannot be analyzed from validated evidence, the report
+   * cannot be serialized, or the background worker panics.
+   */
   lastAction(broadChangePercent?: number | undefined | null): Promise<string>
-  /** Build a bounded page of timeline entries as pretty JSON. */
+  /**
+   * Build a bounded page of timeline entries as pretty JSON.
+   *
+   * # Errors
+   *
+   * Fails when the session's evidence cannot be read, validated, or replayed, the page cannot be
+   * serialized, or the background worker panics.
+   */
   timelinePage(offset?: number | undefined | null, limit?: number | undefined | null, includeHidden?: boolean | undefined | null, includeControls?: boolean | undefined | null): Promise<string>
 }
 export type JsSession = Session
@@ -173,31 +427,118 @@ export type JsSession = Session
 export declare class Termtrace {
   /** Create a new Termtrace instance with optional binary and evidence root paths. */
   constructor(binary?: string | undefined | null, evidenceRoot?: string | undefined | null)
-  /** Launch a new recorded command session. */
+  /**
+   * Launch a new recorded command session.
+   *
+   * # Errors
+   *
+   * Fails when `rows` or `cols` exceeds 65535, the command cannot be launched and recorded, or
+   * the background worker panics.
+   */
   record(command: Array<string>, rows?: number | undefined | null, cols?: number | undefined | null, env?: Record<string, string> | undefined | null, cwd?: string | undefined | null): Promise<Recording>
-  /** Attach to an existing session directory. */
+  /**
+   * Attach to an existing session directory.
+   *
+   * # Errors
+   *
+   * Fails when `session_path` is not an attachable session or the background worker panics.
+   */
   attach(sessionPath: string): Promise<Session>
-  /** Verify an evidence bundle (.tar.zst or directory) and return whether it passed integrity verification. */
+  /**
+   * Verify an evidence bundle (.tar.zst or directory) and return whether it passed integrity verification.
+   *
+   * # Errors
+   *
+   * Fails only when the background worker panics; failed verification returns `false`.
+   */
   verifyBundle(bundlePath: string, sourceSession?: string | undefined | null): Promise<boolean>
-  /** Verify a completed session's structure and evidence bindings offline. */
+  /**
+   * Verify a completed session's structure and evidence bindings offline.
+   *
+   * # Errors
+   *
+   * Fails only when the report cannot be serialized or the background worker panics;
+   * verification findings are part of the returned report.
+   */
   verifySession(sessionPath: string, level?: string | undefined | null): Promise<string>
-  /** Recover the longest integrity-checked event prefix from a damaged session. */
+  /**
+   * Recover the longest integrity-checked event prefix from a damaged session.
+   *
+   * # Errors
+   *
+   * Fails when no integrity-checked prefix can be recovered and published to `destination`, the
+   * report cannot be serialized, or the background worker panics.
+   */
   recoverSession(sessionPath: string, destination: string): Promise<string>
-  /** List registered sessions in the default user registry. */
+  /**
+   * List registered sessions in the default user registry.
+   *
+   * # Errors
+   *
+   * Fails when the default registry cannot be opened or read, the entries cannot be serialized,
+   * or the background worker panics.
+   */
   registryList(includeAll?: boolean | undefined | null): Promise<string>
-  /** Resolve a friendly session name to its registered session path. */
+  /**
+   * Resolve a friendly session name to its registered session path.
+   *
+   * # Errors
+   *
+   * Fails when the default registry cannot be opened or the background worker panics; an
+   * unresolvable name returns `null`.
+   */
   registryResolve(name: string): Promise<string | null>
-  /** Register a friendly name for an existing canonical session directory. */
+  /**
+   * Register a friendly name for an existing canonical session directory.
+   *
+   * # Errors
+   *
+   * Fails when the default registry cannot be opened, `name` is invalid or already registered,
+   * `session_path` is not a registrable session, or the background worker panics.
+   */
   registryRegister(name: string, sessionPath: string): Promise<string>
-  /** Remove a friendly name binding. */
+  /**
+   * Remove a friendly name binding.
+   *
+   * # Errors
+   *
+   * Fails when the default registry cannot be opened or the background worker panics; a failed
+   * removal returns `false`.
+   */
   registryRemove(name: string): Promise<boolean>
-  /** Plan or execute garbage collection over completed sessions. */
+  /**
+   * Plan or execute garbage collection over completed sessions.
+   *
+   * # Errors
+   *
+   * Fails when the default registry cannot be opened, garbage collection cannot be planned or
+   * applied, the report cannot be serialized, or the background worker panics.
+   */
   registryGc(olderThanDays?: number | undefined | null, keepLatest?: number | undefined | null, maxCompletedBytes?: number | undefined | null, apply?: boolean | undefined | null): Promise<string>
-  /** Bundle an aggregate tmux recording into an evidentiary streaming bundle. */
+  /**
+   * Bundle an aggregate tmux recording into an evidentiary streaming bundle.
+   *
+   * # Errors
+   *
+   * Fails when the aggregate tmux recording cannot be bundled or published, the report cannot be
+   * serialized, or the background worker panics.
+   */
   tmuxBundle(manifestPath: string, destination: string): Promise<string>
-  /** Verify an aggregate tmux streaming bundle against its manifest. */
+  /**
+   * Verify an aggregate tmux streaming bundle against its manifest.
+   *
+   * # Errors
+   *
+   * Fails only when the background worker panics; failed verification returns `false`.
+   */
   tmuxVerifyBundle(bundleDirectory: string, manifestPath: string): Promise<boolean>
-  /** Probe runtime system capabilities across engine, media, and evidence signers. */
+  /**
+   * Probe runtime system capabilities across engine, media, and evidence signers.
+   *
+   * # Errors
+   *
+   * Fails only when the report cannot be serialized or the background worker panics.
+   */
   probeCapabilities(): Promise<string>
 }
 export type JsTermtrace = Termtrace
