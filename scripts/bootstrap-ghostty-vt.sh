@@ -5,6 +5,7 @@ readonly zig_version=0.15.2
 readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ghostty="$root/vendor/ghostty"
 readonly tools="$root/.tools"
+readonly revision="$(<"$root/crates/terminal/ghostty-revision")"
 
 if [[ "$(uname -s)" != Linux ]]; then
     echo "libghostty-vt bootstrap currently supports Linux only" >&2
@@ -70,9 +71,29 @@ if [[ -n "${TERMTRACE_ZIG_EXTRA_ARGS:-}" ]]; then
     read -r -a extra_args <<<"${TERMTRACE_ZIG_EXTRA_ARGS}"
 fi
 
-"$zig" build -Demit-lib-vt=true "-Doptimize=${optimize_mode}" "${target_args[@]}" "${extra_args[@]}"
+readonly output="${TERMTRACE_GHOSTTY_PREFIX:-$ghostty/zig-out}"
 
-test -f zig-out/lib/libghostty-vt.a
-test -f zig-out/include/ghostty/vt.h
+"$zig" build -Demit-lib-vt=true "-Doptimize=${optimize_mode}" --prefix "$output" "${target_args[@]}" "${extra_args[@]}"
 
-printf 'libghostty-vt ready at %s\n' "$ghostty/zig-out"
+test -f "$output/lib/libghostty-vt.a"
+test -f "$output/include/ghostty/vt.h"
+
+printf 'libghostty-vt ready at %s\n' "$output"
+
+if [[ "$optimize_mode" != ReleaseFast || ${#target_args[@]} -gt 0 || ${#extra_args[@]} -gt 0 ]]; then
+    exit 0
+fi
+
+if [[ "$(git -C "$ghostty" rev-parse HEAD)" != "$revision" ]]; then
+    echo "Ghostty is not at the pinned revision $revision; skipping the shared libghostty-vt cache" >&2
+    exit 0
+fi
+
+readonly cache="${XDG_CACHE_HOME:-$HOME/.cache}/termtrace/libghostty-vt/$revision"
+mkdir -p "$(dirname "$cache")"
+staging="$(mktemp -d "$cache.XXXXXX")"
+cp -R "$output/lib" "$output/include" "$staging/"
+rm -rf "$cache"
+mv "$staging" "$cache"
+
+printf 'libghostty-vt shared at %s\n' "$cache"

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 readonly bindgen_version=0.72.1
-readonly ghostty_revision=55a3e33ab26a23d75b274b23c7f76d837db00578
 readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly ghostty_revision="$(<"$root/crates/terminal/ghostty-revision")"
 readonly ghostty="$root/vendor/ghostty"
 readonly header="$ghostty/include/ghostty/vt.h"
 readonly output="$root/crates/terminal/src/ghostty_vt/bindings.rs"

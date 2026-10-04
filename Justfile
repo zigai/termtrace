@@ -1,5 +1,3 @@
-export TERMTRACE_GHOSTTY_PREFIX := justfile_directory() + "/vendor/ghostty/zig-out"
-
 _:
   @just help
 
