@@ -7,7 +7,7 @@ use std::{
 use termtrace_control::Error as ControlError;
 use termtrace_model::{
     protocol::{
-        control::ControlErrorDetails,
+        control::{CommandError, ControlErrorDetails},
         mutation::{MutationEffect, Retry},
     },
     terminal::screen::ScreenFrameError,
@@ -63,6 +63,9 @@ pub enum Error {
     /// Live control transport, rejection, or phase observation failed.
     #[error(transparent)]
     Control(#[from] termtrace_control::Error),
+    /// A control command broke a request-shape rule before it was sent.
+    #[error(transparent)]
+    Command(#[from] CommandError),
     /// Canonical evidence access or verification failed.
     #[error(transparent)]
     Evidence(#[from] termtrace_evidence::Error),
@@ -153,6 +156,7 @@ impl Error {
                     _ => ErrorKind::ControlRejected,
                 },
             },
+            Self::Command(_) => ErrorKind::ControlRejected,
             Self::Evidence(_) => ErrorKind::Evidence,
             Self::Engine(_) => ErrorKind::Engine,
             Self::Export(_) => ErrorKind::Export,
@@ -174,6 +178,9 @@ impl Error {
         if let Self::Control(ControlError::Rejected { code, .. }) = self {
             return code;
         }
+        if let Self::Command(error) = self {
+            return error.code();
+        }
         return self.kind().as_str();
     }
 
@@ -193,7 +200,8 @@ impl Error {
         return match self {
             Self::Control(error) => error.effect(),
             Self::PostconditionIncomplete { .. } => MutationEffect::Applied,
-            Self::Evidence(_)
+            Self::Command(_)
+            | Self::Evidence(_)
             | Self::Engine(_)
             | Self::Export(_)
             | Self::Media(_)

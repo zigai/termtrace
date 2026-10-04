@@ -1,11 +1,11 @@
 use super::{
-    action, actor_boundaries, compile_action_postcondition, compile_screen_predicate,
-    control_error_code, control_error_response, control_rejected, deliver_response, mpsc,
-    mutation_failure_effect, presented_state_hash, screen_frame_error, terminal_error,
-    valid_blake3_hash, validate_screen_region, AdmittedAction, ControlCommand, ControlErrorDetails,
-    ControlRequest, ControlResponse, ControlResult, Duration, Error, InputSequenceExecution,
-    Instant, MutationEffect, PendingInputSequence, Result, ScreenWaiter, SessionActor,
-    CONTROL_PROTOCOL_VERSION, MAX_SCREEN_WAITERS,
+    action, actor_boundaries, admitted_postcondition, control_error_code, control_error_response,
+    control_rejected, deliver_response, is_lowercase_blake3_hex, mpsc, mutation_failure_effect,
+    presented_state_hash, screen_frame_error, terminal_error, validate_screen_region,
+    AdmittedAction, ControlCommand, ControlErrorDetails, ControlRequest, ControlResponse,
+    ControlResult, Duration, Error, InputSequenceExecution, Instant, MutationEffect,
+    PendingInputSequence, Result, ScreenWaiter, SessionActor, CONTROL_PROTOCOL_VERSION,
+    MAX_SCREEN_WAITERS,
 };
 
 impl SessionActor<'_> {
@@ -28,6 +28,22 @@ impl SessionActor<'_> {
 
             return Ok(());
         }
+
+        let validated = match request.command.validate() {
+            Ok(validated) => validated,
+            Err(error) => {
+                let response = control_error_response(
+                    request.request_id,
+                    error.code(),
+                    error.to_string(),
+                    MutationEffect::NotApplied,
+                );
+
+                deliver_response(&response_sender, response);
+
+                return Ok(());
+            }
+        };
 
         let command_hash = if read_only {
             None
@@ -77,38 +93,12 @@ impl SessionActor<'_> {
         }
 
         if let ControlCommand::WaitScreen {
-            predicate,
             stable_for_ns,
             timeout_ns,
             projection,
+            ..
         } = &request.command
         {
-            let predicate = compile_screen_predicate(predicate).and_then(|predicate| {
-                if *timeout_ns == 0
-                    || *timeout_ns > 3_600_000_000_000
-                    || *stable_for_ns > *timeout_ns
-                {
-                    return Err("durations do not satisfy stable <= timeout <= 1h".to_owned());
-                }
-                return Ok(predicate);
-            });
-
-            let predicate = match predicate {
-                Ok(predicate) => predicate,
-                Err(reason) => {
-                    let response = control_error_response(
-                        request.request_id,
-                        "invalid_screen_wait",
-                        &reason,
-                        MutationEffect::NotApplied,
-                    );
-
-                    deliver_response(&response_sender, response);
-
-                    return Ok(());
-                }
-            };
-
             if let Err(error) = validate_screen_region(
                 projection,
                 self.live.presented.cols,
@@ -143,7 +133,7 @@ impl SessionActor<'_> {
 
             self.screen_waiters.push(ScreenWaiter {
                 request_id: request.request_id,
-                predicate: Some(predicate),
+                predicate: validated.into_predicate(),
                 stable_for: Duration::from_nanos(*stable_for_ns),
                 deadline: Instant::now() + Duration::from_nanos(*timeout_ns),
                 matching_state: None,
@@ -160,23 +150,6 @@ impl SessionActor<'_> {
             projection,
         } = &request.command
         {
-            if *stable_for_ns == 0
-                || *timeout_ns == 0
-                || *timeout_ns > 3_600_000_000_000
-                || *stable_for_ns > *timeout_ns
-            {
-                let response = control_error_response(
-                    request.request_id,
-                    "invalid_stable_capture",
-                    "durations must satisfy stable <= timeout <= 1h and timeout must be nonzero",
-                    MutationEffect::NotApplied,
-                );
-
-                deliver_response(&response_sender, response);
-
-                return Ok(());
-            }
-
             if let Err(error) = validate_screen_region(
                 projection,
                 self.live.presented.cols,
@@ -239,9 +212,9 @@ impl SessionActor<'_> {
         let current_state_hash = presented_state_hash(&self.live)?;
         let guard = request.expected_presented_state_hash.as_deref();
         let stale = guard.is_some_and(|hash| {
-            return valid_blake3_hash(hash) && hash != current_state_hash;
+            return is_lowercase_blake3_hex(hash) && hash != current_state_hash;
         });
-        let invalid_guard = guard.is_some_and(|hash| return !valid_blake3_hash(hash));
+        let invalid_guard = guard.is_some_and(|hash| return !is_lowercase_blake3_hex(hash));
 
         if !invalid_guard && !stale {
             let sequence = match &request.command {
@@ -268,7 +241,8 @@ impl SessionActor<'_> {
             if let Some((atoms, pace_ns, include_atom_outcomes, action)) = sequence {
                 let admitted_action = action
                     .map(|(postcondition, projection)| {
-                        let postcondition = compile_action_postcondition(postcondition)?;
+                        let postcondition =
+                            admitted_postcondition(postcondition, validated.into_predicate())?;
 
                         validate_screen_region(
                             projection,
@@ -369,12 +343,12 @@ impl SessionActor<'_> {
                 ),
             })
         } else if read_only {
-            self.execute_control_command(request.request_id, &request.command)
+            self.execute_control_command(request.request_id, &validated)
         } else {
             self.mutation_history
                 .reserve_command(request.request_id, &request.command)
                 .and_then(|()| {
-                    return self.execute_control_command(request.request_id, &request.command);
+                    return self.execute_control_command(request.request_id, &validated);
                 })
         };
 

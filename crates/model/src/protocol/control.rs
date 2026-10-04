@@ -17,6 +17,13 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
 
+mod validation;
+
+pub use validation::{
+    is_lowercase_blake3_hex, CommandError, CompiledScreenPredicate, PredicateError,
+    ValidatedCommand, MAX_CONTROL_WAIT,
+};
+
 /// A system monotonic clock bracket around a session-relative clock sample.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

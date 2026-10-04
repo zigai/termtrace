@@ -1,10 +1,10 @@
 use super::{
-    action, actor_boundaries, compile_screen_predicate, control_rejected, encode_all,
-    evaluate_screen_predicate, presented_state_hash, project_screen_frame, semantic_viewport_text,
-    terminal_error, ActionPostcondition, ActionPostconditionResult, ActorBoundaries, ByteString,
-    CaptureQuality, CompiledScreenPredicate, ControlCommand, ControlPayload, Duration, Error,
-    EventLogWriter, Instant, LiveTerminal, Result, ScreenFrame, ScreenFrameSource,
-    ScreenPostconditionQuality, ScreenProjectionRequest, SessionActor, StableCaptureQuality, Uuid,
+    action, actor_boundaries, control_rejected, encode_all, presented_state_hash,
+    project_screen_frame, semantic_viewport_text, terminal_error, ActionPostcondition,
+    ActionPostconditionResult, ActorBoundaries, ByteString, CaptureQuality,
+    CompiledScreenPredicate, ControlCommand, ControlPayload, Duration, Error, EventLogWriter,
+    Instant, LiveTerminal, Result, ScreenFrame, ScreenFrameSource, ScreenPostconditionQuality,
+    ScreenProjectionRequest, SessionActor, StableCaptureQuality, Uuid,
 };
 use nix::time::{clock_gettime, ClockId};
 use termtrace_model::protocol::control::ClockSample;
@@ -50,51 +50,33 @@ pub(super) struct AdmittedAction {
     pub(super) projection: ScreenProjectionRequest,
 }
 
-pub(super) fn compile_action_postcondition(
+pub(super) fn admitted_postcondition(
     postcondition: &ActionPostcondition,
+    predicate: Option<CompiledScreenPredicate>,
 ) -> Result<AdmittedPostcondition> {
-    match postcondition {
-        ActionPostcondition::None => return Ok(AdmittedPostcondition::None),
-        ActionPostcondition::Idle {
-            stable_for_ns,
-            timeout_ns,
-        } if *stable_for_ns > 0
-            && *timeout_ns > 0
-            && *timeout_ns <= 3_600_000_000_000
-            && *stable_for_ns <= *timeout_ns =>
-        {
-            return Ok(AdmittedPostcondition::Idle {
-                stable_for_ns: *stable_for_ns,
-                timeout_ns: *timeout_ns,
-            });
-        }
-        ActionPostcondition::Screen {
-            predicate,
-            timeout_ns,
-        } => {
-            if *timeout_ns == 0 || *timeout_ns > 3_600_000_000_000 {
-                return Err(control_rejected(
-                    "invalid_action_postcondition",
-                    "action postcondition timeout must satisfy 0 < timeout <= 1h",
-                ));
-            }
-
-            let predicate = compile_screen_predicate(predicate).map_err(|reason| {
-                return control_rejected("invalid_action_postcondition", &reason);
-            })?;
-
-            return Ok(AdmittedPostcondition::Screen {
+    return match (postcondition, predicate) {
+        (ActionPostcondition::None, _) => Ok(AdmittedPostcondition::None),
+        (
+            ActionPostcondition::Idle {
+                stable_for_ns,
+                timeout_ns,
+            },
+            _,
+        ) => Ok(AdmittedPostcondition::Idle {
+            stable_for_ns: *stable_for_ns,
+            timeout_ns: *timeout_ns,
+        }),
+        (ActionPostcondition::Screen { timeout_ns, .. }, Some(predicate)) => {
+            Ok(AdmittedPostcondition::Screen {
                 predicate,
                 timeout_ns: *timeout_ns,
-            });
+            })
         }
-        ActionPostcondition::Idle { .. } => {}
-    }
-
-    return Err(control_rejected(
-        "invalid_action_postcondition",
-        "action postcondition exceeds its predicate limits or durations do not satisfy stable <= timeout <= 1h",
-    ));
+        (ActionPostcondition::Screen { .. }, None) => Err(terminal_error(
+            "admit action postcondition",
+            "validated screen postcondition has no compiled predicate",
+        )),
+    };
 }
 
 pub(super) fn evaluate_action_postcondition(
@@ -200,8 +182,7 @@ pub(super) fn evaluate_action_postcondition(
         } => {
             let state_hash = presented_state_hash(live)?;
             let viewport_text = semantic_viewport_text(&live.presented);
-            let matched =
-                evaluate_screen_predicate(predicate, &live.presented, &viewport_text, &state_hash);
+            let matched = predicate.matches(&live.presented, &viewport_text, &state_hash);
 
             let deadline = now >= started_at + Duration::from_nanos(*timeout_ns);
             if !matched && !child_completed && !output_closed && !deadline {

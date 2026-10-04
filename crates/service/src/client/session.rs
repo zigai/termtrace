@@ -23,7 +23,6 @@ use termtrace_engine::{
         resolved_screen_state_for_session, semantic_state_from_live_snapshot,
         semantic_state_with_hash_for_session, state_text,
     },
-    recording::control::{compile_screen_predicate, evaluate_screen_predicate},
 };
 use termtrace_evidence::{
     artifact::sync_directory,
@@ -32,8 +31,8 @@ use termtrace_evidence::{
 use termtrace_model::{
     execution::session::SessionCompletion,
     protocol::control::{
-        ControlCommand, ControlPayload, ControlRequest, ProcessSignal, ScreenPredicate,
-        ScreenWaitQuality, StableCaptureQuality,
+        CommandError, ControlCommand, ControlPayload, ControlRequest, ProcessSignal,
+        ScreenPredicate, ScreenWaitQuality, StableCaptureQuality,
     },
     terminal::{
         inspection::ScreenWaitOutcome,
@@ -210,6 +209,8 @@ impl Session {
     ///
     /// Returns the transport failure or the actor's rejection.
     pub fn control(&self, request: &ControlRequest) -> Result<ControlPayload> {
+        request.command.validate()?;
+
         return Ok(send_request(&self.path, request)?);
     }
 
@@ -220,6 +221,8 @@ impl Session {
     }
 
     fn reach_within(&self, request: &ControlRequest, timing: ExchangeTiming) -> Result<Reached> {
+        request.command.validate()?;
+
         let grace = match &timing {
             ExchangeTiming::Timeout(_) => defaults::COMPLETION_GRACE,
             ExchangeTiming::Deadline(deadline) => deadline
@@ -331,7 +334,9 @@ impl Session {
         predicate: ScreenPredicate,
         stable_for_ns: u64,
     ) -> Result<ScreenWaitOutcome> {
-        let compiled = compile_screen_predicate(&predicate).map_err(client_error)?;
+        let compiled = predicate
+            .compile()
+            .map_err(CommandError::ScreenWaitPredicate)?;
         let (state, source, presented) =
             resolved_screen_state_for_session(&self.path, StatePoint::LatestPresented, false)?;
 
@@ -344,8 +349,7 @@ impl Session {
         )
         .map_err(Error::ScreenFrame)?;
 
-        let matched =
-            evaluate_screen_predicate(&compiled, &state, &state_text(&state), &frame.state_hash);
+        let matched = compiled.matches(&state, &state_text(&state), &frame.state_hash);
 
         let observed_monotonic_ns = frame_monotonic_ns(&frame);
 

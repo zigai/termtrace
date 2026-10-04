@@ -2542,6 +2542,7 @@ dependencies = [
  "base64",
  "blake3",
  "compact_str",
+ "regex",
  "schemars",
  "serde",
  "serde_json",

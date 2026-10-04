@@ -12,6 +12,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use termtrace_model::protocol::control::MAX_CONTROL_WAIT;
 use termtrace_model::terminal::screen::{
     FrameDetail, ScreenFrame, ScreenProjectionRequest, ScreenRegion,
 };
@@ -211,7 +212,7 @@ impl<'session> Locator<'session> {
                     query: self.spec.description(),
                 });
             };
-            let capture_timeout = remaining.min(Duration::from_secs(3_600));
+            let capture_timeout = remaining.min(MAX_CONTROL_WAIT);
             let capture = self.session.capture_stable_by(
                 StableCaptureOptions {
                     stable_for: Duration::from_nanos(1).min(capture_timeout),

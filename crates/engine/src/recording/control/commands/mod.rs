@@ -14,10 +14,7 @@ use super::super::{
     },
     termination::Fact,
 };
-use super::screen::{
-    compile_screen_predicate, evaluate_screen_predicate, presented_state_hash, valid_blake3_hash,
-    CompiledScreenPredicate, ScreenWaiter, MAX_SCREEN_WAITERS,
-};
+use super::screen::{presented_state_hash, ScreenWaiter, MAX_SCREEN_WAITERS};
 use crate::{Error, Result};
 use nix::errno::Errno;
 use std::{
@@ -28,10 +25,11 @@ use termtrace_evidence::event_log::EventLogWriter;
 use termtrace_model::{
     execution::event::{Event, InputDescriptor, InputKind, InputSource, OperationStatus},
     protocol::control::{
-        ActionInputResult, ActionPostcondition, ActionPostconditionResult, ControlCommand,
-        ControlErrorDetails, ControlPayload, ControlRequest, ControlResponse, ControlResult,
-        InputSequenceFailureDetails, PointerOperation, ProcessSignal, ScreenFrameFailureDetails,
-        ScreenPostconditionQuality, StableCaptureQuality, CONTROL_PROTOCOL_VERSION,
+        is_lowercase_blake3_hex, ActionInputResult, ActionPostcondition, ActionPostconditionResult,
+        CompiledScreenPredicate, ControlCommand, ControlErrorDetails, ControlPayload,
+        ControlRequest, ControlResponse, ControlResult, InputSequenceFailureDetails,
+        PointerOperation, ProcessSignal, ScreenFrameFailureDetails, ScreenPostconditionQuality,
+        StableCaptureQuality, ValidatedCommand, CONTROL_PROTOCOL_VERSION,
     },
     protocol::mutation::MutationEffect,
     terminal::observation::{ActorBoundaries, CaptureQuality},
@@ -58,8 +56,7 @@ mod response;
 pub(in crate::recording) use action::PendingInputSequence;
 pub(in crate::recording) use mutations::apply_signal;
 use observation::{
-    compile_action_postcondition, evaluate_action_postcondition, AdmittedAction,
-    AdmittedPostcondition,
+    admitted_postcondition, evaluate_action_postcondition, AdmittedAction, AdmittedPostcondition,
 };
 pub(in crate::recording::control) use response::screen_frame_error;
 use response::{control_error_code, mutation_failure_effect};

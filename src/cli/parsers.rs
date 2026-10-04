@@ -1,6 +1,5 @@
 use miette::{IntoDiagnostic as _, Result, WrapErr as _};
 use std::{ffi::OsStr, path::PathBuf, result::Result as StdResult, time::Duration};
-use termtrace_engine::recording::control::compile_screen_predicate;
 pub(super) use termtrace_engine::timeline::parse_time_offset_ns;
 use termtrace_model::{
     execution::provenance::ProvenanceCapture, execution::session::CaptureTarget,
@@ -269,7 +268,9 @@ pub(super) fn parse_bounded_screen_regex(value: &str) -> StdResult<String, Strin
         pattern: value.to_owned(),
     };
 
-    compile_screen_predicate(&predicate)?;
+    predicate
+        .compile()
+        .map_err(|error| return error.to_string())?;
 
     return Ok(value.to_owned());
 }

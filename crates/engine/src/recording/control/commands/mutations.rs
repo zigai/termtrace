@@ -6,6 +6,7 @@ use super::{
     ControlCommand, ControlPayload, Errno, Error, Event, EventLogWriter, Fact, FocusEvent,
     InputDescriptor, InputKind, InputSource, Instant, MouseAction, MouseButton, OperationStatus,
     PointerOperation, ProcessSignal, Result, SessionActor, TerminalGeometry, Uuid,
+    ValidatedCommand,
 };
 use crate::recording::process::host_signal;
 use termtrace_process::ProcessGroup;
@@ -14,8 +15,10 @@ impl SessionActor<'_> {
     pub(super) fn execute_control_command(
         &mut self,
         request_id: Uuid,
-        command: &ControlCommand,
+        command: &ValidatedCommand<'_>,
     ) -> Result<ControlPayload> {
+        let command = command.command();
+
         if let Some(outcome) = self.execute_observation_command(request_id, command) {
             return outcome;
         }
@@ -640,9 +643,6 @@ impl SessionActor<'_> {
                 });
             }
             ControlCommand::Application { data } => {
-                data.validate().map_err(|reason| {
-                    return control_rejected("invalid_application_event", reason);
-                })?;
                 self.event_log.append(Event::Application {
                     operation_id: request_id,
                     data: data.clone(),
@@ -654,13 +654,6 @@ impl SessionActor<'_> {
             }
             ControlCommand::Mark { label } => {
                 let label = label.trim();
-                if label.is_empty() || label.len() > 256 {
-                    return Err(control_rejected(
-                        "invalid_marker",
-                        "marker must contain 1 to 256 UTF-8 bytes",
-                    ));
-                }
-
                 let event_seq = self.event_log.append(Event::Marker {
                     operation_id: request_id,
                     label: label.to_owned(),

@@ -300,7 +300,6 @@ pub(super) fn input_sequence_error_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recording::control::compile_screen_predicate;
     use std::sync::mpsc;
     use termtrace_model::{
         protocol::control::{ActionInputResult, ScreenPredicate},
@@ -399,9 +398,10 @@ mod tests {
     fn test_waiting_screen_next_deadline_is_timeout() {
         let started_at = Instant::now();
         let timeout_ns = 3_000_000_000;
-        let predicate = compile_screen_predicate(&ScreenPredicate::Contains {
+        let predicate = ScreenPredicate::Contains {
             text: "done".to_owned(),
-        })
+        }
+        .compile()
         .expect("valid test predicate");
 
         let pending = test_pending(InputSequencePhase::Waiting(test_waiting_action(
