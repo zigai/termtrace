@@ -8,6 +8,7 @@ mod coverage;
 mod lifecycle;
 mod media;
 mod scope;
+mod setup;
 
 #[derive(Deserialize)]
 struct TmuxWorkflowFixture {

@@ -215,12 +215,19 @@ impl PreparedTmuxSetup {
         return OsString::from_vec(command);
     }
 
-    /// Background command that starts the observer watchdog.
+    /// tmux-format-escaped background command that starts the observer watchdog.
     pub fn watchdog_command(&self) -> OsString {
         let mut command = self.env_prefix();
         command.extend_from_slice(b" tmux watchdog -q");
+        let mut escaped = Vec::new();
+        for byte in command {
+            escaped.push(byte);
+            if byte == b'#' {
+                escaped.push(byte);
+            }
+        }
 
-        return OsString::from_vec(command);
+        return OsString::from_vec(escaped);
     }
 
     fn env_prefix(&self) -> Vec<u8> {
