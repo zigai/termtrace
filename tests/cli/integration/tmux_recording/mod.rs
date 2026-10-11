@@ -3,6 +3,7 @@ use serde::Deserialize;
 use termtrace_tmux::artifact::{TmuxBundleTrack, TmuxStreamingBundleManifest};
 
 mod bundle;
+mod client;
 mod coverage;
 mod lifecycle;
 mod media;

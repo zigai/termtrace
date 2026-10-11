@@ -6,6 +6,7 @@ use crate::{
     options::{self, HOOK_INDEX, WRAPPER_BINARY_ENV},
 };
 use std::{
+    borrow::Cow,
     env,
     ffi::{OsStr, OsString},
     fmt::{Display, Write as _},
@@ -269,7 +270,11 @@ impl TmuxClient {
     /// Returns tmux failures.
     pub fn set_option(&self, name: &str, value: &OsStr) -> Result<()> {
         let mut command = self.command();
-        command.arg("set-option").arg("-gq").arg(name).arg(value);
+        command
+            .arg("set-option")
+            .arg("-gq")
+            .arg(name)
+            .arg(option_argument(value));
 
         return self.checked(command).map(drop);
     }
@@ -294,7 +299,7 @@ impl TmuxClient {
             .arg("-t")
             .arg(pane)
             .arg(name)
-            .arg(value);
+            .arg(option_argument(value));
 
         return self.checked(command).map(drop);
     }
@@ -425,6 +430,16 @@ impl TmuxClient {
             .next()
             .ok_or_else(|| return Error::Tmux(format!("tmux pane {pane} is unavailable")));
     }
+}
+
+fn option_argument(value: &OsStr) -> Cow<'_, OsStr> {
+    let Some(prefix) = value.as_bytes().strip_suffix(b";") else {
+        return Cow::Borrowed(value);
+    };
+    let mut escaped = prefix.to_vec();
+    escaped.extend_from_slice(b"\\;");
+
+    return Cow::Owned(OsString::from_vec(escaped));
 }
 
 fn row_format() -> String {
