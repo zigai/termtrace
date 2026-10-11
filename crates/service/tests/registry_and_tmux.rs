@@ -1,32 +1,18 @@
 //! Integration tests for `RegistryService` and `TmuxService`.
 
-use assert_cmd::Command;
-use std::path::Path;
+mod support;
+
+use support::record_session;
 use tempfile::TempDir;
 use termtrace_model::execution::session::SessionPhase;
 use termtrace_service::registry::{RegistryService, ValueOverride};
-
-#[allow(clippy::expect_used, reason = "test setup")]
-fn create_sample_session(path: &Path) {
-    let mut cmd = Command::cargo_bin("termtrace").expect("termtrace binary");
-    cmd.args(["record", "--no-input", "--out"])
-        .arg(path)
-        .args([
-            "--",
-            "/bin/sh",
-            "-c",
-            "printf 'REGISTRY-TEST\n'; sleep 0.05",
-        ])
-        .assert()
-        .success();
-}
 
 #[test]
 fn test_registry_lifecycle_and_gc() {
     let temp = TempDir::new().expect("tempdir");
     let state_root = temp.path().join("state-root");
     let session_path = temp.path().join("sample-reg.termtrace");
-    create_sample_session(&session_path);
+    record_session(&session_path, "printf 'REGISTRY-TEST\n'; sleep 0.05");
 
     let registry = RegistryService::open(&state_root).expect("open registry");
 

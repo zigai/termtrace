@@ -1,31 +1,17 @@
 //! Integration tests for `OutputService`, `EventsService`, and `AnalysisService`.
 
-use assert_cmd::Command;
-use std::path::Path;
+mod support;
+
+use support::record_session;
 use tempfile::TempDir;
 use termtrace_model::terminal::observation::StatePoint;
 use termtrace_service::{analysis::AnalysisService, events::EventsService, output::OutputService};
-
-#[allow(clippy::expect_used, reason = "test setup")]
-fn create_sample_session(path: &Path) {
-    let mut cmd = Command::cargo_bin("termtrace").expect("termtrace binary");
-    cmd.args(["record", "--no-input", "--out"])
-        .arg(path)
-        .args([
-            "--",
-            "/bin/sh",
-            "-c",
-            "printf 'ALPHA\nBETA\nGAMMA\n'; sleep 0.05",
-        ])
-        .assert()
-        .success();
-}
 
 #[test]
 fn test_output_service_paging_and_cursor() {
     let temp = TempDir::new().expect("tempdir");
     let session_path = temp.path().join("sample-output.termtrace");
-    create_sample_session(&session_path);
+    record_session(&session_path, "printf 'ALPHA\nBETA\nGAMMA\n'; sleep 0.05");
 
     // Read first page with small limit
     let page1 = OutputService::read_page(&session_path, None, 8).expect("page 1");
@@ -46,7 +32,7 @@ fn test_output_service_paging_and_cursor() {
 fn test_events_service_paging_and_cursor() {
     let temp = TempDir::new().expect("tempdir");
     let session_path = temp.path().join("sample-events.termtrace");
-    create_sample_session(&session_path);
+    record_session(&session_path, "printf 'ALPHA\nBETA\nGAMMA\n'; sleep 0.05");
 
     let page1 = EventsService::read_page(&session_path, None, 2).expect("page 1");
     assert!(!page1.events.is_empty());
@@ -62,7 +48,7 @@ fn test_events_service_paging_and_cursor() {
 fn test_analysis_service_diff_diagnose_cache() {
     let temp = TempDir::new().expect("tempdir");
     let session_path = temp.path().join("sample-analysis.termtrace");
-    create_sample_session(&session_path);
+    record_session(&session_path, "printf 'ALPHA\nBETA\nGAMMA\n'; sleep 0.05");
     // Test diff between initial and latest presented
     let (diff, _before, _after) = AnalysisService::diff(
         &session_path,

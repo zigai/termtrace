@@ -1,7 +1,8 @@
 //! Integration tests for `ArtifactService` and `IntegrityService`.
 
-use assert_cmd::Command;
-use std::path::Path;
+mod support;
+
+use support::record_session;
 use tempfile::TempDir;
 use termtrace_model::{
     artifact::{
@@ -13,26 +14,11 @@ use termtrace_model::{
 };
 use termtrace_service::{artifacts::ArtifactService, integrity::IntegrityService};
 
-#[allow(clippy::expect_used, reason = "test setup")]
-fn create_sample_session(path: &Path) {
-    let mut cmd = Command::cargo_bin("termtrace").expect("termtrace binary");
-    cmd.args(["record", "--no-input", "--out"])
-        .arg(path)
-        .args([
-            "--",
-            "/bin/sh",
-            "-c",
-            "printf 'ARTIFACT-TEST\n'; sleep 0.05",
-        ])
-        .assert()
-        .success();
-}
-
 #[test]
 fn test_artifact_save_bundle_and_verify() {
     let temp = TempDir::new().expect("tempdir");
     let session_path = temp.path().join("sample-artifact.termtrace");
-    create_sample_session(&session_path);
+    record_session(&session_path, "printf 'ARTIFACT-TEST\n'; sleep 0.05");
 
     // Test Save
     let save_dir = temp.path().join("saved-state");
@@ -69,7 +55,7 @@ fn test_artifact_save_bundle_and_verify() {
 fn test_integrity_verify_and_recover() {
     let temp = TempDir::new().expect("tempdir");
     let session_path = temp.path().join("sample-integrity.termtrace");
-    create_sample_session(&session_path);
+    record_session(&session_path, "printf 'ARTIFACT-TEST\n'; sleep 0.05");
 
     // Verify session
     let report = IntegrityService::verify(&session_path, VerificationLevel::Content, None);
