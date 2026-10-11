@@ -107,7 +107,7 @@ where
 {
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);
 
-    return serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+    let value = serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
         let json_path = error.path().to_string();
         let source = error.into_inner();
 
@@ -117,7 +117,12 @@ where
             reason: format!("JSON decoding failed at `{json_path}`: {source}"),
             source: None,
         };
-    });
+    })?;
+    deserializer.end().map_err(|source| {
+        return invalid_log(path, line, format!("trailing JSON input: {source}"));
+    })?;
+
+    return Ok(value);
 }
 
 pub(super) fn validate_header(path: &Path, header: &EventLogHeader) -> Result<()> {

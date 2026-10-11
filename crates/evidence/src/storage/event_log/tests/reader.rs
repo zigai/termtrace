@@ -14,6 +14,51 @@ use termtrace_model::value::ByteString;
 use uuid::Uuid;
 
 #[test]
+fn rejects_second_json_value_after_an_authenticated_event() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let source = temporary.path().join("session/events.jsonl");
+    secure_directory(source.parent().expect("parent"));
+    let clock = SessionClock::now().expect("clock");
+    let mut writer = EventLogWriter::create(&source, &header(&clock), clock).expect("writer");
+    writer
+        .append(Event::Output {
+            data: ByteString::from(b"safe".as_slice()),
+        })
+        .expect("output");
+    drop(writer);
+    let original = fs_err::read(&source).expect("valid log");
+    let header_end = original
+        .iter()
+        .position(|byte| return *byte == b'\n')
+        .expect("header newline")
+        + 1;
+    let mut corrupted = original.clone();
+    assert_eq!(corrupted.pop(), Some(b'\n'));
+    corrupted.extend_from_slice(b"{}\n");
+    fs_err::write(&source, &corrupted).expect("corrupt record");
+
+    assert!(matches!(
+        EventLog::read(&source),
+        Err(Error::InvalidEventLog { line: 2, .. })
+    ));
+    let recovered = source.with_file_name("recovered.jsonl");
+    let report = EventLog::recover_prefix(&source, &recovered).expect("recover prefix");
+    assert_eq!(report.valid_events, 0);
+    assert_eq!(
+        report
+            .discarded_tail
+            .as_ref()
+            .map(|issue| return issue.line),
+        Some(2)
+    );
+    assert_eq!(
+        fs_err::read(recovered).expect("recovered log"),
+        original[..header_end]
+    );
+    assert_eq!(fs_err::read(source).expect("source retained"), corrupted);
+}
+
+#[test]
 fn finite_snapshot_excludes_later_appends_and_partial_records() {
     let temporary = TempDir::new().expect("temporary directory");
     let path = temporary.path().join("session/events.jsonl");

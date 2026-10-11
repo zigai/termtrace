@@ -59,11 +59,20 @@ where
 
     let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
 
-    return serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+    let document = serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
         return Error::InvalidJson {
-            path,
+            path: path.clone(),
             json_path: error.path().to_string(),
             source: error.into_inner(),
         };
-    });
+    })?;
+    deserializer.end().map_err(|source| {
+        return Error::InvalidJson {
+            path,
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
+
+    return Ok(document);
 }

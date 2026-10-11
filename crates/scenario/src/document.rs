@@ -39,6 +39,14 @@ pub(super) fn read(path: impl AsRef<Path>) -> Result<Scenario> {
             };
         })?;
 
+    deserializer.end().map_err(|source| {
+        return Error::InvalidJson {
+            path: path.to_path_buf(),
+            json_path: "$".to_owned(),
+            source,
+        };
+    })?;
+
     validate(&scenario)?;
 
     return Ok(scenario);
@@ -407,6 +415,20 @@ mod tests {
         };
         assert_eq!(json_path, "launch.environment.set.TOKEN");
         assert!(!source.to_string().contains("100000000"));
+    }
+
+    #[test]
+    fn scenario_rejects_a_second_json_document() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let path = temporary.path().join("scenario.json");
+        fs_err::write(
+            &path,
+            br#"{"version":2,"name":"trailing document","launch":{"command":["/bin/true"]},"steps":[{"stop":{}}]}{}"#,
+        )
+        .expect("write scenario");
+
+        assert!(matches!(read(&path), Err(Error::InvalidJson { source, .. })
+            if source.is_syntax()));
     }
 
     #[test]

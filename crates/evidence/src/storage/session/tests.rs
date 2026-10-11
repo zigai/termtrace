@@ -283,6 +283,44 @@ fn completed_validation_rejects_pending_mutation() {
     assert_eq!(report.findings[0].code, "pending_mutation_intents");
 }
 
+#[test]
+fn session_readers_reject_a_second_json_document() {
+    for (filename, is_manifest) in [("session.json", true), ("completion.json", false)] {
+        let (temporary, _) = completed_fixture(vec![Event::Exit {
+            code: None,
+            signal: None,
+            signal_name: None,
+        }]);
+        let session = temporary.path().join("session");
+        assert!(verify_session(&session, VerificationLevel::Content).valid);
+        let path = session.join(filename);
+        let mut bytes = fs_err::read(&path).expect("session document");
+        bytes.extend_from_slice(b"{}");
+        fs_err::write(path, bytes).expect("append second document");
+
+        let result = if is_manifest {
+            read_manifest(&session).map(drop)
+        } else {
+            read_completion(&session).map(drop)
+        };
+        assert!(
+            matches!(result, Err(Error::InvalidJson { source, .. })
+            if source.is_syntax()),
+            "{filename} accepted a second document"
+        );
+        let report = verify_session(&session, VerificationLevel::Content);
+        assert!(!report.valid);
+        assert_eq!(
+            report.findings[0].code,
+            if is_manifest {
+                "session_manifest_invalid"
+            } else {
+                "completion_invalid_or_missing"
+            }
+        );
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct RejectedVersionCorpus {
     format: String,
