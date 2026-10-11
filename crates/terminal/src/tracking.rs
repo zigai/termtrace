@@ -1,5 +1,6 @@
 //! Stateful terminal-sequence trackers used while applying semantic output.
 
+use crate::utf8::Utf8Prefix;
 use std::mem::take;
 
 /// Maximum buffered presentation or query sequence.
@@ -52,6 +53,7 @@ pub struct PresentationTracker {
     state: PresentationParseState,
     pending: Vec<u8>,
     synchronized_output: bool,
+    utf8_prefix: Utf8Prefix,
 }
 
 impl PresentationTracker {
@@ -62,6 +64,7 @@ impl PresentationTracker {
             state: PresentationParseState::Ground,
             pending: Vec::new(),
             synchronized_output,
+            utf8_prefix: Utf8Prefix::default(),
         };
     }
 
@@ -81,7 +84,9 @@ impl PresentationTracker {
         if self.state == PresentationParseState::Ground {
             if let Some(pos) = memchr::memchr2(0x1b, 0x9b, bytes) {
                 if pos > 0 {
-                    return (bytes.get(..pos).unwrap_or(&[]), None);
+                    let prefix = bytes.get(..pos).unwrap_or(&[]);
+                    self.utf8_prefix.observe_slice(prefix);
+                    return (prefix, None);
                 }
 
                 let action = self.push(first_byte);
@@ -89,6 +94,7 @@ impl PresentationTracker {
                 return (&[], Some(action));
             }
 
+            self.utf8_prefix.observe_slice(bytes);
             return (bytes, None);
         }
 
@@ -99,6 +105,10 @@ impl PresentationTracker {
 
     /// Feed one byte and classify how it must be delivered to the terminal.
     pub fn push(&mut self, byte: u8) -> PresentationAction {
+        let continuation = self.utf8_prefix.push(byte);
+        if continuation && self.state == PresentationParseState::Ground {
+            return PresentationAction::Immediate;
+        }
         match &mut self.state {
             PresentationParseState::Ground => match byte {
                 0x1b => {
@@ -278,6 +288,7 @@ enum QueryKind {
 pub struct QueryTracker {
     sequence: Vec<u8>,
     kind: QueryKind,
+    utf8_prefix: Utf8Prefix,
 }
 
 impl QueryTracker {
@@ -287,8 +298,17 @@ impl QueryTracker {
         return !matches!(self.kind, QueryKind::None);
     }
 
+    /// Query-free bulk writes still carry UTF-8 prefixes into the next control candidate.
+    pub fn observe_plain_bytes(&mut self, bytes: &[u8]) {
+        self.utf8_prefix.observe_slice(bytes);
+    }
+
     /// Feed one byte, returning whether the tracked query is complete.
     pub fn push(&mut self, byte: u8) -> bool {
+        let continuation = self.utf8_prefix.push(byte);
+        if continuation && matches!(self.kind, QueryKind::None) {
+            return false;
+        }
         if byte == 0x18 || byte == 0x1a {
             self.clear();
 
@@ -361,7 +381,7 @@ impl QueryTracker {
                 self.sequence.push(byte);
 
                 return byte == 0x07
-                    || byte == 0x9c
+                    || (byte == 0x9c && !(continuation && matches!(self.kind, QueryKind::Osc)))
                     || self.sequence.ends_with(b"\x1b\\")
                     || self.sequence.len() > MAX_TRACKED_SEQUENCE_BYTES;
             }
@@ -449,6 +469,66 @@ mod tests {
         longest_sequence = longest_sequence.max(tracker.finish().len());
 
         assert!(longest_sequence <= TRACKED_SEQUENCE_BOUND + 1);
+    }
+
+    #[test]
+    fn presentation_tracker_delivers_utf8_csi_bytes_without_waiting_for_eof() {
+        for (chunks, expected) in [
+            (vec![b"\xc4\x9b".as_slice()], b"\xc4\x9b".as_slice()),
+            (
+                vec![b"\xc4".as_slice(), b"\x9b".as_slice()],
+                b"\xc4\x9b".as_slice(),
+            ),
+            (
+                vec![b"abcd\xc4".as_slice(), b"\x9b".as_slice()],
+                b"abcd\xc4\x9b".as_slice(),
+            ),
+        ] {
+            let mut tracker = PresentationTracker::new(false);
+            let mut delivered = Vec::new();
+            for mut chunk in chunks {
+                while !chunk.is_empty() {
+                    let (immediate, action) = tracker.push_slice(chunk);
+                    delivered.extend_from_slice(immediate);
+                    let consumed = action.map_or(immediate.len(), |action| {
+                        match action {
+                            PresentationAction::Immediate => delivered.push(chunk[0]),
+                            PresentationAction::Buffered => {}
+                            PresentationAction::Sequence { bytes, command } => {
+                                assert_eq!(command, None);
+                                delivered.extend(bytes);
+                            }
+                        }
+                        return 1;
+                    });
+                    assert!(consumed > 0);
+                    chunk = &chunk[consumed..];
+                }
+            }
+            assert_eq!(delivered, expected);
+            assert!(tracker.finish().is_empty());
+        }
+    }
+
+    #[test]
+    fn query_tracker_does_not_treat_utf8_osc_bytes_as_controls() {
+        let mut tracker = QueryTracker::default();
+        for byte in b"\xc4\x9d" {
+            assert!(!tracker.push(*byte));
+        }
+        assert!(!tracker.is_tracking());
+        assert!(tracker.bytes().is_empty());
+
+        tracker.observe_plain_bytes(b"abcd\xc4");
+        assert!(!tracker.push(0x9d));
+        assert!(!tracker.is_tracking());
+        assert!(tracker.bytes().is_empty());
+
+        for byte in b"\x1b]0;\xc4\x9crest" {
+            assert!(!tracker.push(*byte));
+        }
+        assert!(tracker.push(0x07));
+        assert_eq!(tracker.bytes(), b"\x1b]0;\xc4\x9crest\x07");
     }
 
     #[test]

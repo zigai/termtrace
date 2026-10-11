@@ -1,6 +1,6 @@
 //! Lossless streaming framing of VT output bytes.
 
-use crate::{Error, Result};
+use crate::{utf8::Utf8Prefix, Error, Result};
 use std::mem;
 use termtrace_model::execution::event::{Event, EventRecord};
 pub use termtrace_model::terminal::vt::{VtSourceSegment, VtToken, VtTokenKind};
@@ -32,6 +32,7 @@ pub struct VtFramer {
     token: Vec<u8>,
     source: Vec<VtSourceSegment>,
     printable_utf8_remaining: u8,
+    string_utf8_prefix: Utf8Prefix,
     next_token_id: u64,
     max_token_bytes: usize,
 }
@@ -51,6 +52,7 @@ impl VtFramer {
             token: Vec::new(),
             source: Vec::new(),
             printable_utf8_remaining: 0,
+            string_utf8_prefix: Utf8Prefix::default(),
             next_token_id: 0,
             max_token_bytes,
         };
@@ -137,6 +139,7 @@ impl VtFramer {
             }
             FramerState::StringEscape { kind, osc } => {
                 let value = byte.value;
+                self.string_utf8_prefix.push(value);
                 self.push(byte)?;
 
                 if value == b'\\' {
@@ -260,9 +263,10 @@ impl VtFramer {
         emitted: &mut Vec<VtToken>,
     ) -> Result<()> {
         let value = byte.value;
+        let continuation = self.string_utf8_prefix.push(value);
         self.push(byte)?;
 
-        if value == 0x9c || (osc && value == 0x07) {
+        if (value == 0x9c && !(osc && continuation)) || (osc && value == 0x07) {
             emitted.push(self.emit(kind));
             self.state = FramerState::Ground;
         } else if value == 0x1b {
@@ -337,6 +341,7 @@ impl VtFramer {
     }
 
     fn emit(&mut self, kind: VtTokenKind) -> VtToken {
+        self.string_utf8_prefix = Utf8Prefix::default();
         let raw = mem::take(&mut self.token);
         let source = mem::take(&mut self.source);
         let description = describe(kind, &raw);
@@ -503,6 +508,18 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn osc_utf8_continuation_does_not_terminate_the_token() {
+        let mut framer = VtFramer::default();
+        let mut tokens = framer.feed(1, 0, b"\x1b]0;\xc4").expect("first read");
+        tokens.extend(framer.feed(2, 1, b"\x9crest\x07").expect("second read"));
+        tokens.extend(framer.finish().expect("finish"));
+
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, VtTokenKind::Osc);
+        assert_eq!(tokens[0].raw.as_bytes(), b"\x1b]0;\xc4\x9crest\x07");
     }
 
     #[test]

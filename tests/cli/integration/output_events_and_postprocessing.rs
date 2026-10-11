@@ -5,6 +5,28 @@ use std::{process::Child, sync::mpsc::channel};
 use termtrace_engine::timeline::resolve_session_prefix_source_selection;
 
 #[test]
+fn stripped_output_preserves_utf8_continuation_control_bytes() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("unicode-output");
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/printf", "\\311\\200"])
+        .assert()
+        .success();
+
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["analyze", "output"])
+        .arg(&session)
+        .arg("--strip-controls")
+        .assert()
+        .success()
+        .stdout(predicate::eq(b"\xc9\x80".as_slice()));
+}
+
+#[test]
 fn output_raw_reproduces_exact_canonical_child_bytes() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("raw-output-session");

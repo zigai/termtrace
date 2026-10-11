@@ -1,5 +1,7 @@
 //! Explicitly lossy, streaming-safe child-output projections.
 
+use crate::utf8::Utf8Prefix;
+
 pub use termtrace_model::protocol::output_projection::{
     OutputProjectionQuality, OutputProjectionReport,
 };
@@ -9,6 +11,7 @@ pub use termtrace_model::protocol::output_projection::{
 pub struct ControlStripper {
     state: StripState,
     control: Vec<u8>,
+    utf8_prefix: Utf8Prefix,
     source_byte_count: u64,
     output_byte_count: u64,
     alternate_screen_observed: bool,
@@ -65,6 +68,13 @@ impl ControlStripper {
     }
 
     fn consume(&mut self, byte: u8, output: &mut Vec<u8>) {
+        let continuation = self.utf8_prefix.push(byte);
+
+        if continuation && self.state == StripState::Ground {
+            output.push(byte);
+            return;
+        }
+
         match self.state {
             StripState::Ground => match byte {
                 0x1b => self.begin(StripState::Escape, byte),
@@ -104,7 +114,7 @@ impl ControlStripper {
                 self.push_control(byte);
 
                 match byte {
-                    0x07 | 0x9c => {
+                    0x07 | 0x9c if !continuation => {
                         self.finish_control();
                         self.state = StripState::Ground;
                     }

@@ -219,6 +219,7 @@ pub(super) fn process_semantic_bytes(
 
             if index > start {
                 let chunk = data.get(start..index).unwrap_or(&[]);
+                live.query_tracker.observe_plain_bytes(chunk);
                 live.semantic.write(chunk);
 
                 if live.suppress_mirrored_queries {

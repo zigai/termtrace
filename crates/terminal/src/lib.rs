@@ -11,6 +11,7 @@ pub mod output_projection;
 pub mod screen;
 /// Stateful trackers for presentation and terminal-query sequences.
 pub mod tracking;
+mod utf8;
 /// Lossless framing of canonical output into VT tokens.
 pub mod vt_framer;
 
