@@ -104,38 +104,44 @@ fn fixture_frame() -> ScreenFrame {
 #[test]
 fn test_frame_text_extraction_from_variants() {
     let mut frame = fixture_frame();
-    frame.data = ScreenFrameContent::None;
-
-    assert_eq!(frame_text(&frame), "");
-
-    frame.data = ScreenFrameContent::Text {
-        rows: vec![
-            ScreenTextRow {
-                row: 0,
-                soft_wrapped: false,
-                wrap_continuation: false,
-                text: "First row".to_owned(),
+    for (name, data, expected) in [
+        ("no detail", ScreenFrameContent::None, ""),
+        (
+            "text rows",
+            ScreenFrameContent::Text {
+                rows: vec![
+                    ScreenTextRow {
+                        row: 0,
+                        soft_wrapped: false,
+                        wrap_continuation: false,
+                        text: "First row".to_owned(),
+                    },
+                    ScreenTextRow {
+                        row: 1,
+                        soft_wrapped: false,
+                        wrap_continuation: false,
+                        text: "Second row".to_owned(),
+                    },
+                ],
             },
-            ScreenTextRow {
-                row: 1,
-                soft_wrapped: false,
-                wrap_continuation: false,
-                text: "Second row".to_owned(),
+            "First row\nSecond row",
+        ),
+        (
+            "span rows",
+            ScreenFrameContent::Spans {
+                rows: vec![ScreenSpanRow {
+                    row: 0,
+                    soft_wrapped: false,
+                    wrap_continuation: false,
+                    text: "Span row".to_owned(),
+                    spans: Vec::new(),
+                }],
             },
-        ],
-    };
+            "Span row",
+        ),
+    ] {
+        frame.data = data;
 
-    assert_eq!(frame_text(&frame), "First row\nSecond row");
-
-    frame.data = ScreenFrameContent::Spans {
-        rows: vec![ScreenSpanRow {
-            row: 0,
-            soft_wrapped: false,
-            wrap_continuation: false,
-            text: "Span row".to_owned(),
-            spans: Vec::new(),
-        }],
-    };
-
-    assert_eq!(frame_text(&frame), "Span row");
+        assert_eq!(frame_text(&frame), expected, "{name}");
+    }
 }
