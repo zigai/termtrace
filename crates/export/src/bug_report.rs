@@ -188,7 +188,7 @@ pub fn create(
         }
     };
 
-    if let Err(error) = commit_directory(parent, &staging, destination) {
+    if let Err(error) = commit_directory(parent, &staging, destination, false) {
         let _cleanup = fs_err::remove_dir_all(&staging);
 
         return Err(error.into());

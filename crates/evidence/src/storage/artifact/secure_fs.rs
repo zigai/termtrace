@@ -261,13 +261,18 @@ pub fn sync_directory(path: &Path) -> Result<()> {
 
 /// Atomically publish a staged artifact directory as a direct child of its session.
 ///
-/// The destination is never replaced, and both paths must be direct children of `session`.
+/// Both paths must be direct session children; replacement leaves the old destination at `staging`.
 ///
 /// # Errors
 ///
-/// Returns an error when the paths violate the session boundary, the destination exists, or the
+/// Returns an error when the paths violate the session boundary, replacement is refused, or the
 /// rename and session-directory sync cannot be completed.
-pub fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> Result<()> {
+pub fn commit_directory(
+    session: &Path,
+    staging: &Path,
+    destination: &Path,
+    replace: bool,
+) -> Result<()> {
     let session_norm = if session.as_os_str().is_empty() { Path::new(".") } else { session };
     let staging_parent = staging.parent().map(|p| {
         if p.as_os_str().is_empty() {
@@ -313,6 +318,18 @@ pub fn commit_directory(session: &Path, staging: &Path, destination: &Path) -> R
         destination_name,
         RenameFlags::RENAME_NOREPLACE,
     )
+    .or_else(|error| {
+        if error == Errno::EEXIST && replace {
+            return renameat2(
+                &directory,
+                staging_name,
+                &directory,
+                destination_name,
+                RenameFlags::RENAME_EXCHANGE,
+            );
+        }
+        return Err(error);
+    })
     .map_err(|error| {
         if error == Errno::EEXIST {
             return Error::DestinationExists {

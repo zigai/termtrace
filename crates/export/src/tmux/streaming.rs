@@ -150,7 +150,7 @@ pub fn create(
 
     verify_contents(&staging, aggregate_manifest, &bytes, &aggregate)?;
     sync_directory(&staging)?;
-    commit_directory(parent, &staging, destination)?;
+    commit_directory(parent, &staging, destination, false)?;
 
     cleanup.disarm();
 

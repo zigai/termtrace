@@ -267,7 +267,7 @@ pub fn save(
         Err(error) => return finish_with_cleanup(Err(error), remove_staging(&staging)),
     };
 
-    if let Err(error) = commit_directory(parent, &staging, destination) {
+    if let Err(error) = commit_directory(parent, &staging, destination, false) {
         return finish_with_cleanup(Err(error.into()), remove_staging(&staging));
     }
     return Ok(SaveOutcome {
@@ -401,7 +401,7 @@ pub fn save_screenshot_batch(
         Err(error) => return finish_with_cleanup(Err(error), remove_staging(&staging)),
     };
 
-    if let Err(error) = commit_directory(parent, &staging, destination) {
+    if let Err(error) = commit_directory(parent, &staging, destination, false) {
         return finish_with_cleanup(Err(error.into()), remove_staging(&staging));
     }
     return Ok(manifest);

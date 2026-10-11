@@ -214,7 +214,7 @@ pub fn index_session_with_options(
             identity.check(session_directory)?;
         }
 
-        commit_directory(session_directory, &staging, &destination)?;
+        commit_directory(session_directory, &staging, &destination, false)?;
         let manifest_path = destination.join(INDEX_MANIFEST);
         let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
             return Error::Filesystem {

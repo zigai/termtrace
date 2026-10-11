@@ -84,25 +84,7 @@ pub(super) fn export_with_capability_check(
     create_private_directory(&staging)?;
     let _staging_cleanup = DirectoryCleanup(staging.clone());
     export_staged(plan, &staging)?;
-    if destination.exists() || destination.symlink_metadata().is_ok() {
-        if destination.is_dir() {
-            fs_err::remove_dir_all(destination).map_err(|source| {
-                return Error::Filesystem {
-                    path: destination.to_path_buf(),
-                    source,
-                };
-            })?;
-        } else {
-            fs_err::remove_file(destination).map_err(|source| {
-                return Error::Filesystem {
-                    path: destination.to_path_buf(),
-                    source,
-                };
-            })?;
-        }
-    }
-
-    commit_directory(parent, &staging, destination)?;
+    commit_directory(parent, &staging, destination, true)?;
 
     return Ok(PresentationOutcome {
         directory: destination.to_path_buf(),
@@ -233,7 +215,7 @@ pub fn preview(
 
     write_secure(&staging.join("manifest.json"), &manifest_bytes)?;
     verify_artifact_members(&staging, &manifest.members)?;
-    commit_directory(parent, &staging, destination)?;
+    commit_directory(parent, &staging, destination, false)?;
 
     return Ok(PresentationPreviewOutcome {
         directory: destination.to_path_buf(),
@@ -246,7 +228,12 @@ struct DirectoryCleanup(PathBuf);
 
 impl Drop for DirectoryCleanup {
     fn drop(&mut self) {
-        let _result = fs_err::remove_dir_all(&self.0);
+        let _result =
+            if fs_err::symlink_metadata(&self.0).is_ok_and(|metadata| return metadata.is_dir()) {
+                fs_err::remove_dir_all(&self.0)
+            } else {
+                fs_err::remove_file(&self.0)
+            };
     }
 }
 

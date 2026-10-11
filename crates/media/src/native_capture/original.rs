@@ -189,7 +189,12 @@ pub fn capture_original_with_backend(
         ));
     }
 
-    if let Err(error) = commit_directory(destination_parent, &publication_staging, &destination) {
+    if let Err(error) = commit_directory(
+        destination_parent,
+        &publication_staging,
+        &destination,
+        false,
+    ) {
         return Err(preserve_failed(
             destination_parent,
             &publication_staging,

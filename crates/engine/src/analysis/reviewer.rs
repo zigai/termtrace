@@ -236,7 +236,7 @@ fn export_into(
         .parent()
         .ok_or_else(|| return review_error("review export destination has no parent"))?;
 
-    commit_directory(parent, temporary, destination)?;
+    commit_directory(parent, temporary, destination, false)?;
 
     return Ok(manifest);
 }

@@ -7,6 +7,7 @@ use nix::{fcntl::OFlag, sys::stat::Mode};
 use std::{
     ffi::{OsStr, OsString},
     fs::File,
+    io::ErrorKind,
     os::unix::fs::{symlink, PermissionsExt as _},
 };
 use tempfile::TempDir;
@@ -14,6 +15,46 @@ use termtrace_model::execution::event::{Event, EventLogHeader};
 use termtrace_model::execution::layout::{ARTIFACT_ROOT_LOCK, ARTIFACT_ROOT_LOG};
 use termtrace_model::value::ByteString;
 use uuid::Uuid;
+
+#[test]
+fn failed_publication_preserves_existing_presentation() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let destination = temporary.path().join("presentation");
+    fs_err::create_dir(&destination).expect("existing presentation");
+    let previous = destination.join("presentation.mp4");
+    fs_err::write(&previous, b"previous complete video").expect("previous output");
+    let staging = temporary.path().join("missing-staging");
+
+    let error = commit_directory(temporary.path(), &staging, &destination, true)
+        .expect_err("missing staged output must fail publication");
+
+    assert!(matches!(error, Error::Filesystem { source, .. }
+        if source.kind() == ErrorKind::NotFound));
+    assert_eq!(
+        fs_err::read(previous).expect("previous output remains"),
+        b"previous complete video"
+    );
+    assert!(!staging.exists());
+}
+
+#[test]
+fn publication_replaces_an_existing_presentation_with_complete_output() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let destination = temporary.path().join("presentation");
+    let staging = temporary.path().join("staging");
+    fs_err::create_dir(&destination).expect("previous directory");
+    fs_err::create_dir(&staging).expect("staged directory");
+    fs_err::write(destination.join("old.mp4"), b"old").expect("previous output");
+    fs_err::write(staging.join("presentation.mp4"), b"new complete video").expect("staged output");
+
+    commit_directory(temporary.path(), &staging, &destination, true).expect("replace presentation");
+
+    assert_eq!(
+        fs_err::read(destination.join("presentation.mp4")).expect("published video"),
+        b"new complete video"
+    );
+    assert!(!destination.join("old.mp4").exists());
+}
 
 #[test]
 fn prefix_catalog_authenticates_old_source_after_growth_and_rejects_wrong_byte_count() {

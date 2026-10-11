@@ -115,7 +115,7 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
         return Err(preserve_failed(parent, &staging, error));
     }
 
-    if let Err(error) = commit_directory(parent, &staging, &destination)
+    if let Err(error) = commit_directory(parent, &staging, &destination, false)
         .and_then(|()| return sync_directory(parent))
     {
         let cleanup = fs::remove_dir_all(&staging).map_err(|source| {
@@ -646,7 +646,8 @@ fn which(program: &str) -> Result<()> {
 pub(super) fn preserve_failed(parent: &Path, staging: &Path, error: Error) -> Error {
     let evidence = parent.join(format!("visual-failed-{}", uuid::Uuid::now_v7()));
 
-    match commit_directory(parent, staging, &evidence).and_then(|()| return sync_directory(parent))
+    match commit_directory(parent, staging, &evidence, false)
+        .and_then(|()| return sync_directory(parent))
     {
         Ok(()) => {
             return Error::CaptureFailed {

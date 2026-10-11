@@ -357,7 +357,7 @@ impl NativeReplayWorker {
             return Err(preserve_failed(parent, &staging, error));
         }
 
-        if let Err(error) = commit_directory(parent, &staging, destination) {
+        if let Err(error) = commit_directory(parent, &staging, destination, false) {
             return Err(preserve_failed(parent, &staging, error.into()));
         }
 
@@ -483,7 +483,7 @@ impl NativeReplayWorker {
             return Err(preserve_failed(parent, &staging, error));
         }
 
-        if let Err(error) = commit_directory(parent, &staging, destination) {
+        if let Err(error) = commit_directory(parent, &staging, destination, false) {
             return Err(preserve_failed(parent, &staging, error.into()));
         }
 

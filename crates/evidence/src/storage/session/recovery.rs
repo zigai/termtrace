@@ -158,7 +158,7 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
     write_secure(&recovery_path, &bytes)?;
 
     sync_directory(staging.path())?;
-    commit_directory(parent, staging.path(), &destination)?;
+    commit_directory(parent, staging.path(), &destination, false)?;
 
     return Ok(report);
 }
