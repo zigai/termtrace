@@ -163,7 +163,10 @@ fn parse_scaled_decimal(number: &str, scale: u64) -> StdResult<u64, TimeOffsetEr
     let Some(fraction) = fraction else {
         return Ok(whole_ns);
     };
-    if fraction.is_empty() || fraction.len() > 18 {
+    if fraction.is_empty()
+        || fraction.len() > 18
+        || !fraction.bytes().all(|byte| return byte.is_ascii_digit())
+    {
         return Err(TimeOffsetError::new(
             "fraction must contain between 1 and 18 digits",
         ));
@@ -221,6 +224,11 @@ mod tests {
         assert_eq!(parse_time_offset_ns("01:02.25"), Ok(62_250_000_000));
         assert_eq!(parse_time_offset_ns("01:01:02.25"), Ok(3_662_250_000_000));
         assert_eq!(parse_time_offset_ns("2"), Ok(2_000_000_000));
+    }
+
+    #[test]
+    fn rejects_a_sign_inside_a_decimal_fraction() {
+        assert!(parse_time_offset_ns("0.+1s").is_err());
     }
 
     #[test]
