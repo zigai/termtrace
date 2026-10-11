@@ -86,11 +86,12 @@ pub fn parse_environment_spec(bytes: &[u8], source_path: &Path) -> Result<Enviro
     }
 
     let spec: EnvironmentSpec = serde_json::from_slice(bytes).map_err(|source| {
-        return Error::InvalidJson {
-            path: source_path.to_path_buf(),
-            json_path: "$".to_owned(),
-            source,
-        };
+        return environment_error(format!(
+            "invalid JSON in `{}` at line {} column {}",
+            source_path.display(),
+            source.line(),
+            source.column(),
+        ));
     })?;
 
     spec.validate()

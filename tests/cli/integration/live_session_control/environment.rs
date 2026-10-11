@@ -1,6 +1,37 @@
 use super::*;
 
 #[test]
+fn numeric_environment_values_never_enter_rejection_diagnostics() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let specification = temporary.path().join("environment.json");
+    let session = temporary.path().join("rejected");
+    fs_err::write(&specification, br#"{"set":{"TOKEN":100000000}}"#)
+        .expect("write malformed environment");
+    fs_err::set_permissions(&specification, Permissions::from_mode(0o600))
+        .expect("private environment");
+
+    let output = Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .arg("--environment-spec")
+        .arg(&specification)
+        .args(["--", "/bin/true"])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid JSON"));
+    assert!(!output
+        .stderr
+        .windows(b"100000000".len())
+        .any(|bytes| return bytes == b"100000000"));
+    assert!(output.stdout.is_empty());
+    assert!(!session.exists());
+}
+
+#[test]
 fn environment_values_never_enter_recorder_argv_or_manifest() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("secret-safe");

@@ -1,4 +1,5 @@
 use crate::{error::invalid, Error, Result};
+use serde::de::Error as _;
 use std::{collections::BTreeMap, path::Path};
 use termtrace_model::{
     execution::environment::EnvironmentSpec,
@@ -21,6 +22,15 @@ pub(super) fn read(path: impl AsRef<Path>) -> Result<Scenario> {
         serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
             let json_path = error.path().to_string();
             let source = error.into_inner();
+            let source = if json_path.starts_with("launch.environment") {
+                serde_json::Error::custom(format!(
+                    "invalid environment value at line {} column {}",
+                    source.line(),
+                    source.column(),
+                ))
+            } else {
+                source
+            };
 
             return Error::InvalidJson {
                 path: path.to_path_buf(),
@@ -375,6 +385,28 @@ mod tests {
         assert!(err
             .to_string()
             .contains("duplicates launch.environment.set.COLLISION"));
+    }
+
+    #[test]
+    fn scenario_environment_type_errors_do_not_reveal_values() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let path = temporary.path().join("scenario.json");
+        fs_err::write(
+            &path,
+            br#"{"version":2,"name":"invalid environment","launch":{"command":["/bin/true"],"environment":{"set":{"TOKEN":100000000}}},"steps":[{"stop":{}}]}"#,
+        )
+        .expect("write scenario");
+
+        let error = read(&path).expect_err("invalid environment value");
+        assert!(!error.to_string().contains("100000000"));
+        let Error::InvalidJson {
+            json_path, source, ..
+        } = error
+        else {
+            panic!("expected JSON diagnostic");
+        };
+        assert_eq!(json_path, "launch.environment.set.TOKEN");
+        assert!(!source.to_string().contains("100000000"));
     }
 
     #[test]
