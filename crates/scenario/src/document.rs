@@ -1,4 +1,7 @@
-use crate::{error::invalid, Error, Result};
+use crate::{
+    error::{invalid, operation},
+    Error, Result,
+};
 use serde::de::Error as _;
 use std::{collections::BTreeMap, path::Path};
 use termtrace_model::{
@@ -171,8 +174,16 @@ pub(super) fn expand_matrix(document: Scenario) -> Result<Vec<(String, Scenario)
         .map(|values| {
             let label = values
                 .iter()
-                .map(|(key, value)| format!("{key}={value}"))
-                .collect::<Vec<String>>()
+                .map(|(key, value)| {
+                    let encoded = if value.contains([',', '"']) {
+                        serde_json::to_string(value)
+                            .map_err(|error| return operation("encode matrix value", error))?
+                    } else {
+                        value.clone()
+                    };
+                    return Ok(format!("{key}={encoded}"));
+                })
+                .collect::<Result<Vec<String>>>()?
                 .join(",");
 
             let mut scenario = document.clone();
@@ -329,6 +340,35 @@ mod tests {
             })
             .collect::<BTreeSet<_>>();
         assert_eq!(names.len(), 4);
+    }
+
+    #[test]
+    fn scenario_matrix_delimiters_do_not_share_snapshot_baselines() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let path = temporary.path().join("scenario.json");
+        fs_err::write(
+            &path,
+            br#"{"version":2,"name":"matrix","matrix":{"a":["x,b=y","x"],"b":["z","y,b=z"]},"launch":{"command":["/bin/echo","{{a}}","{{b}}"]},"steps":[{"matchScreenSnapshot":{"name":"final"}}]}"#,
+        )
+        .expect("scenario document");
+        let scenario = read(&path).expect("read matrix scenario");
+
+        let expanded = expand_matrix(scenario).expect("matrix expansion");
+        let names = expanded
+            .iter()
+            .map(|(_, scenario)| {
+                let ScenarioStep::MatchScreenSnapshot(snapshot) = &scenario.steps[0] else {
+                    panic!("expected snapshot step");
+                };
+                return snapshot.name.as_str();
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(names.len(), 4);
+        let labels = expanded
+            .iter()
+            .map(|(label, _)| return label.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(labels.len(), 4);
     }
 
     #[test]
