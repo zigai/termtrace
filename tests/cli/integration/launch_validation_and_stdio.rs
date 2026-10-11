@@ -20,37 +20,21 @@ fn fitted_geometry_requires_a_viewport() {
 
 #[test]
 fn visual_convenience_flags_reject_invalid_values_before_recording() {
-    let mut font_size = Command::cargo_bin("termtrace").expect("binary should build");
-    font_size
-        .args([
-            "record",
+    for (flag, value, error) in [
+        (
             "--font-size",
             "0",
-            "--out",
-            "unused",
-            "--",
-            "/bin/true",
-        ])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains(
             "font size must be a positive finite number",
-        ));
-
-    let mut background = Command::cargo_bin("termtrace").expect("binary should build");
-    background
-        .args([
-            "record",
-            "--background",
-            "black",
-            "--out",
-            "unused",
-            "--",
-            "/bin/true",
-        ])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("color must use #RRGGBB syntax"));
+        ),
+        ("--background", "black", "color must use #RRGGBB syntax"),
+    ] {
+        Command::cargo_bin("termtrace")
+            .expect("binary should build")
+            .args(["record", flag, value, "--out", "unused", "--", "/bin/true"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(error));
+    }
 }
 
 #[test]
