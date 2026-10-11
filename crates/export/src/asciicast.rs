@@ -2,7 +2,7 @@
 
 use crate::{Error, Result};
 use serde::Serialize;
-use std::{collections::HashMap, io::Write, path::Path, time::Duration};
+use std::{collections::HashMap, io::Write, path::Path, str, time::Duration};
 use termtrace_evidence::{
     artifact::{finish_writer, secure_writer},
     event_log::{EventLogCursor, EventLogSummary},
@@ -77,18 +77,24 @@ pub fn export_to_writer(
 
     let mut inputs: HashMap<Uuid, ByteString> = HashMap::new();
     let mut resizes: HashMap<Uuid, (u16, u16)> = HashMap::new();
+    let mut output_bytes = Vec::new();
+    let mut input_bytes = Vec::new();
+    let mut seconds = 0.0;
 
     while let Some(record) = cursor.next_record()? {
-        let seconds = Duration::from_nanos(record.monotonic_ns).as_secs_f64();
+        seconds = Duration::from_nanos(record.monotonic_ns).as_secs_f64();
 
         match &record.event {
-            Event::Output { data } => write_cast_event(
-                &mut writer,
-                seconds,
-                "o",
-                &String::from_utf8_lossy(data.as_bytes()),
-                path,
-            )?,
+            Event::Output { data } => {
+                write_cast_event(
+                    &mut writer,
+                    &mut output_bytes,
+                    seconds,
+                    "o",
+                    data.as_bytes(),
+                    path,
+                )?;
+            }
             Event::InputIntent {
                 operation_id, data, ..
             } => {
@@ -102,9 +108,10 @@ pub fn export_to_writer(
                 if let Some(data) = inputs.remove(operation_id) {
                     write_cast_event(
                         &mut writer,
+                        &mut input_bytes,
                         seconds,
                         "i",
-                        &String::from_utf8_lossy(data.as_bytes()),
+                        data.as_bytes(),
                         path,
                     )?;
                 }
@@ -137,18 +144,48 @@ pub fn export_to_writer(
     }
 
     cursor.finish()?;
+    for (code, bytes) in [("o", output_bytes), ("i", input_bytes)] {
+        if !bytes.is_empty() {
+            write_line(
+                &mut writer,
+                &(seconds, code, String::from_utf8_lossy(&bytes)),
+                path,
+            )?;
+        }
+    }
 
     return Ok(());
 }
 
 fn write_cast_event(
     writer: &mut impl Write,
+    pending: &mut Vec<u8>,
     seconds: f64,
     code: &str,
-    data: &str,
+    data: &[u8],
     path: &Path,
 ) -> Result<()> {
-    return write_line(writer, &(seconds, code, data), path);
+    pending.extend_from_slice(data);
+    let incomplete = pending.utf8_chunks().last().map_or(0, |chunk| {
+        return if str::from_utf8(chunk.invalid())
+            .is_err_and(|error| return error.error_len().is_none())
+        {
+            chunk.invalid().len()
+        } else {
+            0
+        };
+    });
+    let complete = pending.len() - incomplete;
+    if complete != 0 {
+        let (bytes, _) = pending.split_at(complete);
+        write_line(
+            writer,
+            &(seconds, code, String::from_utf8_lossy(bytes)),
+            path,
+        )?;
+        drop(pending.drain(..complete));
+    }
+    return Ok(());
 }
 
 fn write_line(writer: &mut impl Write, value: &impl Serialize, path: &Path) -> Result<()> {

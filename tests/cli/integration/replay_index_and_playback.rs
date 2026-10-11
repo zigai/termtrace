@@ -4,6 +4,87 @@ use crate::support::*;
 use std::sync::mpsc;
 
 #[test]
+fn asciicast_preserves_utf8_split_between_output_and_input_events() {
+    use termtrace_evidence::event_log::{EventLogWriter, SessionClock};
+    use termtrace_model::execution::event::EventLogHeader;
+    use uuid::Uuid;
+
+    for code in ["o", "i"] {
+        let temporary = TempDir::new().expect("temporary directory");
+        fs_err::set_permissions(temporary.path(), Permissions::from_mode(0o700))
+            .expect("private session");
+        let clock = SessionClock::now().expect("session clock");
+        let header = EventLogHeader::new(
+            Uuid::nil(),
+            "0".repeat(64),
+            clock.started_unix_ns(),
+            80,
+            24,
+            640,
+            480,
+            "xterm-ghostty",
+        );
+        let mut writer =
+            EventLogWriter::create(temporary.path().join("events.jsonl"), &header, clock)
+                .expect("event writer");
+        for bytes in [b"\xc2".as_slice(), b"\xa0".as_slice()] {
+            if code == "o" {
+                writer
+                    .append(Event::Output {
+                        data: ByteString::from(bytes),
+                    })
+                    .expect("output event");
+            } else {
+                let operation_id = Uuid::now_v7();
+                writer
+                    .append(Event::InputIntent {
+                        operation_id,
+                        source: InputSource::Agent,
+                        input_kind: InputKind::Raw,
+                        descriptor: InputDescriptor::Raw,
+                        data: ByteString::from(bytes),
+                        terminal_modes_hash: None,
+                        semantic_input: None,
+                        caller_intent: None,
+                    })
+                    .expect("input intent");
+                writer
+                    .append(Event::InputResult {
+                        operation_id,
+                        status: OperationStatus::Applied,
+                        bytes_written: 1,
+                        error_code: None,
+                    })
+                    .expect("applied input");
+            }
+        }
+        drop(writer);
+
+        let cast = Command::cargo_bin("termtrace")
+            .expect("binary")
+            .args(["artifact", "asciicast", "--session"])
+            .arg(temporary.path())
+            .args(["--out", "-"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let text = String::from_utf8(cast).expect("UTF-8 cast");
+        let output = text
+            .lines()
+            .skip(1)
+            .map(|line| {
+                let event: serde_json::Value = serde_json::from_str(line).expect("cast event");
+                assert_eq!(event[1], code);
+                return event[2].as_str().expect("output text").to_owned();
+            })
+            .collect::<String>();
+        assert_eq!(output, "\u{a0}", "stream {code}");
+    }
+}
+
+#[test]
 fn index_replays_every_distinct_state_deterministically() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("replay");
