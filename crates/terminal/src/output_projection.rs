@@ -211,6 +211,14 @@ mod tests {
     }
 
     #[test]
+    fn strips_dcs_with_raw_st_after_a_utf8_lead_byte() {
+        let mut stripper = ControlStripper::default();
+        let output = stripper.feed(b"\x1bPq\xc4\x9cTAIL");
+
+        assert_eq!(output, b"TAIL");
+    }
+
+    #[test]
     fn strips_seven_bit_control_families_and_recovers_from_false_string_escapes() {
         let mut stripper = ControlStripper::default();
         let output = stripper
