@@ -570,21 +570,33 @@ fn publish(video: &Path, out: &Path) -> Result<()> {
         };
     };
 
-    if out.symlink_metadata().is_ok() {
-        if out.is_dir() {
-            fs_err::remove_dir_all(out).map_err(filesystem)?;
-        } else {
-            fs_err::remove_file(out).map_err(filesystem)?;
+    let parent = out
+        .parent()
+        .filter(|path| return !path.as_os_str().is_empty())
+        .unwrap_or_else(|| return Path::new("."));
+    let directory = fs_err::File::open(parent).map_err(filesystem)?;
+    let staging = tempfile::Builder::new()
+        .prefix(".video-")
+        .tempdir_in(parent)
+        .map_err(filesystem)?;
+    let staged = staging.path().join("video.mp4");
+
+    match fs_err::hard_link(video, &staged) {
+        Ok(()) => {}
+        Err(source) if source.kind() == IoErrorKind::CrossesDevices => {
+            fs_err::copy(video, &staged).map_err(filesystem)?;
         }
+        Err(source) => return Err(filesystem(source)),
     }
 
-    return match fs_err::hard_link(video, out) {
-        Ok(()) => Ok(()),
-        Err(source) if source.kind() == IoErrorKind::CrossesDevices => {
-            fs_err::copy(video, out).map(drop).map_err(filesystem)
-        }
-        Err(source) => Err(filesystem(source)),
-    };
+    fs_err::File::open(&staged)
+        .map_err(filesystem)?
+        .sync_all()
+        .map_err(filesystem)?;
+    fs_err::rename(&staged, out).map_err(filesystem)?;
+    directory.sync_all().map_err(filesystem)?;
+
+    return Ok(());
 }
 
 fn duration_millis(duration: Duration, flag: &str) -> Result<u64> {
@@ -615,6 +627,56 @@ fn invalid(reason: impl Into<String>) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_video_publication_preserves_the_previous_file() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let out = temporary.path().join("output.mp4");
+        fs_err::write(&out, b"previous video").expect("previous output");
+
+        let error = publish(&temporary.path().join("missing.mp4"), &out)
+            .expect_err("missing source must fail");
+        assert!(matches!(error, Error::Filesystem { source, .. }
+            if source.kind() == IoErrorKind::NotFound));
+        assert_eq!(
+            fs_err::read(out).expect("previous output"),
+            b"previous video"
+        );
+    }
+
+    #[test]
+    fn video_publication_preserves_an_existing_directory() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let video = temporary.path().join("source.mp4");
+        let out = temporary.path().join("output.mp4");
+        fs_err::write(&video, b"new video").expect("source video");
+        fs_err::create_dir(&out).expect("existing directory");
+        fs_err::write(out.join("keep"), b"unrelated data").expect("directory contents");
+
+        assert!(matches!(
+            publish(&video, &out),
+            Err(Error::Filesystem { .. })
+        ));
+        assert_eq!(
+            fs_err::read(out.join("keep")).expect("directory contents remain"),
+            b"unrelated data"
+        );
+    }
+
+    #[test]
+    fn video_publication_replaces_the_previous_file() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let video = temporary.path().join("source.mp4");
+        let out = temporary.path().join("output.mp4");
+        fs_err::write(&video, b"new complete video").expect("source video");
+        fs_err::write(&out, b"previous video").expect("previous output");
+
+        publish(&video, &out).expect("publish video");
+        assert_eq!(
+            fs_err::read(out).expect("published video"),
+            b"new complete video"
+        );
+    }
 
     #[test]
     fn semantic_raster_profiles_follow_source_and_preset_precedence() {
