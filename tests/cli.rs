@@ -46,5 +46,5 @@ mod testing_adapters;
 mod timeline_analysis;
 #[path = "cli/integration/tmux_recording/mod.rs"]
 mod tmux_recording;
-#[path = "cli/contracts/workflow_regression_gates.rs"]
-mod workflow_regression_gates;
+#[path = "cli/contracts/workflow_conformance.rs"]
+mod workflow_conformance;
