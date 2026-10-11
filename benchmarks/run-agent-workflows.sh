@@ -57,10 +57,13 @@ measure() {
     local wrapper_dir=$work/harness/bin
     mkdir -p "$wrapper_dir"
     local wrapper=$wrapper_dir/termtrace
+    local quoted_invocations quoted_binary
+    printf -v quoted_invocations '%q' "$invocations"
+    printf -v quoted_binary '%q' "$binary"
     cat >"$wrapper" <<EOF
 #!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$invocations"
-exec "$binary" "\$@"
+printf '%s\n' "\$*" >> $quoted_invocations
+exec $quoted_binary "\$@"
 EOF
     chmod +x "$wrapper"
 

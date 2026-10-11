@@ -2,6 +2,8 @@
 
 #[path = "cli/integration/adoption_surfaces.rs"]
 mod adoption_surfaces;
+#[path = "cli/integration/agent_workflows.rs"]
+mod agent_workflows;
 #[path = "cli/integration/artifacts_and_bundles.rs"]
 mod artifacts_and_bundles;
 #[path = "cli/contracts/atomic_action_conformance.rs"]
