@@ -5,6 +5,7 @@ use crate::{
     error::{Error, Result},
     options::{self, HOOK_INDEX, WRAPPER_BINARY_ENV},
 };
+use percent_encoding::percent_decode;
 use std::{
     borrow::Cow,
     env,
@@ -422,7 +423,17 @@ impl TmuxClient {
     /// # Errors
     /// Returns tmux failures, including an absent pane, or a malformed row.
     pub fn pane_row(&self, pane: &str) -> Result<PaneRow> {
-        let mut output = self.pane_format(pane, row_format().as_str())?;
+        let pane_id = self.resolve_target(OsStr::new(pane), "#{pane_id}", b'%', "pane")?;
+        let filter = format!("#{{==:#{{pane_id}},{pane_id}}}");
+        let mut output = self.output([
+            "list-panes",
+            "-t",
+            pane_id.as_str(),
+            "-f",
+            filter.as_str(),
+            "-F",
+            row_format().as_str(),
+        ])?;
         output.push(b'\n');
 
         return parse_rows(&output)?
@@ -465,6 +476,10 @@ fn row_format() -> String {
         format!("#{{{}}}", options::PANE_SESSION),
     ];
 
+    let fields = fields.map(|field| {
+        return format!("#{{s|\u{1e}|%1E|:#{{s|\u{1f}|%1F|:#{{s|%|%25|:{field}}}}}}}");
+    });
+
     return format!("{}\u{1e}", fields.join("\u{1f}"));
 }
 
@@ -489,7 +504,10 @@ fn parse_rows(output: &[u8]) -> Result<Vec<PaneRow>> {
 }
 
 fn parse_row(row: &[u8]) -> Result<PaneRow> {
-    let fields = row.split(|byte| return *byte == FIELD).collect::<Vec<_>>();
+    let fields = row
+        .split(|byte| return *byte == FIELD)
+        .map(|field| return percent_decode(field).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
     let [dead, pane_id, pid, grandfathered, selected, excluded, session_id, session_name, window_id, window_index, window_name, layout, window_active, zoomed, pane_active, in_mode, pane_mode, current_command, recording_session] =
         fields.as_slice()
     else {
@@ -507,15 +525,15 @@ fn parse_row(row: &[u8]) -> Result<PaneRow> {
     };
 
     return Ok(PaneRow {
-        dead: *dead == b"1",
+        dead: dead.as_slice() == b"1",
         pid: number(pid),
         marks: PaneMarks {
             grandfathered: number(grandfathered),
             selected: number(selected),
             excluded: number(excluded),
         },
-        window_name: ByteString::from(*window_name),
-        current_command: ByteString::from(*current_command),
+        window_name: ByteString::from(window_name.as_slice()),
+        current_command: ByteString::from(current_command.as_slice()),
         snapshot: TmuxPaneSnapshot {
             session_id: parse_identifier(Some(session_id), b'$', "session")?,
             session_name: text(session_name)?,
@@ -524,14 +542,14 @@ fn parse_row(row: &[u8]) -> Result<PaneRow> {
                 return Error::Tmux("tmux returned an invalid window index".to_owned());
             })?,
             layout: text(layout)?,
-            window_active: *window_active == b"1",
-            zoomed: *zoomed == b"1",
+            window_active: window_active.as_slice() == b"1",
+            zoomed: zoomed.as_slice() == b"1",
             pane_id: parse_identifier(Some(pane_id), b'%', "pane")?,
-            pane_active: *pane_active == b"1",
-            copy_mode: *in_mode != b"0",
+            pane_active: pane_active.as_slice() == b"1",
+            copy_mode: in_mode.as_slice() != b"0",
             pane_mode: text(pane_mode)?,
             recording_session: (!recording_session.is_empty())
-                .then(|| return ByteString::from(*recording_session)),
+                .then(|| return ByteString::from(recording_session.as_slice())),
         },
     });
 }

@@ -8,6 +8,7 @@ license-file.workspace = true
 rust-version = "1.97.1"
 
 [dependencies]
+percent-encoding = "2.3.2"
 termtrace-model = { version = "=0.1.0", path = "../model" }
 termtrace-evidence = { version = "=0.1.0", path = "../evidence" }
 termtrace-control = { version = "=0.1.0", path = "../control" }
