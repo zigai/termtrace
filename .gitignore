@@ -41,7 +41,7 @@ node_modules/
 perf.data
 perf.data.old
 core
-core.*
+core.[0-9]*
 
 # Local environment and editor state
 .env
