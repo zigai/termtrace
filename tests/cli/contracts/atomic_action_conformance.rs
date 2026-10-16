@@ -236,15 +236,16 @@ fn send_applies_mixed_steps_once_and_replays_them_on_retry() {
         },
         ..SendRequest::default()
     };
-
     let SendOutcome::Action(first) = session.send(request.clone()).expect("first send") else {
         panic!("a send ending in input reports its action outcome");
     };
+
     assert!(first.is_matched());
 
     let SendOutcome::Action(retry) = session.send(request).expect("retried send") else {
         panic!("a retried send ending in input reports its action outcome");
     };
+
     assert_eq!(retry.request_id, first.request_id);
     assert_eq!(retry.input, first.input);
 
@@ -281,7 +282,6 @@ fn send_reports_the_failed_step_after_applying_earlier_ones() {
 
     wait_for_output(session.path(), b"READY", Duration::from_secs(5))
         .expect("send failure fixture ready");
-
     let failure = session
         .send(SendRequest {
             steps: vec![
@@ -295,7 +295,6 @@ fn send_reports_the_failed_step_after_applying_earlier_ones() {
             ..SendRequest::default()
         })
         .expect_err("a blank marker label is rejected");
-
     assert_eq!(failure.step, 1);
     assert_eq!(failure.error.code(), "invalid_marker");
     assert_eq!(failure.error.effect(), MutationEffect::NotApplied);

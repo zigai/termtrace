@@ -13,6 +13,7 @@ fn asciicast_preserves_utf8_split_between_output_and_input_events() {
         let temporary = TempDir::new().expect("temporary directory");
         fs_err::set_permissions(temporary.path(), Permissions::from_mode(0o700))
             .expect("private session");
+
         let clock = SessionClock::now().expect("session clock");
         let header = EventLogHeader::new(
             Uuid::nil(),
@@ -24,6 +25,7 @@ fn asciicast_preserves_utf8_split_between_output_and_input_events() {
             480,
             "xterm-ghostty",
         );
+
         let mut writer =
             EventLogWriter::create(temporary.path().join("events.jsonl"), &header, clock)
                 .expect("event writer");
@@ -58,6 +60,7 @@ fn asciicast_preserves_utf8_split_between_output_and_input_events() {
                     .expect("applied input");
             }
         }
+
         drop(writer);
 
         let cast = Command::cargo_bin("termtrace")
@@ -70,6 +73,7 @@ fn asciicast_preserves_utf8_split_between_output_and_input_events() {
             .get_output()
             .stdout
             .clone();
+
         let text = String::from_utf8(cast).expect("UTF-8 cast");
         let output = text
             .lines()
@@ -77,6 +81,7 @@ fn asciicast_preserves_utf8_split_between_output_and_input_events() {
             .map(|line| {
                 let event: serde_json::Value = serde_json::from_str(line).expect("cast event");
                 assert_eq!(event[1], code);
+
                 return event[2].as_str().expect("output text").to_owned();
             })
             .collect::<String>();

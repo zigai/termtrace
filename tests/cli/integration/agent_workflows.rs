@@ -11,6 +11,7 @@ fn benchmark_wrapper_keeps_command_substitutions_in_paths_literal() {
         b"#!/usr/bin/env bash\ncase \"$1\" in\nrecord|status) exit 0;;\nwait) printf wait > \"$0.invoked\"; exit 17;;\n*) exit 18;;\nesac\n",
     )
     .expect("fixture executable");
+
     fs_err::set_permissions(&binary, Permissions::from_mode(0o700))
         .expect("executable permissions");
 

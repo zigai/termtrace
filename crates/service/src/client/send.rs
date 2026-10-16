@@ -168,7 +168,6 @@ impl Session {
             request_id: Some(request_id),
             if_state: if index == 0 { request.guard.if_state.clone() } else { None },
         };
-
         let outcome = match step {
             SendStep::Command(command) => self
                 .control(&guard.request(command.clone()))

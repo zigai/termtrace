@@ -407,7 +407,6 @@ fn check_text(text: &str) -> Result<(), PredicateError> {
     if text.is_empty() || text.len() > MAX_PREDICATE_TEXT_BYTES {
         return Err(PredicateError::TextLength);
     }
-
     return Ok(());
 }
 
@@ -585,7 +584,6 @@ mod tests {
             .expect("hour-long wait is allowed")
             .into_predicate()
             .expect("screen wait carries its compiled predicate");
-
         assert_eq!(predicate.predicate(), &contains("ready"));
     }
 
@@ -593,7 +591,6 @@ mod tests {
     fn screen_wait_rejects_durations_outside_stable_le_timeout_le_hour() {
         for (stable_for_ns, timeout_ns) in [(0, 0), (0, HOUR_NS + 1), (2, 1)] {
             let error = rejection(&wait(contains("ready"), stable_for_ns, timeout_ns));
-
             assert_eq!(error, CommandError::ScreenWaitDurations);
             assert_eq!(error.code(), "invalid_screen_wait");
         }
@@ -602,7 +599,6 @@ mod tests {
     #[test]
     fn screen_wait_reports_an_invalid_predicate_before_its_durations() {
         let error = rejection(&wait(contains(""), 0, 0));
-
         assert_eq!(
             error,
             CommandError::ScreenWaitPredicate(PredicateError::TextLength)
@@ -618,7 +614,6 @@ mod tests {
                 projection: ScreenProjectionRequest::default(),
             };
         };
-
         assert!(capture(1).validate().is_ok());
         assert_eq!(rejection(&capture(0)).code(), "invalid_stable_capture");
     }
@@ -670,6 +665,7 @@ mod tests {
                 predicates: vec![deep],
             };
         }
+
         assert_eq!(deep.compile().map(|_| ()), Err(PredicateError::TooLarge));
 
         let wide = ScreenPredicate::Any {
@@ -681,11 +677,13 @@ mod tests {
                 })
                 .collect(),
         };
+
         assert_eq!(wide.compile().map(|_| ()), Err(PredicateError::TooLarge));
 
         let siblings = ScreenPredicate::Any {
             predicates: (0..17).map(|_| return contains("a")).collect(),
         };
+
         assert_eq!(
             siblings.compile().map(|_| ()),
             Err(PredicateError::ChildCount)
@@ -740,7 +738,6 @@ mod tests {
 
         for (predicate, message) in invalid {
             let error = predicate.compile().expect_err("operand is out of bounds");
-
             assert!(error.to_string().contains(message), "{error}");
         }
     }
@@ -748,7 +745,6 @@ mod tests {
     #[test]
     fn marker_label_is_measured_after_trimming() {
         let mark = |label: String| return ControlCommand::Mark { label };
-
         assert!(mark(format!("  {}  ", "m".repeat(256))).validate().is_ok());
         assert_eq!(
             rejection(&mark(" \t ".to_owned())),

@@ -104,6 +104,7 @@ fn fixture_frame() -> ScreenFrame {
 #[test]
 fn test_frame_text_extraction_from_variants() {
     let mut frame = fixture_frame();
+
     for (name, data, expected) in [
         ("no detail", ScreenFrameContent::None, ""),
         (
@@ -141,7 +142,6 @@ fn test_frame_text_extraction_from_variants() {
         ),
     ] {
         frame.data = data;
-
         assert_eq!(frame_text(&frame), expected, "{name}");
     }
 }

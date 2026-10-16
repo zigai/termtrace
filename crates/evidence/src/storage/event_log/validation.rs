@@ -106,7 +106,6 @@ where
     T: for<'de> serde::Deserialize<'de>,
 {
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-
     let value = serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
         let json_path = error.path().to_string();
         let source = error.into_inner();

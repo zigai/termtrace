@@ -291,6 +291,7 @@ fn session_readers_reject_a_second_json_document() {
             signal: None,
             signal_name: None,
         }]);
+
         let session = temporary.path().join("session");
         assert!(verify_session(&session, VerificationLevel::Content).valid);
         let path = session.join(filename);

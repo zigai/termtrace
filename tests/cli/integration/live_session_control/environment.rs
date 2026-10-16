@@ -7,6 +7,7 @@ fn numeric_environment_values_never_enter_rejection_diagnostics() {
     let session = temporary.path().join("rejected");
     fs_err::write(&specification, br#"{"set":{"TOKEN":100000000}}"#)
         .expect("write malformed environment");
+
     fs_err::set_permissions(&specification, Permissions::from_mode(0o600))
         .expect("private environment");
 
@@ -21,7 +22,6 @@ fn numeric_environment_values_never_enter_rejection_diagnostics() {
         .failure()
         .get_output()
         .clone();
-
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid JSON"));
     assert!(!output
         .stderr

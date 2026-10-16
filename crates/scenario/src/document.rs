@@ -41,7 +41,6 @@ pub(super) fn read(path: impl AsRef<Path>) -> Result<Scenario> {
                 source,
             };
         })?;
-
     deserializer.end().map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
@@ -181,6 +180,7 @@ pub(super) fn expand_matrix(document: Scenario) -> Result<Vec<(String, Scenario)
                     } else {
                         value.clone()
                     };
+
                     return Ok(format!("{key}={encoded}"));
                 })
                 .collect::<Result<Vec<String>>>()?
@@ -351,8 +351,8 @@ mod tests {
             br#"{"version":2,"name":"matrix","matrix":{"a":["x,b=y","x"],"b":["z","y,b=z"]},"launch":{"command":["/bin/echo","{{a}}","{{b}}"]},"steps":[{"matchScreenSnapshot":{"name":"final"}}]}"#,
         )
         .expect("scenario document");
-        let scenario = read(&path).expect("read matrix scenario");
 
+        let scenario = read(&path).expect("read matrix scenario");
         let expanded = expand_matrix(scenario).expect("matrix expansion");
         let names = expanded
             .iter()
@@ -360,10 +360,12 @@ mod tests {
                 let ScenarioStep::MatchScreenSnapshot(snapshot) = &scenario.steps[0] else {
                     panic!("expected snapshot step");
                 };
+
                 return snapshot.name.as_str();
             })
             .collect::<BTreeSet<_>>();
         assert_eq!(names.len(), 4);
+
         let labels = expanded
             .iter()
             .map(|(label, _)| return label.as_str())
@@ -447,12 +449,14 @@ mod tests {
 
         let error = read(&path).expect_err("invalid environment value");
         assert!(!error.to_string().contains("100000000"));
+
         let Error::InvalidJson {
             json_path, source, ..
         } = error
         else {
             panic!("expected JSON diagnostic");
         };
+
         assert_eq!(json_path, "launch.environment.set.TOKEN");
         assert!(!source.to_string().contains("100000000"));
     }
@@ -466,7 +470,6 @@ mod tests {
             br#"{"version":2,"name":"trailing document","launch":{"command":["/bin/true"]},"steps":[{"stop":{}}]}{}"#,
         )
         .expect("write scenario");
-
         assert!(matches!(read(&path), Err(Error::InvalidJson { source, .. })
             if source.is_syntax()));
     }

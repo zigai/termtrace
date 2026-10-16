@@ -394,6 +394,7 @@ impl Session {
         let compiled = predicate
             .compile()
             .map_err(CommandError::ScreenWaitPredicate)?;
+
         let (state, source, presented) =
             resolved_screen_state_for_session(&self.path, StatePoint::LatestPresented, false)?;
 
@@ -407,7 +408,6 @@ impl Session {
         .map_err(Error::ScreenFrame)?;
 
         let matched = compiled.matches(&state, &state_text(&state), &frame.state_hash);
-
         let observed_monotonic_ns = frame_monotonic_ns(&frame);
 
         return Ok(ScreenWaitOutcome {

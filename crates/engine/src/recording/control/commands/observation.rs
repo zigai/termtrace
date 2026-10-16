@@ -183,8 +183,8 @@ pub(super) fn evaluate_action_postcondition(
             let state_hash = presented_state_hash(live)?;
             let viewport_text = semantic_viewport_text(&live.presented);
             let matched = predicate.matches(&live.presented, &viewport_text, &state_hash);
-
             let deadline = now >= started_at + Duration::from_nanos(*timeout_ns);
+
             if !matched && !child_completed && !output_closed && !deadline {
                 return Ok(None);
             }

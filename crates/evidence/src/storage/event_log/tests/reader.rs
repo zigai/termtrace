@@ -32,8 +32,10 @@ fn rejects_second_json_value_after_an_authenticated_event() {
         .position(|byte| return *byte == b'\n')
         .expect("header newline")
         + 1;
+
     let mut corrupted = original.clone();
     assert_eq!(corrupted.pop(), Some(b'\n'));
+
     corrupted.extend_from_slice(b"{}\n");
     fs_err::write(&source, &corrupted).expect("corrupt record");
 
@@ -41,6 +43,7 @@ fn rejects_second_json_value_after_an_authenticated_event() {
         EventLog::read(&source),
         Err(Error::InvalidEventLog { line: 2, .. })
     ));
+
     let recovered = source.with_file_name("recovered.jsonl");
     let report = EventLog::recover_prefix(&source, &recovered).expect("recover prefix");
     assert_eq!(report.valid_events, 0);

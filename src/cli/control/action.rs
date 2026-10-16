@@ -187,7 +187,6 @@ pub(in crate::cli) fn run_send(
         postcondition: postcondition.clone(),
         projection: projection(&arguments),
     };
-
     let outcome = match session.send(request) {
         Ok(outcome) => outcome,
         Err(failure) => {
@@ -309,6 +308,7 @@ fn write_send_failure(
     let ended = session
         .completion()
         .is_ok_and(|completion| return completion.is_some());
+
     let output = error_response(request_id, error, ended);
 
     if arguments.json {

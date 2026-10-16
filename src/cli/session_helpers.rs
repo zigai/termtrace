@@ -69,6 +69,7 @@ pub(super) fn resolve_cli_range(
     let status = attach_session(session).and_then(|attached| {
         return attached.status().into_diagnostic();
     });
+
     let live_event_count = match status {
         Ok(SessionStatus::Completed(_)) => {
             return selection_bounds(resolve_session_source_selection(

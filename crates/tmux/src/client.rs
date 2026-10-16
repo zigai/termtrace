@@ -475,7 +475,6 @@ fn row_format() -> String {
         "#{pane_current_command}".to_owned(),
         format!("#{{{}}}", options::PANE_SESSION),
     ];
-
     let fields = fields.map(|field| {
         return format!("#{{s|\u{1e}|%1E|:#{{s|\u{1f}|%1F|:#{{s|%|%25|:{field}}}}}}}");
     });
@@ -508,6 +507,7 @@ fn parse_row(row: &[u8]) -> Result<PaneRow> {
         .split(|byte| return *byte == FIELD)
         .map(|field| return percent_decode(field).collect::<Vec<_>>())
         .collect::<Vec<_>>();
+
     let [dead, pane_id, pid, grandfathered, selected, excluded, session_id, session_name, window_id, window_index, window_name, layout, window_active, zoomed, pane_active, in_mode, pane_mode, current_command, recording_session] =
         fields.as_slice()
     else {

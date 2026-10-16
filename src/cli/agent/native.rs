@@ -43,6 +43,7 @@ impl Driver {
                 };
             })?
             .status()?;
+
         let boundary = match status {
             SessionStatus::Completed(_) => None,
             SessionStatus::Live { boundaries, .. } => {

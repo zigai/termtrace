@@ -79,8 +79,8 @@ pub fn export_to_writer(
     let mut resizes: HashMap<Uuid, (u16, u16)> = HashMap::new();
     let mut output_bytes = Vec::new();
     let mut input_bytes = Vec::new();
-    let mut seconds = 0.0;
 
+    let mut seconds = 0.0;
     while let Some(record) = cursor.next_record()? {
         seconds = Duration::from_nanos(record.monotonic_ns).as_secs_f64();
 
@@ -144,6 +144,7 @@ pub fn export_to_writer(
     }
 
     cursor.finish()?;
+
     for (code, bytes) in [("o", output_bytes), ("i", input_bytes)] {
         if !bytes.is_empty() {
             write_line(
@@ -175,6 +176,7 @@ fn write_cast_event(
             0
         };
     });
+
     let complete = pending.len() - incomplete;
     if complete != 0 {
         let (bytes, _) = pending.split_at(complete);
@@ -183,8 +185,10 @@ fn write_cast_event(
             &(seconds, code, String::from_utf8_lossy(bytes)),
             path,
         )?;
+
         drop(pending.drain(..complete));
     }
+
     return Ok(());
 }
 

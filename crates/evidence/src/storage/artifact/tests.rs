@@ -24,10 +24,8 @@ fn failed_publication_preserves_existing_presentation() {
     let previous = destination.join("presentation.mp4");
     fs_err::write(&previous, b"previous complete video").expect("previous output");
     let staging = temporary.path().join("missing-staging");
-
     let error = commit_directory(temporary.path(), &staging, &destination, true)
         .expect_err("missing staged output must fail publication");
-
     assert!(matches!(error, Error::Filesystem { source, .. }
         if source.kind() == ErrorKind::NotFound));
     assert_eq!(
@@ -43,8 +41,11 @@ fn publication_replaces_an_existing_presentation_with_complete_output() {
     let destination = temporary.path().join("presentation");
     let staging = temporary.path().join("staging");
     fs_err::create_dir(&destination).expect("previous directory");
+
     fs_err::create_dir(&staging).expect("staged directory");
+
     fs_err::write(destination.join("old.mp4"), b"old").expect("previous output");
+
     fs_err::write(staging.join("presentation.mp4"), b"new complete video").expect("staged output");
 
     commit_directory(temporary.path(), &staging, &destination, true).expect("replace presentation");

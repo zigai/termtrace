@@ -178,6 +178,7 @@ impl Error {
         if let Self::Control(ControlError::Rejected { code, .. }) = self {
             return code;
         }
+
         if let Self::Command(error) = self {
             return error.code();
         }
