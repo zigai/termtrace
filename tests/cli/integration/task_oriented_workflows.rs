@@ -320,11 +320,13 @@ fn child_completed_wait_returns_the_output_drained_frame() {
             "record",
             "-d",
             "--json",
+            "--until-screen",
+            "READY",
             "drained-action",
             "--",
-            "/bin/sh",
+            "/usr/bin/python3",
             "-c",
-            "sleep 1.5; dd if=/dev/zero bs=16384 count=8 2>/dev/null | tr '\\0' Y; printf ACTION_TAIL",
+            "import os,sys,tty; tty.setraw(0); os.write(1,b'READY'); os.read(0,1); sys.stdout.buffer.write(b'Y'*131072+b'ACTION_TAIL'); sys.stdout.buffer.flush()",
         ])
         .assert()
         .success();

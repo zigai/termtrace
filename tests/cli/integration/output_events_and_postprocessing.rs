@@ -348,7 +348,7 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
             "--",
             "/usr/bin/python3",
             "-c",
-            "import os,signal,sys,tty\nsignal.signal(signal.SIGTERM,lambda *_: sys.exit(0))\ntty.setraw(0)\nfor _ in range(4200):\n os.write(1,b'\\x1b[6n')\n response=b''\n while not response.endswith(b'R'): response+=os.read(0,64)\nos.write(1,b'PREFIX_READY')\nwhile True: os.read(0,4096)",
+            "import os,signal,sys,tty\nsignal.signal(signal.SIGTERM,lambda *_: sys.exit(0))\ntty.setraw(0)\nfor _ in range(1100):\n os.write(1,b'\\x1b[6n')\n response=b''\n while not response.endswith(b'R'): response+=os.read(0,64)\nos.write(1,b'PREFIX_READY')\nwhile True: os.read(0,4096)",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

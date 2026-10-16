@@ -348,10 +348,15 @@ fn native_live_prefix_excludes_hidden_bytes_and_remains_verifiable_after_complet
 fn native_replay_batch_orders_endpoints_and_reuses_one_terminal() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("source");
+    let profile = temporary.path().join("ghostty.conf");
+    fs::write(&profile, b"cursor-style-blink = false\n").expect("non-blinking cursor profile");
+
     Command::cargo_bin("termtrace")
         .expect("binary")
         .args(["record", "--no-input", "--out"])
         .arg(&session)
+        .arg("--ghostty-config")
+        .arg(&profile)
         .args(["--", "/bin/sh", "-c", "printf 'ABC'"])
         .timeout(Duration::from_secs(20))
         .assert()
