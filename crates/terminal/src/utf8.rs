@@ -11,6 +11,7 @@ impl Utf8Prefix {
             false
         } else {
             self.bytes.push(byte);
+
             match str::from_utf8(&self.bytes) {
                 Ok(_) => {
                     self.bytes.clear();
@@ -37,6 +38,7 @@ impl Utf8Prefix {
         if bytes.len() >= 4 {
             self.bytes.clear();
         }
+
         for byte in bytes.iter().skip(bytes.len().saturating_sub(4)) {
             self.push(*byte);
         }

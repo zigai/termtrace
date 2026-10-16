@@ -86,6 +86,7 @@ impl PresentationTracker {
                 if pos > 0 {
                     let prefix = bytes.get(..pos).unwrap_or(&[]);
                     self.utf8_prefix.observe_slice(prefix);
+
                     return (prefix, None);
                 }
 
@@ -95,6 +96,7 @@ impl PresentationTracker {
             }
 
             self.utf8_prefix.observe_slice(bytes);
+
             return (bytes, None);
         }
 
@@ -109,6 +111,7 @@ impl PresentationTracker {
         if continuation && self.state == PresentationParseState::Ground {
             return PresentationAction::Immediate;
         }
+
         match &mut self.state {
             PresentationParseState::Ground => match byte {
                 0x1b => {
@@ -309,6 +312,7 @@ impl QueryTracker {
         if continuation && matches!(self.kind, QueryKind::None) {
             return false;
         }
+
         if byte == 0x18 || byte == 0x1a {
             self.clear();
 
@@ -486,10 +490,12 @@ mod tests {
         ] {
             let mut tracker = PresentationTracker::new(false);
             let mut delivered = Vec::new();
+
             for mut chunk in chunks {
                 while !chunk.is_empty() {
                     let (immediate, action) = tracker.push_slice(chunk);
                     delivered.extend_from_slice(immediate);
+
                     let consumed = action.map_or(immediate.len(), |action| {
                         match action {
                             PresentationAction::Immediate => delivered.push(chunk[0]),
@@ -505,6 +511,7 @@ mod tests {
                     chunk = &chunk[consumed..];
                 }
             }
+
             assert_eq!(delivered, expected);
             assert!(tracker.finish().is_empty());
         }
@@ -516,10 +523,12 @@ mod tests {
         for byte in b"\xc4\x9d" {
             assert!(!tracker.push(*byte));
         }
+
         assert!(!tracker.is_tracking());
         assert!(tracker.bytes().is_empty());
 
         tracker.observe_plain_bytes(b"abcd\xc4");
+
         assert!(!tracker.push(0x9d));
         assert!(!tracker.is_tracking());
         assert!(tracker.bytes().is_empty());
@@ -527,6 +536,7 @@ mod tests {
         for byte in b"\x1b]0;\xc4\x9crest" {
             assert!(!tracker.push(*byte));
         }
+
         assert!(tracker.push(0x07));
         assert_eq!(tracker.bytes(), b"\x1b]0;\xc4\x9crest\x07");
     }

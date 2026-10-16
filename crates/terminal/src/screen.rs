@@ -59,7 +59,7 @@ fn hash_cell(hasher: &mut blake3::Hasher, cell: &CellState) {
 
     let mut bits = 0_u16;
     if cell.style.bold {
-        bits |= 1 << 0;
+        bits |= 1;
     }
 
     if cell.style.italic {
@@ -207,7 +207,7 @@ fn semantic_state_metadata_hasher(state: &SemanticState) -> blake3::Hasher {
     // Active style
     let mut active_bits = 0_u16;
     if state.active_style.bold {
-        active_bits |= 1 << 0;
+        active_bits |= 1;
     }
 
     if state.active_style.italic {

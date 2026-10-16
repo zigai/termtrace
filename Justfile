@@ -135,7 +135,7 @@ security:
 
 # Kill mutants in the streaming control stripper and screen boundary
 mutation:
-  cargo mutants --cargo-arg=--locked -p termtrace-terminal -f crates/terminal/src/output_projection.rs -f crates/terminal/src/screen.rs --timeout 60 --jobs 2
+  TERMTRACE_GHOSTTY_PREFIX={{justfile_directory()}}/vendor/ghostty/zig-out cargo mutants --cargo-arg=--locked -p termtrace-terminal -f crates/terminal/src/output_projection.rs -f crates/terminal/src/screen.rs --timeout 60 --jobs 2
 
 # Run every repository check, including native capture, fuzzing, sanitizers, Miri, and mutation testing (requires bootstrap and the tools each recipe names)
 check: lint validate test integration bindings-test native-check native-test security fuzz miri sanitize test-race mutation

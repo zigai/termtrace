@@ -1,0 +1,9 @@
+gitignore = true
+copy_target = false
+
+exclude_re = [
+    # The in-memory writer's flush implementation already returns Ok(()).
+    ': replace <impl Write for CountingHashWriter>::flush -> io::Result<\(\)> with Ok\(\(\)\)$',
+    # Blank-cell width changes only the conservative estimate; serialized bytes enforce the limit.
+    'crates/terminal/src/screen\.rs:[0-9]+:63: replace == with != in validate_projection_clone_bytes$',
+]

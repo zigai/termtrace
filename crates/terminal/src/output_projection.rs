@@ -1,7 +1,6 @@
 //! Explicitly lossy, streaming-safe child-output projections.
 
 use crate::utf8::Utf8Prefix;
-
 pub use termtrace_model::protocol::output_projection::{
     OutputProjectionQuality, OutputProjectionReport,
 };
@@ -69,7 +68,6 @@ impl ControlStripper {
 
     fn consume(&mut self, byte: u8, output: &mut Vec<u8>) {
         let continuation = self.utf8_prefix.push(byte);
-
         if continuation && self.state == StripState::Ground {
             output.push(byte);
             return;
@@ -214,7 +212,6 @@ mod tests {
     fn strips_dcs_with_raw_st_after_a_utf8_lead_byte() {
         let mut stripper = ControlStripper::default();
         let output = stripper.feed(b"\x1bPq\xc4\x9cTAIL");
-
         assert_eq!(output, b"TAIL");
     }
 
@@ -224,6 +221,51 @@ mod tests {
         let output = stripper
             .feed(b"\x1b]0;title\x07A\x1bPdata\x1b\\B\x1bcC\x1b]0;title\x1b\\D\x1b]0;a\x1bx\x07E");
         assert_eq!(output, b"ABCDE");
+    }
+
+    #[test]
+    fn cancellation_preserves_text_after_incomplete_controls_across_chunk_boundaries() {
+        for (name, prefix) in [
+            ("escape", b"\x1b".as_slice()),
+            ("escape intermediate", b"\x1b("),
+            ("csi", b"\x1b[31"),
+            ("osc", b"\x1b]0;title"),
+            ("dcs", b"\x1bPpayload"),
+            ("osc pending escape", b"\x1b]0;title\x1b"),
+            ("dcs pending escape", b"\x1bPpayload\x1b"),
+        ] {
+            for cancel in [0x18, 0x1a] {
+                let mut input = b"before".to_vec();
+                input.extend_from_slice(prefix);
+                input.push(cancel);
+                input.extend_from_slice(b"after\n");
+
+                for split in 0..=input.len() {
+                    let mut stripper = ControlStripper::default();
+                    let mut output = stripper.feed(&input[..split]);
+                    output.extend(stripper.feed(&input[split..]));
+                    assert_eq!(
+                        output, b"beforeafter\n",
+                        "{name}, cancellation {cancel:#x}, split {split}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn utf8_continuation_in_osc_does_not_leak_title_text_across_chunk_boundaries() {
+        for input in [
+            b"before\x1b]0;\xc4\x9cprivate title\x07after\n".as_slice(),
+            b"before\x1b]0;prefix\x1bx\xc4\x9cprivate title\x07after\n",
+        ] {
+            for split in 0..=input.len() {
+                let mut stripper = ControlStripper::default();
+                let mut output = stripper.feed(&input[..split]);
+                output.extend(stripper.feed(&input[split..]));
+                assert_eq!(output, b"beforeafter\n", "split {split}");
+            }
+        }
     }
 
     #[test]
