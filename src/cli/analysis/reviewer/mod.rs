@@ -7,7 +7,10 @@ use crossterm::{
         KeyEventKind, KeyModifiers, MouseEventKind,
     },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
+        LeaveAlternateScreen,
+    },
 };
 use ratatui::{
     backend::CrosstermBackend,
@@ -389,7 +392,13 @@ impl TerminalModeGuard {
         enable_raw_mode().map_err(terminal_error)?;
 
         let guard = Self;
-        execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture).map_err(terminal_error)?;
+        execute!(
+            io::stdout(),
+            EnterAlternateScreen,
+            Clear(ClearType::All),
+            EnableMouseCapture
+        )
+        .map_err(terminal_error)?;
 
         return Ok(guard);
     }
@@ -418,7 +427,6 @@ pub(in crate::cli) fn run(
     let _guard = TerminalModeGuard::enter()?;
     let mut terminal =
         Terminal::new(CrosstermBackend::new(io::stdout())).map_err(terminal_error)?;
-    terminal.clear().map_err(terminal_error)?;
 
     while !sigint.load(Ordering::Relaxed) && !sigterm.load(Ordering::Relaxed) {
         model.update()?;
