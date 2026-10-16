@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
 import tempfile
 from typing import Any
+from unittest.mock import Mock
+
 import pytest
 from termtrace import (
+    Recording,
     StateGuardFailedError,
     Termtrace,
+    TermtraceError,
     TimeoutError,
+    aio,
 )
 from termtrace.aio import AsyncTermtrace
 
@@ -188,6 +195,92 @@ async def test_async_recording_lifecycle() -> None:
             state = await screen.wait_for_text("PY_ASYNC_OK", timeout=5.0)
             assert "PY_ASYNC_OK" in state.text
         assert not rec.is_active()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("completed", [False, True], ids=["pending", "completed"])
+@pytest.mark.parametrize(
+    "failure",
+    [None, "force_close", "stop", "launch"],
+    ids=["closed", "fallback", "cleanup-failed", "launch-failed"],
+)
+async def test_cancelled_recording_launch_is_cleaned_up_and_failures_reported(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    completed: bool,
+    failure: str | None,
+) -> None:
+    loop = asyncio.get_running_loop()
+    launched: asyncio.Future[Recording] = loop.create_future()
+    started = asyncio.Event()
+    cleaned = asyncio.Event()
+    rec = Mock(spec=Recording)
+    rec.force_close.side_effect = cleaned.set
+    if failure in {"force_close", "stop"}:
+        rec.force_close.side_effect = TermtraceError("force close failed")
+    if failure == "stop":
+        rec.stop.side_effect = TermtraceError("stop failed")
+
+    async def launch_in_thread(*args: Any, **kwargs: Any) -> Recording:
+        started.set()
+        return await launched
+
+    def observe_cleanup(record: logging.LogRecord) -> None:
+        cleaned.set()
+
+    handler = logging.Handler()
+    monkeypatch.setattr(handler, "emit", observe_cleanup)
+    logger = logging.getLogger("termtrace.aio")
+    logger.addHandler(handler)
+    caplog.set_level(logging.ERROR, logger="termtrace.aio")
+    monkeypatch.setattr(aio.asyncio, "to_thread", launch_in_thread)
+    tt = AsyncTermtrace(binary=TERMTRACE_BIN)
+    pending_before = set(aio._pending_launches)
+    task = asyncio.create_task(tt.record(["/bin/sh"]))
+    try:
+        await asyncio.wait_for(started.wait(), 1.0)
+        assert len(aio._pending_launches - pending_before) == 1
+        if completed:
+            if failure == "launch":
+                launched.set_exception(TermtraceError("launch failed"))
+            else:
+                launched.set_result(rec)
+            loop.call_soon(task.cancel)
+        else:
+            task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        if not completed:
+            assert len(aio._pending_launches - pending_before) == 1
+            if failure == "launch":
+                launched.set_exception(TermtraceError("launch failed"))
+            else:
+                launched.set_result(rec)
+        await asyncio.wait_for(cleaned.wait(), 1.0)
+        if failure == "launch":
+            rec.force_close.assert_not_called()
+        else:
+            rec.force_close.assert_called_once_with()
+        if failure in {"force_close", "stop"}:
+            rec.stop.assert_called_once_with()
+        else:
+            rec.stop.assert_not_called()
+        records = [record for record in caplog.records if record.name == "termtrace.aio"]
+        assert len(records) == {
+            None: 0,
+            "force_close": 1,
+            "stop": 2,
+            "launch": 1,
+        }[failure]
+        assert all(record.exc_info is not None for record in records)
+        assert aio._pending_launches == pending_before
+    finally:
+        logger.removeHandler(handler)
+        if not launched.done():
+            launched.cancel()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 def test_asciicast_export() -> None:

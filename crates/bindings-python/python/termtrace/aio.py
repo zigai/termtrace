@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, Self
 
@@ -12,19 +13,31 @@ from termtrace._termtrace import (
 from termtrace._termtrace import (
     ResolvedState,
     ScreenFrame,
+    TermtraceError,
 )
 from termtrace._termtrace import (
     Termtrace as _SyncTermtrace,
 )
 
-def _cleanup_recording(rec: Any) -> None:
+_logger = logging.getLogger(__name__)
+_pending_launches: set[asyncio.Task[_SyncRecording]] = set()
+
+
+def _cleanup_recording(rec: _SyncRecording) -> None:
     try:
         rec.force_close()
+    except TermtraceError:
+        _logger.exception("Failed to force-close cancelled recording; trying stop")
+        rec.stop()
+
+
+def _cleanup_launch(launch: asyncio.Future[_SyncRecording]) -> None:
+    if launch.cancelled():
+        return
+    try:
+        _cleanup_recording(launch.result())
     except Exception:
-        try:
-            rec.stop()
-        except Exception:
-            pass
+        _logger.exception("Failed to clean up cancelled recording launch")
 
 
 class AsyncScreen:
@@ -176,26 +189,17 @@ class AsyncTermtrace:
         def _launch() -> _SyncRecording:
             return self._sync.record(cmd_list, rows, cols, env_dict, cwd)
 
-        launch_task = asyncio.ensure_future(asyncio.to_thread(_launch))
+        launch_task = asyncio.create_task(asyncio.to_thread(_launch))
+        _pending_launches.add(launch_task)
+        launch_task.add_done_callback(_pending_launches.discard)
         try:
             rec = await asyncio.shield(launch_task)
             return AsyncRecording(rec)
         except asyncio.CancelledError:
-            if launch_task.done() and not launch_task.cancelled():
-                try:
-                    rec = launch_task.result()
-                    _cleanup_recording(rec)
-                except Exception:
-                    pass
+            if launch_task.done():
+                _cleanup_launch(launch_task)
             else:
-                def _on_done(fut: asyncio.Future[Any]) -> None:
-                    try:
-                        if not fut.cancelled():
-                            rec = fut.result()
-                            _cleanup_recording(rec)
-                    except Exception:
-                        pass
-                launch_task.add_done_callback(_on_done)
+                launch_task.add_done_callback(_cleanup_launch)
             raise
 
     def verify_bundle(self, bundle_path: str, source_session: str | None = None) -> bool:
