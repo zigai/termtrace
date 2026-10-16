@@ -1,7 +1,7 @@
 use super::*;
 use std::time::{Duration, Instant};
 use termtrace_evidence::event_log::{EventLogWriter, SessionClock};
-use termtrace_model::execution::event::{Event, EventLogHeader};
+use termtrace_model::execution::event::{Event, EventBody, EventLogHeader};
 
 fn writer(path: &Path) -> EventLogWriter {
     let clock = SessionClock::now().expect("clock");
@@ -17,6 +17,35 @@ fn writer(path: &Path) -> EventLogWriter {
     );
 
     return EventLogWriter::create(path, &header, clock).expect("writer");
+}
+
+fn set_output_burst_timestamps(path: &Path) {
+    let log = EventLog::read(path).expect("recorded output burst");
+    let mut bytes = serde_json::to_vec(&log.header).expect("header JSON");
+    let mut previous_hash = blake3::hash(&bytes);
+    bytes.push(b'\n');
+
+    for mut record in log.events {
+        record.monotonic_ns = (record.seq + 1) * 10_000;
+        record.prev_hash = previous_hash.to_hex().to_string();
+
+        let body = EventBody {
+            seq: record.seq,
+            monotonic_ns: record.monotonic_ns,
+            observed_monotonic_ns: record.observed_monotonic_ns,
+            event: &record.event,
+        };
+
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(previous_hash.as_bytes());
+        serde_json::to_writer(&mut hasher, &body).expect("event body JSON");
+        previous_hash = hasher.finalize();
+        record.hash = previous_hash.to_hex().to_string();
+        serde_json::to_writer(&mut bytes, &record).expect("event record JSON");
+        bytes.push(b'\n');
+    }
+
+    fs_err::write(path, bytes).expect("timed output burst");
 }
 
 #[test]
@@ -174,6 +203,10 @@ fn video_stride_samples_intermediate_flutter_into_compact_index() {
             .expect("output");
     }
 
+    drop(writer);
+
+    set_output_burst_timestamps(&event_path);
+
     let summary = EventLogSummary::snapshot(&event_path).expect("snapshot");
     let full_dir = session.join("full");
     let video_dir = session.join("video");
@@ -253,6 +286,8 @@ fn index_session_with_video_options_samples_cleanly() {
 
     drop(writer);
 
+    set_output_burst_timestamps(&event_path);
+
     let outcome = index_session_with_options(
         &session,
         IndexOptions {
@@ -317,6 +352,8 @@ fn high_resolution_canvas_video_stride_completes_in_seconds() {
     }
 
     drop(writer);
+
+    set_output_burst_timestamps(&event_path);
 
     let start = Instant::now();
     let outcome = index_session_with_options(
