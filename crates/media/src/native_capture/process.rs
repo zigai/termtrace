@@ -5,11 +5,14 @@ use super::{
 use crate::helper_protocol::{flag, geometry_probe, playback};
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use serde::de::DeserializeOwned;
+#[cfg(target_os = "linux")]
+use std::os::{linux::net::SocketAddrExt as _, unix::net::SocketAddr};
 use std::{
     env, fs,
     io::{ErrorKind, Read, Write as _},
+    os::unix::net::UnixListener,
     path::{Path, PathBuf},
-    process::{self, ChildStderr, ChildStdout, Command, ExitStatus, Stdio},
+    process::{ChildStderr, ChildStdout, Command, ExitStatus, Stdio},
     time::{Duration, Instant},
 };
 use termtrace_evidence::artifact::secure_file;
@@ -17,7 +20,7 @@ use termtrace_model::{
     artifact::playback::{PlaybackFailure, PlaybackTiming},
     artifact::visual::{CaptureKind, CaptureOptions},
 };
-use termtrace_process::{owned, poll_until, ExclusiveLock, SupervisedChild};
+use termtrace_process::{owned, poll_until, SupervisedChild};
 
 /// Grace for a managed group after `SIGTERM`. It exceeds [`owned::GROUP_GRACE`] plus one
 /// owner poll so a helper-led group can stop its inner group before being killed.
@@ -33,8 +36,9 @@ pub(super) struct ManagedChild {
 
 pub(super) struct DisplayLease {
     pub(super) number: u16,
-    // Persistent inode with a kernel lock; owner death releases the lease.
-    _lock: ExclusiveLock,
+    // An abstract socket name is released by the kernel when its owner exits and leaves
+    // no file behind.
+    _socket: UnixListener,
 }
 
 struct ProbeOutput {
@@ -119,6 +123,7 @@ pub(super) fn probe_output_with_check(
 pub(super) fn ghostty_overrides() -> Vec<String> {
     return vec![
         "--gtk-single-instance=false",
+        "--async-backend=epoll",
         "--confirm-close-surface=false",
         "--quit-after-last-window-closed=true",
         "--window-position-x=0",
@@ -353,28 +358,16 @@ impl DisplayLease {
                 continue;
             }
 
-            let path = PathBuf::from(format!("/tmp/termtrace-X{number}.lock"));
-            let filesystem = |source| {
-                return Error::Filesystem {
-                    path: path.clone(),
-                    source,
-                };
-            };
-            let Some(lock) = ExclusiveLock::try_acquire(&path).map_err(filesystem)? else {
+            let Some(socket) = bind_display_lease(number)? else {
                 continue;
             };
 
             if in_use(number) {
                 continue;
             }
-
-            let mut file = lock.file();
-            file.set_len(0).map_err(filesystem)?;
-            writeln!(file, "{}", process::id()).map_err(filesystem)?;
-
             return Ok(Self {
                 number,
-                _lock: lock,
+                _socket: socket,
             });
         }
 
@@ -383,6 +376,31 @@ impl DisplayLease {
             reason: "no private display number is available".to_owned(),
         });
     }
+
+    pub(super) fn socket(&self) -> PathBuf {
+        return PathBuf::from(format!("/tmp/.X11-unix/X{}", self.number));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn bind_display_lease(number: u16) -> Result<Option<UnixListener>> {
+    let name = format!("termtrace-X{number}");
+    let address = SocketAddr::from_abstract_name(name.as_bytes())
+        .map_err(|error| return external_error("display lease", error))?;
+
+    return match UnixListener::bind_addr(&address) {
+        Ok(socket) => Ok(Some(socket)),
+        Err(error) if error.kind() == ErrorKind::AddrInUse => Ok(None),
+        Err(error) => Err(external_error("display lease", error)),
+    };
+}
+
+#[cfg(not(target_os = "linux"))]
+fn bind_display_lease(_number: u16) -> Result<Option<UnixListener>> {
+    return Err(external_error(
+        "display lease",
+        "native capture requires Linux",
+    ));
 }
 
 impl ManagedChild {
@@ -510,7 +528,7 @@ pub(super) fn wait_for_x_socket(
     process: &mut ManagedChild,
     timeout: Duration,
 ) -> Result<()> {
-    let socket = PathBuf::from(format!("/tmp/.X11-unix/X{}", lease.number));
+    let socket = lease.socket();
 
     return wait_while_running(process, timeout, &timed_out_after(timeout), || {
         return Ok(socket.exists().then_some(()));
@@ -563,7 +581,7 @@ pub(super) fn wait_for_playback_handshake(
 }
 
 /// Poll `ready` until it yields a value; the process exiting first or the deadline fails.
-fn wait_while_running<T>(
+pub(super) fn wait_while_running<T>(
     process: &mut ManagedChild,
     timeout: Duration,
     timed_out: &str,

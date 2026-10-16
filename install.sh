@@ -206,6 +206,6 @@ case ":${PATH}:" in
     *:"$install_dir":*)
         ;;
     *)
-        printf 'Add %s to PATH, then run: termtrace doctor --explain\n' "$install_dir"
+        printf 'Add %s to PATH, then run: termtrace doctor\n' "$install_dir"
         ;;
 esac

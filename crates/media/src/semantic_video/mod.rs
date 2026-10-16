@@ -615,9 +615,9 @@ fn require_semantic_video_capability() -> Result<()> {
     return probe_semantic_video_encode().map_err(|detail| {
         return Error::CapabilityBlocked {
             id: SEMANTIC_VIDEO_CAPABILITY.to_owned(),
-            code: "semantic_video_dependency_missing".to_owned(),
-            detail,
-            remediation: "install FFmpeg with FFprobe and the libx264rgb encoder".to_owned(),
+            code: "semantic_video_probe_failed".to_owned(),
+            detail: format!("the libx264rgb encode probe failed: {detail}"),
+            remediation: "install an FFmpeg build with the libx264rgb encoder".to_owned(),
         };
     });
 }

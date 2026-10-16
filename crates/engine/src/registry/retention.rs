@@ -1,8 +1,9 @@
 use super::{
     ensure_owner_directory, fs, inspect_entry, read_manifest, read_registry_record_nofollow,
-    registry_error, sync_directory, validate_owner_directory, DetachedSessionPaths, Duration,
-    Error, ErrorKind, GarbageCollectionCandidate, GarbageCollectionReport, HashSet, OsStr, Path,
-    PathBuf, RegistryRecord, Result, SessionPhase, SessionRegistry, SystemTime, Uuid, UNIX_EPOCH,
+    registry_error, sync_directory, DetachedSessionPaths, Duration, Error, ErrorKind,
+    GarbageCollectionCandidate, GarbageCollectionReport, HashSet, OsStr, Path, PathBuf,
+    RegistryRecord, Result, SessionPhase, SessionRegistry, SystemTime, Uuid, SESSIONS_DIRECTORY,
+    SUPERVISOR_DIRECTORY, UNIX_EPOCH,
 };
 use std::cmp::Reverse;
 use termtrace_evidence::session::validate_completed_session;
@@ -18,8 +19,8 @@ impl SessionRegistry {
     ///
     /// Returns an error when owner-only state directories cannot be prepared.
     pub fn allocate_detached_paths(&self) -> Result<DetachedSessionPaths> {
-        let sessions = self.state_root.join("sessions");
-        let diagnostics = self.state_root.join("supervisor");
+        let sessions = self.state_root.join(SESSIONS_DIRECTORY);
+        let diagnostics = self.state_root.join(SUPERVISOR_DIRECTORY);
 
         ensure_owner_directory(&sessions)?;
         ensure_owner_directory(&diagnostics)?;
@@ -76,7 +77,7 @@ impl SessionRegistry {
     ) -> Result<GarbageCollectionReport> {
         // Serialize alias changes with the protection scan and apply phase.
         let _lock = self.lock()?;
-        let sessions = self.state_root.join("sessions");
+        let sessions = self.state_root.join(SESSIONS_DIRECTORY);
         let mut report = GarbageCollectionReport {
             state_root: self.state_root.clone(),
             changes_applied: apply,
@@ -100,12 +101,12 @@ impl SessionRegistry {
             return Ok(report);
         }
 
-        validate_owner_directory(&sessions)?;
+        Self::validate_owner_directory(&sessions)?;
 
-        let (registered, corrupt_entries, removed_stale_aliases) =
+        let (registered, corrupt_entries, stale_aliases) =
             self.reap_and_resolve_protected_paths(apply)?;
         report.skipped_corrupt_registry_entries = corrupt_entries;
-        report.removed_stale_aliases = removed_stale_aliases;
+        report.removed_stale_aliases = u64::try_from(stale_aliases.len()).unwrap_or(u64::MAX);
 
         if corrupt_entries != 0 {
             return Ok(report);
@@ -225,7 +226,7 @@ impl SessionRegistry {
             return Ok(report);
         }
 
-        let supervisor = self.state_root.join("supervisor");
+        let supervisor = self.state_root.join(SUPERVISOR_DIRECTORY);
 
         for candidate in &report.candidates {
             validate_gc_candidate(candidate)?;
@@ -262,13 +263,29 @@ impl SessionRegistry {
         return Ok(report);
     }
 
+    /// Aliases whose session is neither live nor completed, and expired alias reservations.
+    ///
+    /// With `apply`, their registry records are removed under the registry lock; session
+    /// directories are never touched. Without it nothing is written, not even the lock file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the registry cannot be read or a removal cannot be published
+    /// durably.
+    pub fn reap_stale_aliases(&self, apply: bool) -> Result<Vec<String>> {
+        let _lock = apply.then(|| return self.lock()).transpose()?;
+        let (_, _, stale_aliases) = self.reap_and_resolve_protected_paths(apply)?;
+
+        return Ok(stale_aliases);
+    }
+
     fn reap_and_resolve_protected_paths(
         &self,
         apply: bool,
-    ) -> Result<(HashSet<PathBuf>, u64, u64)> {
+    ) -> Result<(HashSet<PathBuf>, u64, Vec<String>)> {
         let mut paths = HashSet::new();
         let mut corrupt_entries = 0_u64;
-        let mut removed_stale_aliases = 0_u64;
+        let mut stale_aliases = Vec::new();
         let now_unix_ns = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -304,7 +321,7 @@ impl SessionRegistry {
                             remove_registry_record(&path)?;
                         }
 
-                        removed_stale_aliases = removed_stale_aliases.saturating_add(1);
+                        stale_aliases.push(reservation.alias);
                     } else {
                         paths.insert(reservation.session_path());
                     }
@@ -323,7 +340,7 @@ impl SessionRegistry {
                             remove_registry_record(&path)?;
                         }
 
-                        removed_stale_aliases = removed_stale_aliases.saturating_add(1);
+                        stale_aliases.push(entry.alias);
                     } else {
                         if let Ok(canonical) = session.canonicalize() {
                             paths.insert(canonical);
@@ -335,11 +352,13 @@ impl SessionRegistry {
             }
         }
 
-        if apply && removed_stale_aliases > 0 {
+        if apply && !stale_aliases.is_empty() {
             sync_directory(&self.directory)?;
         }
 
-        return Ok((paths, corrupt_entries, removed_stale_aliases));
+        stale_aliases.sort();
+
+        return Ok((paths, corrupt_entries, stale_aliases));
     }
 }
 

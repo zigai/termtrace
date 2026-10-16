@@ -36,6 +36,8 @@ pub(super) fn spawn_video_ffmpeg(
                 "-loglevel",
                 "info",
                 "-copyts",
+                "-fpsprobesize",
+                "0",
                 "-f",
                 "x11grab",
                 "-framerate",

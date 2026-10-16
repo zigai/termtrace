@@ -217,13 +217,13 @@ fn doctor_require_passes_ready_capabilities_and_fails_blocked_ones() {
         return serde_json::from_slice(output).expect("doctor JSON");
     };
 
-    let status_of = |report: &serde_json::Value, id: &str| -> serde_json::Value {
-        return report["capabilities"]
+    let check = |report: &serde_json::Value, id: &str| -> serde_json::Value {
+        return report["checks"]
             .as_array()
-            .expect("capabilities array")
+            .expect("checks array")
             .iter()
-            .find(|capability| return capability["id"] == id)
-            .unwrap_or_else(|| panic!("missing {id} capability in {report:?}"))
+            .find(|check| return check["id"] == id)
+            .unwrap_or_else(|| panic!("missing {id} check in {report:?}"))
             .clone();
     };
 
@@ -236,8 +236,8 @@ fn doctor_require_passes_ready_capabilities_and_fails_blocked_ones() {
         .stdout
         .clone();
     assert_eq!(
-        status_of(&doctor_json(&ready), "semantic")["status"],
-        "ready"
+        check(&doctor_json(&ready), "capabilities.semantic")["status"],
+        "ok"
     );
 
     for required in ["native-video", "semantic-video"] {
@@ -251,12 +251,164 @@ fn doctor_require_passes_ready_capabilities_and_fails_blocked_ones() {
             .stdout
             .clone();
 
-        let capability = status_of(&doctor_json(&output), required);
-        assert_eq!(capability["status"], "blocked");
-        assert!(
-            capability["remediation"].is_string(),
-            "blocked {required} must carry remediation: {capability:?}"
-        );
+        let report = doctor_json(&output);
+        let capability = check(&report, &format!("capabilities.{required}"));
+        assert_eq!(capability["status"], "skip");
+
+        let needs = capability["needs"]
+            .as_array()
+            .expect("skipped check names its causes");
+        assert!(!needs.is_empty(), "{capability:?}");
+
+        for cause in needs {
+            let cause = check(&report, cause.as_str().expect("check id"));
+            assert_eq!(cause["status"], "fail", "{cause:?}");
+            assert!(
+                cause["fix"]["manual"].is_string(),
+                "failed {required} dependency must carry a fix: {cause:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn doctor_tmux_integration_applicability_preserves_diagnostics() {
+    let script = r#"#!/bin/sh
+if [ "$1" = "-S" ]; then
+    printf 'invalid option: pane-launch-command\n' >&2
+    exit 1
+fi
+if [ "$1 $2" != 'show-options -gqv' ]; then
+    printf 'unexpected fake tmux arguments\n' >&2
+    exit 2
+fi
+case "$FAKE_TMUX_CASE" in
+    disabled) exit 0 ;;
+    no-server) printf 'no server running on fixture\n' >&2; exit 1 ;;
+    read-error) printf 'fixture read error\n' >&2; exit 1 ;;
+esac
+if [ "$3" = '@termtrace-recording-version' ]; then
+    if [ "$FAKE_TMUX_CASE" = mismatch ]; then printf '999\n'; else printf '1\n'; fi
+elif [ "$FAKE_TMUX_CASE" = hook-error ]; then
+    printf 'fixture hook error\n' >&2; exit 1
+elif [ "$FAKE_TMUX_CASE" = broken ]; then
+    printf '%s/missing-hook\n' "$HOME"
+else
+    printf '/bin/sh\n'
+fi
+"#;
+
+    for (case, expected) in [
+        ("disabled", None),
+        ("missing", Some("skip")),
+        ("no-server", Some("skip")),
+        ("read-error", Some("warn")),
+        ("mismatch", Some("warn")),
+        ("hook-error", Some("warn")),
+        ("broken", Some("fail")),
+        ("enabled", Some("ok")),
+    ] {
+        let temporary = TempDir::new().expect("temporary directory");
+        let home = temporary.path().join("home");
+        let tools = temporary.path().join("bin");
+        let state = temporary.path().join("state");
+        fs::create_dir_all(&home).expect("private home");
+
+        fs::create_dir_all(&tools).expect("private tools");
+
+        fs::create_dir_all(&state).expect("private state");
+        fs::set_permissions(&state, Permissions::from_mode(0o700)).expect("private permissions");
+        let tmux = tools.join("tmux");
+        fs::write(&tmux, script).expect("fake tmux script");
+        fs::set_permissions(&tmux, Permissions::from_mode(0o755)).expect("fake executable");
+
+        for fix in [false, true] {
+            let command = || {
+                let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+                command
+                    .env_clear()
+                    .env("HOME", &home)
+                    .env(
+                        "PATH",
+                        if case == "missing" { Path::new("") } else { &tools },
+                    )
+                    .env("TMPDIR", temporary.path())
+                    .env("TERMTRACE_STATE_DIR", &state)
+                    .env("FAKE_TMUX_CASE", case)
+                    .env("NO_COLOR", "1")
+                    .env("TERM", "dumb")
+                    .args(["doctor", "--require", "semantic"]);
+
+                if fix {
+                    command.arg("--fix");
+                }
+
+                return command;
+            };
+            let json = command()
+                .arg("--json")
+                .output()
+                .expect("doctor JSON command");
+
+            let report: serde_json::Value =
+                serde_json::from_slice(&json.stdout).expect("doctor JSON");
+            let checks = report["checks"].as_array().expect("checks array");
+            let integration = checks
+                .iter()
+                .find(|entry| return entry["id"] == "state.tmux-integration");
+            assert_eq!(
+                integration.and_then(|entry| return entry["status"].as_str()),
+                expected,
+                "case {case}, fix {fix}: {report}"
+            );
+
+            if matches!(case, "read-error" | "mismatch" | "hook-error" | "broken") {
+                assert!(integration.expect("diagnostic check")["fix"]["manual"].is_string());
+            }
+
+            if case == "missing" {
+                assert_eq!(
+                    integration.expect("missing dependency check")["needs"],
+                    serde_json::json!(["dependencies.tmux"])
+                );
+            }
+
+            assert!(checks
+                .iter()
+                .any(|entry| return entry["id"] == "state.root"));
+            assert!(checks
+                .iter()
+                .any(|entry| return entry["id"] == "capabilities.native-video"));
+            let summary = &report["summary"];
+            for status in ["ok", "info", "warn", "fail", "skip"] {
+                assert_eq!(
+                    summary[status].as_u64().expect("status count"),
+                    checks
+                        .iter()
+                        .filter(|entry| return entry["status"] == status)
+                        .count() as u64,
+                    "case {case}, fix {fix}, status {status}"
+                );
+            }
+
+            let text = command().output().expect("doctor text command");
+            let stdout = String::from_utf8(text.stdout).expect("doctor text");
+            assert_eq!(
+                stdout.contains("tmux-integration"),
+                expected.is_some(),
+                "{case}"
+            );
+            let counts = format!(
+                "{} ok, {} info, {} warn, {} fail, {} skip",
+                summary["ok"], summary["info"], summary["warn"], summary["fail"], summary["skip"]
+            );
+            assert!(stdout.contains(&counts), "case {case}: {stdout}");
+            assert_eq!(
+                json.status.code(),
+                Some(if case == "broken" { 1 } else { 0 })
+            );
+            assert_eq!(text.status.code(), json.status.code());
+        }
     }
 }
 
@@ -392,8 +544,9 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
             "required capability `native-screenshot` is blocked",
         ))
         .stderr(predicate::str::contains("native_host_tools_missing"))
-        .stderr(predicate::str::contains("termtrace doctor"))
-        .stderr(predicate::str::contains("native-screenshot --explain"));
+        .stderr(predicate::str::contains(
+            "termtrace doctor --require native-screenshot",
+        ));
 
     assert!(
         !screenshot.exists(),
@@ -415,8 +568,9 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
             "required capability `native-video` is blocked",
         ))
         .stderr(predicate::str::contains("native_video_dependency_missing"))
-        .stderr(predicate::str::contains("termtrace doctor"))
-        .stderr(predicate::str::contains("native-video --explain"));
+        .stderr(predicate::str::contains(
+            "termtrace doctor --require native-video",
+        ));
 
     assert!(
         !session.join("visual").exists(),
@@ -444,8 +598,9 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .stderr(predicate::str::contains(
             "semantic_video_dependency_missing",
         ))
-        .stderr(predicate::str::contains("termtrace doctor"))
-        .stderr(predicate::str::contains("semantic-video --explain"));
+        .stderr(predicate::str::contains(
+            "termtrace doctor --require semantic-video",
+        ));
 
     assert!(!preview.exists(), "blocked preview created its destination");
 
@@ -470,8 +625,9 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .stderr(predicate::str::contains(
             "semantic_video_dependency_missing",
         ))
-        .stderr(predicate::str::contains("termtrace doctor"))
-        .stderr(predicate::str::contains("semantic-video --explain"));
+        .stderr(predicate::str::contains(
+            "termtrace doctor --require semantic-video",
+        ));
 
     assert!(!export.exists(), "blocked export created its destination");
 

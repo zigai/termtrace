@@ -1,39 +1,54 @@
 use super::{
-    capture_io::external_error,
+    capture_io::{check_cancelled, external_error},
     media::{validate_screenshot_probe, validate_video_probe},
     process::{
-        ghostty_overrides, probe_output, spawn_xvfb, wait_for_file, wait_for_x_socket,
-        DisplayLease, ManagedChild,
+        ghostty_overrides, probe_output_with_check, spawn_xvfb, wait_while_running, DisplayLease,
+        ManagedChild,
     },
     Result,
 };
 use std::{
     env, fs,
-    os::unix::fs::PermissionsExt as _,
     path::Path,
     process::{Command, Stdio},
     result::Result as StdResult,
+    sync::atomic::AtomicBool,
     thread,
     time::{Duration, Instant},
 };
 use termtrace_evidence::artifact::{create_private_directory, write_secure};
 use termtrace_model::protocol::capability::{
-    Capability, CapabilityStatus, NATIVE_SCREENSHOT_CAPABILITY, NATIVE_VIDEO_CAPABILITY,
+    Capability, CapabilityStatus, NATIVE_SCREENSHOT_CAPABILITY, NATIVE_SCREENSHOT_TOOLS,
+    NATIVE_VIDEO_CAPABILITY, NATIVE_VIDEO_TOOLS,
 };
+use termtrace_process::find_executable;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 const STEP_TIMEOUT: Duration = Duration::from_secs(5);
 const WIDTH: u16 = 640;
 const HEIGHT: u16 = 400;
 const FPS: u16 = 10;
+const PROBE: &str = "native readiness probe";
 
 type ProbeResult = StdResult<(), String>;
 
 /// Probe native dependencies and perform bounded private-display capture in stable report order.
-pub fn native_capabilities(screenshot: bool, video: bool) -> impl Iterator<Item = Capability> {
-    return native_capabilities_with(screenshot, video, available, operational_probe)
-        .into_iter()
-        .flatten();
+///
+/// Setting `cancelled` stops the capture probe, which then tears down its display, terminal,
+/// and staging directory and reports the cancellation as a probe failure.
+pub fn native_capabilities(
+    screenshot: bool,
+    video: bool,
+    cancelled: &AtomicBool,
+) -> impl Iterator<Item = Capability> + use<> {
+    return native_capabilities_with(
+        screenshot,
+        video,
+        |program| return find_executable(program).is_some(),
+        |screenshot, video| return operational_probe(screenshot, video, cancelled),
+    )
+    .into_iter()
+    .flatten();
 }
 
 fn native_capabilities_with(
@@ -50,11 +65,8 @@ fn native_capabilities_with(
             .collect();
     };
 
-    let screenshot_missing = screenshot
-        .then(|| return missing(&["ghostty", "Xvfb", "dbus-run-session", "import", "ffprobe"]));
-
-    let video_missing = video
-        .then(|| return missing(&["ghostty", "Xvfb", "dbus-run-session", "ffmpeg", "ffprobe"]));
+    let screenshot_missing = screenshot.then(|| return missing(NATIVE_SCREENSHOT_TOOLS));
+    let video_missing = video.then(|| return missing(NATIVE_VIDEO_TOOLS));
 
     let probe_screenshot =
         cfg!(target_os = "linux") && screenshot_missing.as_ref().is_some_and(Vec::is_empty);
@@ -122,24 +134,14 @@ fn capability(id: &str, missing: &[String], result: ProbeResult) -> Capability {
     };
 }
 
-fn available(program: &str) -> bool {
-    return env::var_os("PATH").is_some_and(|path| {
-        return env::split_paths(&path).any(|directory| {
-            return fs::metadata(directory.join(program)).is_ok_and(|metadata| {
-                return metadata.is_file() && metadata.permissions().mode() & 0o111 != 0;
-            });
-        });
-    });
-}
-
-fn operational_probe(screenshot: bool, video: bool) -> [ProbeResult; 2] {
+fn operational_probe(screenshot: bool, video: bool, cancelled: &AtomicBool) -> [ProbeResult; 2] {
     let staging = env::temp_dir().join(format!("termtrace-capability-{}", uuid::Uuid::now_v7()));
     if let Err(error) = create_private_directory(&staging) {
         return failed_probes(error.into());
     }
 
     let deadline = Instant::now() + PROBE_TIMEOUT;
-    let result = probe_staged(&staging, deadline, screenshot, video);
+    let result = probe_staged(&staging, deadline, screenshot, video, cancelled);
 
     let cleanup = fs::remove_dir_all(&staging);
     if let Err(error) = cleanup {
@@ -159,11 +161,20 @@ fn probe_staged(
     deadline: Instant,
     screenshot: bool,
     video: bool,
+    cancelled: &AtomicBool,
 ) -> Result<[ProbeResult; 2]> {
+    let probe = Probe {
+        deadline,
+        cancelled,
+    };
+
+    probe.check()?;
+
     let lease = DisplayLease::acquire()?;
     let display = format!(":{}", lease.number);
     let mut xvfb = spawn_xvfb(None, &lease, WIDTH, HEIGHT, staging, None)?;
-    wait_for_x_socket(&lease, &mut xvfb, remaining(deadline)?)?;
+    let socket = lease.socket();
+    probe.wait_until(&mut xvfb, || return socket.exists())?;
 
     let ready = staging.join("fixture-ready");
     // The fixture is a shell builtin-only program, not the caller's executable: library hosts
@@ -181,11 +192,11 @@ fn probe_staged(
         .env("LIBGL_ALWAYS_SOFTWARE", "1")
         .stdin(Stdio::null());
     let mut ghostty = ManagedChild::spawn_group("ghostty", &mut command)?;
-    wait_for_file(&ready, &mut ghostty, remaining(deadline)?)?;
+    probe.wait_until(&mut ghostty, || return ready.is_file())?;
     ghostty.check_running()?;
 
     let screenshot_result = if screenshot {
-        probe_capture(staging, &display, deadline, false).map_err(|error| return error.to_string())
+        probe_capture(staging, &display, &probe, false).map_err(|error| return error.to_string())
     } else {
         Ok(())
     };
@@ -193,7 +204,7 @@ fn probe_staged(
     xvfb.check_running()?;
 
     let video_result = if video {
-        probe_capture(staging, &display, deadline, true).map_err(|error| return error.to_string())
+        probe_capture(staging, &display, &probe, true).map_err(|error| return error.to_string())
     } else {
         Ok(())
     };
@@ -206,25 +217,50 @@ fn probe_staged(
     return Ok([screenshot_result, video_result]);
 }
 
-fn remaining(deadline: Instant) -> Result<Duration> {
-    return deadline
-        .checked_duration_since(Instant::now())
-        .map(|duration| return duration.min(STEP_TIMEOUT))
-        .ok_or_else(|| {
-            return external_error("native readiness probe", "20 second deadline expired");
-        });
+struct Probe<'cancel> {
+    deadline: Instant,
+    cancelled: &'cancel AtomicBool,
 }
 
-fn run_probe(name: &'static str, command: &mut Command, deadline: Instant) -> Result<Vec<u8>> {
-    return probe_output(name, command, remaining(deadline)?);
+impl Probe<'_> {
+    fn check(&self) -> Result<()> {
+        return check_cancelled(self.cancelled, PROBE);
+    }
+
+    fn remaining(&self) -> Result<Duration> {
+        return self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .map(|duration| return duration.min(STEP_TIMEOUT))
+            .ok_or_else(|| return external_error(PROBE, "20 second deadline expired"));
+    }
+
+    fn wait_until(&self, process: &mut ManagedChild, ready: impl Fn() -> bool) -> Result<()> {
+        let timeout = self.remaining()?;
+
+        return wait_while_running(
+            process,
+            timeout,
+            &format!("timed out after {} ms", timeout.as_millis()),
+            || {
+                self.check()?;
+
+                return Ok(ready().then_some(()));
+            },
+        );
+    }
+
+    fn run(&self, name: &'static str, command: &mut Command) -> Result<Vec<u8>> {
+        return probe_output_with_check(name, command, self.remaining()?, || return self.check());
+    }
 }
 
-fn wait_for_painted_frame(display: &str, deadline: Instant, video: bool) -> Result<()> {
-    let deadline = deadline.min(Instant::now() + STEP_TIMEOUT);
+fn wait_for_painted_frame(display: &str, probe: &Probe<'_>, video: bool) -> Result<()> {
+    let deadline = probe.deadline.min(Instant::now() + STEP_TIMEOUT);
 
     loop {
         let sample = if video {
-            run_probe(
+            probe.run(
                 "ffmpeg frame readiness",
                 Command::new("ffmpeg").args([
                     "-hide_banner",
@@ -246,10 +282,9 @@ fn wait_for_painted_frame(display: &str, deadline: Instant, video: bool) -> Resu
                     "rawvideo",
                     "pipe:1",
                 ]),
-                deadline,
             )?
         } else {
-            run_probe(
+            probe.run(
                 "import frame readiness",
                 Command::new("import")
                     .args([
@@ -263,7 +298,6 @@ fn wait_for_painted_frame(display: &str, deadline: Instant, video: bool) -> Resu
                         "rgb:-",
                     ])
                     .env("DISPLAY", display),
-                deadline,
             )?
         };
         if sample == [0x10, 0x20, 0x30] {
@@ -281,12 +315,12 @@ fn wait_for_painted_frame(display: &str, deadline: Instant, video: bool) -> Resu
     }
 }
 
-fn probe_capture(staging: &Path, display: &str, deadline: Instant, video: bool) -> Result<()> {
-    wait_for_painted_frame(display, deadline, video)?;
+fn probe_capture(staging: &Path, display: &str, probe: &Probe<'_>, video: bool) -> Result<()> {
+    wait_for_painted_frame(display, probe, video)?;
 
     let path = staging.join(if video { "probe.mkv" } else { "probe.png" });
     let bytes = if video {
-        run_probe(
+        probe.run(
             "ffmpeg",
             Command::new("ffmpeg").args([
                 "-hide_banner",
@@ -321,22 +355,20 @@ fn probe_capture(staging: &Path, display: &str, deadline: Instant, video: bool) 
                 "matroska",
                 "pipe:1",
             ]),
-            deadline,
         )?
     } else {
-        run_probe(
+        probe.run(
             "import",
             Command::new("import")
                 .args(["-silent", "-window", "root", "png:-"])
                 .env("DISPLAY", display),
-            deadline,
         )?
     };
 
     write_secure(&path, &bytes)?;
 
     let name = if video { "video-ffprobe" } else { "screenshot-ffprobe" };
-    let bytes = run_probe(
+    let bytes = probe.run(
         name,
         Command::new("ffprobe")
             .args([
@@ -348,7 +380,6 @@ fn probe_capture(staging: &Path, display: &str, deadline: Instant, video: bool) 
                 "json",
             ])
             .arg(&path),
-        deadline,
     )?;
     let report: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|error| return external_error("ffprobe report", error))?;

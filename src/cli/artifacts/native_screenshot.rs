@@ -39,7 +39,16 @@ pub(super) fn run(
     destination: &Path,
     viewport: Option<CaptureTarget>,
 ) -> Result<ExitCode> {
-    require_cli_capability(NATIVE_SCREENSHOT_CAPABILITY)?;
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let mut signals = CancellationSignals(Vec::new());
+
+    for signal in [SIGINT, SIGTERM] {
+        signals
+            .0
+            .push(flag::register(signal, Arc::clone(&cancelled)).into_diagnostic()?);
+    }
+
+    require_cli_capability(NATIVE_SCREENSHOT_CAPABILITY, &cancelled)?;
 
     let live_boundary = match attach_session(session)?.status().into_diagnostic()? {
         SessionStatus::Completed(_) => None,
@@ -53,15 +62,6 @@ pub(super) fn run(
             Some(boundaries.durable)
         }
     };
-
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let mut signals = CancellationSignals(Vec::new());
-
-    for signal in [SIGINT, SIGTERM] {
-        signals
-            .0
-            .push(flag::register(signal, Arc::clone(&cancelled)).into_diagnostic()?);
-    }
 
     let helper = env::current_exe().into_diagnostic()?;
     let (target, _) = native_capture_target(&helper, session, viewport).into_diagnostic()?;

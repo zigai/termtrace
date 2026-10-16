@@ -4,16 +4,83 @@ use directories::BaseDirs;
 impl SessionRegistry {
     /// Open the default owner-only session registry.
     ///
-    /// `TERMTRACE_STATE_DIR` overrides the platform user state directory.
+    /// [`STATE_DIR_ENV`] overrides the platform user state directory.
     ///
     /// # Errors
     ///
     /// Returns an error when no state root can be selected or an existing root
     /// is not an owner-only real directory.
     pub fn open_default() -> Result<Self> {
-        let root = default_state_root()?;
+        let root = Self::default_state_root()?;
 
         return Self::open(root);
+    }
+
+    /// Select the default state root without creating it.
+    ///
+    /// [`STATE_DIR_ENV`] overrides the platform user state directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the platform user state directory is unavailable.
+    pub fn default_state_root() -> Result<PathBuf> {
+        if let Some(path) = env::var_os(STATE_DIR_ENV) {
+            return Ok(PathBuf::from(path));
+        }
+
+        let state_home = BaseDirs::new()
+            .and_then(|dirs| {
+                return dirs.state_dir().map(Path::to_path_buf);
+            })
+            .ok_or_else(|| {
+                return registry_error(
+                    "select registry state root",
+                    "platform user state directory is unavailable",
+                );
+            })?;
+
+        return Ok(state_home.join("termtrace"));
+    }
+
+    /// Directories beneath `state_root` that must be owner-only, outermost first.
+    #[must_use]
+    pub fn owner_directories(state_root: &Path) -> [PathBuf; 4] {
+        return [
+            state_root.to_path_buf(),
+            state_root.join(REGISTRY_DIRECTORY),
+            state_root.join(SESSIONS_DIRECTORY),
+            state_root.join(SUPERVISOR_DIRECTORY),
+        ];
+    }
+
+    /// Check that an existing `path` is a real directory owned by the current user with
+    /// mode `0700`, without creating or changing anything.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Filesystem`] when `path` cannot be inspected and
+    /// [`Error::InsecureArtifactDirectory`] when it is not owner-only.
+    pub fn validate_owner_directory(path: &Path) -> Result<()> {
+        let metadata = fs::symlink_metadata(path).map_err(|source| {
+            return Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            };
+        })?;
+
+        let mode = metadata.mode() & 0o777;
+        if metadata.file_type().is_symlink()
+            || !metadata.file_type().is_dir()
+            || metadata.uid() != getuid().as_raw()
+            || mode != 0o700
+        {
+            return Err(Error::InsecureArtifactDirectory {
+                path: path.to_path_buf(),
+                owner_uid: metadata.uid(),
+                mode,
+            });
+        }
+        return Ok(());
     }
 
     /// Open or securely initialize a registry beneath an explicit state root.
@@ -135,7 +202,7 @@ impl SessionRegistry {
         }
 
         let session = entry.session_path();
-        validate_owner_directory(&session)?;
+        SessionRegistry::validate_owner_directory(&session)?;
         let canonical = session.canonicalize().map_err(|source| {
             return Error::Filesystem {
                 path: session.clone(),
@@ -284,7 +351,7 @@ impl SessionRegistry {
     }
 
     pub(super) fn entry_for(&self, alias: &str, session: &Path) -> Result<RegistryEntry> {
-        validate_owner_directory(session)?;
+        SessionRegistry::validate_owner_directory(session)?;
         let canonical = session.canonicalize().map_err(|source| {
             return Error::Filesystem {
                 path: session.to_path_buf(),
@@ -292,7 +359,7 @@ impl SessionRegistry {
             };
         })?;
 
-        validate_owner_directory(&canonical)?;
+        SessionRegistry::validate_owner_directory(&canonical)?;
 
         let manifest = read_manifest(&canonical)?;
 
@@ -379,7 +446,7 @@ pub(super) fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
     }
 
     let session = entry.session_path();
-    if let Err(error) = validate_owner_directory(&session) {
+    if let Err(error) = SessionRegistry::validate_owner_directory(&session) {
         row.diagnostic = Some(error.to_string());
 
         return row;
@@ -440,28 +507,9 @@ pub(super) fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
     return row;
 }
 
-pub(super) fn default_state_root() -> Result<PathBuf> {
-    if let Some(path) = env::var_os("TERMTRACE_STATE_DIR") {
-        return Ok(PathBuf::from(path));
-    }
-
-    let state_home = BaseDirs::new()
-        .and_then(|dirs| {
-            return dirs.state_dir().map(Path::to_path_buf);
-        })
-        .ok_or_else(|| {
-            return registry_error(
-                "select registry state root",
-                "platform user state directory is unavailable",
-            );
-        })?;
-
-    return Ok(state_home.join("termtrace"));
-}
-
 pub(super) fn ensure_owner_directory(path: &Path) -> Result<()> {
     if path.exists() {
-        return validate_owner_directory(path);
+        return SessionRegistry::validate_owner_directory(path);
     }
 
     fs::create_dir_all(path).map_err(|source| {
@@ -479,30 +527,7 @@ pub(super) fn ensure_owner_directory(path: &Path) -> Result<()> {
 
     sync_parent_directory(path)?;
 
-    return validate_owner_directory(path);
-}
-
-pub(super) fn validate_owner_directory(path: &Path) -> Result<()> {
-    let metadata = fs::symlink_metadata(path).map_err(|source| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        };
-    })?;
-
-    let mode = metadata.mode() & 0o777;
-    if metadata.file_type().is_symlink()
-        || !metadata.file_type().is_dir()
-        || metadata.uid() != getuid().as_raw()
-        || mode != 0o700
-    {
-        return Err(Error::InsecureArtifactDirectory {
-            path: path.to_path_buf(),
-            owner_uid: metadata.uid(),
-            mode,
-        });
-    }
-    return Ok(());
+    return SessionRegistry::validate_owner_directory(path);
 }
 
 pub(super) fn read_registry_record_nofollow(path: &Path) -> Result<RegistryRecord> {

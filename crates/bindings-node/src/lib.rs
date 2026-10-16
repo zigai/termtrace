@@ -16,7 +16,7 @@ use napi_derive::napi;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::Duration;
 use termtrace_model::artifact::bundle::{BundleProfile, BundleVerificationPolicy};
 use termtrace_model::artifact::save::SaveFormat;
@@ -1637,7 +1637,7 @@ impl JsTermtrace {
     #[napi]
     pub async fn probe_capabilities(&self) -> napi::Result<String> {
         return tokio::task::spawn_blocking(move || {
-            let report = SystemService::probe_capabilities();
+            let report = SystemService::probe_capabilities(&AtomicBool::new(false));
 
             return serde_json::to_string_pretty(&report)
                 .map_err(|e| return napi::Error::from_reason(e.to_string()));

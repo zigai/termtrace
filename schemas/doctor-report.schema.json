@@ -1,0 +1,350 @@
+{
+  "$defs": {
+    "DoctorBuild": {
+      "additionalProperties": false,
+      "description": "Build identity of the running executable.",
+      "properties": {
+        "revision": {
+          "description": "Source revision the executable was built from.",
+          "type": "string"
+        },
+        "target": {
+          "description": "Target operating system and architecture, `<os>/<arch>`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "revision",
+        "target"
+      ],
+      "type": "object"
+    },
+    "DoctorCheck": {
+      "additionalProperties": false,
+      "description": "Result of one diagnostic check.",
+      "properties": {
+        "code": {
+          "description": "Stable diagnostic code of the underlying probe, when it reports one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "details": {
+          "description": "One line per finding when the check found several.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fix": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DoctorFix"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Repair for the finding, when one is known."
+        },
+        "group": {
+          "description": "Heading of the group the check belongs to.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Stable identifier, `<group>.<name>`.",
+          "type": "string"
+        },
+        "message": {
+          "description": "One-line finding.",
+          "type": "string"
+        },
+        "needs": {
+          "description": "Checks whose result caused this check to be skipped.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/DoctorStatus",
+          "description": "Check outcome."
+        }
+      },
+      "required": [
+        "id",
+        "group",
+        "status",
+        "message"
+      ],
+      "type": "object"
+    },
+    "DoctorFix": {
+      "additionalProperties": false,
+      "description": "Repair for a problem a check found.",
+      "properties": {
+        "automatic": {
+          "description": "Whether `termtrace doctor --fix` applies the repair.",
+          "type": "boolean"
+        },
+        "command": {
+          "description": "Shell command that repairs the problem.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manual": {
+          "description": "Manual step when no single command repairs the problem.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "automatic"
+      ],
+      "type": "object"
+    },
+    "DoctorFixOutcome": {
+      "additionalProperties": false,
+      "description": "One repair applied by `termtrace doctor --fix`.",
+      "properties": {
+        "action": {
+          "description": "Action that was taken.",
+          "type": "string"
+        },
+        "error": {
+          "description": "Failure message when the action failed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Check the repair belongs to.",
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/DoctorFixResult",
+          "description": "Whether the action succeeded."
+        }
+      },
+      "required": [
+        "id",
+        "action",
+        "result"
+      ],
+      "type": "object"
+    },
+    "DoctorFixResult": {
+      "description": "Outcome of applying one repair.",
+      "oneOf": [
+        {
+          "const": "applied",
+          "description": "The repair completed.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "The repair failed.",
+          "type": "string"
+        }
+      ]
+    },
+    "DoctorInstall": {
+      "additionalProperties": false,
+      "description": "Location of the running executable.",
+      "properties": {
+        "executable": {
+          "description": "Running executable, with the home directory shown as `~`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "method": {
+          "description": "Installer that placed the executable, when recognizable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DoctorPath": {
+      "additionalProperties": false,
+      "description": "A resolved directory and the setting that selected it.",
+      "properties": {
+        "path": {
+          "description": "Directory, with the home directory shown as `~`.",
+          "type": "string"
+        },
+        "source": {
+          "description": "Environment variable that selected the directory; absent for the default.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "DoctorPaths": {
+      "additionalProperties": false,
+      "description": "Directories resolved for this run.",
+      "properties": {
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DoctorPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Session registry and managed-session state root; absent when none can be selected."
+        }
+      },
+      "type": "object"
+    },
+    "DoctorStatus": {
+      "description": "Outcome of one diagnostic check.",
+      "oneOf": [
+        {
+          "const": "ok",
+          "description": "The check passed.",
+          "type": "string"
+        },
+        {
+          "const": "info",
+          "description": "A neutral fact, such as an optional component that is absent.",
+          "type": "string"
+        },
+        {
+          "const": "warn",
+          "description": "Works now but is degraded or likely to break.",
+          "type": "string"
+        },
+        {
+          "const": "fail",
+          "description": "The core path or a required feature does not work.",
+          "type": "string"
+        },
+        {
+          "const": "skip",
+          "description": "The check did not run.",
+          "type": "string"
+        }
+      ]
+    },
+    "DoctorSummary": {
+      "additionalProperties": false,
+      "description": "Count of checks per status.",
+      "properties": {
+        "fail": {
+          "description": "Failures.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "info": {
+          "description": "Neutral findings.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ok": {
+          "description": "Checks that passed.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "skip": {
+          "description": "Checks that did not run.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "warn": {
+          "description": "Degraded findings.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok",
+        "info",
+        "warn",
+        "fail",
+        "skip"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/doctor-report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Complete environment diagnosis.",
+  "properties": {
+    "build": {
+      "$ref": "#/$defs/DoctorBuild",
+      "description": "Build identity."
+    },
+    "checks": {
+      "description": "Checks in report order.",
+      "items": {
+        "$ref": "#/$defs/DoctorCheck"
+      },
+      "type": "array"
+    },
+    "env": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Termtrace environment variables that are set, by name.",
+      "type": "object"
+    },
+    "fixes": {
+      "description": "Repairs applied by `--fix`, in the order they ran.",
+      "items": {
+        "$ref": "#/$defs/DoctorFixOutcome"
+      },
+      "type": "array"
+    },
+    "install": {
+      "$ref": "#/$defs/DoctorInstall",
+      "description": "Running executable."
+    },
+    "paths": {
+      "$ref": "#/$defs/DoctorPaths",
+      "description": "Directories resolved for this run."
+    },
+    "summary": {
+      "$ref": "#/$defs/DoctorSummary",
+      "description": "Count of checks per status."
+    },
+    "version": {
+      "description": "Package version.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "version",
+    "build",
+    "install",
+    "paths",
+    "env",
+    "checks",
+    "summary"
+  ],
+  "title": "DoctorReport",
+  "type": "object"
+}

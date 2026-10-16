@@ -5,7 +5,7 @@ use crate::storage::{
 };
 use std::{
     env,
-    ffi::{OsStr, OsString},
+    ffi::OsString,
     fs::{OpenOptions, Permissions},
     io::{ErrorKind, Write as _},
     os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
@@ -21,9 +21,12 @@ use termtrace_model::{
         EvidenceReceipt, EvidenceReceiptPayload, EvidenceSignature, ReceiptVerification,
     },
     execution::session::{SessionCompletion, VerificationLevel},
-    protocol::capability::{Capability, CapabilityStatus, RECEIPT_SIGNING_CAPABILITY},
+    protocol::capability::{
+        Capability, CapabilityStatus, RECEIPT_SIGNING_CAPABILITY, RECEIPT_SIGNING_TOOLS,
+    },
     value::ByteString,
 };
+use termtrace_process::find_executable;
 use uuid::Uuid;
 
 const SIGNATURE_NAMESPACE: &str = "termtrace-evidence";
@@ -33,7 +36,10 @@ const MAX_RECEIPT_BYTES: u64 = 4 * 1024 * 1024;
 /// Probe the OpenSSH signing dependency owned by receipt publication.
 #[must_use]
 pub fn receipt_signing_capability() -> Capability {
-    if executable("ssh-keygen").is_some() {
+    if RECEIPT_SIGNING_TOOLS
+        .iter()
+        .all(|tool| return find_executable(tool).is_some())
+    {
         return Capability {
             id: RECEIPT_SIGNING_CAPABILITY.to_owned(),
             status: CapabilityStatus::Ready,
@@ -49,15 +55,6 @@ pub fn receipt_signing_capability() -> Capability {
         detail: "OpenSSH ssh-keygen was not found".to_owned(),
         remediation: Some("install an OpenSSH client package".to_owned()),
     };
-}
-
-fn executable(command: impl AsRef<OsStr>) -> Option<PathBuf> {
-    let command = command.as_ref();
-    let path = env::var_os("PATH")?;
-
-    return env::split_paths(&path)
-        .map(|directory| return directory.join(command))
-        .find(|candidate| return candidate.is_file());
 }
 
 /// Verify canonical content and create a no-replace OpenSSH evidence receipt.

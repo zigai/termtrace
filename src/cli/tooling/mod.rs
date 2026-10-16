@@ -5,39 +5,41 @@ pub(super) mod args;
 use crate::cli::command::completion;
 use crate::cli::{
     agent::serve as serve_driver,
-    output::{write_json_line, write_json_pretty, write_stdout},
-    tooling::args::{CompletionsArgs, DoctorArgs, SchemaArgs, VersionArgs},
+    output::{write_json_line, write_stdout},
+    tooling::args::{CompletionsArgs, SchemaArgs, VersionArgs},
 };
 use clap_complete::generate;
 use miette::{IntoDiagnostic as _, Report, Result};
 use std::{
     env,
-    fmt::Write as _,
     io::{self, BufReader},
     os::unix::ffi::OsStrExt as _,
     process::ExitCode,
+    sync::atomic::{AtomicBool, Ordering},
 };
 use termtrace_engine::Error as EngineError;
 use termtrace_model::{
     execution::event::EVENT_LOG_VERSION,
-    protocol::capability::{CapabilityReport, CapabilityStatus},
     protocol::control::CONTROL_PROTOCOL_VERSION,
     terminal::replay::{GHOSTTY_REVISION, STATE_FORMAT_VERSION},
     value::ByteString,
 };
 use termtrace_service::{system::SystemService, Error as ServiceError};
 
-#[must_use]
-pub(super) fn probe_capabilities() -> CapabilityReport {
-    return SystemService::probe_capabilities();
-}
+mod doctor;
+
+pub(super) use doctor::run_doctor;
 
 pub(super) fn require_capability(id: &str) -> termtrace_sdk::Result<()> {
-    return SystemService::require(id);
+    return SystemService::require(id, &AtomicBool::new(false));
 }
 
-pub(super) fn require_cli_capability(id: &str) -> Result<()> {
-    return SystemService::require(id).map_err(capability_report);
+pub(super) fn require_cli_capability(id: &str, cancelled: &AtomicBool) -> Result<()> {
+    let result = SystemService::require(id, cancelled);
+    if cancelled.load(Ordering::SeqCst) {
+        return Err(miette::miette!("the `{id}` capability probe was cancelled"));
+    }
+    return result.map_err(capability_report);
 }
 
 /// Render a service failure, naming the doctor command when a capability is blocked.
@@ -50,7 +52,7 @@ pub(super) fn capability_report(error: ServiceError) -> Report {
     }) = &error
     {
         return miette::miette!(
-            "required capability `{id}` is blocked ({code}): {detail}; fix: {remediation}; inspect with `termtrace doctor --require {id} --explain`"
+            "required capability `{id}` is blocked ({code}): {detail}; fix: {remediation}; inspect with `termtrace doctor --require {id}`"
         );
     }
     return Report::from_err(error);
@@ -86,48 +88,6 @@ pub(super) fn run_version(
             env!("TERMTRACE_BUILD_REVISION")
         ),
     );
-}
-
-pub(super) fn run_doctor(response: &mut ResponseWriter, arguments: DoctorArgs) -> Result<ExitCode> {
-    let report = probe_capabilities();
-
-    if arguments.json {
-        write_json_pretty(response, &report)?;
-    } else {
-        write_stdout(response, capability_text(&report, arguments.explain)?)?;
-    }
-
-    if arguments
-        .require
-        .iter()
-        .any(|required| return !report.is_ready(required))
-    {
-        return Ok(ExitCode::FAILURE);
-    }
-    return Ok(ExitCode::SUCCESS);
-}
-
-fn capability_text(report: &CapabilityReport, explain: bool) -> Result<String> {
-    let mut output = String::new();
-    for capability in &report.capabilities {
-        writeln!(
-            output,
-            "{:<20} {:<7} {}",
-            capability.id,
-            match capability.status {
-                CapabilityStatus::Ready => "ready",
-                CapabilityStatus::Blocked => "blocked",
-            },
-            capability.detail
-        )
-        .into_diagnostic()?;
-
-        if explain && let Some(remediation) = &capability.remediation {
-            writeln!(output, "  fix: {remediation}").into_diagnostic()?;
-        }
-    }
-
-    return Ok(output);
 }
 
 pub(super) fn run_completions(

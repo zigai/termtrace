@@ -31,7 +31,7 @@ fn allowed_dependencies(package: &str) -> Option<&'static [&'static str]> {
             "termtrace-process",
             "termtrace-terminal",
         ]),
-        "termtrace-evidence" => Some(&["termtrace-model"]),
+        "termtrace-evidence" => Some(&["termtrace-model", "termtrace-process"]),
         "termtrace-export" => Some(&[
             "termtrace-engine",
             "termtrace-evidence",

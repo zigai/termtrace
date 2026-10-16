@@ -7,7 +7,7 @@ use pyo3::prelude::*;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use termtrace_model::artifact::bundle::{BundleProfile, BundleVerificationPolicy};
 use termtrace_model::execution::session::VerificationLevel;
 use termtrace_sdk::artifacts::ArtifactService;
@@ -398,7 +398,7 @@ impl PyTermtrace {
     /// Raises `TermtraceError` or a subclass only when the capability report cannot be serialized.
     pub fn probe_capabilities(&self, py: Python<'_>) -> PyResult<String> {
         py.detach(move || {
-            let report = SystemService::probe_capabilities();
+            let report = SystemService::probe_capabilities(&AtomicBool::new(false));
 
             return serde_json::to_string_pretty(&report).map_err(|e| {
                 return to_py_err(termtrace_sdk::Error::InvalidJson {

@@ -27,6 +27,31 @@ pub const CAPABILITY_IDS: &[&str] = &[
     PRESENTATION_CAPABILITY,
     RECEIPT_SIGNING_CAPABILITY,
 ];
+/// Programs the native screenshot probe and capture run.
+pub const NATIVE_SCREENSHOT_TOOLS: &[&str] =
+    &["ghostty", "Xvfb", "dbus-run-session", "import", "ffprobe"];
+/// Programs the native video probe and capture run.
+pub const NATIVE_VIDEO_TOOLS: &[&str] =
+    &["ghostty", "Xvfb", "dbus-run-session", "ffmpeg", "ffprobe"];
+/// Programs semantic-video encoding runs.
+pub const SEMANTIC_VIDEO_TOOLS: &[&str] = &["ffmpeg", "ffprobe"];
+/// Programs presentation export runs.
+pub const PRESENTATION_TOOLS: &[&str] = &["ffmpeg", "ffprobe"];
+/// Programs receipt signing runs.
+pub const RECEIPT_SIGNING_TOOLS: &[&str] = &["ssh-keygen"];
+
+/// External programs capability `id` runs; empty for unknown and self-contained capabilities.
+#[must_use]
+pub fn capability_tools(id: &str) -> &'static [&'static str] {
+    return match id {
+        NATIVE_SCREENSHOT_CAPABILITY => NATIVE_SCREENSHOT_TOOLS,
+        NATIVE_VIDEO_CAPABILITY => NATIVE_VIDEO_TOOLS,
+        SEMANTIC_VIDEO_CAPABILITY => SEMANTIC_VIDEO_TOOLS,
+        PRESENTATION_CAPABILITY => PRESENTATION_TOOLS,
+        RECEIPT_SIGNING_CAPABILITY => RECEIPT_SIGNING_TOOLS,
+        _ => &[],
+    };
+}
 
 /// Stable capability readiness.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

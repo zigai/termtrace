@@ -40,7 +40,7 @@ fn blocked_capability_retains_remediation_in_driver_protocol() {
         } if code == "capability_blocked"
             && message.contains("native_host_tools_missing")
             && message.contains("fix: install Ghostty GTK")
-            && message.contains("--require native-screenshot --explain")
+            && message.contains("termtrace doctor --require native-screenshot")
     ));
 }
 

@@ -33,7 +33,7 @@ fn missing_native_capture_guides_capture_or_semantic_fallback() {
     let message = error.to_string();
     assert!(message.contains("/evidence/session/visual/manifest.json"));
     assert!(message.contains("termtrace artifact capture --session SESSION"));
-    assert!(message.contains("--require native-video --explain"));
+    assert!(message.contains("termtrace doctor --require native-video"));
     assert!(message.contains("--renderer semantic"));
 }
 

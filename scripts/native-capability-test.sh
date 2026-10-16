@@ -85,13 +85,13 @@ run_case() {
         cat "$directory/report.json" >&2
         return 1
     }
-    jq -e --arg id "$requirement" --arg code "$code" \
-        '.capabilities[] | select(.id == $id) | .code == $code' "$directory/report.json" >/dev/null
-    jq -e '.capabilities[] | select(.id == "semantic") | .status == "ready"' "$directory/report.json" >/dev/null
+    jq -e --arg id "capabilities.$requirement" --arg code "$code" \
+        '.checks[] | select(.id == $id) | .code == $code' "$directory/report.json" >/dev/null
+    jq -e '.checks[] | select(.id == "capabilities.semantic") | .status == "ok"' "$directory/report.json" >/dev/null
     if [[ "$broken" == import ]]; then
-        jq -e '.capabilities[] | select(.id == "native-video") | .status == "ready"' "$directory/report.json" >/dev/null
+        jq -e '.checks[] | select(.id == "capabilities.native-video") | .status == "ok"' "$directory/report.json" >/dev/null
     elif [[ "$broken" == ffmpeg || "$broken" == hanging-ffmpeg ]]; then
-        jq -e '.capabilities[] | select(.id == "native-screenshot") | .status == "ready"' "$directory/report.json" >/dev/null
+        jq -e '.checks[] | select(.id == "capabilities.native-screenshot") | .status == "ok"' "$directory/report.json" >/dev/null
     fi
     if [[ "$broken" != Xvfb ]]; then
         [[ "$(wc -l <"$TERMTRACE_PROBE_DISPLAYS")" == 1 ]] || {
@@ -110,7 +110,7 @@ run_case() {
     done <"$TERMTRACE_PROBE_PIDS"
     while read -r display; do
         display="${display#:}"
-        for path in "/tmp/termtrace-X$display.lock" "/tmp/.X$display-lock" "/tmp/.X11-unix/X$display"; do
+        for path in "/tmp/.X$display-lock" "/tmp/.X11-unix/X$display"; do
             [[ ! -e "$path" ]] || {
                 printf '%s: leaked display resource %s\n' "$name" "$path" >&2
                 return 1

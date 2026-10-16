@@ -1,7 +1,7 @@
-use crate::cli::parsers::parse_capability_id;
-use clap::Args;
+use clap::{builder::PossibleValuesParser, Args};
 use clap_complete::Shell;
 use std::path::PathBuf;
+use termtrace_model::protocol::capability::CAPABILITY_IDS;
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct VersionArgs {
@@ -12,15 +12,20 @@ pub(in crate::cli) struct VersionArgs {
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct DoctorArgs {
-    /// Emit the stable structured capability report.
+    /// Emit the report as JSON.
     #[arg(long)]
     pub(in crate::cli) json: bool,
-    /// Comma-separated capabilities that must be ready.
-    #[arg(long, value_delimiter = ',', value_parser = parse_capability_id)]
+    /// Comma-separated capabilities that must be ready; any other result fails the run.
+    #[arg(
+        long,
+        value_name = "ID,...",
+        value_delimiter = ',',
+        value_parser = PossibleValuesParser::new(CAPABILITY_IDS)
+    )]
     pub(in crate::cli) require: Vec<String>,
-    /// Include focused remediation for blocked capabilities in text output.
+    /// Apply the automatic repairs the report lists.
     #[arg(long)]
-    pub(in crate::cli) explain: bool,
+    pub(in crate::cli) fix: bool,
 }
 
 #[derive(Debug, Args)]

@@ -42,19 +42,10 @@ pub fn require(report: &CapabilityReport, id: &str) -> Result<()> {
     });
 }
 
-/// Probe engine-owned capabilities and merge bounded probes supplied by other owners.
-///
-/// The caller supplies media, rendering, export, and receipt-signing probes. Duplicate,
-/// unknown, or omitted external identifiers are reported as blocked rather than trusted.
+/// Probe the pinned semantic engine by creating and snapshotting a terminal.
 #[must_use]
-pub fn probe_capabilities(external: impl IntoIterator<Item = Capability>) -> CapabilityReport {
-    let mut supplied: BTreeMap<String, Capability> = BTreeMap::new();
-    for capability in external {
-        supplied.entry(capability.id.clone()).or_insert(capability);
-    }
-
-    let semantic = match GhosttyVt::new(2, 2, 0).and_then(|mut terminal| return terminal.snapshot())
-    {
+pub fn semantic_capability() -> Capability {
+    return match GhosttyVt::new(2, 2, 0).and_then(|mut terminal| return terminal.snapshot()) {
         Ok(_) => ready(
             SEMANTIC_CAPABILITY,
             "semantic_engine_ready",
@@ -67,6 +58,22 @@ pub fn probe_capabilities(external: impl IntoIterator<Item = Capability>) -> Cap
             "reinstall a build containing the pinned semantic engine",
         ),
     };
+}
+
+/// Probe the core capability and merge it with the semantic probe and bounded probes
+/// supplied by other owners.
+///
+/// The caller supplies media, rendering, export, and receipt-signing probes. Duplicate,
+/// unknown, or omitted external identifiers are reported as blocked rather than trusted.
+#[must_use]
+pub fn probe_capabilities(
+    semantic: Capability,
+    external: impl IntoIterator<Item = Capability>,
+) -> CapabilityReport {
+    let mut supplied: BTreeMap<String, Capability> = BTreeMap::new();
+    for capability in external {
+        supplied.entry(capability.id.clone()).or_insert(capability);
+    }
 
     let core = if cfg!(target_os = "linux") {
         ready(

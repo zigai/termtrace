@@ -537,7 +537,7 @@ where
         }) => (
             "capability_blocked",
             format!(
-                "required capability `{id}` is blocked ({code}): {detail}; fix: {remediation}; inspect with `termtrace doctor --require {id} --explain`"
+                "required capability `{id}` is blocked ({code}): {detail}; fix: {remediation}; inspect with `termtrace doctor --require {id}`"
             ),
         ),
         Error::Control(_) | Error::Command(_) => (error.code(), error.to_string()),

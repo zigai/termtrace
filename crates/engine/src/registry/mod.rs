@@ -33,7 +33,11 @@ use termtrace_model::{
 use termtrace_process::ExclusiveLock;
 use uuid::Uuid;
 
+/// Environment variable that overrides the platform user state directory.
+pub const STATE_DIR_ENV: &str = "TERMTRACE_STATE_DIR";
 const REGISTRY_DIRECTORY: &str = "registry";
+const SESSIONS_DIRECTORY: &str = "sessions";
+const SUPERVISOR_DIRECTORY: &str = "supervisor";
 const REGISTRY_RESERVATION_FORMAT: &str = "termtrace-session-registry-reservation";
 const REGISTRY_RESERVATION_VERSION: u32 = 1;
 
@@ -74,7 +78,7 @@ mod store;
 use reservation::{is_valid, system_time_unix_ns, validate_alias};
 use store::{
     ensure_owner_directory, inspect_entry, read_registry_record_nofollow, registry_error,
-    sync_directory, sync_parent_directory, validate_owner_directory,
+    sync_directory, sync_parent_directory,
 };
 
 #[cfg(test)]

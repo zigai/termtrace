@@ -97,7 +97,7 @@ termtrace test SCENARIO.json
 
 `termtrace analyze` summarizes the last input action; its subcommands cover
 timelines, diffs, state inspection, exact output, and offline verification. Use
-`termtrace doctor --explain` to check optional native dependencies.
+`termtrace doctor` to check optional native dependencies.
 
 ## Documentation
 

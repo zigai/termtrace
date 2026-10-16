@@ -6,6 +6,7 @@ use std::{
     fmt,
     io::ErrorKind as IoErrorKind,
     path::{Path, PathBuf},
+    sync::atomic::AtomicBool,
     time::Duration,
 };
 use termtrace_engine::{
@@ -309,7 +310,7 @@ fn ensure_native_capture(
         return Ok(());
     }
 
-    SystemService::require(NATIVE_VIDEO_CAPABILITY)?;
+    SystemService::require(NATIVE_VIDEO_CAPABILITY, &AtomicBool::new(false))?;
 
     match index_session_for_video(session, u32::from(fps)) {
         Ok(_) | Err(EngineError::ArtifactExists { .. }) => {}
@@ -555,10 +556,10 @@ impl PresetConfig {
 
 fn require_render_capabilities(source: PresentationSourceRequest) -> Result<()> {
     if let PresentationSourceRequest::Semantic { .. } = source {
-        SystemService::require(SEMANTIC_VIDEO_CAPABILITY)?;
+        SystemService::require(SEMANTIC_VIDEO_CAPABILITY, &AtomicBool::new(false))?;
     }
 
-    return SystemService::require(PRESENTATION_CAPABILITY);
+    return SystemService::require(PRESENTATION_CAPABILITY, &AtomicBool::new(false));
 }
 
 /// Replace `out` with the rendered video, hard-linking when the filesystem allows it.
@@ -579,6 +580,7 @@ fn publish(video: &Path, out: &Path) -> Result<()> {
         .prefix(".video-")
         .tempdir_in(parent)
         .map_err(filesystem)?;
+
     let staged = staging.path().join("video.mp4");
 
     match fs_err::hard_link(video, &staged) {
@@ -650,6 +652,7 @@ mod tests {
         let video = temporary.path().join("source.mp4");
         let out = temporary.path().join("output.mp4");
         fs_err::write(&video, b"new video").expect("source video");
+
         fs_err::create_dir(&out).expect("existing directory");
         fs_err::write(out.join("keep"), b"unrelated data").expect("directory contents");
 
@@ -669,9 +672,11 @@ mod tests {
         let video = temporary.path().join("source.mp4");
         let out = temporary.path().join("output.mp4");
         fs_err::write(&video, b"new complete video").expect("source video");
+
         fs_err::write(&out, b"previous video").expect("previous output");
 
         publish(&video, &out).expect("publish video");
+
         assert_eq!(
             fs_err::read(out).expect("published video"),
             b"new complete video"

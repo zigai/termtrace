@@ -13,8 +13,57 @@ use std::{
     fmt::{self, Write as _},
     os::unix::ffi::{OsStrExt as _, OsStringExt as _},
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     str::FromStr,
 };
+
+/// Option the supplied tmux launch-hook patch adds.
+pub const LAUNCH_HOOK_OPTION: &str = "pane-launch-command";
+
+/// Whether the tmux at `executable` has the launch-hook patch.
+///
+/// Starts a server with no configuration on `socket`; tmux stops it as soon as the probe
+/// disconnects because it holds no sessions. The caller owns and removes the socket's
+/// directory.
+///
+/// # Errors
+/// Returns [`Error::Tmux`] when tmux cannot run or fails for another reason.
+pub fn launch_hook_supported(executable: &Path, socket: &Path) -> Result<bool> {
+    let output = Command::new(executable)
+        .arg("-S")
+        .arg(socket)
+        .args([
+            "-f",
+            "/dev/null",
+            "start-server",
+            ";",
+            "show-options",
+            "-gv",
+        ])
+        .arg(LAUNCH_HOOK_OPTION)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| {
+            return Error::Tmux(format!(
+                "could not run tmux executable {}: {error}",
+                executable.display()
+            ));
+        })?;
+
+    if output.status.success() {
+        return Ok(true);
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("invalid option") {
+        return Ok(false);
+    }
+    return Err(Error::Tmux(format!(
+        "tmux command failed with {}: {}",
+        output.status,
+        stderr.trim()
+    )));
+}
 
 /// Ghostty profile capture policy for new panes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -200,7 +249,7 @@ impl PreparedTmuxSetup {
 
     /// Option naming the command tmux runs for new panes.
     pub fn launch_option(&self) -> &'static str {
-        return if self.launch_hook { "pane-launch-command" } else { "default-command" };
+        return if self.launch_hook { LAUNCH_HOOK_OPTION } else { "default-command" };
     }
 
     /// Pane wrapper installed in [`Self::launch_option`].
@@ -219,9 +268,11 @@ impl PreparedTmuxSetup {
     pub fn watchdog_command(&self) -> OsString {
         let mut command = self.env_prefix();
         command.extend_from_slice(b" tmux watchdog -q");
+
         let mut escaped = Vec::new();
         for byte in command {
             escaped.push(byte);
+
             if byte == b'#' {
                 escaped.push(byte);
             }
@@ -377,7 +428,7 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
         let original_command = client.option("default-command")?;
 
         if self.launch_hook {
-            let _ = client.output(["show-options", "-gv", "pane-launch-command"])?;
+            let _ = client.output(["show-options", "-gv", LAUNCH_HOOK_OPTION])?;
         }
 
         let original_shell = client.option("default-shell")?;
@@ -420,7 +471,7 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
         original_shell: &[u8],
     ) -> Result<()> {
         if self.launch_hook {
-            let original = client.output(["show-options", "-gv", "pane-launch-command"])?;
+            let original = client.output(["show-options", "-gv", LAUNCH_HOOK_OPTION])?;
             client.set_option(options::ORIGINAL_LAUNCH_HOOK, OsStr::from_bytes(&original))?;
         }
 
@@ -513,7 +564,7 @@ pub fn disable(client: &TmuxClient) -> Result<Disabled> {
 fn remove(client: &TmuxClient, original_command: &[u8]) -> Result<()> {
     if client.option_text(options::LAUNCH_HOOK)? == "1" {
         let original = client.option(options::ORIGINAL_LAUNCH_HOOK)?;
-        client.set_option("pane-launch-command", OsStr::from_bytes(&original))?;
+        client.set_option(LAUNCH_HOOK_OPTION, OsStr::from_bytes(&original))?;
     } else {
         client.set_option("default-command", OsStr::from_bytes(original_command))?;
     }

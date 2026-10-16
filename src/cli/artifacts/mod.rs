@@ -25,6 +25,7 @@ use std::{
     os::unix::ffi::OsStrExt as _,
     path::Path,
     process::{Command as ProcessCommand, ExitCode, Stdio},
+    sync::atomic::AtomicBool,
 };
 use termtrace_engine::Error;
 use termtrace_evidence::{
@@ -296,7 +297,7 @@ pub(super) fn run_capture(
     let (start_monotonic_ns, end_monotonic_ns) =
         resolve_cli_range(&arguments.session, &arguments.range)?;
 
-    require_cli_capability(NATIVE_VIDEO_CAPABILITY)?;
+    require_cli_capability(NATIVE_VIDEO_CAPABILITY, &AtomicBool::new(false))?;
 
     let viewport = match (arguments.width, arguments.height) {
         (Some(width), Some(height)) => Some(CaptureTarget { width, height }),

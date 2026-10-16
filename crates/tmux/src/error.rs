@@ -81,6 +81,15 @@ pub enum Error {
 }
 
 impl Error {
+    /// Whether tmux failed because no server listens on the selected socket.
+    pub fn is_server_unavailable(&self) -> bool {
+        return matches!(
+            self,
+            Self::Tmux(message)
+                if message.contains("no server running") || message.contains("error connecting to")
+        );
+    }
+
     pub(crate) fn filesystem(path: impl Into<PathBuf>, source: io::Error) -> Self {
         return Self::Filesystem {
             path: path.into(),

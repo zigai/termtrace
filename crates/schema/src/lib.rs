@@ -15,7 +15,7 @@ use termtrace_model::{
         visual,
     },
     execution::{environment, event, event_log, provenance, receipt, request_journal, session},
-    protocol::{capability, control, driver, output_projection},
+    protocol::{capability, control, doctor, driver, output_projection},
     registry as model_registry, scenario,
     terminal::{analysis, diff, inspection, observation, replay, reviewer, screen, timeline, vt},
 };
@@ -138,6 +138,9 @@ registry!(
     ),
     ("capability-report.schema.json",
         capability::CapabilityReport
+    ),
+    ("doctor-report.schema.json",
+        doctor::DoctorReport
     ),
     ("save-manifest.schema.json",
         save::SaveManifest

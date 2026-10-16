@@ -71,11 +71,11 @@ pub(super) enum Command {
     Test(TestArgs),
     /// Record managed tmux panes for their full lifetime.
     Tmux(TmuxArgs),
-    /// Probe system capabilities, Ghostty VT, and rendering dependencies.
-    Doctor(DoctorArgs),
     /// Generate a shell autocompletion script from the current command graph.
     #[command(name = "completion")]
     Completion(CompletionsArgs),
+    /// Diagnose the installation, dependencies, state, and capabilities.
+    Doctor(DoctorArgs),
 
     /// Serve the versioned language-neutral JSONL process protocol.
     #[command(hide = true)]

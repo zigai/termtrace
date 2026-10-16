@@ -3,8 +3,8 @@ use std::{ffi::OsStr, path::PathBuf, result::Result as StdResult, time::Duration
 pub(super) use termtrace_engine::timeline::parse_time_offset_ns;
 use termtrace_model::{
     execution::provenance::ProvenanceCapture, execution::session::CaptureTarget,
-    protocol::capability::CAPABILITY_IDS, protocol::control::ScreenPredicate,
-    terminal::analysis::DiagnosticCheck, terminal::screen::ScreenRegion,
+    protocol::control::ScreenPredicate, terminal::analysis::DiagnosticCheck,
+    terminal::screen::ScreenRegion,
 };
 use termtrace_sdk::defaults;
 
@@ -104,16 +104,6 @@ pub(super) fn parse_event_type(value: &str) -> StdResult<String, String> {
     return Err(format!(
         "unknown event type `{value}`; expected one of {}",
         EVENT_TYPES.join(",")
-    ));
-}
-
-pub(super) fn parse_capability_id(value: &str) -> StdResult<String, String> {
-    if CAPABILITY_IDS.contains(&value) {
-        return Ok(value.to_owned());
-    }
-    return Err(format!(
-        "unknown capability `{value}`; expected one of {}",
-        CAPABILITY_IDS.join(",")
     ));
 }
 

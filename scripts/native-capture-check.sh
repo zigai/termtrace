@@ -334,17 +334,17 @@ check_session_integrity() {
     local status
     local finding
     {
-        printf '\n$ %q -F integrity verify --level content --json %q\n' \
+        printf '\n$ %q integrity verify --level content --json %q\n' \
             "$binary" "$output"
     } >>"$log"
     if [[ "$verbose" == true ]]; then
-        if report="$("$binary" -F integrity verify \
+        if report="$("$binary" integrity verify \
             --level content --json "$output" 2> >(tee -a "$log" >&2))"; then
             status=0
         else
             status=$?
         fi
-    elif report="$("$binary" -F integrity verify \
+    elif report="$("$binary" integrity verify \
         --level content --json "$output" 2>>"$log")"; then
         status=0
     else
@@ -857,13 +857,13 @@ else
 fi
 
 step "Checking native capture capabilities"
-run "$binary" -F doctor --json \
+run "$binary" doctor --json \
     --require native-screenshot,native-video
 
 printf 'font-size = 11\nwindow-padding-x = 2\nbackground = #220000\n' >"$profile"
 
 step "Recording the timed fixture (about 13 seconds)"
-run "$binary" -F record --no-input --geometry fit \
+run "$binary" record --no-input --geometry fit \
     --viewport "$VERIFICATION_VIEWPORT" --ghostty-config "$profile" --font-size "$VERIFICATION_FONT_SIZE" \
     --padding-x 6 --padding-y 4 --foreground '#e6e6e6' \
     --background '#101010' --out "$output" -- /bin/sh -c \
@@ -871,22 +871,22 @@ run "$binary" -F record --no-input --geometry fit \
 rm -f "$profile"
 
 step "Indexing the complete recording"
-run "$binary" -F analyze index --session "$output"
+run "$binary" analyze index --session "$output"
 
 step "Capturing full video and a strict screenshot"
-run "$binary" -F artifact capture --session "$output" --fps 24
-run "$binary" -F screenshot "$output" \
+run "$binary" artifact capture --session "$output" --fps 24
+run "$binary" screenshot "$output" \
     --renderer native --at 12.2s --viewport "$VERIFICATION_VIEWPORT" --strict \
     --out "$output/native-single"
 
 readonly capture_range_visual="$output/visual-$VERIFICATION_RANGE_SUFFIX"
 
 step "Capturing the selected 11.0s–12.35s range"
-run "$binary" -F analyze index --session "$output" \
+run "$binary" analyze index --session "$output" \
     --from "${VERIFICATION_RANGE_FROM_NS}ns" --to "${VERIFICATION_RANGE_TO_NS}ns"
 range_capture_started="$(python3 -c 'import time; print(time.monotonic_ns())')"
 readonly range_capture_started
-run "$binary" -F artifact capture --session "$output" --fps 24 \
+run "$binary" artifact capture --session "$output" --fps 24 \
     --from "${VERIFICATION_RANGE_FROM_NS}ns" --to "${VERIFICATION_RANGE_TO_NS}ns"
 range_capture_finished="$(python3 -c 'import time; print(time.monotonic_ns())')"
 readonly range_capture_finished
