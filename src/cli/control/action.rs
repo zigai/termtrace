@@ -5,6 +5,7 @@ use std::mem::take;
 use termtrace_model::{
     protocol::control::{PointerOperation, ProcessSignal},
     protocol::mutation::{MutationEffect, Retry},
+    terminal::screen::{FrameDetail, ScreenFrameContent},
     terminal::state::MouseButton,
 };
 use termtrace_sdk::session::{CommandPostcondition, SendOutcome, SendRequest, SendStep};
@@ -241,10 +242,43 @@ pub(in crate::cli) fn run_send(
     if arguments.json {
         write_json_pretty(response, &output)?;
     } else {
-        write_stdout(response, human_action_summary(&output))?;
+        let mut summary = human_action_summary(&output);
+        if let Some(frame) = outcome.frame() {
+            summary.push_str(&human_frame_summary(frame));
+        }
+
+        write_stdout(response, summary)?;
     }
 
     return Ok(if outcome.is_matched() { ExitCode::SUCCESS } else { ExitCode::FAILURE });
+}
+
+fn human_frame_summary(frame: &ScreenFrame) -> String {
+    let rows: Vec<&str> = match &frame.data {
+        ScreenFrameContent::None => Vec::new(),
+        ScreenFrameContent::Text { rows } => {
+            rows.iter().map(|row| return row.text.as_str()).collect()
+        }
+        ScreenFrameContent::Spans { rows } => {
+            rows.iter().map(|row| return row.text.as_str()).collect()
+        }
+        ScreenFrameContent::Cells { rows } => {
+            rows.iter().map(|row| return row.text.as_str()).collect()
+        }
+    };
+
+    let viewport = rows
+        .into_iter()
+        .map(|row| return row.trim_end_matches(' '))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    return human_screen_summary(&serde_json::json!({
+        "state": frame.state_hash,
+        "size": [frame.geometry.cols, frame.geometry.rows],
+        "quality": frame.capture_quality,
+        "screen": viewport.trim_end_matches('\n'),
+    }));
 }
 
 /// Report the postcondition checked after a trailing control command.
@@ -352,7 +386,14 @@ pub(super) fn projection(arguments: &SendArgs) -> ScreenProjectionRequest {
     if arguments.verbose {
         return ScreenProjectionRequest::default();
     }
-    return hash_only_projection();
+
+    if arguments.json {
+        return hash_only_projection();
+    }
+    return ScreenProjectionRequest {
+        detail: FrameDetail::Text,
+        region: None,
+    };
 }
 
 #[derive(serde::Serialize)]
@@ -718,7 +759,7 @@ mod action_response_tests {
         assert_eq!(response["boundaries"]["observed"]["next_event_seq"], 5);
     }
 
-    fn send_args(verbose: bool) -> SendArgs {
+    fn send_args(verbose: bool, json: bool) -> SendArgs {
         return SendArgs {
             session: PathBuf::from("test-session"),
             atoms: Vec::new(),
@@ -737,18 +778,29 @@ mod action_response_tests {
             if_state: None,
             request_id: None,
             verbose,
-            json: false,
+            json,
         };
     }
 
     #[test]
-    fn action_projection_selects_lightweight_detail_by_default() {
-        assert_eq!(projection(&send_args(false)).detail, FrameDetail::None);
+    fn action_projection_selects_hash_only_detail_for_json() {
+        assert_eq!(
+            projection(&send_args(false, true)).detail,
+            FrameDetail::None
+        );
+    }
+
+    #[test]
+    fn action_projection_selects_screen_text_for_human_output() {
+        assert_eq!(
+            projection(&send_args(false, false)).detail,
+            FrameDetail::Text
+        );
     }
 
     #[test]
     fn action_projection_preserves_full_rich_spans_when_verbose_requested() {
-        let projection = projection(&send_args(true));
+        let projection = projection(&send_args(true, false));
         assert_eq!(projection.detail, FrameDetail::Spans);
         assert!(projection.region.is_none());
     }

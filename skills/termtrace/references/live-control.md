@@ -4,17 +4,33 @@ Use clean CLI commands or the Python SDK throughout an automated workflow:
 
 ```sh
 termtrace record -d app --until-screen Ready -- ./command
-termtrace send app text:/settings enter --until-idle=100ms
+termtrace send app text:/settings enter --until-screen Settings --timeout 10s
 termtrace screen app --since STATE
 ```
+
+`send` prints the action, the resulting state hash, and the presented screen, so
+it needs no follow-up `screen` call. Keep that output; redirecting it to
+`/dev/null` hides why a step failed.
 
 Pass `--json` to receive structured JSON objects on stdout:
 
 ```sh
 termtrace record -d app --json --until-screen Ready -- ./command
-termtrace send app --json text:/settings enter --until-idle=100ms
+termtrace send app --json text:/settings enter --until-screen Settings --timeout 10s
 termtrace screen app --json --since STATE
 ```
+
+## Waiting
+
+- Wait for the text you expect with `--until-screen` or `--until-screen-regex`.
+  `--until-idle` only proves that the screen stopped changing for its window
+  (default 500ms). It returns the old screen when the app reacts later than
+  that, and a partial screen when loading pauses.
+- Never `sleep` before reading the screen. When something outside Termtrace
+  changes the app (tmux keys, a file edit, a reload), use
+  `termtrace wait app --screen TEXT`.
+- Waits default to 30s. Pass `--timeout` shorter than your shell tool's command
+  timeout, so Termtrace reports the miss and the screen instead of being killed.
 
 `--until-screen` observes the presented viewport. It is not a search of all
 canonical child output. Use `wait --output` separately only when byte history is

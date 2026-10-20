@@ -20,6 +20,8 @@ use termtrace_model::{
     terminal::replay::{StateInspection, StateSelector},
 };
 
+const EVIDENCE_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
 /// Reconstruct one complete semantic state directly from canonical evidence.
 ///
 /// # Errors
@@ -100,7 +102,7 @@ pub fn wait_for_output(
             return Err(wait_error("timed out before output matched"));
         }
 
-        thread::sleep(Duration::from_millis(50).min(deadline.saturating_duration_since(now)));
+        thread::sleep(EVIDENCE_POLL_INTERVAL.min(deadline.saturating_duration_since(now)));
     }
 }
 
@@ -123,11 +125,12 @@ pub fn wait_for_completion(
             return Ok(validate_completed_session(session)?);
         }
 
-        if Instant::now() >= deadline {
+        let now = Instant::now();
+        if now >= deadline {
             return Err(wait_error("timed out before session completion"));
         }
 
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(EVIDENCE_POLL_INTERVAL.min(deadline.saturating_duration_since(now)));
     }
 }
 

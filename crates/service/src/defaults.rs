@@ -15,7 +15,7 @@ pub const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a screen wait, stable capture, or action postcondition may run.
 pub const WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long the presented screen must stay unchanged to count as idle.
-pub const IDLE_STABLE_FOR: Duration = Duration::from_millis(100);
+pub const IDLE_STABLE_FOR: Duration = Duration::from_millis(500);
 /// How long a stop waits for validated completion.
 pub const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long an unreachable live session may take to publish completion before the

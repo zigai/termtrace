@@ -65,7 +65,9 @@ from an older command name.
 2. Use `send` to combine state-guarded input and the next screen or idle
    postcondition. Natural input atoms include keys (`enter`, `ctrl+c`), text (`text:hello`),
    mouse clicks (`click:10,20`), semantic activation (`activate:"Save"`), window resizing
-   (`resize:120,40`), and signals (`signal:INT`).
+   (`resize:120,40`), and signals (`signal:INT`). Wait for expected text with
+   `--until-screen` and a `--timeout` shorter than your shell tool's timeout,
+   never with `sleep`. `send` prints the resulting state and screen.
 3. Use the returned presented-state hash with `screen --since STATE` to receive
    only a changed screen. Pass it through `--if-state` when an action is valid
    only for that exact presentation.
