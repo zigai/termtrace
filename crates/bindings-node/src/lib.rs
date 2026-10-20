@@ -380,7 +380,7 @@ impl JsActionBuilder {
         });
     }
 
-    /// Wait until the screen is idle and unchanged after applying input.
+    /// Wait until the screen changes after applying input and then stays unchanged.
     #[napi]
     pub fn until_idle(&self, stable_for_ms: Option<u32>, timeout_ms: Option<u32>) {
         let stable_for = stable_for_ms.map_or(defaults::IDLE_STABLE_FOR, |millis| {

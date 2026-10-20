@@ -29,8 +29,8 @@ pub use termtrace_service::testing;
 pub mod session {
     pub use termtrace_service::client::{
         await_ready, CommandPostcondition, LaunchSpec, LocatedSession, Readiness, SendFailure,
-        SendOutcome, SendRequest, SendStep, Session, SessionStatus, SessionTarget, StopOutcome,
-        StopRequest, Terminal,
+        SendLastStep, SendOutcome, SendRequest, SendStep, Session, SessionStatus, SessionTarget,
+        StopOutcome, StopRequest, Terminal,
     };
 }
 
@@ -39,7 +39,7 @@ pub mod session {
 pub mod input {
     pub use termtrace_model::terminal::state::{KeyChord, KeyModifiers, MouseButton, NamedKey};
     pub use termtrace_service::actions::{
-        ActOutcome, ActRequest, ActionCondition, InputAtom, MutationGuard,
+        ActOutcome, ActRequest, ActionCondition, InputAtom, MutationGuard, Reaction,
     };
     pub use termtrace_service::client::Pointer;
 }
@@ -130,7 +130,7 @@ pub mod advanced {
 }
 
 #[cfg(feature = "local")]
-pub use actions::{ActOutcome, ActRequest, ActionCondition, InputAtom, MutationGuard};
+pub use actions::{ActOutcome, ActRequest, ActionCondition, InputAtom, MutationGuard, Reaction};
 #[cfg(feature = "local")]
 pub use client::{
     Events, Evidence, LaunchSpec, Native, Output, Pointer, Semantic, Session, SessionStatus,

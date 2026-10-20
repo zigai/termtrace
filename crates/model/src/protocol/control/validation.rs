@@ -1,7 +1,8 @@
 //! Request-shape rules every control client and the recording actor apply identically.
 
 use super::{
-    ActionPostcondition, ControlCommand, ScreenMode, ScreenPredicate, StateHashComparison,
+    ActionPostcondition, ControlCommand, ReactionRequirement, ScreenMode, ScreenPredicate,
+    StateHashComparison,
 };
 use crate::terminal::{screen::ScreenRegion, state::SemanticState};
 use regex::{Regex, RegexBuilder};
@@ -16,6 +17,16 @@ const MAX_PREDICATE_DEPTH: usize = 4;
 const MAX_PREDICATE_NODES: usize = 32;
 const MAX_PREDICATE_CHILDREN: usize = 16;
 const PREDICATE_REGEX_SIZE_LIMIT: usize = 1024 * 1024;
+const REACTION_RULE: &str =
+    "reaction requires a lowercase BLAKE3 starting state and 0 < timeout <= 1h";
+
+fn valid_reaction(reaction: &ReactionRequirement) -> bool {
+    return within_wait(reaction.timeout_ns)
+        && reaction
+            .changed_from
+            .as_deref()
+            .is_none_or(is_lowercase_blake3_hex);
+}
 
 /// Whether a value is a 64-character lowercase hexadecimal BLAKE3 digest.
 pub fn is_lowercase_blake3_hex(hash: &str) -> bool {
@@ -82,12 +93,16 @@ pub enum CommandError {
     ScreenWaitDurations,
     /// Stable-capture durations do not satisfy `0 < stable <= timeout <= 1h`.
     StableCaptureDurations,
+    /// Stable-capture reaction has an invalid starting state or a timeout outside `0 < timeout <= 1h`.
+    StableCaptureReaction,
     /// Action screen postcondition predicate is invalid.
     PostconditionPredicate(PredicateError),
     /// Action screen postcondition timeout does not satisfy `0 < timeout <= 1h`.
     PostconditionTimeout,
     /// Action idle postcondition durations do not satisfy `0 < stable <= timeout <= 1h`.
     PostconditionIdleDurations,
+    /// Action idle reaction has an invalid starting state or a timeout outside `0 < timeout <= 1h`.
+    PostconditionReaction,
     /// Marker label is empty after trimming or longer than 256 bytes.
     MarkerLabel,
     /// Application event violates its own limits.
@@ -102,10 +117,11 @@ impl CommandError {
     pub const fn code(&self) -> &'static str {
         return match self {
             Self::ScreenWaitPredicate(_) | Self::ScreenWaitDurations => "invalid_screen_wait",
-            Self::StableCaptureDurations => "invalid_stable_capture",
+            Self::StableCaptureDurations | Self::StableCaptureReaction => "invalid_stable_capture",
             Self::PostconditionPredicate(_)
             | Self::PostconditionTimeout
-            | Self::PostconditionIdleDurations => "invalid_action_postcondition",
+            | Self::PostconditionIdleDurations
+            | Self::PostconditionReaction => "invalid_action_postcondition",
             Self::MarkerLabel => "invalid_marker",
             Self::ApplicationEvent { .. } => "invalid_application_event",
         };
@@ -125,6 +141,7 @@ impl fmt::Display for CommandError {
                 f,
                 "durations must satisfy stable <= timeout <= 1h and both must be nonzero"
             ),
+            Self::StableCaptureReaction => write!(f, "stable capture {REACTION_RULE}"),
             Self::PostconditionTimeout => write!(
                 f,
                 "action postcondition timeout must satisfy 0 < timeout <= 1h"
@@ -133,6 +150,7 @@ impl fmt::Display for CommandError {
                 f,
                 "idle postcondition durations must satisfy 0 < stable <= timeout <= 1h"
             ),
+            Self::PostconditionReaction => write!(f, "idle postcondition {REACTION_RULE}"),
             Self::MarkerLabel => write!(f, "marker must contain 1 to 256 UTF-8 bytes"),
             Self::ApplicationEvent { reason } => write!(f, "{reason}"),
         };
@@ -250,11 +268,19 @@ impl ControlCommand {
             Self::CaptureStable {
                 stable_for_ns,
                 timeout_ns,
+                reaction,
                 ..
             } => {
                 if *stable_for_ns == 0 || !within_wait(*timeout_ns) || *stable_for_ns > *timeout_ns
                 {
                     return Err(CommandError::StableCaptureDurations);
+                }
+
+                if reaction
+                    .as_ref()
+                    .is_some_and(|reaction| return !valid_reaction(reaction))
+                {
+                    return Err(CommandError::StableCaptureReaction);
                 }
 
                 None
@@ -264,12 +290,17 @@ impl ControlCommand {
                 ActionPostcondition::Idle {
                     stable_for_ns,
                     timeout_ns,
+                    reaction,
                 } => {
                     if *stable_for_ns == 0
                         || !within_wait(*timeout_ns)
                         || *stable_for_ns > *timeout_ns
                     {
                         return Err(CommandError::PostconditionIdleDurations);
+                    }
+
+                    if !valid_reaction(reaction) {
+                        return Err(CommandError::PostconditionReaction);
                     }
 
                     None
@@ -561,6 +592,13 @@ mod tests {
         };
     }
 
+    fn reaction(timeout_ns: u64) -> ReactionRequirement {
+        return ReactionRequirement {
+            changed_from: None,
+            timeout_ns,
+        };
+    }
+
     fn act(postcondition: ActionPostcondition) -> ControlCommand {
         return ControlCommand::Act {
             atoms: Vec::<InputSequenceAtom>::new(),
@@ -612,10 +650,41 @@ mod tests {
                 stable_for_ns,
                 timeout_ns: HOUR_NS,
                 projection: ScreenProjectionRequest::default(),
+                reaction: None,
             };
         };
         assert!(capture(1).validate().is_ok());
         assert_eq!(rejection(&capture(0)).code(), "invalid_stable_capture");
+    }
+
+    #[test]
+    fn stable_capture_reaction_requires_a_blake3_state_and_a_bounded_timeout() {
+        let capture = |changed_from: Option<String>, timeout_ns| {
+            return ControlCommand::CaptureStable {
+                stable_for_ns: 1,
+                timeout_ns: HOUR_NS,
+                projection: ScreenProjectionRequest::default(),
+                reaction: Some(ReactionRequirement {
+                    changed_from,
+                    timeout_ns,
+                }),
+            };
+        };
+        assert!(capture(Some("a".repeat(64)), 1).validate().is_ok());
+        assert!(capture(None, HOUR_NS).validate().is_ok());
+
+        for (changed_from, timeout_ns) in [
+            (Some(String::new()), 1),
+            (Some("ABC".to_owned()), 1),
+            (Some("A".repeat(64)), 1),
+            (None, 0),
+            (None, HOUR_NS + 1),
+        ] {
+            assert_eq!(
+                rejection(&capture(changed_from, timeout_ns)),
+                CommandError::StableCaptureReaction
+            );
+        }
     }
 
     #[test]
@@ -624,10 +693,25 @@ mod tests {
             ActionPostcondition::Idle {
                 stable_for_ns: 0,
                 timeout_ns: 1,
+                reaction: reaction(1),
             },
             ActionPostcondition::Idle {
                 stable_for_ns: 1,
                 timeout_ns: HOUR_NS + 1,
+                reaction: reaction(1),
+            },
+            ActionPostcondition::Idle {
+                stable_for_ns: 1,
+                timeout_ns: 1,
+                reaction: ReactionRequirement {
+                    changed_from: Some("not-a-hash".to_owned()),
+                    timeout_ns: 1,
+                },
+            },
+            ActionPostcondition::Idle {
+                stable_for_ns: 1,
+                timeout_ns: 1,
+                reaction: reaction(0),
             },
             ActionPostcondition::Screen {
                 predicate: contains("done"),

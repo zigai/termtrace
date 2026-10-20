@@ -241,6 +241,10 @@ pub(in crate::cli) struct SendArgs {
     /// Maximum postcondition wait duration; defaults to the shared wait timeout.
     #[arg(long, value_parser = parse_wait_deadline_duration)]
     pub(in crate::cli) timeout: Option<Duration>,
+    /// How long `--until-idle` waits for output or a changed screen before reporting
+    /// `unchanged`; defaults to 2s and is never shorter than the idle interval.
+    #[arg(long, value_parser = parse_wait_deadline_duration, requires = "until_idle")]
+    pub(in crate::cli) reaction_timeout: Option<Duration>,
     /// Delay between atoms; paced text is split by Unicode scalar.
     #[arg(long, value_parser = parse_pace_duration, default_value = "0ms")]
     pub(in crate::cli) pace: Duration,
@@ -256,9 +260,21 @@ pub(in crate::cli) struct SendArgs {
     /// Include per-atom operation and canonical event identifiers.
     #[arg(long)]
     pub(in crate::cli) verbose: bool,
+    /// Screen reported after the send.
+    #[arg(long, value_enum, default_value_t = SendScreen::Text)]
+    pub(in crate::cli) screen: SendScreen,
     /// Emit stable structured output as JSON.
     #[arg(long)]
     pub(in crate::cli) json: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(in crate::cli) enum SendScreen {
+    /// Complete screen text; JSON reports only the state hash.
+    Text,
+    /// Moved row blocks and changed rows since just before the send; the complete screen
+    /// when the geometry, the alternate screen, or most rows changed.
+    Diff,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]

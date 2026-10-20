@@ -252,6 +252,109 @@ fn bounded_policy_flushes_an_idle_pending_prefix() {
     assert!(record.final_sync_completed);
 }
 
+fn policy_writer(temporary: &TempDir, name: &str, policy: DurabilityPolicy) -> EventLogWriter {
+    let directory = temporary.path().join(name);
+    secure_directory(&directory);
+    let path = directory.join("events.jsonl");
+    let clock = SessionClock::now().expect("valid clock");
+
+    return EventLogWriter::create_with_policy(&path, &header(&clock), clock, policy)
+        .expect("create policy writer");
+}
+
+fn marker(label: &str) -> Event {
+    return Event::Marker {
+        operation_id: Uuid::now_v7(),
+        label: label.to_owned(),
+    };
+}
+
+#[test]
+fn deferred_events_become_durable_with_the_next_synchronized_append() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let mut writer = policy_writer(
+        &temporary,
+        "deferred",
+        DurabilityPolicy {
+            mode: DurabilityMode::Throughput,
+            maximum_interval_ms: None,
+            maximum_uncommitted_bytes: None,
+        },
+    );
+    writer
+        .append_deferred(marker("deferred"))
+        .expect("deferred marker");
+
+    assert_eq!(writer.observed_boundary().next_event_seq, 1);
+    assert_eq!(writer.durable_boundary().next_event_seq, 0);
+
+    writer
+        .append(marker("synchronized"))
+        .expect("synchronized marker");
+
+    assert_eq!(writer.durable_boundary(), writer.observed_boundary());
+    assert_eq!(writer.durable_boundary().next_event_seq, 2);
+}
+
+#[test]
+fn deferred_events_follow_strict_and_bounded_policies() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let mut strict = policy_writer(
+        &temporary,
+        "strict-deferred",
+        DurabilityPolicy {
+            mode: DurabilityMode::Strict,
+            maximum_interval_ms: None,
+            maximum_uncommitted_bytes: None,
+        },
+    );
+    strict
+        .append_deferred(marker("strict"))
+        .expect("strict deferred marker");
+
+    assert_eq!(strict.durable_boundary().next_event_seq, 1);
+
+    let mut bounded = policy_writer(
+        &temporary,
+        "bounded-deferred",
+        DurabilityPolicy {
+            mode: DurabilityMode::Bounded,
+            maximum_interval_ms: Some(1),
+            maximum_uncommitted_bytes: Some(1024),
+        },
+    );
+    bounded
+        .append_deferred(marker("bounded"))
+        .expect("bounded deferred marker");
+
+    assert_eq!(bounded.durable_boundary().next_event_seq, 0);
+
+    thread::sleep(Duration::from_millis(5));
+
+    assert!(bounded.flush_due().expect("flush due deferred event"));
+    assert_eq!(bounded.durable_boundary(), bounded.observed_boundary());
+}
+
+#[test]
+fn deferred_append_rejects_output() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let mut writer = policy_writer(
+        &temporary,
+        "deferred-output",
+        DurabilityPolicy {
+            mode: DurabilityMode::Throughput,
+            maximum_interval_ms: None,
+            maximum_uncommitted_bytes: None,
+        },
+    );
+    assert!(writer
+        .append_deferred(Event::Output {
+            data: ByteString::from(&b"x"[..]),
+        })
+        .is_err());
+    assert_eq!(writer.observed_boundary().next_event_seq, 0);
+}
+
 #[test]
 fn refuses_group_readable_artifact_directory() {
     let temporary = TempDir::new().expect("temporary directory");

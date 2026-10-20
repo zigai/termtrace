@@ -1,13 +1,13 @@
 use super::{
     action, actor_boundaries, control_rejected, encode_all, presented_state_hash,
-    project_screen_frame, semantic_viewport_text, terminal_error, ActionPostcondition,
-    ActionPostconditionResult, ActorBoundaries, ByteString, CaptureQuality,
+    project_screen_frame, reaction_window, semantic_viewport_text, terminal_error,
+    ActionPostcondition, ActionPostconditionResult, ActorBoundaries, ByteString, CaptureQuality,
     CompiledScreenPredicate, ControlCommand, ControlPayload, Duration, Error, EventLogWriter,
     Instant, LiveTerminal, Result, ScreenFrame, ScreenFrameSource, ScreenPostconditionQuality,
     ScreenProjectionRequest, SessionActor, StableCaptureQuality, Uuid,
 };
 use nix::time::{clock_gettime, ClockId};
-use termtrace_model::protocol::control::ClockSample;
+use termtrace_model::protocol::control::{ClockSample, ReactionRequirement};
 use termtrace_model::terminal::screen::FrameDetail;
 
 fn system_monotonic_ns() -> Result<u64> {
@@ -38,6 +38,7 @@ pub(super) enum AdmittedPostcondition {
     Idle {
         stable_for_ns: u64,
         timeout_ns: u64,
+        reaction: ReactionRequirement,
     },
     Screen {
         predicate: CompiledScreenPredicate,
@@ -48,6 +49,8 @@ pub(super) enum AdmittedPostcondition {
 pub(super) struct AdmittedAction {
     pub(super) postcondition: AdmittedPostcondition,
     pub(super) projection: ScreenProjectionRequest,
+    pub(super) baseline_state_hash: String,
+    pub(super) baseline_output_bytes: u64,
 }
 
 pub(super) fn admitted_postcondition(
@@ -60,11 +63,13 @@ pub(super) fn admitted_postcondition(
             ActionPostcondition::Idle {
                 stable_for_ns,
                 timeout_ns,
+                reaction,
             },
             _,
         ) => Ok(AdmittedPostcondition::Idle {
             stable_for_ns: *stable_for_ns,
             timeout_ns: *timeout_ns,
+            reaction: reaction.clone(),
         }),
         (ActionPostcondition::Screen { timeout_ns, .. }, Some(predicate)) => {
             Ok(AdmittedPostcondition::Screen {
@@ -84,6 +89,7 @@ pub(super) fn evaluate_action_postcondition(
     event_log: &EventLogWriter,
     session_id: Uuid,
     live: &LiveTerminal,
+    output_bytes: u64,
     child_exited: bool,
     output_closed: bool,
 ) -> Result<Option<ActionPostconditionResult>> {
@@ -119,9 +125,19 @@ pub(super) fn evaluate_action_postcondition(
         AdmittedPostcondition::Idle {
             stable_for_ns,
             timeout_ns,
+            reaction,
         } => {
             let state_hash = presented_state_hash(live)?;
+            let baseline = reaction
+                .changed_from
+                .as_ref()
+                .unwrap_or(&waiting.action.baseline_state_hash);
+
+            let reacted = waiting.matching_state.is_some()
+                || &state_hash != baseline
+                || output_bytes > waiting.action.baseline_output_bytes;
             match &waiting.matching_state {
+                _ if !reacted => {}
                 Some((prior_hash, _)) if prior_hash == &state_hash => {}
                 _ => waiting.matching_state = Some((state_hash.clone(), now)),
             }
@@ -130,8 +146,11 @@ pub(super) fn evaluate_action_postcondition(
                 return since.elapsed() >= Duration::from_nanos(*stable_for_ns);
             });
 
+            let unchanged = !reacted
+                && now >= started_at + reaction_window(*stable_for_ns, reaction.timeout_ns);
+
             let deadline = now >= started_at + Duration::from_nanos(*timeout_ns);
-            if !stable && !child_completed && !output_closed && !deadline {
+            if !stable && !unchanged && !child_completed && !output_closed && !deadline {
                 return Ok(None);
             }
 
@@ -141,11 +160,14 @@ pub(super) fn evaluate_action_postcondition(
                 StableCaptureQuality::ChildCompleted
             } else if output_closed {
                 StableCaptureQuality::OutputClosed
+            } else if !reacted {
+                StableCaptureQuality::Unchanged
             } else {
                 StableCaptureQuality::Deadline
             };
 
-            let capture_quality = if stable {
+            let settled = quality.is_settled();
+            let capture_quality = if settled {
                 CaptureQuality::Stable
             } else if deadline {
                 CaptureQuality::Incomplete
@@ -170,7 +192,7 @@ pub(super) fn evaluate_action_postcondition(
             };
 
             Ok(Some(ActionPostconditionResult::Idle {
-                matched: stable,
+                matched: settled,
                 quality,
                 state_hash,
                 frame,

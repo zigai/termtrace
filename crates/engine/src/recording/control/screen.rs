@@ -34,7 +34,18 @@ pub(in crate::recording) struct ScreenWaiter {
     pub(super) deadline: Instant,
     pub(super) projection: ScreenProjectionRequest,
     pub(super) matching_state: Option<(String, Instant, u64)>,
+    pub(super) reaction: Option<WaiterReaction>,
     pub(super) response: mpsc::SyncSender<ControlResponse>,
+}
+
+pub(in crate::recording) struct WaiterReaction {
+    pub(super) changed_from: String,
+    pub(super) output_bytes: u64,
+    pub(super) deadline: Instant,
+}
+
+pub(super) fn reaction_window(stable_for_ns: u64, reaction_timeout_ns: u64) -> Duration {
+    return Duration::from_nanos(reaction_timeout_ns.max(stable_for_ns));
 }
 
 pub(super) fn presented_state_hash(live: &LiveTerminal) -> Result<String> {
@@ -61,17 +72,34 @@ impl SessionActor<'_> {
             let Some(waiter) = self.screen_waiters.get_mut(index) else {
                 break;
             };
-            let matched = waiter.predicate.as_ref().is_none_or(|predicate| {
-                let text = if predicate.needs_viewport_text() {
-                    viewport_text
-                        .get_or_insert_with(|| return semantic_viewport_text(&self.live.presented))
-                        .as_str()
-                } else {
-                    ""
-                };
 
-                return predicate.matches(&self.live.presented, text, &state_hash);
-            });
+            let output_bytes = self.progress.output_bytes;
+            let reacted = waiter.matching_state.is_some()
+                || waiter.reaction.as_ref().is_none_or(|reaction| {
+                    return reaction.changed_from != state_hash
+                        || output_bytes > reaction.output_bytes;
+                });
+
+            let unchanged = !reacted
+                && waiter
+                    .reaction
+                    .as_ref()
+                    .is_some_and(|reaction| return now >= reaction.deadline);
+
+            let matched = reacted
+                && waiter.predicate.as_ref().is_none_or(|predicate| {
+                    let text = if predicate.needs_viewport_text() {
+                        viewport_text
+                            .get_or_insert_with(|| {
+                                return semantic_viewport_text(&self.live.presented);
+                            })
+                            .as_str()
+                    } else {
+                        ""
+                    };
+
+                    return predicate.matches(&self.live.presented, text, &state_hash);
+                });
 
             if matched {
                 match &waiter.matching_state {
@@ -92,7 +120,7 @@ impl SessionActor<'_> {
 
             let child_completed = child_exited && output_closed;
             let deadline = now >= waiter.deadline;
-            let finished = stable || child_completed || output_closed || deadline;
+            let finished = stable || unchanged || child_completed || output_closed || deadline;
 
             if !finished {
                 index += 1;
@@ -101,7 +129,7 @@ impl SessionActor<'_> {
 
             let waiter = self.screen_waiters.remove(index);
             let boundaries = actor_boundaries(&self.event_log);
-            let capture_quality = if stable {
+            let capture_quality = if stable || unchanged {
                 CaptureQuality::Stable
             } else if deadline {
                 CaptureQuality::Incomplete
@@ -170,6 +198,8 @@ impl SessionActor<'_> {
                     StableCaptureQuality::ChildCompleted
                 } else if output_closed {
                     StableCaptureQuality::OutputClosed
+                } else if !reacted {
+                    StableCaptureQuality::Unchanged
                 } else {
                     StableCaptureQuality::Deadline
                 };

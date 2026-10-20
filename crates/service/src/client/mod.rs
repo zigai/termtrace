@@ -40,7 +40,9 @@ mod terminal;
 
 pub use capabilities::{Events, Evidence, FollowPosition, Native, Output, Pointer, Semantic};
 pub use launch::{await_ready, LaunchSpec, Readiness};
-pub use send::{CommandPostcondition, SendFailure, SendOutcome, SendRequest, SendStep};
+pub use send::{
+    CommandPostcondition, SendFailure, SendLastStep, SendOutcome, SendRequest, SendStep,
+};
 pub use session::{Session, SessionStatus, StopOutcome, StopRequest};
 pub use target::{LocatedSession, SessionTarget};
 pub use terminal::Terminal;

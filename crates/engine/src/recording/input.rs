@@ -148,7 +148,7 @@ pub(super) fn apply(
     caller_intent: Option<String>,
     data: &[u8],
 ) -> Result<InputApplication> {
-    let intent_event_seq = event_log.append(Event::InputIntent {
+    let intent = Event::InputIntent {
         operation_id,
         source,
         input_kind,
@@ -157,8 +157,41 @@ pub(super) fn apply(
         terminal_modes_hash,
         semantic_input,
         caller_intent,
-    })?;
+    };
 
+    return apply_intent(writer, event_log, operation_id, intent, data, false);
+}
+
+/// Answer a terminal query, leaving a successful result for the next synchronization.
+pub(super) fn apply_query_response(
+    writer: &mut dyn Write,
+    event_log: &mut EventLogWriter,
+    operation_id: Uuid,
+    data: &[u8],
+) -> Result<InputApplication> {
+    let intent = Event::InputIntent {
+        operation_id,
+        source: InputSource::Host,
+        input_kind: InputKind::Raw,
+        descriptor: InputDescriptor::Raw,
+        data: ByteString::from(data),
+        terminal_modes_hash: None,
+        semantic_input: Some("terminal-query-response".to_owned()),
+        caller_intent: None,
+    };
+
+    return apply_intent(writer, event_log, operation_id, intent, data, true);
+}
+
+fn apply_intent(
+    writer: &mut dyn Write,
+    event_log: &mut EventLogWriter,
+    operation_id: Uuid,
+    intent: Event,
+    data: &[u8],
+    defer_success: bool,
+) -> Result<InputApplication> {
+    let intent_event_seq = event_log.append(intent)?;
     let (bytes_written, write_error) = write_input(writer, data);
     let status = if write_error.is_some() {
         OperationStatus::Failed
@@ -167,12 +200,17 @@ pub(super) fn apply(
     };
 
     let error_code = write_error.as_ref().map(io_error_code);
-    let result_write = event_log.append(Event::InputResult {
+    let result = Event::InputResult {
         operation_id,
         status,
         bytes_written,
         error_code,
-    });
+    };
+    let result_write = if defer_success && write_error.is_none() {
+        event_log.append_deferred(result)
+    } else {
+        event_log.append(result)
+    };
 
     let Some(error) = write_error else {
         let result_event_seq = result_write?;

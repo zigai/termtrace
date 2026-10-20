@@ -2,7 +2,7 @@ use crate::cli::analysis::args::PageArgs;
 use clap::error::ErrorKind as ClapErrorKind;
 use miette::{IntoDiagnostic as _, Result};
 use std::{
-    fmt::{Display, Write as _},
+    fmt::{self, Display, Write as _},
     io::{self, Write as _},
     process::ExitCode,
 };
@@ -10,6 +10,8 @@ use termtrace_model::{
     protocol::output_projection::OutputProjectionQuality,
     terminal::{
         analysis::{LastActionDiagnosticsReport, LastActionReport},
+        diff::{RowMove, ScreenChanges},
+        screen::ScreenFrame,
         state::RowState,
     },
     value::pagination::OutputPage,
@@ -44,12 +46,12 @@ mod pagination;
 mod sink;
 
 pub(super) use formatting::{
-    id_list, optional_display, projection_warning, quoted_text, row_text, stable_enum_label,
-    write_projection_warning,
+    id_list, optional_display, projection_warning, quoted_text, row_range, row_text,
+    stable_enum_label, write_projection_warning,
 };
 pub(in crate::cli) use human::{
     human_action_summary, human_diagnostics_summary, human_last_action_summary,
-    human_screen_summary,
+    human_screen_changes, human_screen_summary,
 };
 pub(in crate::cli) use io_core::write_progress;
 use io_core::{direct_stderr, direct_stdout, report_message};

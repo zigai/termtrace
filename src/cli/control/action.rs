@@ -1,14 +1,17 @@
-use super::args::SendArgs;
+use super::args::{SendArgs, SendScreen};
 use super::input::parse_atom;
 use super::*;
 use std::mem::take;
 use termtrace_model::{
     protocol::control::{PointerOperation, ProcessSignal},
     protocol::mutation::{MutationEffect, Retry},
+    terminal::diff::ScreenChanges,
     terminal::screen::{FrameDetail, ScreenFrameContent},
     terminal::state::MouseButton,
 };
-use termtrace_sdk::session::{CommandPostcondition, SendOutcome, SendRequest, SendStep};
+use termtrace_sdk::session::{
+    CommandPostcondition, SendLastStep, SendOutcome, SendRequest, SendStep,
+};
 
 fn parse_click_str(s: &str) -> Result<(u16, u16)> {
     let (x_str, y_str) = s
@@ -187,6 +190,7 @@ pub(in crate::cli) fn run_send(
         verbose_atom_outcomes: arguments.verbose,
         postcondition: postcondition.clone(),
         projection: projection(&arguments),
+        report_changes: arguments.screen == SendScreen::Diff,
     };
     let outcome = match session.send(request) {
         Ok(outcome) => outcome,
@@ -204,8 +208,9 @@ pub(in crate::cli) fn run_send(
         }
     };
 
-    let outcome = match outcome {
-        SendOutcome::Command {
+    let SendOutcome { last, changes } = outcome;
+    let outcome = match last {
+        SendLastStep::Command {
             request_id,
             postcondition,
             ..
@@ -218,9 +223,10 @@ pub(in crate::cli) fn run_send(
                 label,
                 request_id,
                 postcondition,
+                changes.as_ref(),
             );
         }
-        SendOutcome::Action(outcome) => outcome,
+        SendLastStep::Action(outcome) => outcome,
     };
 
     let direct_stream = arguments.atoms.is_empty()
@@ -238,15 +244,22 @@ pub(in crate::cli) fn run_send(
         );
     }
 
-    let output = applied_response(&outcome)?;
+    let report_changes = arguments.screen == SendScreen::Diff;
+
+    let mut output = applied_response(&outcome, !report_changes)?;
     if arguments.json {
+        if report_changes {
+            insert_changes(&mut output, changes.as_ref())?;
+        }
+
         write_json_pretty(response, &output)?;
     } else {
         let mut summary = human_action_summary(&output);
-        if let Some(frame) = outcome.frame() {
-            summary.push_str(&human_frame_summary(frame));
-        }
-
+        summary.push_str(&human_send_screen(
+            arguments.screen,
+            changes.as_ref(),
+            outcome.frame(),
+        )?);
         write_stdout(response, summary)?;
     }
 
@@ -281,6 +294,47 @@ fn human_frame_summary(frame: &ScreenFrame) -> String {
     }));
 }
 
+fn human_send_screen(
+    screen: SendScreen,
+    changes: Option<&ScreenChanges>,
+    frame: Option<&ScreenFrame>,
+) -> Result<String> {
+    return Ok(match (screen, changes, frame) {
+        (SendScreen::Diff, Some(changes), Some(frame))
+            if !changes_need_full_screen(changes, frame) =>
+        {
+            human_screen_changes(changes, Some(frame))?
+        }
+        (SendScreen::Diff, Some(changes), None) => human_screen_changes(changes, None)?,
+        (_, _, Some(frame)) => human_frame_summary(frame),
+        (_, _, None) => String::new(),
+    });
+}
+
+fn changes_need_full_screen(changes: &ScreenChanges, frame: &ScreenFrame) -> bool {
+    let switched_screen = changes
+        .modes
+        .as_ref()
+        .is_some_and(|modes| return modes.before.alternate_screen != modes.after.alternate_screen);
+
+    let reported_lines = changes.rows.len().saturating_add(changes.moves.len());
+
+    return changes.geometry.is_some()
+        || switched_screen
+        || reported_lines.saturating_mul(5) > usize::from(frame.geometry.rows).saturating_mul(2);
+}
+
+fn insert_changes(output: &mut serde_json::Value, changes: Option<&ScreenChanges>) -> Result<()> {
+    if let (Some(object), Some(changes)) = (output.as_object_mut(), changes) {
+        object.insert(
+            "changes".to_owned(),
+            serde_json::to_value(changes).into_diagnostic()?,
+        );
+    }
+
+    return Ok(());
+}
+
 /// Report the postcondition checked after a trailing control command.
 fn write_trailing_postcondition(
     response: &mut ResponseWriter,
@@ -288,7 +342,14 @@ fn write_trailing_postcondition(
     label: &'static str,
     request_id: uuid::Uuid,
     postcondition: Option<Box<CommandPostcondition>>,
+    changes: Option<&ScreenChanges>,
 ) -> Result<ExitCode> {
+    let frame = match postcondition.as_deref() {
+        Some(CommandPostcondition::Idle(Ok(capture))) => Some(capture.frame.clone()),
+        Some(CommandPostcondition::Screen(Ok(wait))) => Some(wait.frame.clone()),
+        _ => None,
+    };
+
     let (matched, kind, outcome) = match postcondition.map(|postcondition| return *postcondition) {
         None => (true, "none", "matched".to_owned()),
         Some(CommandPostcondition::Idle(Ok(capture))) => (
@@ -305,27 +366,40 @@ fn write_trailing_postcondition(
         Some(CommandPostcondition::Screen(Err(_))) => (false, "screen", "error".to_owned()),
     };
 
+    let report_changes = arguments.screen == SendScreen::Diff;
     if arguments.json {
-        write_json_pretty(
-            response,
-            &serde_json::json!({
-                "v": 1,
-                "ok": matched,
-                "type": label,
-                "request_id": request_id,
-                "postcondition": {
-                    "kind": kind,
-                    "matched": matched,
-                    "outcome": outcome,
-                }
-            }),
-        )?;
+        let mut output = serde_json::json!({
+            "v": 1,
+            "ok": matched,
+            "type": label,
+            "request_id": request_id,
+            "postcondition": {
+                "kind": kind,
+                "matched": matched,
+                "outcome": outcome,
+            }
+        });
+
+        if report_changes {
+            insert_changes(&mut output, changes)?;
+        }
+
+        write_json_pretty(response, &output)?;
     } else {
         let status = if matched { "completed" } else { "failed" };
-        write_stdout(
-            response,
-            format!("Send command {status} ({label}); postcondition {kind} matched={matched}, outcome={outcome}\n"),
-        )?;
+        let mut summary = format!(
+            "Send command {status} ({label}); postcondition {kind} matched={matched}, outcome={outcome}\n"
+        );
+
+        if report_changes {
+            summary.push_str(&human_send_screen(
+                arguments.screen,
+                changes,
+                frame.as_ref(),
+            )?);
+        }
+
+        write_stdout(response, summary)?;
     }
 
     return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
@@ -361,6 +435,12 @@ pub(super) fn condition(arguments: &SendArgs) -> ActionCondition {
         return ActionCondition::Idle {
             stable_for,
             timeout,
+            reaction: Reaction {
+                changed_from: None,
+                timeout: arguments
+                    .reaction_timeout
+                    .unwrap_or(defaults::REACTION_TIMEOUT),
+            },
         };
     }
 
@@ -449,7 +529,10 @@ pub(super) struct ActionAppliedOutput<'data> {
     pub(super) code: Option<&'static str>,
 }
 
-pub(super) fn applied_response(outcome: &ActOutcome) -> Result<serde_json::Value> {
+pub(super) fn applied_response(
+    outcome: &ActOutcome,
+    include_frame: bool,
+) -> Result<serde_json::Value> {
     let input = &outcome.input;
     let matched = outcome.is_matched();
     let (postcondition, ended) = match &outcome.postcondition {
@@ -504,7 +587,7 @@ pub(super) fn applied_response(outcome: &ActOutcome) -> Result<serde_json::Value
         observation: ActionObservation {
             state: state_hash,
             state_hash,
-            frame: outcome.frame(),
+            frame: outcome.frame().filter(|_| return include_frame),
         },
         ended,
         boundaries: &outcome.boundaries,
@@ -614,7 +697,7 @@ pub(super) fn error_response(
 #[cfg(test)]
 mod action_response_tests {
     use super::{applied_response, error_response, projection};
-    use crate::cli::control::args::SendArgs;
+    use crate::cli::control::args::{SendArgs, SendScreen};
     use std::{path::PathBuf, time::Duration};
     use termtrace_model::{
         protocol::control::{ActionInputResult, ActionPostconditionResult, ControlErrorDetails},
@@ -694,7 +777,7 @@ mod action_response_tests {
             postcondition,
             boundaries: boundaries(),
         };
-        let response = applied_response(&outcome).expect("action response");
+        let response = applied_response(&outcome, true).expect("action response");
         assert_eq!(response["ok"], false);
         assert_eq!(response["code"], "postcondition_failed");
         assert_eq!(response["request_id"], request_id.to_string());
@@ -772,12 +855,14 @@ mod action_response_tests {
             until_screen: Some("ready".to_owned()),
             until_screen_regex: None,
             until_idle: None,
+            reaction_timeout: None,
             timeout: None,
             pace: Duration::ZERO,
             intent: None,
             if_state: None,
             request_id: None,
             verbose,
+            screen: SendScreen::Text,
             json,
         };
     }

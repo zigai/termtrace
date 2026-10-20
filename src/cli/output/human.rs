@@ -53,8 +53,12 @@ pub(crate) fn human_screen_summary(value: &serde_json::Value) -> String {
         .get("rows")
         .and_then(serde_json::Value::as_array)
         .map_or(0, Vec::len);
-
-    if changed_rows == 0 {
+    let moves = screen
+        .get("moves")
+        .and_then(|moves| return serde_json::from_value::<Vec<RowMove>>(moves.clone()).ok())
+        .unwrap_or_default();
+    push_moved_rows(&mut output, &moves);
+    if changed_rows == 0 && moves.is_empty() {
         output.push_str("  (no nonblank or changed rows)\n");
 
         return output;
@@ -82,6 +86,78 @@ pub(crate) fn human_screen_summary(value: &serde_json::Value) -> String {
     }
 
     return output;
+}
+
+pub(crate) fn human_screen_changes(
+    changes: &ScreenChanges,
+    frame: Option<&ScreenFrame>,
+) -> Result<String> {
+    let geometry = match frame {
+        Some(frame) => format!(
+            " ({}×{}, {})",
+            frame.geometry.cols,
+            frame.geometry.rows,
+            stable_enum_label(&frame.capture_quality)?
+        ),
+        None => String::new(),
+    };
+
+    let mut output = format!(
+        "Viewport changes from {} to {}{geometry}\n",
+        changes.before_state_hash, changes.after_state_hash
+    );
+
+    if changes.is_empty() {
+        output.push_str("  (no changes)\n");
+
+        return Ok(output);
+    }
+
+    push_moved_rows(&mut output, &changes.moves);
+    for row in &changes.rows {
+        let label = if row.appearance_only { " (appearance)" } else { "" };
+        let text = row.after.as_deref().unwrap_or("(absent)");
+        push_line(
+            &mut output,
+            format_args!("  row {}{label}: {text}", row.row),
+        );
+    }
+
+    if let Some(cursor) = &changes.cursor {
+        match (cursor.after.column, cursor.after.row) {
+            (Some(column), Some(row)) => {
+                push_line(&mut output, format_args!("  cursor at {column},{row}"));
+            }
+            _ => output.push_str("  cursor outside the viewport\n"),
+        }
+    }
+
+    if changes.modes.is_some() {
+        output.push_str("  terminal modes changed\n");
+    }
+
+    return Ok(output);
+}
+
+fn push_moved_rows(output: &mut String, moves: &[RowMove]) {
+    for moved in moves {
+        push_line(
+            output,
+            format_args!(
+                "  rows {} moved to {}",
+                row_range(moved.from_row, moved.count),
+                row_range(moved.to_row, moved.count)
+            ),
+        );
+    }
+}
+
+fn push_line(output: &mut String, line: fmt::Arguments<'_>) {
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "`fmt::Write` for `String` never fails, as documented on `format!`, and `drop_non_drop` rejects dropping the unit result"
+    )]
+    let _ = writeln!(output, "{line}");
 }
 
 fn value_string(value: &serde_json::Value, key: &str) -> Option<String> {

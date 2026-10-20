@@ -2,7 +2,10 @@ use super::*;
 use crate::cli::{analysis::args::ShowFormat, output::stable_enum_label};
 use std::io::{self, Write as _};
 use termtrace_engine::observation::observe_completed_with_formats;
-use termtrace_model::terminal::observation::Observation;
+use termtrace_model::terminal::{
+    diff::{row_moves, RowMove},
+    observation::Observation,
+};
 use termtrace_terminal::Format as GhosttyFormat;
 
 pub(in crate::cli) fn run_screen(
@@ -123,6 +126,7 @@ pub(in crate::cli) fn run_screen(
                     timeout: arguments.timeout.unwrap_or(defaults::WAIT_TIMEOUT),
                     projection: hash_only_projection(),
                     allow_incomplete: false,
+                    reaction: None,
                 })
                 .map_err(|error| {
                     let SessionError::StableCaptureIncomplete { result } = &error else {
@@ -349,6 +353,7 @@ pub(super) struct SparseScreenResponse<'viewport> {
 pub(super) struct DiffScreenResponse<'viewport> {
     encoding: &'static str,
     since: String,
+    moves: Vec<RowMove>,
     rows: Vec<(usize, &'viewport str)>,
 }
 
@@ -380,18 +385,23 @@ pub(super) fn difference(before: &str, after: &str, since: String) -> serde_json
     let before_rows: Vec<&str> = before.lines().collect();
     let after_rows: Vec<&str> = after.lines().collect();
     let row_count = before_rows.len().max(after_rows.len());
+    let moves = row_moves(&before_rows, &after_rows);
     let rows: Vec<(usize, &str)> = (0..row_count)
         .filter_map(|row| {
             let old = before_rows.get(row).copied().unwrap_or_default();
             let new = after_rows.get(row).copied().unwrap_or_default();
+            let moved = u16::try_from(row).is_ok_and(|row| {
+                return moves.iter().any(|moved| return moved.covers_later_row(row));
+            });
 
-            return (old != new).then(|| return (row, new.trim_end()));
+            return (old != new && !moved).then(|| return (row, new.trim_end()));
         })
         .collect();
 
     let response = DiffScreenResponse {
         encoding: "diff_rows",
         since,
+        moves,
         rows,
     };
 

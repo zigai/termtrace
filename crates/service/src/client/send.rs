@@ -2,14 +2,22 @@
 
 use super::{client_error, Session};
 use crate::{
-    actions::{ActOutcome, ActRequest, ActionCondition, InputAtom, MutationGuard},
+    actions::{
+        hash_only_projection, ActOutcome, ActRequest, ActionCondition, InputAtom, MutationGuard,
+        Reaction,
+    },
     screen::{StableCaptureOptions, StableScreenCapture},
     Error, Result,
 };
 use std::{error::Error as StdError, fmt, result::Result as StdResult, time::Duration};
+use termtrace_engine::diff::screen_changes;
 use termtrace_model::{
     protocol::control::{ControlCommand, ControlPayload},
-    terminal::{inspection::ScreenWaitOutcome, screen::ScreenProjectionRequest},
+    terminal::{
+        diff::ScreenChanges,
+        inspection::ScreenWaitOutcome,
+        screen::{FrameDetail, ScreenFrame, ScreenProjectionRequest},
+    },
 };
 use uuid::Uuid;
 
@@ -37,13 +45,25 @@ pub struct SendRequest {
     pub verbose_atom_outcomes: bool,
     /// Condition checked after the last step; an unmet condition is reported, not an error.
     pub postcondition: ActionCondition,
-    /// Detail and region requested for the terminating frame.
+    /// Detail and region requested for the terminating frame; full-screen spans when
+    /// changes are reported.
     pub projection: ScreenProjectionRequest,
+    /// Report presented-screen changes from just before the first step to the terminating frame.
+    pub report_changes: bool,
+}
+
+/// Result of a completed [`Session::send`].
+#[derive(Debug)]
+pub struct SendOutcome {
+    /// What the last step produced.
+    pub last: SendLastStep,
+    /// Presented-screen changes, when requested and a terminating frame exists.
+    pub changes: Option<ScreenChanges>,
 }
 
 /// What the last step of a [`Session::send`] produced.
 #[derive(Debug)]
-pub enum SendOutcome {
+pub enum SendLastStep {
     /// The last step was input; its action outcome carries the postcondition.
     Action(Box<ActOutcome>),
     /// The last step was a control command, followed by the postcondition check.
@@ -111,7 +131,9 @@ impl Session {
     ///
     /// The presented-state guard applies to the first step only, because each step may change
     /// the presented state the next one starts from. The postcondition rides on the last step
-    /// when it is input, and is checked after it when it is a control command.
+    /// when it is input, and is checked after it when it is a control command. An idle
+    /// postcondition measures stability only after the screen leaves its state from before
+    /// the first step.
     ///
     /// # Errors
     ///
@@ -124,6 +146,70 @@ impl Session {
                 request_id: send_request_id,
                 error: Box::new(client_error("send requires at least one step")),
             });
+        };
+        let actor_admits_last_step =
+            earlier_steps.is_empty() && matches!(last_step, SendStep::Input(_));
+
+        let idle_needs_start_state = !actor_admits_last_step
+            && matches!(
+                &request.postcondition,
+                ActionCondition::Idle {
+                    reaction: Reaction {
+                        changed_from: None,
+                        ..
+                    },
+                    ..
+                }
+            );
+
+        let projection = if request.report_changes {
+            ScreenProjectionRequest {
+                detail: FrameDetail::Spans,
+                region: None,
+            }
+        } else {
+            request.projection
+        };
+
+        let start_frame = if request.report_changes || idle_needs_start_state {
+            let start_projection =
+                if request.report_changes { projection } else { hash_only_projection() };
+
+            let frame = self.frame(start_projection).map_err(|error| {
+                return SendFailure {
+                    step: 0,
+                    request_id: send_request_id,
+                    error: Box::new(error),
+                };
+            })?;
+
+            Some(frame)
+        } else {
+            None
+        };
+
+        let postcondition = match &request.postcondition {
+            ActionCondition::Idle {
+                stable_for,
+                timeout,
+                reaction,
+            } if idle_needs_start_state => ActionCondition::Idle {
+                stable_for: *stable_for,
+                timeout: *timeout,
+                reaction: Reaction {
+                    changed_from: start_frame
+                        .as_ref()
+                        .map(|frame| return frame.state_hash.clone()),
+                    timeout: reaction.timeout,
+                },
+            },
+            postcondition => postcondition.clone(),
+        };
+
+        let request = SendRequest {
+            projection,
+            postcondition,
+            ..request.clone()
         };
 
         for (index, step) in earlier_steps.iter().enumerate() {
@@ -139,20 +225,52 @@ impl Session {
         let last = earlier_steps.len();
         let request_id = step_request_id(send_request_id, last);
 
-        return match self.send_step(
+        let last_step = match self.send_step(
             &request,
             send_request_id,
             last,
             last_step,
             request.postcondition.clone(),
         )? {
-            StepOutcome::Command(payload) => Ok(SendOutcome::Command {
+            StepOutcome::Command(payload) => SendLastStep::Command {
                 request_id,
                 payload,
                 postcondition: self.command_postcondition(&request),
-            }),
-            StepOutcome::Action(outcome) => Ok(SendOutcome::Action(outcome)),
+            },
+            StepOutcome::Action(outcome) => SendLastStep::Action(outcome),
         };
+
+        let changes = match start_frame {
+            Some(before) if request.report_changes => self
+                .terminating_frame(&last_step, projection)
+                .map(|after| return screen_changes(&before, &after)),
+            _ => None,
+        };
+
+        return Ok(SendOutcome {
+            last: last_step,
+            changes,
+        });
+    }
+
+    fn terminating_frame(
+        &self,
+        last_step: &SendLastStep,
+        projection: ScreenProjectionRequest,
+    ) -> Option<ScreenFrame> {
+        let frame = match last_step {
+            SendLastStep::Action(outcome) => outcome.frame(),
+            SendLastStep::Command { postcondition, .. } => match postcondition.as_deref() {
+                Some(CommandPostcondition::Idle(Ok(capture))) => Some(&capture.frame),
+                Some(CommandPostcondition::Screen(Ok(outcome))) => Some(&outcome.frame),
+                Some(CommandPostcondition::Idle(Err(_)) | CommandPostcondition::Screen(Err(_))) => {
+                    None
+                }
+                None => return self.frame(projection).ok(),
+            },
+        };
+
+        return frame.cloned();
     }
 
     fn send_step(
@@ -201,11 +319,13 @@ impl Session {
             ActionCondition::Idle {
                 stable_for,
                 timeout,
+                reaction,
             } => CommandPostcondition::Idle(self.capture_stable(StableCaptureOptions {
                 stable_for: *stable_for,
                 timeout: *timeout,
                 projection: request.projection,
                 allow_incomplete: true,
+                reaction: Some(reaction.clone()),
             })),
             ActionCondition::Screen { predicate, timeout } => CommandPostcondition::Screen(
                 self.wait_screen(predicate.clone(), Duration::ZERO, *timeout),

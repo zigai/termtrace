@@ -67,6 +67,14 @@ pub(in crate::cli) fn write_projection_warning(
     return Ok(());
 }
 
+pub(in crate::cli) fn row_range(first: u16, count: u16) -> String {
+    let last = first.saturating_add(count.saturating_sub(1));
+    if first == last {
+        return first.to_string();
+    }
+    return format!("{first}-{last}");
+}
+
 pub(in crate::cli) fn row_text(row: &RowState) -> String {
     let mut text = String::new();
     for cell in &row.cells {

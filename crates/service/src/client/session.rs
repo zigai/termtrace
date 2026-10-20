@@ -1,6 +1,6 @@
 use super::{client_error, Events, Evidence, Native, Output, Pointer, Semantic};
 use crate::{
-    actions::{duration_ns, ActOutcome, ActRequest, MutationGuard},
+    actions::{duration_ns, ActOutcome, ActRequest, MutationGuard, Reaction},
     defaults,
     screen::{StableCaptureOptions, StableScreenCapture},
     Error, Result,
@@ -442,6 +442,7 @@ impl Session {
             stable_for_ns,
             timeout_ns: duration_ns(options.timeout),
             projection: options.projection,
+            reaction: options.reaction.as_ref().map(Reaction::to_wire),
         });
 
         let timing = deadline.map_or_else(

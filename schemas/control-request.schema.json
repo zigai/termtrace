@@ -25,6 +25,10 @@
               "const": "idle",
               "type": "string"
             },
+            "reaction": {
+              "$ref": "#/$defs/ReactionRequirement",
+              "description": "Reaction required before the stable interval starts."
+            },
             "stable_for_ns": {
               "description": "Required unchanged presented-state interval.",
               "format": "uint64",
@@ -41,7 +45,8 @@
           "required": [
             "condition",
             "stable_for_ns",
-            "timeout_ns"
+            "timeout_ns",
+            "reaction"
           ],
           "type": "object"
         },
@@ -293,6 +298,17 @@
             "projection": {
               "$ref": "#/$defs/ScreenProjectionRequest",
               "description": "Rich projection returned from the exact terminating state."
+            },
+            "reaction": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ReactionRequirement"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Reaction required before the stable interval starts."
             },
             "stable_for_ns": {
               "description": "Required unchanged presented-state interval.",
@@ -1184,6 +1200,29 @@
           "type": "string"
         }
       ]
+    },
+    "ReactionRequirement": {
+      "additionalProperties": false,
+      "description": "Output or a presented-state change that must follow admission before stability is measured.",
+      "properties": {
+        "changed_from": {
+          "description": "Presented-state hash the screen must leave; absent means the state at admission.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout_ns": {
+          "description": "How long to wait for a reaction, at least the stable interval, before reporting\n`unchanged`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "timeout_ns"
+      ],
+      "type": "object"
     },
     "ScreenMode": {
       "description": "Stable terminal-mode selectors available to screen predicates.",

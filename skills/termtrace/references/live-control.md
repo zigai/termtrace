@@ -23,9 +23,13 @@ termtrace screen app --json --since STATE
 ## Waiting
 
 - Wait for the text you expect with `--until-screen` or `--until-screen-regex`.
-  `--until-idle` only proves that the screen stopped changing for its window
-  (default 500ms). It returns the old screen when the app reacts later than
-  that, and a partial screen when loading pauses.
+  `--until-idle` waits for output or a screen change after the send, then for
+  the screen to stop changing for its window (default 500ms). Input with no
+  reaction within `--reaction-timeout` (default 2s) settles as
+  `outcome=unchanged`; a slower app needs a longer reaction timeout. Echoed input
+  counts as a reaction, and loading pauses can return a partial screen.
+- Pass `--screen diff` to `send` to print only moved row blocks and changed rows
+  since just before the send; it prints the full screen when most rows changed.
 - Never `sleep` before reading the screen. When something outside Termtrace
   changes the app (tmux keys, a file edit, a reload), use
   `termtrace wait app --screen TEXT`.

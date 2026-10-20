@@ -232,6 +232,7 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
                 timeout: Duration::from_secs(2),
                 projection: ScreenProjectionRequest::default(),
                 allow_incomplete: false,
+                reaction: None,
             })
             .expect("facade atomic stable capture")
             .quality,

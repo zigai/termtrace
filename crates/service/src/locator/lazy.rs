@@ -222,6 +222,7 @@ impl<'session> Locator<'session> {
                         region: self.spec.region(),
                     },
                     allow_incomplete: true,
+                    reaction: None,
                 },
                 Some(deadline),
             );

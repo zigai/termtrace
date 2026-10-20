@@ -256,6 +256,9 @@ pub enum StableCaptureQuality {
     OutputClosed,
     /// The server-side deadline elapsed before the requested stable interval.
     Deadline,
+    /// The reaction window elapsed with no output and the presented state still equal to its
+    /// starting state, which therefore stayed unchanged for at least the stable interval.
+    Unchanged,
     /// The session had already completed; the frame is its final presented state.
     Completed,
 }
@@ -269,14 +272,15 @@ impl StableCaptureQuality {
             Self::ChildCompleted => "child_completed",
             Self::OutputClosed => "output_closed",
             Self::Deadline => "deadline",
+            Self::Unchanged => "unchanged",
             Self::Completed => "completed",
         };
     }
 
-    /// Whether the returned frame can no longer change: stable while live, or final.
+    /// Whether the returned frame settled: stable or unchanged while live, or final.
     #[must_use]
     pub const fn is_settled(self) -> bool {
-        return matches!(self, Self::Stable | Self::Completed);
+        return matches!(self, Self::Stable | Self::Unchanged | Self::Completed);
     }
 }
 
@@ -353,6 +357,9 @@ pub enum ControlCommand {
         timeout_ns: u64,
         /// Rich projection returned from the exact terminating state.
         projection: ScreenProjectionRequest,
+        /// Reaction required before the stable interval starts.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reaction: Option<ReactionRequirement>,
     },
     /// Send exact bytes to the child PTY.
     Input {
@@ -810,6 +817,8 @@ pub enum ActionPostcondition {
         stable_for_ns: u64,
         /// Server-side monotonic deadline interval.
         timeout_ns: u64,
+        /// Reaction required before the stable interval starts.
+        reaction: ReactionRequirement,
     },
     /// Wait for one presentation-eligible screen predicate.
     Screen {
@@ -818,6 +827,18 @@ pub enum ActionPostcondition {
         /// Server-side monotonic deadline interval.
         timeout_ns: u64,
     },
+}
+
+/// Output or a presented-state change that must follow admission before stability is measured.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReactionRequirement {
+    /// Presented-state hash the screen must leave; absent means the state at admission.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed_from: Option<String>,
+    /// How long to wait for a reaction, at least the stable interval, before reporting
+    /// `unchanged`.
+    pub timeout_ns: u64,
 }
 
 /// Exact applied-input component of an actor-ordered action.

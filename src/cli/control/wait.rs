@@ -70,6 +70,7 @@ fn run_idle_wait(
             timeout: arguments.timeout.unwrap_or(defaults::WAIT_TIMEOUT),
             projection: ScreenProjectionRequest::default(),
             allow_incomplete: true,
+            reaction: None,
         })
         .into_diagnostic()?;
 

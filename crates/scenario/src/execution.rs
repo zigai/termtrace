@@ -324,6 +324,7 @@ fn execute_step(
                     ),
                     projection: Default::default(),
                     allow_incomplete: false,
+                    reaction: None,
                 })
                 .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
 

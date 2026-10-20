@@ -45,7 +45,7 @@ export declare class ActionBuilder {
   paste(text: string): void
   /** Wait until the screen contains the specified pattern after applying input. */
   untilScreen(pattern: string, timeoutMs?: number | undefined | null): void
-  /** Wait until the screen is idle and unchanged after applying input. */
+  /** Wait until the screen changes after applying input and then stays unchanged. */
   untilIdle(stableForMs?: number | undefined | null, timeoutMs?: number | undefined | null): void
   /**
    * Execute the action sequence and return the terminating screen frame.

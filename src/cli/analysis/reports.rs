@@ -10,8 +10,8 @@ use crate::cli::{
     },
     output::{
         human_diagnostics_summary, human_last_action_summary, id_list, optional_display, paginate,
-        quoted_text, stable_enum_label, write_json_line, write_json_pretty, write_progress,
-        write_stdout,
+        quoted_text, row_range, stable_enum_label, write_json_line, write_json_pretty,
+        write_progress, write_stdout,
     },
     session_helpers::{
         resolve_session, resolve_session_path, resolve_state_point, write_session_lifecycle,
@@ -561,7 +561,24 @@ fn diff_text(difference: &SemanticDiff) -> Result<String> {
         changed_cells,
     );
 
-    for row in &difference.rows {
+    for moved in &difference.moves {
+        writeln!(
+            output,
+            "  rows {} moved to {}",
+            row_range(moved.from_row, moved.count),
+            row_range(moved.to_row, moved.count),
+        )
+        .into_diagnostic()?;
+    }
+
+    let rows = difference.rows.iter().filter(|row| {
+        return !difference
+            .moves
+            .iter()
+            .any(|moved| return moved.covers_later_row(row.row));
+    });
+
+    for row in rows {
         for cell in &row.cells {
             let before = cell
                 .before

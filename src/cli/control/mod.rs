@@ -5,8 +5,8 @@ pub(super) mod args;
 use crate::cli::{
     control::args::{millis_or, ScreenArgs, ScreenEncoding, StatusArgs, StopArgs, WaitArgs},
     output::{
-        human_action_summary, human_screen_summary, stable_enum_label, write_json_line,
-        write_json_pretty, write_stdout,
+        human_action_summary, human_screen_changes, human_screen_summary, stable_enum_label,
+        write_json_line, write_json_pretty, write_stdout,
     },
     parsers::{parse_cursor_position, parse_region_predicate, parse_row_predicate},
     session_helpers::{
@@ -37,7 +37,7 @@ use termtrace_model::{
 };
 use termtrace_sdk::{
     actions::hash_only_projection, defaults, session::Session, ActOutcome, ActionCondition,
-    Error as SessionError, InputAtom, MutationGuard, StableCaptureOptions, StopOutcome,
+    Error as SessionError, InputAtom, MutationGuard, Reaction, StableCaptureOptions, StopOutcome,
     StopRequest,
 };
 

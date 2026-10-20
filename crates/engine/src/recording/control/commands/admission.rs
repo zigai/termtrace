@@ -1,11 +1,11 @@
 use super::{
     action, actor_boundaries, admitted_postcondition, control_error_code, control_error_response,
     control_rejected, deliver_response, is_lowercase_blake3_hex, mpsc, mutation_failure_effect,
-    presented_state_hash, screen_frame_error, terminal_error, validate_screen_region,
-    AdmittedAction, ControlCommand, ControlErrorDetails, ControlRequest, ControlResponse,
-    ControlResult, Duration, Error, InputSequenceExecution, Instant, MutationEffect,
-    PendingInputSequence, Result, ScreenWaiter, SessionActor, CONTROL_PROTOCOL_VERSION,
-    MAX_SCREEN_WAITERS,
+    presented_state_hash, reaction_window, screen_frame_error, terminal_error,
+    validate_screen_region, AdmittedAction, ControlCommand, ControlErrorDetails, ControlRequest,
+    ControlResponse, ControlResult, Duration, Error, InputSequenceExecution, Instant,
+    MutationEffect, PendingInputSequence, Result, ScreenWaiter, SessionActor, WaiterReaction,
+    CONTROL_PROTOCOL_VERSION, MAX_SCREEN_WAITERS,
 };
 
 impl SessionActor<'_> {
@@ -137,6 +137,7 @@ impl SessionActor<'_> {
                 stable_for: Duration::from_nanos(*stable_for_ns),
                 deadline: Instant::now() + Duration::from_nanos(*timeout_ns),
                 matching_state: None,
+                reaction: None,
                 projection: *projection,
                 response: response_sender,
             });
@@ -148,6 +149,7 @@ impl SessionActor<'_> {
             stable_for_ns,
             timeout_ns,
             projection,
+            reaction,
         } = &request.command
         {
             if let Err(error) = validate_screen_region(
@@ -182,12 +184,25 @@ impl SessionActor<'_> {
                 return Ok(());
             }
 
+            let now = Instant::now();
+            let reaction = match reaction {
+                Some(reaction) => Some(WaiterReaction {
+                    changed_from: match &reaction.changed_from {
+                        Some(hash) => hash.clone(),
+                        None => presented_state_hash(&self.live)?,
+                    },
+                    output_bytes: self.progress.output_bytes,
+                    deadline: now + reaction_window(*stable_for_ns, reaction.timeout_ns),
+                }),
+                None => None,
+            };
             self.screen_waiters.push(ScreenWaiter {
                 request_id: request.request_id,
                 predicate: None,
                 stable_for: Duration::from_nanos(*stable_for_ns),
-                deadline: Instant::now() + Duration::from_nanos(*timeout_ns),
+                deadline: now + Duration::from_nanos(*timeout_ns),
                 matching_state: None,
+                reaction,
                 projection: *projection,
                 response: response_sender,
             });
@@ -254,6 +269,8 @@ impl SessionActor<'_> {
                         return Ok(AdmittedAction {
                             postcondition,
                             projection: *projection,
+                            baseline_state_hash: current_state_hash.clone(),
+                            baseline_output_bytes: self.progress.output_bytes,
                         });
                     })
                     .transpose();

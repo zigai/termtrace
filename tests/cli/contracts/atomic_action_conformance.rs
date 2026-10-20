@@ -2,7 +2,7 @@
 
 use crate::support::*;
 use serde::Deserialize;
-use std::thread;
+use std::{error::Error, thread, time::Instant};
 use termtrace_model::{
     protocol::control::{
         ActionPostconditionResult, ScreenPostconditionQuality, StableCaptureQuality,
@@ -11,8 +11,8 @@ use termtrace_model::{
     terminal::screen::{FrameDetail, ScreenFrame, ScreenFrameContent, ScreenFrameSource},
 };
 use termtrace_sdk::{
-    session::{SendOutcome, SendRequest, SendStep},
-    MutationEffect, MutationGuard, Retry,
+    session::{CommandPostcondition, SendLastStep, SendRequest, SendStep},
+    MutationEffect, MutationGuard, Reaction, Retry,
 };
 use uuid::Uuid;
 
@@ -236,13 +236,14 @@ fn send_applies_mixed_steps_once_and_replays_them_on_retry() {
         },
         ..SendRequest::default()
     };
-    let SendOutcome::Action(first) = session.send(request.clone()).expect("first send") else {
+    let SendLastStep::Action(first) = session.send(request.clone()).expect("first send").last
+    else {
         panic!("a send ending in input reports its action outcome");
     };
 
     assert!(first.is_matched());
 
-    let SendOutcome::Action(retry) = session.send(request).expect("retried send") else {
+    let SendLastStep::Action(retry) = session.send(request).expect("retried send").last else {
         panic!("a retried send ending in input reports its action outcome");
     };
 
@@ -303,6 +304,235 @@ fn send_reports_the_failed_step_after_applying_earlier_ones() {
     session
         .stop(StopRequest::default(), Some(Duration::from_secs(5)))
         .expect("stop send failure fixture");
+}
+
+fn start_delayed_reaction(
+    temporary: &Path,
+    name: &str,
+) -> Result<termtrace_sdk::Session, Box<dyn Error>> {
+    let terminal = ClientTerminal::new(env!("CARGO_BIN_EXE_termtrace"), temporary.join(name));
+    let session = terminal
+        .start(LaunchSpec::new([
+            OsString::from("/bin/sh"),
+            OsString::from("-c"),
+            OsString::from(
+                "trap 'exit 0' TERM; stty -echo; printf READY; IFS= read -r line; sleep 0.7; printf '\\r\\nDONE:%s' \"$line\"; while :; do sleep 1; done",
+            ),
+        ]))?;
+
+    wait_for_output(session.path(), b"READY", Duration::from_secs(5))?;
+
+    return Ok(session);
+}
+
+#[test]
+fn idle_action_waits_for_a_reaction_slower_than_its_stable_interval() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let mut session = start_delayed_reaction(temporary.path(), "slow-idle-evidence")
+        .expect("start delayed reaction fixture");
+
+    let outcome = session
+        .act(
+            ActRequest::new()
+                .text("go")
+                .key(ENTER)
+                .until_idle(Duration::from_millis(200), Duration::from_secs(5))
+                .projection(ScreenProjectionRequest::default()),
+        )
+        .expect("idle action");
+    assert!(outcome.is_matched());
+
+    let frame = outcome.frame().expect("terminating frame");
+    assert!(
+        frame_contains(frame, "DONE:go"),
+        "stale idle frame: {frame:?}"
+    );
+
+    session
+        .stop(StopRequest::default(), Some(Duration::from_secs(5)))
+        .expect("stop slow idle fixture");
+}
+
+fn idle_after(atoms: Vec<InputAtom>, reaction_timeout: Duration) -> ActRequest {
+    return ActRequest {
+        atoms,
+        postcondition: ActionCondition::Idle {
+            stable_for: Duration::from_millis(100),
+            timeout: Duration::from_secs(10),
+            reaction: Reaction {
+                changed_from: None,
+                timeout: reaction_timeout,
+            },
+        },
+        projection: ScreenProjectionRequest::default(),
+        allow_incomplete: true,
+        ..ActRequest::default()
+    };
+}
+
+#[test]
+fn idle_action_settles_as_unchanged_after_the_reaction_window() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let mut session = start_delayed_reaction(temporary.path(), "unchanged-idle-evidence")
+        .expect("start delayed reaction fixture");
+
+    let started = Instant::now();
+    let outcome = session
+        .act(idle_after(
+            vec![InputAtom::Text("x".to_owned())],
+            Duration::from_millis(300),
+        ))
+        .expect("unchanged idle action");
+
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(outcome.is_matched());
+    assert!(matches!(
+        outcome.postcondition,
+        ActionPostconditionResult::Idle {
+            quality: StableCaptureQuality::Unchanged,
+            ..
+        }
+    ));
+
+    session
+        .stop(StopRequest::default(), Some(Duration::from_secs(5)))
+        .expect("stop unchanged idle fixture");
+}
+
+#[test]
+fn idle_action_counts_output_that_redraws_an_identical_screen_as_a_reaction() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let terminal = ClientTerminal::new(
+        env!("CARGO_BIN_EXE_termtrace"),
+        temporary.path().join("redraw-idle-evidence"),
+    );
+
+    let mut session = terminal
+        .start(LaunchSpec::new([
+            OsString::from("/bin/sh"),
+            OsString::from("-c"),
+            OsString::from(
+                "trap 'exit 0' TERM; stty -echo -icanon min 1; printf READY; while :; do dd bs=1 count=1 >/dev/null 2>&1; printf '\\rREADY'; done",
+            ),
+        ]))
+        .expect("launch redraw fixture");
+
+    wait_for_output(session.path(), b"READY", Duration::from_secs(5))
+        .expect("redraw fixture ready");
+    let before = session
+        .frame(ScreenProjectionRequest::default())
+        .expect("frame before redraw");
+    let outcome = session
+        .act(idle_after(
+            vec![InputAtom::Text("x".to_owned())],
+            Duration::from_secs(5),
+        ))
+        .expect("redraw idle action");
+    assert_eq!(outcome.state_hash(), Some(before.state_hash.as_str()));
+    assert!(matches!(
+        outcome.postcondition,
+        ActionPostconditionResult::Idle {
+            quality: StableCaptureQuality::Stable,
+            ..
+        }
+    ));
+
+    session
+        .stop(StopRequest::default(), Some(Duration::from_secs(5)))
+        .expect("stop redraw fixture");
+}
+
+#[test]
+fn idle_send_ending_in_a_command_waits_for_a_change_since_the_send_began() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let mut session = start_delayed_reaction(temporary.path(), "command-idle-evidence")
+        .expect("start delayed reaction fixture");
+
+    let outcome = session
+        .send(SendRequest {
+            steps: vec![
+                SendStep::Input(vec![
+                    InputAtom::Text("go".to_owned()),
+                    InputAtom::Key(ENTER),
+                ]),
+                SendStep::Command(ControlCommand::Mark {
+                    label: "sent".to_owned(),
+                }),
+            ],
+            postcondition: ActionCondition::Idle {
+                stable_for: Duration::from_millis(200),
+                timeout: Duration::from_secs(5),
+                reaction: Reaction::new(),
+            },
+            projection: ScreenProjectionRequest::default(),
+            ..SendRequest::default()
+        })
+        .expect("send ending in a command");
+
+    let SendLastStep::Command { postcondition, .. } = outcome.last else {
+        panic!("a send ending in a marker reports its command");
+    };
+    let Some(CommandPostcondition::Idle(Ok(capture))) = postcondition.as_deref() else {
+        panic!("unexpected command postcondition: {postcondition:?}");
+    };
+
+    assert_eq!(capture.quality, StableCaptureQuality::Stable);
+    assert!(frame_contains(&capture.frame, "DONE:go"));
+
+    session
+        .stop(StopRequest::default(), Some(Duration::from_secs(5)))
+        .expect("stop command idle fixture");
+}
+
+#[test]
+fn send_reports_screen_changes_for_input_and_command_endings() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let mut session = start_delayed_reaction(temporary.path(), "changes-evidence")
+        .expect("start delayed reaction fixture");
+
+    let send = |steps| {
+        return session
+            .send(SendRequest {
+                steps,
+                postcondition: ActionCondition::Screen {
+                    predicate: ScreenPredicate::Contains {
+                        text: "DONE:go".to_owned(),
+                    },
+                    timeout: Duration::from_secs(5),
+                },
+                report_changes: true,
+                ..SendRequest::default()
+            })
+            .expect("send with changes");
+    };
+    let input_ending = send(vec![SendStep::Input(vec![
+        InputAtom::Text("go".to_owned()),
+        InputAtom::Key(ENTER),
+    ])]);
+    let changes = input_ending.changes.expect("changes for an input ending");
+
+    assert_ne!(changes.before_state_hash, changes.after_state_hash);
+    assert!(changes.moves.is_empty());
+    assert!(
+        changes
+            .rows
+            .iter()
+            .any(|row| return row.row == 1 && row.after.as_deref() == Some("DONE:go")),
+        "unexpected changes: {changes:?}"
+    );
+
+    let command_ending = send(vec![SendStep::Command(ControlCommand::Mark {
+        label: "after".to_owned(),
+    })]);
+    let changes = command_ending
+        .changes
+        .expect("changes for a command ending");
+
+    assert!(changes.is_empty(), "a marker changes nothing: {changes:?}");
+
+    session
+        .stop(StopRequest::default(), Some(Duration::from_secs(5)))
+        .expect("stop changes fixture");
 }
 
 #[test]
@@ -476,6 +706,7 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
             timeout: Duration::from_secs(2),
             projection: ScreenProjectionRequest::default(),
             allow_incomplete: false,
+            reaction: None,
         })
         .expect("Rust stable capture");
 

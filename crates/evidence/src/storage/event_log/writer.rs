@@ -290,6 +290,28 @@ impl EventLogWriter {
         return self.append_at(self.clock.elapsed_ns(), event);
     }
 
+    /// Append a non-output event for a later synchronization to make durable.
+    ///
+    /// Strict durability synchronizes it at once and bounded durability within its interval;
+    /// throughput durability waits for the next synchronized append.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an output event or when persistence fails.
+    pub fn append_deferred(&mut self, event: Event) -> Result<u64> {
+        if matches!(event, Event::Output { .. }) {
+            return Err(invalid_log(
+                &self.path,
+                self.next_seq.saturating_add(2),
+                "append_deferred requires a non-output event",
+            ));
+        }
+
+        let durable = self.durability_policy.mode == DurabilityMode::Strict;
+
+        return self.append_at_policy(self.clock.elapsed_ns(), event, durable);
+    }
+
     /// Append an output event according to the configured durability policy.
     ///
     /// # Errors
@@ -529,11 +551,11 @@ impl EventLogWriter {
 
         self.recent_cursors.push_back(self.observed_cursor);
 
-        if output_bytes > 0 {
-            if self.uncommitted_since.is_none() {
-                self.uncommitted_since = Some(Instant::now());
-            }
+        if !durable && self.uncommitted_since.is_none() {
+            self.uncommitted_since = Some(Instant::now());
+        }
 
+        if output_bytes > 0 {
             self.uncommitted_output_bytes =
                 self.uncommitted_output_bytes.saturating_add(output_bytes);
             self.maximum_observed_uncommitted_bytes = self

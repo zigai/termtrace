@@ -207,6 +207,7 @@ fn start_postcondition(
                 timeout: synchronization.timeout,
                 projection: ScreenProjectionRequest::default(),
                 allow_incomplete: true,
+                reaction: None,
             })
             .into_diagnostic()?;
 

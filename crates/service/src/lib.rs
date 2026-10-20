@@ -28,15 +28,15 @@ pub mod inspection {
     pub use termtrace_model::terminal::inspection::{ScreenWaitOutcome, WaitOutcome};
 }
 
-pub use actions::{ActOutcome, ActRequest, ActionCondition, InputAtom, MutationGuard};
+pub use actions::{ActOutcome, ActRequest, ActionCondition, InputAtom, MutationGuard, Reaction};
 pub use analysis::AnalysisService;
 pub use artifacts::ArtifactService;
 pub use assertions::{assert_screen_text, SnapshotProfile};
 pub use client::{
     await_ready, CommandPostcondition, Events, Evidence, FollowPosition, LaunchSpec,
-    LocatedSession, Native, Output, Pointer, Readiness, Semantic, SendFailure, SendOutcome,
-    SendRequest, SendStep, Session, SessionStatus, SessionTarget, StopOutcome, StopRequest,
-    Terminal,
+    LocatedSession, Native, Output, Pointer, Readiness, Semantic, SendFailure, SendLastStep,
+    SendOutcome, SendRequest, SendStep, Session, SessionStatus, SessionTarget, StopOutcome,
+    StopRequest, Terminal,
 };
 pub use error::{ControlError, Error, ErrorKind, Result};
 pub use events::{EventCursor, EventPage, EventsService};

@@ -1,10 +1,10 @@
 use super::{
     actor_boundaries, control_error_code, control_error_response, evaluate_action_postcondition,
-    mpsc, mutation_failure_effect, presented_state_hash, screen_frame_error, ActionInputResult,
-    AdmittedAction, AdmittedPostcondition, ControlCommand, ControlErrorDetails, ControlPayload,
-    ControlRequest, ControlResponse, ControlResult, Duration, Error, EventLogWriter,
-    InputSequenceExecution, InputSequenceFailureDetails, Instant, MutationEffect, Result,
-    SessionActor, Uuid, CONTROL_PROTOCOL_VERSION,
+    mpsc, mutation_failure_effect, presented_state_hash, reaction_window, screen_frame_error,
+    ActionInputResult, AdmittedAction, AdmittedPostcondition, ControlCommand, ControlErrorDetails,
+    ControlPayload, ControlRequest, ControlResponse, ControlResult, Duration, Error,
+    EventLogWriter, InputSequenceExecution, InputSequenceFailureDetails, Instant, MutationEffect,
+    Result, SessionActor, Uuid, CONTROL_PROTOCOL_VERSION,
 };
 
 pub(in crate::recording) struct PendingInputSequence {
@@ -39,13 +39,16 @@ impl PendingInputSequence {
                 AdmittedPostcondition::Idle {
                     stable_for_ns,
                     timeout_ns,
+                    reaction,
                 } => {
                     let deadline = waiting.started_at + Duration::from_nanos(*timeout_ns);
+                    let reaction_deadline =
+                        waiting.started_at + reaction_window(*stable_for_ns, reaction.timeout_ns);
 
                     return waiting
                         .matching_state
                         .as_ref()
-                        .map_or(waiting.started_at, |(_, since)| {
+                        .map_or(reaction_deadline, |(_, since)| {
                             return *since + Duration::from_nanos(*stable_for_ns);
                         })
                         .min(deadline);
@@ -134,6 +137,7 @@ impl SessionActor<'_> {
                         &self.event_log,
                         self.session_id,
                         &self.live,
+                        self.progress.output_bytes,
                         child_exited,
                         output_closed,
                     ) {
@@ -302,7 +306,7 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use termtrace_model::{
-        protocol::control::{ActionInputResult, ScreenPredicate},
+        protocol::control::{ActionInputResult, ReactionRequirement, ScreenPredicate},
         terminal::screen::{FrameDetail, ScreenProjectionRequest},
     };
 
@@ -327,6 +331,8 @@ mod tests {
                     detail: FrameDetail::None,
                     region: None,
                 },
+                baseline_state_hash: "baseline".to_owned(),
+                baseline_output_bytes: 0,
             },
             started_at,
             matching_state,
@@ -346,17 +352,22 @@ mod tests {
     }
 
     #[test]
-    fn test_waiting_idle_next_deadline_samples_immediately_when_unmatched() {
+    fn test_waiting_idle_next_deadline_is_the_reaction_window_until_a_reaction() {
         let started_at = Instant::now();
+        let timeout_ns = 5_000_000_000;
         let pending = test_pending(InputSequencePhase::Waiting(test_waiting_action(
             AdmittedPostcondition::Idle {
                 stable_for_ns: 100_000_000,
-                timeout_ns: 5_000_000_000,
+                timeout_ns,
+                reaction: ReactionRequirement {
+                    changed_from: None,
+                    timeout_ns: 2_000_000_000,
+                },
             },
             started_at,
             None,
         )));
-        assert_eq!(pending.next_deadline(), started_at);
+        assert_eq!(pending.next_deadline(), started_at + Duration::from_secs(2));
     }
 
     #[test]
@@ -370,6 +381,10 @@ mod tests {
             AdmittedPostcondition::Idle {
                 stable_for_ns,
                 timeout_ns,
+                reaction: ReactionRequirement {
+                    changed_from: None,
+                    timeout_ns: 2_000_000_000,
+                },
             },
             started_at,
             Some(("hash_a".to_owned(), since)),
@@ -384,6 +399,10 @@ mod tests {
             AdmittedPostcondition::Idle {
                 stable_for_ns,
                 timeout_ns,
+                reaction: ReactionRequirement {
+                    changed_from: None,
+                    timeout_ns: 2_000_000_000,
+                },
             },
             started_at,
             Some(("hash_b".to_owned(), late_since)),
@@ -425,6 +444,10 @@ mod tests {
             AdmittedPostcondition::Idle {
                 stable_for_ns: 100_000_000,
                 timeout_ns: 10_000_000_000,
+                reaction: ReactionRequirement {
+                    changed_from: None,
+                    timeout_ns: 2_000_000_000,
+                },
             },
             started_at,
             Some(("hash_1".to_owned(), started_at)),

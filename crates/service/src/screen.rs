@@ -1,6 +1,6 @@
 //! Stable-capture requests and outcomes, and plain text of rich frames.
 
-use crate::defaults;
+use crate::{actions::Reaction, defaults};
 use std::time::Duration;
 use termtrace_model::{
     protocol::control::StableCaptureQuality,
@@ -9,7 +9,7 @@ use termtrace_model::{
 };
 
 /// Options for one exact stable rich-screen capture.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StableCaptureOptions {
     /// Required interval during which the presented state remains unchanged.
     pub stable_for: Duration,
@@ -19,6 +19,8 @@ pub struct StableCaptureOptions {
     pub projection: ScreenProjectionRequest,
     /// Whether to return an unsettled capture instead of an error.
     pub allow_incomplete: bool,
+    /// Reaction required before the stable interval starts.
+    pub reaction: Option<Reaction>,
 }
 
 impl Default for StableCaptureOptions {
@@ -28,6 +30,7 @@ impl Default for StableCaptureOptions {
             timeout: defaults::WAIT_TIMEOUT,
             projection: ScreenProjectionRequest::default(),
             allow_incomplete: false,
+            reaction: None,
         };
     }
 }

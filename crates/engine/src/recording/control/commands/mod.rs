@@ -14,7 +14,9 @@ use super::super::{
     },
     termination::Fact,
 };
-use super::screen::{presented_state_hash, ScreenWaiter, MAX_SCREEN_WAITERS};
+use super::screen::{
+    presented_state_hash, reaction_window, ScreenWaiter, WaiterReaction, MAX_SCREEN_WAITERS,
+};
 use crate::{Error, Result};
 use nix::errno::Errno;
 use std::{

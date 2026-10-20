@@ -541,6 +541,39 @@
       ],
       "type": "object"
     },
+    "RowMove": {
+      "additionalProperties": false,
+      "description": "Contiguous block of complete rows found at a different position in the later state.",
+      "properties": {
+        "count": {
+          "description": "Number of rows in the block.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "from_row": {
+          "description": "First row of the block in the earlier state.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "to_row": {
+          "description": "First row of the block in the later state.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "from_row",
+        "to_row",
+        "count"
+      ],
+      "type": "object"
+    },
     "StatePoint": {
       "description": "Shared state selection vocabulary.",
       "oneOf": [
@@ -996,6 +1029,13 @@
       ],
       "description": "Terminal mode change."
     },
+    "moves": {
+      "description": "Blocks of complete rows that moved; `rows` still compares cells at equal positions.",
+      "items": {
+        "$ref": "#/$defs/RowMove"
+      },
+      "type": "array"
+    },
     "presented": {
       "anyOf": [
         {
@@ -1023,7 +1063,8 @@
     "from",
     "to",
     "changed",
-    "rows"
+    "rows",
+    "moves"
   ],
   "title": "SemanticDiff",
   "type": "object"

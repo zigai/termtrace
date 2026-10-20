@@ -7,7 +7,7 @@ use termtrace_model::{
     protocol::control::{
         derive_input_operation_id, ActionInputResult, ActionPostcondition,
         ActionPostconditionResult, ControlCommand, ControlRequest, InputSequenceAtom,
-        ScreenPredicate,
+        ReactionRequirement, ScreenPredicate,
     },
     terminal::observation::ActorBoundaries,
     terminal::screen::{FrameDetail, ScreenFrame, ScreenProjectionRequest},
@@ -35,12 +35,14 @@ pub enum ActionCondition {
     /// Return immediately after complete input application.
     #[default]
     None,
-    /// Require one unchanged presented state.
+    /// Require a reaction, then a presented state that stays unchanged.
     Idle {
         /// Required interval during which the presented state remains unchanged.
         stable_for: Duration,
         /// Maximum time to wait for stability.
         timeout: Duration,
+        /// Reaction that must precede the stable interval.
+        reaction: Reaction,
     },
     /// Evaluate one actor-portable presented-screen predicate.
     Screen {
@@ -58,6 +60,7 @@ impl ActionCondition {
         return Self::Idle {
             stable_for: defaults::IDLE_STABLE_FOR,
             timeout: defaults::WAIT_TIMEOUT,
+            reaction: Reaction::new(),
         };
     }
 
@@ -69,15 +72,56 @@ impl ActionCondition {
             Self::Idle {
                 stable_for,
                 timeout,
+                reaction,
             } => ActionPostcondition::Idle {
                 stable_for_ns: duration_ns(*stable_for),
                 timeout_ns: duration_ns(*timeout),
+                reaction: reaction.to_wire(),
             },
             Self::Screen { predicate, timeout } => ActionPostcondition::Screen {
                 predicate: predicate.clone(),
                 timeout_ns: duration_ns(*timeout),
             },
         };
+    }
+}
+
+/// Output or a presented-state change required before stability is measured.
+///
+/// Without one within `timeout`, or the stable interval when longer, the condition settles
+/// as `unchanged`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Reaction {
+    /// Presented-state hash the screen must leave; `None` uses the state when the actor
+    /// admitted the request.
+    pub changed_from: Option<String>,
+    /// How long to wait for a reaction.
+    pub timeout: Duration,
+}
+
+impl Reaction {
+    /// React relative to the admitted state within the default reaction timeout.
+    #[must_use]
+    pub const fn new() -> Self {
+        return Self {
+            changed_from: None,
+            timeout: defaults::REACTION_TIMEOUT,
+        };
+    }
+
+    /// Wire form of this reaction.
+    #[must_use]
+    pub fn to_wire(&self) -> ReactionRequirement {
+        return ReactionRequirement {
+            changed_from: self.changed_from.clone(),
+            timeout_ns: duration_ns(self.timeout),
+        };
+    }
+}
+
+impl Default for Reaction {
+    fn default() -> Self {
+        return Self::new();
     }
 }
 
@@ -199,12 +243,13 @@ impl ActRequest {
         return self;
     }
 
-    /// Await an unchanged presented state after input application.
+    /// Await a reaction to the input and then an unchanged presented state.
     #[must_use]
     pub fn until_idle(mut self, stable_for: Duration, timeout: Duration) -> Self {
         self.postcondition = ActionCondition::Idle {
             stable_for,
             timeout,
+            reaction: Reaction::new(),
         };
 
         return self;

@@ -1,14 +1,10 @@
 //! Terminal presentation parsing and semantic-state tracking.
 
-use super::{control::MutationHistory, input::apply, model::TerminalGeometry};
+use super::{control::MutationHistory, input::apply_query_response, model::TerminalGeometry};
 use crate::{Error, Result};
 use std::{cell::RefCell, io::Write, mem::take, slice};
 use termtrace_evidence::event_log::EventLogWriter;
-use termtrace_model::{
-    execution::event::{Event, InputDescriptor, InputKind, InputSource},
-    terminal::state::SemanticState,
-    value::ByteString,
-};
+use termtrace_model::{execution::event::Event, terminal::state::SemanticState, value::ByteString};
 use termtrace_terminal::{
     GhosttyVt, PresentationAction, PresentationTracker, PresentationTransition, QueryTracker,
 };
@@ -281,25 +277,14 @@ pub(super) fn process_semantic_bytes(
             for response in take(&mut live.pending_query_responses) {
                 let operation_id = Uuid::now_v7();
 
-                event_log.append(Event::QueryResponse {
+                event_log.append_deferred(Event::QueryResponse {
                     source_event_seq: live.source_event_seq,
                     source_byte_offset: live.source_byte_offset,
                     query: query.clone(),
                     response: ByteString::from(response.as_slice()),
                     responder: "pinned-libghostty-vt".to_owned(),
                 })?;
-                apply(
-                    writer,
-                    event_log,
-                    operation_id,
-                    InputSource::Host,
-                    InputKind::Raw,
-                    InputDescriptor::Raw,
-                    None,
-                    Some("terminal-query-response".to_owned()),
-                    None,
-                    &response,
-                )?;
+                apply_query_response(writer, event_log, operation_id, &response)?;
             }
         }
 

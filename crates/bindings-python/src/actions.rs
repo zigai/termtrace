@@ -120,7 +120,7 @@ impl PyActionBuilder {
         return Ok(slf);
     }
 
-    /// Wait until the screen is idle and unchanged after applying input.
+    /// Wait until the screen changes after applying input and then stays unchanged.
     ///
     /// # Errors
     ///

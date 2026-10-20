@@ -24,6 +24,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
             stable_for_ns: 30_000_000,
             timeout_ns: 2_000_000_000,
             projection: ScreenProjectionRequest::default(),
+            reaction: None,
         }),
     )
     .expect("stable capture");
@@ -112,6 +113,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
             stable_for_ns: 100_000_000,
             timeout_ns: 250_000_000,
             projection: ScreenProjectionRequest::default(),
+            reaction: None,
         }),
     )
     .expect("typed deadline capture");
@@ -155,6 +157,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
             stable_for_ns: 3_600_000_000_000,
             timeout_ns: 3_600_000_000_000,
             projection: ScreenProjectionRequest::default(),
+            reaction: None,
         }),
     )
     .expect("typed child completion");
@@ -199,6 +202,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
             stable_for_ns: 1_000_000_000,
             timeout_ns: 3_000_000_000,
             projection: ScreenProjectionRequest::default(),
+            reaction: None,
         }),
     )
     .expect("typed output closure");

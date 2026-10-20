@@ -2963,6 +2963,11 @@
           "type": "string"
         },
         {
+          "const": "unchanged",
+          "description": "The reaction window elapsed with no output and the presented state still equal to its\nstarting state, which therefore stayed unchanged for at least the stable interval.",
+          "type": "string"
+        },
+        {
           "const": "completed",
           "description": "The session had already completed; the frame is its final presented state.",
           "type": "string"

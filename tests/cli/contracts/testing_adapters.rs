@@ -69,6 +69,7 @@ fn rust_test_helper_discards_styled_stable_attempt_after_snapshot() {
                     timeout: Duration::from_secs(5),
                     projection: ScreenProjectionRequest::default(),
                     allow_incomplete: false,
+                    reaction: None,
                 },
             )?;
 
