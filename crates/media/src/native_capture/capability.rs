@@ -17,6 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 use termtrace_evidence::artifact::{create_private_directory, write_secure};
+use termtrace_model::execution::session::WindowPadding;
 use termtrace_model::protocol::capability::{
     Capability, CapabilityStatus, NATIVE_SCREENSHOT_CAPABILITY, NATIVE_SCREENSHOT_TOOLS,
     NATIVE_VIDEO_CAPABILITY, NATIVE_VIDEO_TOOLS,
@@ -182,7 +183,7 @@ fn probe_staged(
     let mut command = Command::new("dbus-run-session");
     command
         .args(["--", "ghostty"])
-        .args(ghostty_overrides())
+        .args(ghostty_overrides(WindowPadding::default()))
         .args(["--config-default-files=false", "--background=102030", "--foreground=ffffff"])
         .args(["-e", "/bin/sh", "-c", r#"printf '\033[2J\033[Htermtrace native readiness\n'; printf ready > "$1"; read -r answer"#, "termtrace-native-probe"])
         .arg(&ready)

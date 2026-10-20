@@ -300,7 +300,7 @@ pub(super) fn run_capture(
     require_cli_capability(NATIVE_VIDEO_CAPABILITY, &AtomicBool::new(false))?;
 
     let viewport = match (arguments.width, arguments.height) {
-        (Some(width), Some(height)) => Some(CaptureTarget { width, height }),
+        (Some(width), Some(height)) => Some(CaptureTarget::new(width, height)),
         (None, None) => None,
         _ => {
             return Err(miette::miette!(
@@ -319,6 +319,7 @@ pub(super) fn run_capture(
             session_directory: arguments.session,
             width: target.width,
             height: target.height,
+            padding: target.padding,
             fps: arguments.fps,
             start_monotonic_ns,
             end_monotonic_ns,

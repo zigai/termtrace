@@ -19,6 +19,7 @@ use termtrace_evidence::artifact::secure_file;
 use termtrace_model::{
     artifact::playback::{PlaybackFailure, PlaybackTiming},
     artifact::visual::{CaptureKind, CaptureOptions},
+    execution::session::WindowPadding,
 };
 use termtrace_process::{owned, poll_until, SupervisedChild};
 
@@ -120,8 +121,8 @@ pub(super) fn probe_output_with_check(
     return Ok(output.stdout_bytes);
 }
 
-pub(super) fn ghostty_overrides() -> Vec<String> {
-    return vec![
+pub(super) fn ghostty_overrides(padding: WindowPadding) -> Vec<String> {
+    let mut overrides: Vec<String> = [
         "--gtk-single-instance=false",
         "--async-backend=epoll",
         "--confirm-close-surface=false",
@@ -131,10 +132,21 @@ pub(super) fn ghostty_overrides() -> Vec<String> {
         "--window-width=9999",
         "--window-height=9999",
         "--window-save-state=never",
+        "--resize-overlay=never",
     ]
     .into_iter()
     .map(str::to_owned)
     .collect();
+
+    if !padding.is_none() {
+        overrides.extend([
+            format!("--window-padding-x={}", padding.x),
+            format!("--window-padding-y={}", padding.y),
+            "--window-padding-balance=true".to_owned(),
+        ]);
+    }
+
+    return overrides;
 }
 
 pub(super) fn spawn_xvfb(

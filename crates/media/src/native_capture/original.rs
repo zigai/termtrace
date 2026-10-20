@@ -295,7 +295,7 @@ fn capture_staged(
     let finished = staging.join("recording-exit-status");
     let stderr = secure_file(&staging.join("ghostty.stderr.log"))?;
     let stdout = secure_file(&staging.join("ghostty.stdout.log"))?;
-    let mut overrides = ghostty_overrides();
+    let mut overrides = ghostty_overrides(options.padding);
 
     if backend == OriginalCaptureBackend::WaylandPortal {
         overrides.retain(|arg| {

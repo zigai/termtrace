@@ -229,7 +229,7 @@ pub(super) fn parse_capture_target(value: &str) -> StdResult<CaptureTarget, Stri
     if width == 0 || height == 0 {
         return Err("viewport dimensions must be non-zero".to_owned());
     }
-    return Ok(CaptureTarget { width, height });
+    return Ok(CaptureTarget::new(width, height));
 }
 
 pub(super) fn parse_font_size(value: &str) -> StdResult<String, String> {

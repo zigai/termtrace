@@ -118,6 +118,7 @@ pub(super) fn capture_stable_x11_frame(
         staging,
         display,
         screenshot,
+        None,
         Duration::from_secs(30),
         || return Ok(()),
     );
@@ -127,6 +128,7 @@ pub(super) fn capture_stable_x11_frame_with_check(
     staging: &Path,
     display: &str,
     screenshot: &Path,
+    crop: Option<(u16, u16)>,
     timeout: Duration,
     mut check: impl FnMut() -> Result<()>,
 ) -> Result<Vec<NativeFrameSample>> {
@@ -146,10 +148,15 @@ pub(super) fn capture_stable_x11_frame_with_check(
         }
 
         let path = staging.join(format!(".native-sample-{sample:04}.png"));
+        let mut import = Command::new("import");
+        import.args(["-silent", "-window", "root"]);
+        if let Some((width, height)) = crop {
+            import.args(["-crop", &format!("{width}x{height}+0+0"), "+repage"]);
+        }
+
         let output = probe_output_with_check(
             "X11 frame import",
-            Command::new("import")
-                .args(["-silent", "-window", "root"])
+            import
                 .arg(format!("png:{}", path.display()))
                 .env("DISPLAY", display),
             remaining,

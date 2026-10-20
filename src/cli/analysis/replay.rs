@@ -173,6 +173,7 @@ pub(in crate::cli) fn run_playback_worker(arguments: PlaybackWorkerArgs) -> Resu
         &arguments.session,
         &arguments.socket,
         &arguments.geometry_file,
+        &arguments.error_file,
     )
     .into_diagnostic()?;
 

@@ -2,7 +2,7 @@
 
 use crate::{
     artifact::metadata::ArtifactMember,
-    execution::session::CaptureTarget,
+    execution::session::{CaptureTarget, WindowPadding},
     terminal::replay::{SourceRange, StateSelection},
     value::geometry::TerminalGeometryReport,
 };
@@ -27,6 +27,8 @@ pub struct CaptureOptions {
     pub width: u16,
     /// Xvfb/capture height in pixels.
     pub height: u16,
+    /// Balanced Ghostty window padding for the capture viewport.
+    pub padding: WindowPadding,
     /// Encoded video frame rate.
     pub fps: u16,
     /// Optional inclusive source offset.

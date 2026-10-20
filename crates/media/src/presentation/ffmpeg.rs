@@ -419,6 +419,16 @@ pub(super) fn append_pixel_transforms(
         }
     }
 
+    if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
+        filters.push(format!(
+            "[{prior}]pad={}:{}:0:0:color=black[evened]",
+            width.next_multiple_of(2),
+            height.next_multiple_of(2)
+        ));
+
+        "evened".clone_into(&mut prior);
+    }
+
     if let Some(branding) = &plan.layout.branding {
         ensure_presentation_font(staging)?;
         write_secure(&staging.join("branding.txt"), branding.as_bytes())?;

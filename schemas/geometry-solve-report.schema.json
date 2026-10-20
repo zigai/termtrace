@@ -10,6 +10,10 @@
           "minimum": 0,
           "type": "integer"
         },
+        "padding": {
+          "$ref": "#/$defs/WindowPadding",
+          "description": "Balanced Ghostty window padding that fits a grid smaller than Ghostty's minimum window."
+        },
         "width": {
           "description": "Viewport width in pixels.",
           "format": "uint16",
@@ -96,6 +100,31 @@
         "cell_height",
         "text_width",
         "text_height"
+      ],
+      "type": "object"
+    },
+    "WindowPadding": {
+      "additionalProperties": false,
+      "description": "Ghostty window padding in points; zero leaves the profile's own padding in effect.",
+      "properties": {
+        "x": {
+          "description": "Horizontal padding on each side.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "y": {
+          "description": "Vertical padding on each side.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "x",
+        "y"
       ],
       "type": "object"
     }

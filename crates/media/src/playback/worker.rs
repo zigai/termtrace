@@ -1,16 +1,19 @@
 use super::{
-    runtime::{emit_endpoint, emit_event},
-    terminal::{query, resize_and_query, RawTerminalGuard, TerminalInputDrain},
+    runtime::{emit_endpoint, emit_event, write_create_new_json},
+    terminal::{query, RawTerminalGuard, ReplayTerminal},
 };
 use crate::{error::finish_with_cleanup, Error, Result};
+use nix::{
+    sys::socket::{getsockopt, sockopt::PeerCredentials},
+    unistd::geteuid,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fs,
     io::{self, BufRead as _, BufReader, Read as _, Write as _},
-    os::unix::{
-        fs::PermissionsExt as _,
-        net::{UnixListener, UnixStream},
+    os::{
+        linux::net::SocketAddrExt as _,
+        unix::net::{SocketAddr, UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -22,7 +25,7 @@ use termtrace_evidence::{
 };
 use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::{
-    execution::event::Event, terminal::replay::ReplayEndpoint,
+    artifact::playback::PlaybackFailure, execution::event::Event, terminal::replay::ReplayEndpoint,
     value::geometry::TerminalGeometryReport,
 };
 use termtrace_process::poll_until;
@@ -41,6 +44,8 @@ pub(crate) enum WorkerResponse {
     Ready {
         endpoint: ReplayEndpoint,
         geometry: TerminalGeometryReport,
+        window_width: u16,
+        window_height: u16,
     },
     Closed,
     Error {
@@ -55,28 +60,50 @@ struct PlaybackPosition {
 
 /// Serve forward native replay requests inside one owned Ghostty terminal.
 ///
-/// The private socket accepts one parent connection. Closing that connection ends
-/// playback. Requests validate an explicit canonical prefix before acknowledging
-/// a parser barrier; the caller acquires and labels pixels separately.
+/// The abstract socket named `socket_name` accepts one parent connection owned by the
+/// same user. Closing that connection ends playback. Requests validate an explicit
+/// canonical prefix before acknowledging a parser barrier; the caller acquires and labels
+/// pixels separately. A failure is also written to `error_file`, so the parent learns of
+/// it before any connection exists.
 ///
 /// # Errors
 /// Returns terminal, protocol, source-validation, or filesystem failures.
-pub fn playback_worker(session: &Path, socket: &Path, geometry_file: &Path) -> Result<()> {
+pub fn playback_worker(
+    session: &Path,
+    socket_name: &str,
+    geometry_file: &Path,
+    error_file: &Path,
+) -> Result<()> {
     let mut raw = RawTerminalGuard::enter(true)?;
-    let result = run_worker(session, socket, geometry_file, raw.is_active());
+    let result = run_worker(session, socket_name, geometry_file, raw.is_active());
+    let result = finish_with_cleanup(result, raw.restore());
+    let Err(error) = result else {
+        return Ok(());
+    };
+    let failure = PlaybackFailure {
+        message: error.to_string(),
+    };
 
-    return finish_with_cleanup(result, raw.restore());
+    if let Err(cleanup) = write_create_new_json(error_file, &failure) {
+        return Err(Error::CleanupFailed {
+            primary: Box::new(error),
+            cleanup: Box::new(cleanup),
+        });
+    }
+    return Err(error);
 }
 
 fn run_worker(
     session: &Path,
-    socket: &Path,
+    socket_name: &str,
     geometry_file: &Path,
     terminal_input: bool,
 ) -> Result<()> {
+    let socket = &abstract_socket_label(socket_name);
     let manifest = read_manifest(session)?;
     let manifest_hash = manifest_hash(&canonical_manifest_bytes(&manifest)?);
-    let reported = resize_and_query(manifest.geometry.cols, manifest.geometry.rows)?;
+    let mut terminal = ReplayTerminal::new(terminal_input);
+    let reported = terminal.resize(manifest.geometry.cols, manifest.geometry.rows)?;
 
     if (reported.cols, reported.rows) != (manifest.geometry.cols, manifest.geometry.rows) {
         return Err(invalid(
@@ -84,10 +111,10 @@ fn run_worker(
         ));
     }
 
-    let listener =
-        UnixListener::bind(socket).map_err(|source| return filesystem(socket, source))?;
-    fs::set_permissions(socket, fs::Permissions::from_mode(0o600))
+    let address = SocketAddr::from_abstract_name(socket_name.as_bytes())
         .map_err(|source| return filesystem(socket, source))?;
+    let listener =
+        UnixListener::bind_addr(&address).map_err(|source| return filesystem(socket, source))?;
     listener
         .set_nonblocking(true)
         .map_err(|source| return filesystem(socket, source))?;
@@ -103,7 +130,14 @@ fn run_worker(
         Duration::from_millis(10),
         || {
             return match listener.accept() {
-                Ok((stream, _)) => Ok(Some(stream)),
+                Ok((stream, _)) => {
+                    if is_same_user_peer(&stream)
+                        .map_err(|source| return filesystem(socket, source))?
+                    {
+                        return Ok(Some(stream));
+                    }
+                    return Ok(None);
+                }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
                 Err(error) => Err(filesystem(socket, error)),
             };
@@ -157,13 +191,21 @@ fn run_worker(
             &endpoint,
             last.as_ref(),
             &mut resizes,
-            terminal_input,
-        );
+            &mut terminal,
+        )
+        .and_then(|(position, geometry)| {
+            return Ok((position, geometry, terminal.window_size()?));
+        });
         match result {
-            Ok((position, geometry)) => {
+            Ok((position, geometry, (window_width, window_height))) => {
                 write_response(
                     input.get_mut(),
-                    &WorkerResponse::Ready { endpoint, geometry },
+                    &WorkerResponse::Ready {
+                        endpoint,
+                        geometry,
+                        window_width,
+                        window_height,
+                    },
                     socket,
                 )?;
 
@@ -189,7 +231,7 @@ fn advance(
     endpoint: &ReplayEndpoint,
     last: Option<&PlaybackPosition>,
     resizes: &mut HashMap<Uuid, (u16, u16)>,
-    terminal_input: bool,
+    terminal: &mut ReplayTerminal,
 ) -> Result<(PlaybackPosition, TerminalGeometryReport)> {
     if last.is_some_and(|last| {
         return (endpoint.event_seq, endpoint.event_byte_offset)
@@ -208,9 +250,9 @@ fn advance(
         ));
     }
 
-    let mut drain = TerminalInputDrain::start(terminal_input)?;
-    let result = advance_events(session, endpoint, last, resizes);
-    let position = finish_with_cleanup(result, drain.stop())?;
+    terminal.start_drain()?;
+    let result = advance_events(session, endpoint, last, resizes, terminal);
+    let position = finish_with_cleanup(result, terminal.stop_drain())?;
     let geometry = query()?;
 
     if (geometry.cols, geometry.rows) != (endpoint.cols, endpoint.rows) {
@@ -226,6 +268,7 @@ fn advance_events(
     endpoint: &ReplayEndpoint,
     last: Option<&PlaybackPosition>,
     resizes: &mut HashMap<Uuid, (u16, u16)>,
+    terminal: &mut ReplayTerminal,
 ) -> Result<PlaybackPosition> {
     let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     if cursor.header().session_id != endpoint.session_id
@@ -257,14 +300,12 @@ fn advance_events(
             return Err(invalid("previously replayed source bytes changed"));
         }
 
-        let Some(target) = endpoint.event_seq else {
-            continue;
-        };
-        if record.seq > target {
+        let target = endpoint.event_seq;
+        if target.is_some_and(|target| return record.seq > target) {
             continue;
         }
 
-        if record.seq == target {
+        if target == Some(record.seq) {
             event_hash = Some(record.hash.clone());
         }
 
@@ -283,7 +324,7 @@ fn advance_events(
                             return invalid("previous native output endpoint has no byte offset");
                         })?;
 
-                    let end = if record.seq == target {
+                    let end = if target == Some(record.seq) {
                         endpoint
                             .event_byte_offset
                             .and_then(|offset| return offset.checked_add(1))
@@ -312,15 +353,16 @@ fn advance_events(
             }
         }
 
-        if record.seq == target {
+        if target == Some(record.seq) {
             emit_endpoint(
                 &mut output,
+                terminal,
                 resizes,
                 &record.event,
                 endpoint.event_byte_offset,
             )?;
         } else {
-            emit_event(&mut output, resizes, &record.event, None)?;
+            emit_event(&mut output, terminal, resizes, &record.event, None)?;
         }
     }
 
@@ -347,6 +389,18 @@ fn write_response(stream: &mut UnixStream, response: &WorkerResponse, path: &Pat
     return stream
         .write_all(b"\n")
         .map_err(|source| return filesystem(path, source));
+}
+
+/// Display form of an abstract socket name, used to label its errors.
+pub(crate) fn abstract_socket_label(name: &str) -> PathBuf {
+    return PathBuf::from(format!("@{name}"));
+}
+
+/// Whether the connected peer runs as this process's effective user.
+pub(crate) fn is_same_user_peer(stream: &UnixStream) -> io::Result<bool> {
+    let credentials = getsockopt(stream, PeerCredentials).map_err(io::Error::from)?;
+
+    return Ok(credentials.uid() == geteuid().as_raw());
 }
 
 fn invalid(reason: &str) -> Error {

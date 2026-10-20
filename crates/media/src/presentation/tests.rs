@@ -462,10 +462,17 @@ fn transform_geometry_is_ordered_bounded_and_even() {
         ],
         ..EditPlan::default()
     };
+
     assert_eq!(
         validate_transform_geometry(&edit, 80, 40, false).expect("valid transforms"),
         (64, 48)
     );
+    assert_eq!(
+        validate_transform_geometry(&EditPlan::default(), 705, 339, false)
+            .expect("odd source canvas"),
+        (706, 340)
+    );
+
     let invalid = EditPlan {
         transforms: vec![
             PixelTransform::Crop {
@@ -478,6 +485,7 @@ fn transform_geometry_is_ordered_bounded_and_even() {
         ],
         ..EditPlan::default()
     };
+
     assert!(validate_transform_geometry(&invalid, 80, 40, false).is_err());
 }
 

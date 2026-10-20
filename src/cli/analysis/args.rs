@@ -494,12 +494,15 @@ pub(in crate::cli) struct PlaybackWorkerArgs {
     /// Canonical source session.
     #[arg(long = helper_protocol::playback_worker::SESSION)]
     pub(in crate::cli) session: PathBuf,
-    /// Private parent protocol socket.
+    /// Abstract socket name for the parent protocol.
     #[arg(long = helper_protocol::playback_worker::SOCKET)]
-    pub(in crate::cli) socket: PathBuf,
+    pub(in crate::cli) socket: String,
     /// Initial measured terminal geometry.
     #[arg(long = helper_protocol::playback_worker::GEOMETRY_FILE)]
     pub(in crate::cli) geometry_file: PathBuf,
+    /// Structured failure handshake path.
+    #[arg(long = helper_protocol::playback_worker::ERROR_FILE)]
+    pub(in crate::cli) error_file: PathBuf,
 }
 
 #[derive(Debug, Args)]

@@ -40,10 +40,12 @@ pub mod playback_worker {
     pub const SUBCOMMAND: &str = "playback-worker";
     /// Canonical source session.
     pub const SESSION: &str = "session";
-    /// Private parent protocol socket.
+    /// Abstract socket name for the parent protocol.
     pub const SOCKET: &str = "socket";
     /// Initial measured terminal geometry.
     pub const GEOMETRY_FILE: &str = "geometry-file";
+    /// Structured failure handshake path.
+    pub const ERROR_FILE: &str = "error-file";
 }
 
 /// Live terminal geometry probe run as Ghostty's child process.

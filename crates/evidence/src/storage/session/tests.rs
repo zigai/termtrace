@@ -155,10 +155,7 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
     let mut fitted = manifest.clone();
     fitted.geometry_provenance = GeometryProvenance {
         source: GeometrySource::GhosttyFit,
-        capture_target: Some(CaptureTarget {
-            width: 1280,
-            height: 720,
-        }),
+        capture_target: Some(CaptureTarget::new(1280, 720)),
     };
     validate_manifest(&fitted).expect("complete fitted-geometry provenance");
 

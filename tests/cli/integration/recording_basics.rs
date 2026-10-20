@@ -30,10 +30,7 @@ fn record_mirrors_output_persists_events_and_propagates_exit_code() {
     assert_eq!(manifest.geometry_provenance.source, GeometrySource::Manual);
     assert_eq!(
         manifest.geometry_provenance.capture_target,
-        Some(CaptureTarget {
-            width: 800,
-            height: 600,
-        })
+        Some(CaptureTarget::new(800, 600))
     );
 }
 

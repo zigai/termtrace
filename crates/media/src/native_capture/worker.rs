@@ -12,14 +12,19 @@ use super::{
     validate_visual_manifest, Error, Result,
 };
 use crate::helper_protocol::{flag, playback_worker};
-use crate::playback::worker::{WorkerRequest, WorkerResponse};
+use crate::playback::worker::{
+    abstract_socket_label, is_same_user_peer, WorkerRequest, WorkerResponse,
+};
 use serde::Serialize;
 use std::{
     env::temp_dir,
     fs,
     io::{self, Read as _, Write as _},
     net::Shutdown,
-    os::unix::net::UnixStream,
+    os::{
+        linux::net::SocketAddrExt as _,
+        unix::net::{SocketAddr, UnixStream},
+    },
     path::{Path, PathBuf},
     process::Stdio,
     result::Result as StdResult,
@@ -38,6 +43,7 @@ use termtrace_evidence::{
 };
 use termtrace_model::execution::layout::{self, SessionLayout};
 use termtrace_model::{
+    artifact::playback::PlaybackFailure,
     artifact::visual::{
         CaptureOutcome, VisualManifest, GHOSTTY_EFFECTIVE_CONFIG_NAME, VISUAL_MANIFEST_VERSION,
     },
@@ -76,6 +82,7 @@ pub struct NativeReplayWorker {
     work: WorkDirectory,
     session: PathBuf,
     target: CaptureTarget,
+    canvas: CaptureTarget,
     effective: Vec<u8>,
     version: String,
     cancelled: Arc<AtomicBool>,
@@ -97,8 +104,8 @@ impl NativeReplayWorker {
     ) -> Result<Self> {
         if timeout.is_zero()
             || timeout > Duration::from_secs(3600)
-            || target.width < 320
-            || target.height < 200
+            || target.width < super::MIN_VIEWPORT_WIDTH
+            || target.height < super::MIN_VIEWPORT_HEIGHT
         {
             return Err(failure("invalid replay worker timeout or viewport"));
         }
@@ -150,34 +157,39 @@ impl NativeReplayWorker {
         let version =
             String::from_utf8_lossy(&command_output("ghostty", &["+version"])?).into_owned();
 
+        let canvas = super::geometry::session_canvas(&session, target)?;
         let lease = DisplayLease::acquire()?;
         let display = format!(":{}", lease.number);
         let mut xvfb = spawn_xvfb(
             Some(helper),
             &lease,
-            target.width,
-            target.height,
+            canvas.width,
+            canvas.height,
             &work.0,
             None,
         )?;
         wait_for_x_socket(&lease, &mut xvfb, timeout.min(Duration::from_secs(5)))?;
 
-        let socket = work.0.join("control.sock");
+        let socket_name = format!("termtrace-replay-{}", uuid::Uuid::now_v7());
+        let socket = abstract_socket_label(&socket_name);
         let geometry = work.0.join("geometry.json");
+        let error_file = work.0.join("playback-error.json");
         let mut command = owned_command(helper, "dbus-run-session")?;
         command
             .arg("--")
             .arg("ghostty")
-            .args(ghostty_overrides())
+            .args(ghostty_overrides(target.padding))
             .arg("-e")
             .arg(helper)
             .arg(playback_worker::SUBCOMMAND)
             .arg(flag(playback_worker::SESSION))
             .arg(&session)
             .arg(flag(playback_worker::SOCKET))
-            .arg(&socket)
+            .arg(&socket_name)
             .arg(flag(playback_worker::GEOMETRY_FILE))
             .arg(&geometry)
+            .arg(flag(playback_worker::ERROR_FILE))
+            .arg(&error_file)
             .env("DISPLAY", display)
             .env("GDK_BACKEND", "x11")
             .env("LIBGL_ALWAYS_SOFTWARE", "1")
@@ -200,7 +212,12 @@ impl NativeReplayWorker {
 
                 ghostty.check_running()?;
                 xvfb.check_running()?;
-
+                if let Ok(failed) = read_json::<PlaybackFailure>(&error_file) {
+                    return Err(failure(&format!(
+                        "worker startup failed: {}",
+                        failed.message
+                    )));
+                }
                 return Ok::<_, Error>(read_json(&geometry).ok());
             })?
             .ok_or_else(|| return failure("worker startup timed out"))?;
@@ -213,8 +230,15 @@ impl NativeReplayWorker {
             target.height,
         )?;
 
-        let stream =
-            UnixStream::connect(&socket).map_err(|source| return filesystem(&socket, source))?;
+        let address = SocketAddr::from_abstract_name(socket_name.as_bytes())
+            .map_err(|source| return filesystem(&socket, source))?;
+        let stream = UnixStream::connect_addr(&address)
+            .map_err(|source| return filesystem(&socket, source))?;
+
+        if !is_same_user_peer(&stream).map_err(|source| return filesystem(&socket, source))? {
+            return Err(failure("replay worker socket is owned by another user"));
+        }
+
         stream
             .set_read_timeout(Some(Duration::from_millis(100)))
             .map_err(|source| return filesystem(&socket, source))?;
@@ -230,6 +254,7 @@ impl NativeReplayWorker {
             work,
             session,
             target,
+            canvas,
             effective,
             version,
             cancelled,
@@ -390,7 +415,10 @@ impl NativeReplayWorker {
         }
     }
 
-    fn advance(&mut self, endpoint: &ReplayEndpoint) -> Result<TerminalGeometryReport> {
+    fn advance(
+        &mut self,
+        endpoint: &ReplayEndpoint,
+    ) -> Result<(TerminalGeometryReport, (u16, u16))> {
         if self.closed {
             return Err(failure("worker is closed"));
         }
@@ -447,7 +475,9 @@ impl NativeReplayWorker {
             WorkerResponse::Ready {
                 endpoint: actual,
                 geometry,
-            } if actual == *endpoint => return Ok(geometry),
+                window_width,
+                window_height,
+            } if actual == *endpoint => return Ok((geometry, (window_width, window_height))),
             WorkerResponse::Error { message } => return Err(failure(&message)),
             _ => return Err(failure("worker acknowledgement differs from endpoint")),
         }
@@ -518,13 +548,19 @@ impl NativeReplayWorker {
     }
 
     fn capture_staged(&mut self, endpoint: &ReplayEndpoint, staging: &Path) -> Result<()> {
-        let geometry_report = self.advance(endpoint)?;
+        let (geometry_report, (window_width, window_height)) = self.advance(endpoint)?;
+        let width = window_width.min(self.canvas.width);
+        let height = window_height.min(self.canvas.height);
+        let crop =
+            ((width, height) != (self.canvas.width, self.canvas.height)).then_some((width, height));
+
         let capture_started_unix_ns = unix_now_ns()?;
         let screenshot = staging.join("final.png");
         let samples = capture_stable_x11_frame_with_check(
             staging,
             &format!(":{}", self.lease.number),
             &screenshot,
+            crop,
             self.timeout,
             || return check_cancelled(&self.cancelled, WORKER),
         )?;
@@ -554,16 +590,16 @@ impl NativeReplayWorker {
             state_selection: StateSelection::Presented,
             geometry_report,
             fps: 24,
-            width: self.target.width,
-            height: self.target.height,
+            width,
+            height,
             capture_started_unix_ns,
             replay_origin_unix_ns: 0,
             effective_config_hash: blake3::hash(&self.effective).to_hex().to_string(),
             ghostty_version: self.version.clone(),
             ffmpeg_version: None,
-            ghostty_overrides: ghostty_overrides(),
+            ghostty_overrides: ghostty_overrides(self.target.padding),
             video_probe: None,
-            screenshot_probe: probe_screenshot(&screenshot, self.target.width, self.target.height)?,
+            screenshot_probe: probe_screenshot(&screenshot, width, height)?,
             members: collect_artifact_members(staging)?,
             capture_kind: "screenshot".to_owned(),
             selected_state_id: endpoint.state_id,

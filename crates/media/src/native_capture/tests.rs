@@ -41,62 +41,137 @@ fn capture_geometry_error_reports_actual_and_recorded_grids() {
 
 #[test]
 fn geometry_solver_converges_and_independently_verifies_exact_grid() {
-    let report = solve_geometry_with(
-        100,
-        25,
-        CaptureTarget {
-            width: 1280,
-            height: 720,
-        },
-        |target| {
-            let text_width = target.width.saturating_sub(20);
-            let text_height = target.height.saturating_sub(40);
+    let report = solve_geometry_with(100, 25, CaptureTarget::new(1280, 720), |target| {
+        let text_width = target.width.saturating_sub(20);
+        let text_height = target.height.saturating_sub(40);
 
-            return Ok(TerminalGeometryReport {
-                cols: text_width / 8,
-                rows: text_height / 16,
-                cell_width: 8,
-                cell_height: 16,
-                text_width,
-                text_height,
-            });
-        },
-    )
+        return Ok(TerminalGeometryReport {
+            cols: text_width / 8,
+            rows: text_height / 16,
+            cell_width: 8,
+            cell_height: 16,
+            text_width,
+            text_height,
+        });
+    })
     .expect("solve exact grid");
-    assert_eq!(
-        report.selected,
-        CaptureTarget {
-            width: 820,
-            height: 440,
-        }
-    );
+    assert_eq!(report.selected, CaptureTarget::new(820, 440));
     assert_eq!(report.attempts.len(), 3);
     assert_eq!(report.attempts.get(1), report.attempts.get(2));
 }
 
+#[derive(Clone, Copy)]
+struct SimulatedWindow {
+    minimum: (u16, u16),
+    chrome: (u16, u16),
+    profile_padding: (u16, u16),
+    pixels_per_point: (u16, u16),
+    cell: (u16, u16),
+}
+
+impl SimulatedWindow {
+    fn report(self, target: CaptureTarget) -> TerminalGeometryReport {
+        let padding = |profile: u16, points: u16| {
+            if target.padding.is_none() {
+                return profile;
+            }
+            return 2 * points * self.pixels_per_point.0 / self.pixels_per_point.1;
+        };
+        let width = target.width.max(self.minimum.0)
+            - self.chrome.0
+            - padding(self.profile_padding.0, target.padding.x);
+
+        let height = target.height.max(self.minimum.1)
+            - self.chrome.1
+            - padding(self.profile_padding.1, target.padding.y);
+
+        let cols = width / self.cell.0;
+        let rows = height / self.cell.1;
+
+        return TerminalGeometryReport {
+            cols,
+            rows,
+            cell_width: self.cell.0,
+            cell_height: self.cell.1,
+            text_width: cols * self.cell.0,
+            text_height: rows * self.cell.1,
+        };
+    }
+
+    fn solve(self, cols: u16, rows: u16, initial: CaptureTarget) -> CaptureTarget {
+        let report = solve_geometry_with(cols, rows, initial, |target| {
+            return Ok(self.report(target));
+        })
+        .expect("solve grid below the minimum window");
+
+        let selected = self.report(report.selected);
+        assert_eq!((selected.cols, selected.rows), (cols, rows));
+        assert!(report.selected.width >= self.minimum.0);
+        assert!(report.selected.height >= self.minimum.1);
+
+        return report.selected;
+    }
+}
+
+const SMALL_WINDOW: SimulatedWindow = SimulatedWindow {
+    minimum: (360, 130),
+    chrome: (0, 50),
+    profile_padding: (4, 4),
+    pixels_per_point: (3, 2),
+    cell: (7, 14),
+};
+
+#[test]
+fn geometry_solver_pads_grids_narrower_than_the_minimum_window() {
+    let selected = SMALL_WINDOW.solve(40, 18, CaptureTarget::new(608, 560));
+    assert!(selected.padding.x > 0);
+}
+
+#[test]
+fn geometry_solver_pads_both_axes_of_a_tiny_grid() {
+    let window = SimulatedWindow {
+        minimum: (360, 220),
+        ..SMALL_WINDOW
+    };
+    let selected = window.solve(20, 6, CaptureTarget::new(368, 272));
+    assert!(selected.padding.x > 0 && selected.padding.y > 0);
+}
+
+#[test]
+fn geometry_solver_detects_a_minimum_window_inside_the_display() {
+    let window = SimulatedWindow {
+        minimum: (420, 130),
+        ..SMALL_WINDOW
+    };
+
+    window.solve(50, 18, CaptureTarget::new(700, 400));
+}
+
+#[test]
+fn geometry_solver_corrects_padding_for_high_density_displays() {
+    let window = SimulatedWindow {
+        pixels_per_point: (3, 1),
+        ..SMALL_WINDOW
+    };
+
+    window.solve(30, 18, CaptureTarget::new(500, 400));
+}
+
 #[test]
 fn geometry_solver_reports_cycles_with_measured_candidates() {
-    let error = solve_geometry_with(
-        100,
-        25,
-        CaptureTarget {
-            width: 800,
-            height: 400,
-        },
-        |target| {
-            let text_width = target.width.saturating_sub(20);
-            let text_height = target.height.saturating_sub(20);
+    let error = solve_geometry_with(100, 25, CaptureTarget::new(800, 400), |target| {
+        let text_width = target.width.saturating_sub(20);
+        let text_height = target.height.saturating_sub(20);
 
-            return Ok(TerminalGeometryReport {
-                cols: 99,
-                rows: 24,
-                cell_width: 8,
-                cell_height: 16,
-                text_width,
-                text_height,
-            });
-        },
-    )
+        return Ok(TerminalGeometryReport {
+            cols: 99,
+            rows: 24,
+            cell_width: 8,
+            cell_height: 16,
+            text_width,
+            text_height,
+        });
+    })
     .expect_err("cycle must fail");
     assert!(error.to_string().contains("search cycled"));
     assert!(error.to_string().contains("800x400px=>99x24"));

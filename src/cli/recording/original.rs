@@ -64,10 +64,10 @@ pub(super) fn run(response: &mut ResponseWriter, mut arguments: RecordArgs) -> R
     let profile = resolve_ghostty_profile(arguments.recording.ghostty_config.as_deref(), overrides)
         .into_diagnostic()?;
 
-    let target = arguments.recording.viewport.unwrap_or(CaptureTarget {
-        width: 1280,
-        height: 720,
-    });
+    let target = arguments
+        .recording
+        .viewport
+        .unwrap_or(CaptureTarget::new(1280, 720));
 
     arguments.recording.geometry = GeometryMode::Inherit;
     arguments.recording.viewport = None;
@@ -85,6 +85,7 @@ pub(super) fn run(response: &mut ResponseWriter, mut arguments: RecordArgs) -> R
         session_directory: session.clone(),
         width: target.width,
         height: target.height,
+        padding: target.padding,
         fps: arguments.original_fps.unwrap_or(24),
         start_monotonic_ns: None,
         end_monotonic_ns: None,

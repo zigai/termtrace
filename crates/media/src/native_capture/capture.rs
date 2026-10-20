@@ -40,7 +40,7 @@ use termtrace_model::{
         GHOSTTY_EFFECTIVE_CONFIG_NAME, VISUAL_MANIFEST_VERSION,
     },
     execution::layout::SessionLayout,
-    execution::session::{GeometrySource, SessionManifest},
+    execution::session::{CaptureTarget, GeometrySource, SessionManifest},
     terminal::replay::SourceRange,
 };
 
@@ -244,6 +244,20 @@ fn capture_staged(
     staging: &Path,
 ) -> Result<()> {
     let manifest = read_manifest(&options.session_directory)?;
+    let canvas = super::geometry::session_canvas(
+        &options.session_directory,
+        CaptureTarget {
+            width: options.width,
+            height: options.height,
+            padding: options.padding,
+        },
+    )?;
+
+    let options = &CaptureOptions {
+        width: canvas.width,
+        height: canvas.height,
+        ..options.clone()
+    };
 
     if let Some(report) = &options.geometry_solver {
         write_secure(
@@ -345,7 +359,7 @@ fn capture_staged(
     let timing_file = staging.join("playback-timing.json");
     let error_file = staging.join("playback-error.json");
     let ready_file = staging.join("playback-ready");
-    let overrides = ghostty_overrides();
+    let overrides = ghostty_overrides(options.padding);
     let mut ghostty = spawn_ghostty(
         helper,
         options,
@@ -562,10 +576,16 @@ fn capture_staged(
 }
 
 pub(super) fn validate_options(options: &CaptureOptions) -> Result<()> {
-    if options.width < 320 || options.height < 200 || !matches!(options.fps, 24 | 30 | 60) {
+    if options.width < super::MIN_VIEWPORT_WIDTH
+        || options.height < super::MIN_VIEWPORT_HEIGHT
+        || !matches!(options.fps, 24 | 30 | 60)
+    {
         return Err(Error::InvalidReplay {
-            reason: "native capture requires at least 320x200 pixels and 24, 30, or 60 FPS"
-                .to_owned(),
+            reason: format!(
+                "native capture requires at least {}x{} pixels and 24, 30, or 60 FPS",
+                super::MIN_VIEWPORT_WIDTH,
+                super::MIN_VIEWPORT_HEIGHT
+            ),
             source: None,
         });
     }
@@ -883,13 +903,14 @@ pub fn resolve_display_scaling(
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use termtrace_model::terminal::replay::StateSelection;
+    use termtrace_model::{execution::session::WindowPadding, terminal::replay::StateSelection};
 
     fn options(fps: u16) -> CaptureOptions {
         return CaptureOptions {
             session_directory: PathBuf::from("/unused"),
             width: 640,
             height: 480,
+            padding: WindowPadding::default(),
             fps,
             start_monotonic_ns: None,
             end_monotonic_ns: None,

@@ -1124,12 +1124,17 @@ pub(super) fn validate_transform_geometry(
         }
     }
 
-    if width % 2 != 0 || height % 2 != 0 {
-        return Err(plan_error(
-            "final H.264 yuv420p presentation dimensions must be even",
-        ));
-    }
-    return Ok((width, height));
+    return Ok((
+        even_canvas_dimension(width)?,
+        even_canvas_dimension(height)?,
+    ));
+}
+
+/// H.264 yuv420p needs even dimensions; an odd canvas gains one padded pixel.
+fn even_canvas_dimension(value: u16) -> Result<u16> {
+    return value
+        .checked_next_multiple_of(2)
+        .ok_or_else(|| return plan_error("presentation canvas dimension overflowed"));
 }
 
 fn scaled_even_dimension(value: u16, numerator: u16, denominator: u16) -> Result<u16> {

@@ -349,6 +349,39 @@ pub struct CaptureTarget {
     pub width: u16,
     /// Viewport height in pixels.
     pub height: u16,
+    /// Balanced Ghostty window padding that fits a grid smaller than Ghostty's minimum window.
+    #[serde(default, skip_serializing_if = "WindowPadding::is_none")]
+    pub padding: WindowPadding,
+}
+
+impl CaptureTarget {
+    /// Viewport without extra window padding.
+    #[must_use]
+    pub const fn new(width: u16, height: u16) -> Self {
+        return Self {
+            width,
+            height,
+            padding: WindowPadding { x: 0, y: 0 },
+        };
+    }
+}
+
+/// Ghostty window padding in points; zero leaves the profile's own padding in effect.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WindowPadding {
+    /// Horizontal padding on each side.
+    pub x: u16,
+    /// Vertical padding on each side.
+    pub y: u16,
+}
+
+impl WindowPadding {
+    /// Whether no padding override applies.
+    #[must_use]
+    pub const fn is_none(&self) -> bool {
+        return self.x == 0 && self.y == 0;
+    }
 }
 
 /// Provenance for automatic terminal geometry selection.
@@ -549,10 +582,7 @@ mod tests {
     fn geometry_provenance_has_no_visual_hash_authority() {
         let provenance = GeometryProvenance {
             source: GeometrySource::GhosttyFit,
-            capture_target: Some(CaptureTarget {
-                width: 1280,
-                height: 720,
-            }),
+            capture_target: Some(CaptureTarget::new(1280, 720)),
         };
         let encoded = serde_json::to_value(&provenance).expect("geometry provenance JSON");
         assert!(encoded.get("effective_config_hash").is_none());

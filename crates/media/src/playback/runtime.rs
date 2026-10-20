@@ -1,4 +1,4 @@
-use super::terminal::{query, resize_and_query, RawTerminalGuard, TerminalInputDrain};
+use super::terminal::{query, RawTerminalGuard, ReplayTerminal};
 use crate::{error::finish_with_cleanup, Error, Result};
 use std::{
     collections::HashMap,
@@ -85,7 +85,8 @@ fn playback_inner(options: &PlaybackOptions) -> Result<()> {
     let result = (|| {
         let manifest = read_manifest(&options.session_directory)?;
         let expected = manifest.geometry;
-        let reported = resize_and_query(expected.cols, expected.rows)?;
+        let mut terminal = ReplayTerminal::new(raw.is_active());
+        let reported = terminal.resize(expected.cols, expected.rows)?;
         if (reported.cols, reported.rows) != (expected.cols, expected.rows) {
             return Err(Error::InvalidReplay {
                 reason: format!(
@@ -114,7 +115,7 @@ fn playback_inner(options: &PlaybackOptions) -> Result<()> {
 
         write_create_new_json(&options.geometry_file, &reported)?;
 
-        return playback_events(options, raw.is_active());
+        return playback_events(options, &mut terminal);
     })();
 
     return finish_with_cleanup(result, raw.restore());
@@ -139,7 +140,7 @@ fn validate_options(options: &PlaybackOptions) -> Result<()> {
     return Ok(());
 }
 
-fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result<()> {
+fn playback_events(options: &PlaybackOptions, terminal: &mut ReplayTerminal) -> Result<()> {
     let log = EventLogSummary::read(SessionLayout::new(&options.session_directory).event_log())?;
     let final_ns = log
         .terminal
@@ -173,6 +174,7 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
 
             emit_event(
                 &mut output,
+                terminal,
                 &mut resize_intents,
                 &record.event,
                 Some(&mut grid),
@@ -193,9 +195,9 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
         }
     }
 
-    let mut drain = TerminalInputDrain::start(input_is_terminal)?;
-    let result = timed_playback(options, &log, source_range, &mut resize_intents);
-    finish_with_cleanup(result, drain.stop())?;
+    terminal.start_drain()?;
+    let result = timed_playback(options, terminal, &log, source_range, &mut resize_intents);
+    finish_with_cleanup(result, terminal.stop_drain())?;
 
     query()?;
 
@@ -207,6 +209,7 @@ fn playback_events(options: &PlaybackOptions, input_is_terminal: bool) -> Result
 
 fn timed_playback(
     options: &PlaybackOptions,
+    terminal: &mut ReplayTerminal,
     log: &EventLogSummary,
     source_range: Option<SourceRange>,
     resize_intents: &mut HashMap<uuid::Uuid, (u16, u16)>,
@@ -277,6 +280,7 @@ fn timed_playback(
         if options.endpoint_event_seq == Some(record.seq) {
             emit_endpoint(
                 &mut output,
+                terminal,
                 resize_intents,
                 &record.event,
                 options.endpoint_event_byte_offset,
@@ -286,7 +290,7 @@ fn timed_playback(
             continue;
         }
 
-        emit_event(&mut output, resize_intents, &record.event, None)?;
+        emit_event(&mut output, terminal, resize_intents, &record.event, None)?;
     }
 
     validate_playback_boundary(&cursor, log)?;
@@ -333,6 +337,7 @@ fn changed_source() -> Error {
 
 pub(super) fn emit_endpoint(
     output: &mut impl io::Write,
+    terminal: &mut ReplayTerminal,
     resize_intents: &mut HashMap<uuid::Uuid, (u16, u16)>,
     event: &Event,
     byte_offset: Option<u64>,
@@ -373,11 +378,12 @@ pub(super) fn emit_endpoint(
             source: None,
         });
     }
-    return emit_event(output, resize_intents, event, None);
+    return emit_event(output, terminal, resize_intents, event, None);
 }
 
 pub(super) fn emit_event(
     output: &mut impl io::Write,
+    terminal: &mut ReplayTerminal,
     resize_intents: &mut HashMap<uuid::Uuid, (u16, u16)>,
     event: &Event,
     applied_grid: Option<&mut (u16, u16)>,
@@ -401,9 +407,8 @@ pub(super) fn emit_event(
             ..
         } => {
             if let Some((cols, rows)) = resize_intents.remove(operation_id) {
-                write!(output, "\x1b[8;{rows};{cols}t")
-                    .and_then(|()| return output.flush())
-                    .map_err(output_error)?;
+                output.flush().map_err(output_error)?;
+                terminal.resize(cols, rows)?;
 
                 if let Some(grid) = applied_grid {
                     *grid = (cols, rows);
@@ -432,7 +437,7 @@ fn unix_now_ns() -> Result<u128> {
         .map_err(|source| return Error::ClockBeforeEpoch { source });
 }
 
-fn write_create_new_json(path: &Path, value: &impl serde::Serialize) -> Result<()> {
+pub(super) fn write_create_new_json(path: &Path, value: &impl serde::Serialize) -> Result<()> {
     let encoded = serde_json::to_vec(value).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),

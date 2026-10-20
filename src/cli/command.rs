@@ -286,7 +286,7 @@ mod tests {
             ),
             (
                 "playback-worker",
-                vec!["session", "socket", "geometry-file"],
+                vec!["session", "socket", "geometry-file", "error-file"],
             ),
             ("geometry-probe", vec!["out"]),
             ("owned-process", vec!["parent-pid", "parent-start-ticks"]),

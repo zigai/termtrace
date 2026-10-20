@@ -339,6 +339,7 @@ fn ensure_native_capture(
             session_directory: session.to_path_buf(),
             width: target.width,
             height: target.height,
+            padding: target.padding,
             fps,
             start_monotonic_ns: None,
             end_monotonic_ns: None,

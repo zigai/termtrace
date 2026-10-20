@@ -32,3 +32,7 @@ pub use validation::{
     validated_visual_manifests_for_state,
 };
 pub use worker::NativeReplayWorker;
+
+const MIN_VIEWPORT_WIDTH: u16 = 64;
+const MIN_VIEWPORT_HEIGHT: u16 = 32;
+const MAX_WINDOW_PADDING_POINTS: u16 = 2000;

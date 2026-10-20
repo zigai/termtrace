@@ -4,21 +4,25 @@ use super::{
         wait_for_x_socket, DisplayLease,
     },
     profile::materialize,
-    Error, Result,
+    Error, Result, MAX_WINDOW_PADDING_POINTS, MIN_VIEWPORT_HEIGHT, MIN_VIEWPORT_WIDTH,
 };
-use std::{env::temp_dir, fs, path::Path, time::Duration};
+use std::{collections::HashMap, env::temp_dir, fs, path::Path, time::Duration};
 use termtrace_engine::{
     analysis::profile::ResolvedGhosttyProfile,
     recording::{resolve_ghostty_profile, restore_ghostty_profile},
 };
 use termtrace_evidence::{
     artifact::{create_private_directory, write_secure},
+    event_log::EventLogCursor,
     session::read_manifest,
 };
 use termtrace_model::execution::layout::{self, SessionLayout};
 use termtrace_model::{
     artifact::visual::{GeometryProbeAttempt, GeometrySolveReport, GHOSTTY_EFFECTIVE_CONFIG_NAME},
-    execution::session::{CaptureTarget, GeometrySource, GhosttyVisualOverrides, SessionGeometry},
+    execution::event::{Event, OperationStatus},
+    execution::session::{
+        CaptureTarget, GeometrySource, GhosttyVisualOverrides, SessionGeometry, WindowPadding,
+    },
     value::geometry::TerminalGeometryReport,
 };
 
@@ -46,10 +50,18 @@ pub fn native_capture_target(
         .geometry_provenance
         .capture_target
         .unwrap_or_else(|| {
-            return CaptureTarget {
-                width: manifest.geometry.pixel_width.saturating_add(128).max(320),
-                height: manifest.geometry.pixel_height.saturating_add(128).max(200),
-            };
+            return CaptureTarget::new(
+                manifest
+                    .geometry
+                    .pixel_width
+                    .saturating_add(128)
+                    .max(MIN_VIEWPORT_WIDTH),
+                manifest
+                    .geometry
+                    .pixel_height
+                    .saturating_add(128)
+                    .max(MIN_VIEWPORT_HEIGHT),
+            );
         });
 
     let profile = if let Some(provenance) = &manifest.ghostty_visual {
@@ -82,6 +94,61 @@ pub fn native_capture_target(
     return Ok((report.selected, Some(report)));
 }
 
+pub(super) fn session_canvas(session: &Path, target: CaptureTarget) -> Result<CaptureTarget> {
+    let manifest = read_manifest(session)?;
+    let initial = (manifest.geometry.cols, manifest.geometry.rows);
+    let mut largest = initial;
+    let mut intents = HashMap::new();
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
+
+    while let Some(record) = cursor.next_record()? {
+        match record.event {
+            Event::ResizeIntent {
+                operation_id,
+                cols,
+                rows,
+                ..
+            } => {
+                intents.insert(operation_id, (cols, rows));
+            }
+            Event::ResizeResult {
+                operation_id,
+                status: OperationStatus::Applied,
+                ..
+            } => {
+                if let Some((cols, rows)) = intents.remove(&operation_id) {
+                    largest = (largest.0.max(cols), largest.1.max(rows));
+                }
+            }
+            Event::ResizeResult { operation_id, .. } => {
+                intents.remove(&operation_id);
+            }
+            _ => {}
+        }
+    }
+
+    return Ok(CaptureTarget {
+        width: scaled_axis(target.width, largest.0, initial.0)?,
+        height: scaled_axis(target.height, largest.1, initial.1)?,
+        padding: target.padding,
+    });
+}
+
+fn scaled_axis(size: u16, largest: u16, initial: u16) -> Result<u16> {
+    if largest <= initial || initial == 0 {
+        return Ok(size);
+    }
+
+    let scaled = (u32::from(size) * u32::from(largest)).div_ceil(u32::from(initial));
+
+    return u16::try_from(scaled).map_err(|source| {
+        return Error::InvalidReplay {
+            reason: "native capture display for the largest session grid overflowed".to_owned(),
+            source: Some(Box::new(source)),
+        };
+    });
+}
+
 /// Measure the terminal geometry produced by one Ghostty viewport and replay profile.
 ///
 /// The probe runs in an isolated display. Failed probes retain their staging directory in
@@ -90,7 +157,7 @@ pub fn native_capture_target(
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidReplay` for a viewport smaller than 320x200 pixels,
+/// Returns `Error::InvalidReplay` for a viewport smaller than the native capture minimum,
 /// `Error::CaptureFailed` retaining the staging directory when the probe fails, and a filesystem
 /// error when the staging directory cannot be created or removed.
 pub fn probe_ghostty_geometry(
@@ -98,9 +165,11 @@ pub fn probe_ghostty_geometry(
     target: CaptureTarget,
     profile: &ResolvedGhosttyProfile,
 ) -> Result<TerminalGeometryReport> {
-    if target.width < 320 || target.height < 200 {
+    if target.width < MIN_VIEWPORT_WIDTH || target.height < MIN_VIEWPORT_HEIGHT {
         return Err(Error::InvalidReplay {
-            reason: "fitted geometry requires a viewport of at least 320x200 pixels".to_owned(),
+            reason: format!(
+                "fitted geometry requires a viewport of at least {MIN_VIEWPORT_WIDTH}x{MIN_VIEWPORT_HEIGHT} pixels"
+            ),
             source: None,
         });
     }
@@ -200,23 +269,43 @@ pub(super) fn solve_geometry_with(
             continue;
         }
 
-        let overhead_width = target.width.saturating_sub(report.text_width);
-        let overhead_height = target.height.saturating_sub(report.text_height);
-        let width = required_cols
-            .checked_mul(report.cell_width)
-            .and_then(|value| return value.checked_add(overhead_width))
-            .ok_or_else(|| {
-                return solver_error(required_cols, required_rows, &attempts, "width overflowed");
-            })?;
-        let height = required_rows
-            .checked_mul(report.cell_height)
-            .and_then(|value| return value.checked_add(overhead_height))
-            .ok_or_else(|| {
-                return solver_error(required_cols, required_rows, &attempts, "height overflowed");
-            })?;
+        let (width, padding_x) = next_axis(
+            &axis_samples(&attempts, |target, report| {
+                return (
+                    target.width,
+                    target.padding.x,
+                    report.cols,
+                    report.cell_width,
+                    report.text_width,
+                );
+            }),
+            required_cols,
+        )
+        .ok_or_else(|| {
+            return solver_error(required_cols, required_rows, &attempts, "width overflowed");
+        })?;
+        let (height, padding_y) = next_axis(
+            &axis_samples(&attempts, |target, report| {
+                return (
+                    target.height,
+                    target.padding.y,
+                    report.rows,
+                    report.cell_height,
+                    report.text_height,
+                );
+            }),
+            required_rows,
+        )
+        .ok_or_else(|| {
+            return solver_error(required_cols, required_rows, &attempts, "height overflowed");
+        })?;
         target = CaptureTarget {
-            width: width.max(320),
-            height: height.max(200),
+            width: width.max(MIN_VIEWPORT_WIDTH),
+            height: height.max(MIN_VIEWPORT_HEIGHT),
+            padding: WindowPadding {
+                x: padding_x.unwrap_or(0),
+                y: padding_y.unwrap_or(0),
+            },
         };
     }
 
@@ -302,7 +391,7 @@ fn probe_staged(
         staging,
         &display,
         &report_path,
-        &ghostty_overrides(),
+        &ghostty_overrides(target.padding),
         &root,
         scaling,
         "ghostty",
@@ -331,6 +420,102 @@ fn validate_report(report: TerminalGeometryReport) -> Result<()> {
         });
     }
     return Ok(());
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AxisSample {
+    size: u16,
+    padding: Option<u16>,
+    cells: u16,
+    cell: u16,
+    text: u16,
+}
+
+impl AxisSample {
+    fn is_pinned(&self, samples: &[AxisSample]) -> bool {
+        return self.text > self.size
+            || samples.iter().any(|other| {
+                return other.padding == self.padding
+                    && other.text == self.text
+                    && other.size.abs_diff(self.size) >= self.cell;
+            });
+    }
+}
+
+fn axis_samples(
+    attempts: &[GeometryProbeAttempt],
+    project: impl Fn(&CaptureTarget, &TerminalGeometryReport) -> (u16, u16, u16, u16, u16),
+) -> Vec<AxisSample> {
+    return attempts
+        .iter()
+        .map(|attempt| {
+            let (size, padding, cells, cell, text) = project(&attempt.target, &attempt.report);
+
+            return AxisSample {
+                size,
+                padding: (!attempt.target.padding.is_none()).then_some(padding),
+                cells,
+                cell,
+                text,
+            };
+        })
+        .collect();
+}
+
+fn next_axis(samples: &[AxisSample], required: u16) -> Option<(u16, Option<u16>)> {
+    let current = *samples.last()?;
+    if current.cells == required {
+        return Some((current.size, current.padding));
+    }
+
+    let padding_mode = current.padding.is_some_and(|padding| return padding > 0);
+    if !padding_mode && !current.is_pinned(samples) {
+        let overhead = current.size.saturating_sub(current.text);
+        let size = required.checked_mul(current.cell)?.checked_add(overhead)?;
+
+        return Some((size, current.padding));
+    }
+
+    let size = if padding_mode {
+        current.size
+    } else {
+        let overhead = samples
+            .iter()
+            .filter(|sample| return sample.padding.is_none() && !sample.is_pinned(samples))
+            .map(|sample| return sample.size.saturating_sub(sample.text))
+            .min()
+            .unwrap_or(current.cell);
+
+        current
+            .text
+            .checked_add(overhead)?
+            .checked_add(current.cell)?
+    };
+
+    let padding = i32::from(current.padding.unwrap_or(0));
+    // Ghostty converts padding points to pixels by display scale, so the ratio is measured from
+    // two padded probes and starts at 1.5 pixels per side, the 96 DPI value.
+    let (pixels, points) = samples
+        .iter()
+        .filter(|sample| return sample.size == size)
+        .find_map(|sample| {
+            let other = i32::from(sample.padding.filter(|other| return *other > 0)?);
+            let pixels = (i32::from(sample.text) - i32::from(current.text)).abs();
+
+            return (other != padding && pixels > 0)
+                .then(|| return (pixels, (padding - other).abs()));
+        })
+        .unwrap_or((3, 1));
+
+    let surplus = i32::from(current.text) - i32::from(required) * i32::from(current.cell);
+    let step = match surplus * points / pixels {
+        0 => surplus.signum(),
+        step => step,
+    };
+
+    let next = (padding + step).clamp(1, i32::from(MAX_WINDOW_PADDING_POINTS));
+
+    return Some((size, Some(u16::try_from(next).ok()?)));
 }
 
 fn solver_error(cols: u16, rows: u16, attempts: &[GeometryProbeAttempt], reason: &str) -> Error {
