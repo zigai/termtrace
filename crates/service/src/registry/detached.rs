@@ -8,7 +8,7 @@ use crate::{
 use std::{
     ffi::OsString,
     fs::{File, OpenOptions},
-    io::Write as _,
+    io::{Read as _, Seek as _, SeekFrom, Write as _},
     os::unix::fs::OpenOptionsExt as _,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -22,6 +22,7 @@ use termtrace_model::{
 /// Extra alias-lease time beyond the startup deadline, so a recorder that becomes ready at the
 /// deadline can still promote its reservation.
 const RESERVATION_GRACE: Duration = Duration::from_secs(5);
+const LOG_TAIL_BYTES: u64 = 4096;
 
 /// A detached recording to start under a reserved registry alias.
 #[derive(Clone, Debug)]
@@ -98,12 +99,15 @@ impl RegistryService {
             Readiness::Exited(status) => {
                 self.release_reservation(&reservation);
 
-                return Err(startup_failure(
-                    &format!(
-                        "detached recorder exited before publishing valid completion evidence with {status}"
-                    ),
-                    &paths,
-                ));
+                let mut reason = format!(
+                    "detached recorder exited before publishing valid completion evidence with {status}"
+                );
+
+                if let Some(cause) = last_log_line(&paths.stderr_log) {
+                    reason = format!("{reason}: {cause}");
+                }
+
+                return Err(startup_failure(&reason, &paths));
             }
             Readiness::TimedOut => {
                 return Err(startup_failure(
@@ -203,6 +207,22 @@ fn open_log(path: &Path) -> Result<File> {
                 source,
             };
         });
+}
+
+fn last_log_line(log: &Path) -> Option<String> {
+    let mut file = File::open(log).ok()?;
+    let length = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(length.saturating_sub(LOG_TAIL_BYTES)))
+        .ok()?;
+    let mut tail = Vec::new();
+    file.take(LOG_TAIL_BYTES).read_to_end(&mut tail).ok()?;
+    let tail = String::from_utf8_lossy(&tail);
+    let line = tail
+        .lines()
+        .rev()
+        .find(|line| return !line.trim().is_empty())?;
+
+    return Some(line.trim().trim_start_matches("termtrace: ").to_owned());
 }
 
 fn startup_failure(reason: &str, paths: &DetachedSessionPaths) -> Error {
