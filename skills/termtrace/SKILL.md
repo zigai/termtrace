@@ -21,9 +21,11 @@ and communicate strictly via exit code.
   - `analyze <SESSION>` after completion to triage the last action and view diagnostic findings.
   - `screenshot`, `video`, or `bundle` to generate self-contained artifacts.
   - Pass `--json` when structured data is required.
+- When the Termtrace MCP tools are available (`claude mcp add termtrace -- termtrace mcp`),
+  prefer them for live control. They take the same session names as the CLI.
 - For complex, stateful workflows (loops, retries, branching, multi-step agent drivers),
-  use the Rust SDK (`termtrace_sdk`) or the agent driver rather than
-  chaining dozens of subshell CLI calls. Read [client workflows](references/client-workflows.md).
+  use the Rust SDK (`termtrace_sdk`) rather than chaining dozens of subshell CLI calls.
+  Read [client workflows](references/client-workflows.md).
 - Use `termtrace test` for repeatable assertion workflows or regressions. Start
   from [the tested scenario example](examples/ready.termtrace.json) and read
   [repeatable testing](references/testing.md).

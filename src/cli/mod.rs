@@ -6,13 +6,13 @@ use tracing_subscriber::{
     fmt, layer::SubscriberExt, registry as tracing_registry, util::SubscriberInitExt, EnvFilter,
 };
 
-mod agent;
 mod analysis;
 mod artifacts;
 mod command;
 mod control;
 mod dispatch;
 mod integrity;
+mod mcp;
 mod output;
 mod owned;
 mod parsers;

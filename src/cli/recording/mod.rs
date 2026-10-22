@@ -61,13 +61,14 @@ use termtrace_model::{
     },
     protocol::control::{ScreenPredicate, ScreenWaitQuality},
     registry::{DetachedSessionPaths, RegistryEntry},
-    terminal::screen::ScreenProjectionRequest,
+    terminal::screen::{ScreenFrame, ScreenProjectionRequest},
     terminal::state::{supported_geometry_cell_count, terminal_geometry_limits},
     value::geometry::TerminalGeometryReport,
     value::ByteString,
 };
 use termtrace_sdk::{
     defaults,
+    screen::frame_text,
     session::{await_ready, Readiness, StopOutcome, StopRequest},
     StableCaptureOptions,
 };

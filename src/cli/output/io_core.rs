@@ -34,7 +34,7 @@ pub(super) fn direct_stderr(message: &str) {
     drop(writeln!(stderr, "termtrace: {message}"));
 }
 
-pub(super) fn report_message(error: &miette::Report) -> String {
+pub(in crate::cli) fn report_message(error: &miette::Report) -> String {
     let mut message = error.to_string();
 
     if let Some(help) = error.help() {

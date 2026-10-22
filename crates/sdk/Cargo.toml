@@ -15,14 +15,11 @@ scenario = ["local", "dep:termtrace-scenario"]
 
 [dependencies]
 termtrace-model = { version = "=0.1.0", path = "../model" }
-termtrace-process = { version = "=0.1.0", path = "../process" }
 termtrace-control = { version = "=0.1.0", path = "../control" }
 termtrace-service = { version = "=0.1.0", path = "../service", optional = true }
 termtrace-scenario = { version = "=0.1.0", path = "../scenario", optional = true }
 termtrace-media = { version = "=0.1.0", path = "../media", optional = true }
-nix = { version = "0.30.1", features = ["fs", "poll", "signal", "socket", "user"] }
 serde_json = "1.0.145"
-thiserror = "2.0.17"
 uuid = { version = "1.18.1", features = ["serde", "v7"] }
 
 [dev-dependencies]

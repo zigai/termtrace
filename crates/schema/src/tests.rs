@@ -1,8 +1,6 @@
 use super::*;
 use jsonschema::meta::is_valid;
-use schemars::schema_for;
 use std::{collections::BTreeSet, path::Path};
-use termtrace_model::protocol::driver::DriverResponse;
 
 #[test]
 fn checked_in_schemas_match_catalog() {
@@ -63,46 +61,4 @@ fn acceptance_benchmark_instance_matches_schema() {
         serde_json::from_slice(include_bytes!("../../../benchmarks/acceptance-v1.json"))
             .expect("acceptance benchmark json");
     assert!(validator.is_valid(&instance));
-}
-
-#[test]
-fn shared_driver_response_fixtures_match_the_rust_contract() {
-    let schema = serde_json::to_value(schema_for!(DriverResponse)).expect("driver schema");
-    let validator = jsonschema::validator_for(&schema).expect("driver validator");
-
-    let fixtures: serde_json::Value = serde_json::from_slice(include_bytes!(
-        "../../../fixtures/conformance/protocol/driver-responses.json"
-    ))
-    .expect("shared protocol fixtures");
-
-    let valid = fixtures
-        .get("valid")
-        .and_then(serde_json::Value::as_array)
-        .expect("valid fixture array");
-    let invalid = fixtures
-        .get("invalid")
-        .and_then(serde_json::Value::as_array)
-        .expect("invalid fixture array");
-
-    for case in valid {
-        let response = case.get("response").expect("valid fixture response");
-        assert!(
-            validator.is_valid(response),
-            "shared valid response fixture failed: {}",
-            case.get("name")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("unnamed")
-        );
-    }
-
-    for case in invalid {
-        let response = case.get("response").expect("invalid fixture response");
-        assert!(
-            !validator.is_valid(response),
-            "shared invalid response fixture passed: {}",
-            case.get("name")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("unnamed")
-        );
-    }
 }

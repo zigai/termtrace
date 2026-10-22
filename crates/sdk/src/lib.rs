@@ -3,15 +3,10 @@
 #[cfg(feature = "local")]
 pub use termtrace_service::{client, defaults};
 
-mod driver;
 pub mod instrumentation;
 mod remote;
 
-pub use driver::{Driver, DriverError};
 pub use remote::Client;
-pub use termtrace_model::protocol::driver::{
-    DriverMethod, DriverPayload, DriverRequest, DriverResponse, DriverResult,
-};
 pub use termtrace_model::{execution::session::ResourceLimits, value::ByteString};
 #[cfg(feature = "scenario")]
 pub use termtrace_scenario as scenario;
@@ -123,9 +118,8 @@ pub mod system {
     pub use termtrace_service::system::SystemService;
 }
 
-/// Low-level process driver and raw protocol access.
+/// Low-level raw protocol access.
 pub mod advanced {
-    pub use crate::driver::{Driver, DriverError};
     pub use crate::remote::Client;
 }
 

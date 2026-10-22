@@ -61,6 +61,11 @@ impl io::Write for ResponseOutput<'_> {
 
                 Ok(buf.len())
             }
+            ResponseMode::Capture => {
+                self.response.captured.extend_from_slice(buf);
+
+                Ok(buf.len())
+            }
         };
     }
 
@@ -77,8 +82,14 @@ pub(in crate::cli) fn write_follow_stdout(
     response: &mut ResponseWriter,
     output: &[u8],
 ) -> Result<bool> {
-    if response.mode() == ResponseMode::Quiet {
-        return Ok(true);
+    match response.mode() {
+        ResponseMode::Quiet => return Ok(true),
+        ResponseMode::Capture => {
+            response.captured.extend_from_slice(output);
+
+            return Ok(true);
+        }
+        ResponseMode::Human => {}
     }
 
     let stdout = io::stdout();
@@ -119,7 +130,7 @@ pub(in crate::cli) fn write_json_line(
     let mut encoded = serde_json::to_vec(value).into_diagnostic()?;
     encoded.push(b'\n');
 
-    return direct_stdout(&encoded);
+    return emit(response, &encoded);
 }
 
 pub(in crate::cli) fn write_json_pretty(
@@ -133,15 +144,24 @@ pub(in crate::cli) fn write_json_pretty(
     let mut encoded = serde_json::to_vec_pretty(value).into_diagnostic()?;
     encoded.push(b'\n');
 
-    return direct_stdout(&encoded);
+    return emit(response, &encoded);
 }
 
 pub(in crate::cli) fn write_stdout(
     response: &mut ResponseWriter,
     output: impl AsRef<[u8]>,
 ) -> Result<ExitCode> {
-    if response.mode() == ResponseMode::Quiet {
-        return Ok(ExitCode::SUCCESS);
-    }
-    return direct_stdout(output.as_ref());
+    return emit(response, output.as_ref());
+}
+
+fn emit(response: &mut ResponseWriter, output: &[u8]) -> Result<ExitCode> {
+    return match response.mode() {
+        ResponseMode::Quiet => Ok(ExitCode::SUCCESS),
+        ResponseMode::Capture => {
+            response.captured.extend_from_slice(output);
+
+            Ok(ExitCode::SUCCESS)
+        }
+        ResponseMode::Human => direct_stdout(output),
+    };
 }

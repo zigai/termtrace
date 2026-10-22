@@ -15,7 +15,7 @@ use termtrace_model::{
         visual,
     },
     execution::{environment, event, event_log, provenance, receipt, request_journal, session},
-    protocol::{capability, control, doctor, driver, output_projection},
+    protocol::{capability, control, doctor, output_projection},
     registry as model_registry, scenario,
     terminal::{analysis, diff, inspection, observation, replay, reviewer, screen, timeline, vt},
 };
@@ -171,12 +171,6 @@ registry!(
     ),
     ("control-response.schema.json",
         control::ControlResponse
-    ),
-    ("driver-request.schema.json",
-        driver::DriverRequest
-    ),
-    ("driver-response.schema.json",
-        driver::DriverResponse
     ),
     ("environment-spec.schema.json",
         environment::EnvironmentSpec

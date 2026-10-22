@@ -10,14 +10,14 @@ mod artifacts_and_bundles;
 mod atomic_action_conformance;
 #[path = "cli/integration/command_surface.rs"]
 mod command_surface;
-#[path = "cli/integration/drivers_and_clients.rs"]
-mod drivers_and_clients;
 #[path = "cli/integration/integrity_and_receipts.rs"]
 mod integrity_and_receipts;
 #[path = "cli/integration/launch_validation_and_stdio.rs"]
 mod launch_validation_and_stdio;
 #[path = "cli/integration/live_session_control/mod.rs"]
 mod live_session_control;
+#[path = "cli/integration/mcp.rs"]
+mod mcp;
 #[path = "cli/integration/original_native.rs"]
 mod original_native;
 #[path = "cli/integration/output_events_and_postprocessing.rs"]

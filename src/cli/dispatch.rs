@@ -6,13 +6,14 @@ use crate::cli::{
     artifacts::{self, run_bundle, run_screenshot, run_video_facade},
     control::{run_screen, run_send, run_status, run_stop, run_wait},
     integrity,
+    mcp::run_mcp,
     output::ResponseWriter,
     owned,
     recording::{run_geometry_probe, run_record, run_restart},
     registry,
     scenario::run_test,
     tmux::dispatch as dispatch_tmux,
-    tooling::{run_completions, run_doctor, run_driver, run_schemas, run_version},
+    tooling::{run_completions, run_doctor, run_schemas, run_version},
 };
 use miette::Result;
 use std::process::ExitCode;
@@ -34,7 +35,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: Command) -> Resul
         Command::Tmux(arguments) => dispatch_tmux(response, arguments.command),
         Command::Doctor(arguments) => run_doctor(response, arguments),
         Command::Completion(arguments) => run_completions(response, arguments),
-        Command::Agent => run_driver(),
+        Command::Mcp => run_mcp(),
         Command::Schema(arguments) => run_schemas(response, arguments),
         Command::Version(arguments) => run_version(response, arguments),
         Command::Playback(arguments) => run_playback(arguments),

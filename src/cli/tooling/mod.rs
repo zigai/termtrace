@@ -4,7 +4,6 @@ pub(super) mod args;
 
 use crate::cli::command::completion;
 use crate::cli::{
-    agent::serve as serve_driver,
     output::{write_json_line, write_stdout},
     tooling::args::{CompletionsArgs, SchemaArgs, VersionArgs},
 };
@@ -12,7 +11,6 @@ use clap_complete::generate;
 use miette::{IntoDiagnostic as _, Report, Result};
 use std::{
     env,
-    io::{self, BufReader},
     os::unix::ffi::OsStrExt as _,
     process::ExitCode,
     sync::atomic::{AtomicBool, Ordering},
@@ -29,10 +27,6 @@ use termtrace_service::{system::SystemService, Error as ServiceError};
 mod doctor;
 
 pub(super) use doctor::run_doctor;
-
-pub(super) fn require_capability(id: &str) -> termtrace_sdk::Result<()> {
-    return SystemService::require(id, &AtomicBool::new(false));
-}
 
 pub(super) fn require_cli_capability(id: &str, cancelled: &AtomicBool) -> Result<()> {
     let result = SystemService::require(id, cancelled);
@@ -99,14 +93,6 @@ pub(super) fn run_completions(
     generate(arguments.shell, &mut command, "termtrace", &mut output);
 
     return write_stdout(response, output);
-}
-
-pub(super) fn run_driver() -> Result<ExitCode> {
-    let stdin = io::stdin();
-    let stdout = io::stdout();
-    serve_driver(BufReader::new(stdin.lock()), stdout.lock()).into_diagnostic()?;
-
-    return Ok(ExitCode::SUCCESS);
 }
 
 pub(super) fn run_schemas(

@@ -76,10 +76,9 @@ pub(super) enum Command {
     Completion(CompletionsArgs),
     /// Diagnose the installation, dependencies, state, and capabilities.
     Doctor(DoctorArgs),
+    /// Serve the session workflow as Model Context Protocol tools over stdio.
+    Mcp,
 
-    /// Serve the versioned language-neutral JSONL process protocol.
-    #[command(hide = true)]
-    Agent,
     /// Generate JSON Schemas for public events, controls, and artifacts.
     #[command(name = "schema", hide = true)]
     Schema(SchemaArgs),

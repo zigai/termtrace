@@ -225,7 +225,7 @@ fn start_postcondition(
                 "quality": capture.quality,
                 "state_hash": capture.frame.state_hash,
                 "frame_hash": capture.frame.frame_hash,
-                "frame": capture.frame,
+                "screen": screen_text(&capture.frame),
             }),
         ));
     }
@@ -269,9 +269,19 @@ fn start_postcondition(
                     | ScreenWaitQuality::OutputClosed
                     | ScreenWaitQuality::Completed
             ),
-            "frame": waited.frame,
+            "screen": screen_text(&waited.frame),
         }),
     ));
+}
+
+fn screen_text(frame: &ScreenFrame) -> String {
+    return frame_text(frame)
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_end_matches('\n')
+        .to_owned();
 }
 
 pub(in crate::cli) fn detached_record_arguments(

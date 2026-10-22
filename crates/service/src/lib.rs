@@ -1,6 +1,6 @@
 //! Reusable application services for Termtrace: one session type and its operations.
 //!
-//! The CLI control commands, the JSONL agent driver, the Python and Node bindings, and the
+//! The CLI control commands (also served over MCP), the Python and Node bindings, and the
 //! scenario runner all drive sessions through [`Session`]; they only parse input and render
 //! output.
 

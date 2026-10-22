@@ -9,7 +9,7 @@ multiple sessions, or caller-owned retry IDs.
 ## Rust SDK for Stateful Workflows
 
 When orchestrating multi-step interactive workflows, use `termtrace_sdk`. One `Session`
-type carries every operation the CLI, agent driver, and Python/Node bindings use:
+type carries every operation the CLI, MCP server, and Python/Node bindings use:
 `Terminal::start`/`attach`, `act`, `wait_screen`, `capture_stable`, `observe`, `frame`,
 `stop`, `complete`, and `detach`. Defaults (geometry, timeouts, idle interval) live in
 `termtrace_sdk::defaults`.

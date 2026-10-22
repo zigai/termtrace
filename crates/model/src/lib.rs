@@ -9,7 +9,7 @@ pub mod artifact;
 pub mod error;
 /// Execution history, environment, session, and provenance contracts.
 pub mod execution;
-/// Control, driver, capability, and CLI response protocol contracts.
+/// Control, capability, and CLI response protocol contracts.
 pub mod protocol;
 /// Named-session registry values.
 pub mod registry;

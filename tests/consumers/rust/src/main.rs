@@ -6,8 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 use termtrace_sdk::{
-    instrumentation::Instrumentation, ByteString, Client, ControlCommand, ControlRequest,
-    ControlResult, Driver, DriverMethod, DriverPayload, DriverResult,
+    instrumentation::Instrumentation, Client, ControlCommand, ControlRequest, ControlResult,
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -33,43 +32,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let span = application.start_span("installed rust SDK", None, BTreeMap::new())?;
     application.event("consumer diagnostic", BTreeMap::new())?;
     application.end_span("installed rust SDK", span, BTreeMap::new())?;
-
-    let binary = env::var_os("TERMTRACE_BIN").ok_or("expected TERMTRACE_BIN")?;
-    let mut driver = Driver::spawn(binary)?;
-    let response = driver.request(
-        DriverMethod::Attach {
-            session: session.into(),
-        },
-        Duration::from_secs(10),
-    )?;
-    let DriverResult::Ok {
-        data: DriverPayload::Attached { handle, .. },
-    } = response.result
-    else {
-        return Err("driver did not attach".into());
-    };
-
-    let response = driver.request(
-        DriverMethod::WaitOutput {
-            handle,
-            data: ByteString::from(b"consumer ready".as_slice()),
-            timeout_ms: 2000,
-        },
-        Duration::from_secs(5),
-    )?;
-
-    assert!(matches!(
-        response.result,
-        DriverResult::Ok {
-            data: DriverPayload::OutputWait { .. }
-        }
-    ));
-
-    driver.close(Duration::from_secs(10))?;
-    assert!(
-        client.is_reachable(),
-        "closing an attachment must preserve its recorder"
-    );
 
     let response = client.send(&ControlRequest::new(ControlCommand::Stop))?;
     assert!(matches!(response.result, ControlResult::Ok { .. }));
