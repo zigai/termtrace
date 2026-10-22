@@ -524,7 +524,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
 
     let mut index = Command::cargo_bin("termtrace").expect("binary should build");
     index
-        .args(["analyze", "index", "--session"])
+        .args(["analyze", "index"])
         .arg(&session)
         .assert()
         .success();
@@ -558,7 +558,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
     let mut native_capture = Command::cargo_bin("termtrace").expect("binary should build");
     native_capture
         .env("PATH", "")
-        .args(["artifact", "capture", "--session"])
+        .args(["artifact", "capture"])
         .arg(&session)
         .args(["--width", "640", "--height", "480"])
         .assert()
@@ -658,14 +658,14 @@ fn retained_native_video_exports_without_native_capture_tools() {
 
     Command::cargo_bin("termtrace")
         .expect("binary should build")
-        .args(["analyze", "index", "--session"])
+        .args(["analyze", "index"])
         .arg(&session)
         .assert()
         .success();
 
     Command::cargo_bin("termtrace")
         .expect("binary should build")
-        .args(["artifact", "capture", "--session"])
+        .args(["artifact", "capture"])
         .arg(&session)
         .args(["--fps", "24"])
         .assert()
@@ -760,7 +760,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
     let cast = temporary.path().join("result.cast");
     let mut asciicast = Command::cargo_bin("termtrace").expect("binary should build");
     let output = asciicast
-        .args(["artifact", "asciicast", "--session"])
+        .args(["artifact", "asciicast"])
         .arg(&session)
         .arg("--out")
         .arg(&cast)

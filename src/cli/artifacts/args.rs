@@ -110,8 +110,7 @@ pub(in crate::cli) struct ImportArgs {
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct ExportArgs {
-    /// Source session directory.
-    #[arg(long)]
+    /// Completed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
     /// New asciicast v2 output path.
     #[arg(long)]
@@ -242,8 +241,7 @@ pub(in crate::cli) enum ScreenshotFormat {
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct CaptureArgs {
-    /// Indexed source session directory.
-    #[arg(long)]
+    /// Indexed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
     /// Whole capture viewport width; omit both dimensions to use the recorded target or solve the exact grid.
     #[arg(long, requires = "height")]

@@ -216,7 +216,7 @@ pub(crate) fn wait_for_path(path: &Path) {
 pub(crate) fn assert_late_checkpoint_inspection(session: &Path) {
     let mut index = Command::cargo_bin("termtrace").expect("binary should build");
     index
-        .args(["analyze", "index", "--session"])
+        .args(["analyze", "index"])
         .arg(session)
         .assert()
         .success();
@@ -247,7 +247,7 @@ pub(crate) fn assert_late_checkpoint_inspection(session: &Path) {
 
     let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
     inspect
-        .args(["analyze", "inspect", "--session"])
+        .args(["analyze", "inspect"])
         .arg(session)
         .args([
             "--state",

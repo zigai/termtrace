@@ -76,17 +76,17 @@ wait_for_recorder() {
 derive_and_capture() {
     local session=$1
     local demo_directory=$2
-    "$TERMTRACE_BIN" analyze index --session "$session" >"$demo_directory/index.json"
-    "$TERMTRACE_BIN" analyze inspect --session "$session" --format json >"$demo_directory/final-state.json"
-    "$TERMTRACE_BIN" analyze inspect --session "$session" --format text >"$demo_directory/final-screen.txt"
-    "$TERMTRACE_BIN" analyze inspect --session "$session" --state 0 --format json >"$demo_directory/initial-state.json"
+    "$TERMTRACE_BIN" analyze index "$session" >"$demo_directory/index.json"
+    "$TERMTRACE_BIN" analyze inspect "$session" --format json >"$demo_directory/final-state.json"
+    "$TERMTRACE_BIN" analyze inspect "$session" --format text >"$demo_directory/final-screen.txt"
+    "$TERMTRACE_BIN" analyze inspect "$session" --state 0 --format json >"$demo_directory/initial-state.json"
 
     "$TERMTRACE_BIN" artifact asciicast \
-        --session "$session" \
+        "$session" \
         --out "$demo_directory/session.cast"
 
     "$TERMTRACE_BIN" artifact capture \
-        --session "$session" \
+        "$session" \
         --width 1920 \
         --height 1080 \
         --fps 24 >"$demo_directory/capture.json"

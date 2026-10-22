@@ -94,8 +94,7 @@ pub(in crate::cli) enum InspectFormat {
         .args(["state", "state_hash", "event_seq", "monotonic_ns"])
 ))]
 pub(in crate::cli) struct InspectArgs {
-    /// Source session directory.
-    #[arg(long)]
+    /// Completed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
     /// Exact semantic state identifier.
     #[arg(long)]
@@ -424,8 +423,7 @@ pub(in crate::cli) struct TimeRangeArgs {
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct IndexArgs {
-    /// Source session directory.
-    #[arg(long)]
+    /// Session name or canonical path; active sessions require `--live-snapshot`.
     pub(in crate::cli) session: PathBuf,
     /// Index a hash-addressed prefix when the recording is still active.
     #[arg(long)]

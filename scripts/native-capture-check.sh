@@ -871,10 +871,10 @@ run "$binary" record --no-input --geometry fit \
 rm -f "$profile"
 
 step "Indexing the complete recording"
-run "$binary" analyze index --session "$output"
+run "$binary" analyze index "$output"
 
 step "Capturing full video and a strict screenshot"
-run "$binary" artifact capture --session "$output" --fps 24
+run "$binary" artifact capture "$output" --fps 24
 run "$binary" screenshot "$output" \
     --renderer native --at 12.2s --viewport "$VERIFICATION_VIEWPORT" --strict \
     --out "$output/native-single"
@@ -882,11 +882,11 @@ run "$binary" screenshot "$output" \
 readonly capture_range_visual="$output/visual-$VERIFICATION_RANGE_SUFFIX"
 
 step "Capturing the selected 11.0s–12.35s range"
-run "$binary" analyze index --session "$output" \
+run "$binary" analyze index "$output" \
     --from "${VERIFICATION_RANGE_FROM_NS}ns" --to "${VERIFICATION_RANGE_TO_NS}ns"
 range_capture_started="$(python3 -c 'import time; print(time.monotonic_ns())')"
 readonly range_capture_started
-run "$binary" artifact capture --session "$output" --fps 24 \
+run "$binary" artifact capture "$output" --fps 24 \
     --from "${VERIFICATION_RANGE_FROM_NS}ns" --to "${VERIFICATION_RANGE_TO_NS}ns"
 range_capture_finished="$(python3 -c 'import time; print(time.monotonic_ns())')"
 readonly range_capture_finished

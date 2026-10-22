@@ -65,7 +65,7 @@ fn asciicast_preserves_utf8_split_between_output_and_input_events() {
 
         let cast = Command::cargo_bin("termtrace")
             .expect("binary")
-            .args(["artifact", "asciicast", "--session"])
+            .args(["artifact", "asciicast"])
             .arg(temporary.path())
             .args(["--out", "-"])
             .assert()
@@ -122,7 +122,7 @@ fn index_replays_every_distinct_state_deterministically() {
     let cast = temporary.path().join("session.cast");
     let mut export = Command::cargo_bin("termtrace").expect("binary should build");
     export
-        .args(["artifact", "asciicast", "--session"])
+        .args(["artifact", "asciicast"])
         .arg(&session)
         .args(["--out"])
         .arg(&cast)
@@ -153,7 +153,7 @@ fn index_replays_every_distinct_state_deterministically() {
 
     let mut index = Command::cargo_bin("termtrace").expect("binary should build");
     index
-        .args(["analyze", "index", "--session"])
+        .args(["analyze", "index"])
         .arg(&session)
         .assert()
         .success();
@@ -162,7 +162,7 @@ fn index_replays_every_distinct_state_deterministically() {
 
     let mut presented = Command::cargo_bin("termtrace").expect("binary should build");
     presented
-        .args(["analyze", "index", "--presented-only", "--session"])
+        .args(["analyze", "index", "--presented-only"])
         .arg(&session)
         .assert()
         .success();
@@ -200,7 +200,7 @@ fn index_replays_every_distinct_state_deterministically() {
 
     let mut inspect_text = Command::cargo_bin("termtrace").expect("binary should build");
     inspect_text
-        .args(["analyze", "inspect", "--session"])
+        .args(["analyze", "inspect"])
         .arg(&session)
         .args(["--format", "text"])
         .assert()
@@ -209,7 +209,7 @@ fn index_replays_every_distinct_state_deterministically() {
 
     let mut inspect_initial = Command::cargo_bin("termtrace").expect("binary should build");
     inspect_initial
-        .args(["analyze", "inspect", "--session"])
+        .args(["analyze", "inspect"])
         .arg(&session)
         .args(["--state", "0", "--format", "json"])
         .assert()
@@ -218,7 +218,7 @@ fn index_replays_every_distinct_state_deterministically() {
 
     let mut inspect_row = Command::cargo_bin("termtrace").expect("binary should build");
     inspect_row
-        .args(["analyze", "inspect", "--session"])
+        .args(["analyze", "inspect"])
         .arg(&session)
         .args(["--state", "0", "--row", "0", "--format", "json-compact"])
         .assert()
@@ -260,7 +260,7 @@ fn index_replays_every_distinct_state_deterministically() {
 
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
-        .args(["analyze", "index", "--session"])
+        .args(["analyze", "index"])
         .arg(&session)
         .assert()
         .failure()
@@ -296,7 +296,7 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
 
     let mut empty = Command::cargo_bin("termtrace").expect("binary should build");
     empty
-        .args(["analyze", "index", "--session"])
+        .args(["analyze", "index"])
         .arg(&session)
         .args([
             "--from",
@@ -310,7 +310,7 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
 
     let mut index = Command::cargo_bin("termtrace").expect("binary should build");
     index
-        .args(["analyze", "index", "--session"])
+        .args(["analyze", "index"])
         .arg(&session)
         .args([
             "--from",
@@ -360,7 +360,7 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
     assert!(!final_text.contains("AFTER"));
 
     let mut full = Command::cargo_bin("termtrace").expect("binary should build");
-    full.args(["analyze", "index", "--session"])
+    full.args(["analyze", "index"])
         .arg(&session)
         .assert()
         .success();
@@ -370,7 +370,7 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
 
     let mut unmatched_capture = Command::cargo_bin("termtrace").expect("binary should build");
     unmatched_capture
-        .args(["artifact", "capture", "--session"])
+        .args(["artifact", "capture"])
         .arg(&session)
         .args([
             "--width",
@@ -390,7 +390,7 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
 
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
     duplicate
-        .args(["analyze", "index", "--session"])
+        .args(["analyze", "index"])
         .arg(&session)
         .args([
             "--from",
@@ -417,7 +417,7 @@ fn inspect_exits_cleanly_when_downstream_closes_the_pipe() {
 
     let binary = env!("CARGO_BIN_EXE_termtrace");
     let mut inspect = StdCommand::new(binary)
-        .args(["analyze", "inspect", "--session"])
+        .args(["analyze", "inspect"])
         .arg(&session)
         .args(["--format", "json"])
         .stdout(Stdio::piped())

@@ -288,7 +288,6 @@ fn state_hash_selectors_reach_every_exact_state_workflow() {
     let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
     inspect
         .args(["analyze", "inspect"])
-        .arg("--session")
         .arg(&session)
         .args(["--state-hash", &final_hash, "--format", "json-compact"])
         .assert()

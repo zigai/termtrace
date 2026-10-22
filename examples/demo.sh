@@ -78,9 +78,9 @@ printf '{"truncated_tail":' >>"$DEMO_DIRECTORY/damaged-events.jsonl"
 
 cmp "$SESSION/events.jsonl" "$DEMO_DIRECTORY/recovered/events.jsonl"
 
-"$TERMTRACE_BIN" analyze index --session "$DEMO_DIRECTORY/recovered" --live-snapshot \
+"$TERMTRACE_BIN" analyze index "$DEMO_DIRECTORY/recovered" --live-snapshot \
     >"$DEMO_DIRECTORY/recovered-index.json"
-"$TERMTRACE_BIN" analyze inspect --session "$DEMO_DIRECTORY/recovered" --format text \
+"$TERMTRACE_BIN" analyze inspect "$DEMO_DIRECTORY/recovered" --format text \
     >"$DEMO_DIRECTORY/recovered-final-screen.txt"
 mkdir -m 700 "$DEMO_DIRECTORY/tampered"
 jq -c '
@@ -93,7 +93,7 @@ jq -c '
 chmod 600 "$DEMO_DIRECTORY/tampered/events.jsonl"
 
 set +e
-"$TERMTRACE_BIN" analyze index --session "$DEMO_DIRECTORY/tampered" --live-snapshot \
+"$TERMTRACE_BIN" analyze index "$DEMO_DIRECTORY/tampered" --live-snapshot \
     >"$DEMO_DIRECTORY/tamper.stdout.log" \
     2>"$DEMO_DIRECTORY/tamper-rejected.log"
 TAMPER_STATUS=$?

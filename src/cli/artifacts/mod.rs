@@ -58,15 +58,17 @@ pub(super) fn run_export_asciicast(
     response: &mut ResponseWriter,
     arguments: ExportArgs,
 ) -> Result<ExitCode> {
+    let session = resolve_session_path(arguments.session)?;
     let output = arguments.out;
+
     if output == Path::new("-") {
         let mut buffer = Vec::new();
-        export_asciicast_to_writer(arguments.session, &mut buffer, "<stdout>").into_diagnostic()?;
+        export_asciicast_to_writer(session, &mut buffer, "<stdout>").into_diagnostic()?;
 
         return write_stdout(response, buffer);
     }
 
-    export_asciicast(arguments.session, &output).into_diagnostic()?;
+    export_asciicast(session, &output).into_diagnostic()?;
 
     return write_json_line(
         response,
@@ -294,8 +296,8 @@ pub(super) fn run_capture(
     response: &mut ResponseWriter,
     arguments: CaptureArgs,
 ) -> Result<ExitCode> {
-    let (start_monotonic_ns, end_monotonic_ns) =
-        resolve_cli_range(&arguments.session, &arguments.range)?;
+    let session = resolve_session_path(arguments.session)?;
+    let (start_monotonic_ns, end_monotonic_ns) = resolve_cli_range(&session, &arguments.range)?;
 
     require_cli_capability(NATIVE_VIDEO_CAPABILITY, &AtomicBool::new(false))?;
 
@@ -311,12 +313,12 @@ pub(super) fn run_capture(
 
     let helper = env::current_exe().into_diagnostic()?;
     let (target, geometry_solver) =
-        native_capture_target(&helper, &arguments.session, viewport).into_diagnostic()?;
+        native_capture_target(&helper, &session, viewport).into_diagnostic()?;
 
     let outcome = capture(
         &helper,
         &CaptureOptions {
-            session_directory: arguments.session,
+            session_directory: session,
             width: target.width,
             height: target.height,
             padding: target.padding,

@@ -6,7 +6,7 @@ use crate::cli::{
     },
     analysis::reviewer::run as run_reviewer,
     output::{row_text, write_json_line, write_json_pretty, write_stdout},
-    session_helpers::{attach_session, resolve_cli_range, resolve_session_path},
+    session_helpers::{attach_session, resolve_cli_range, resolve_session, resolve_session_path},
 };
 use miette::{IntoDiagnostic as _, Result};
 use std::{
@@ -102,20 +102,17 @@ pub(in crate::cli) fn run_index(
     response: &mut ResponseWriter,
     arguments: IndexArgs,
 ) -> Result<ExitCode> {
+    let session = resolve_session(arguments.session)?.path;
     if !arguments.live_snapshot
-        && attach_session(&arguments.session)?
+        && attach_session(&session)?
             .completion()
             .into_diagnostic()?
             .is_none()
     {
-        return Err(Error::SessionIncomplete {
-            session: arguments.session,
-        })
-        .into_diagnostic();
+        return Err(Error::SessionIncomplete { session }).into_diagnostic();
     }
 
-    let (start_monotonic_ns, end_monotonic_ns) =
-        resolve_cli_range(&arguments.session, &arguments.range)?;
+    let (start_monotonic_ns, end_monotonic_ns) = resolve_cli_range(&session, &arguments.range)?;
 
     let state_selection = if arguments.presented_only {
         StateSelection::Presented
@@ -124,7 +121,7 @@ pub(in crate::cli) fn run_index(
     };
 
     let outcome = index_session_with_options(
-        arguments.session,
+        session,
         IndexOptions {
             start_monotonic_ns,
             end_monotonic_ns,
@@ -202,7 +199,8 @@ pub(in crate::cli) fn run_inspect(
         }
     };
 
-    let inspection = inspect_session(arguments.session, selector).into_diagnostic()?;
+    let session = resolve_session(arguments.session)?.path;
+    let inspection = inspect_session(session, selector).into_diagnostic()?;
 
     if let Some(row_number) = arguments.row {
         let row = inspection

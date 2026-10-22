@@ -636,7 +636,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
 
     let mut incomplete_index = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_index
-        .args(["analyze", "index", "--session"])
+        .args(["analyze", "index"])
         .arg(&session)
         .assert()
         .failure()
@@ -644,7 +644,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
 
     let mut incomplete_capture = Command::cargo_bin("termtrace").expect("binary should build");
     incomplete_capture
-        .args(["artifact", "capture", "--session"])
+        .args(["artifact", "capture"])
         .arg(&session)
         .args(["--width", "320", "--height", "200"])
         .assert()
@@ -700,7 +700,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
 
     let mut marker_range = Command::cargo_bin("termtrace").expect("binary should build");
     marker_range
-        .args(["analyze", "index", "--from-marker", "settled", "--session"])
+        .args(["analyze", "index", "--from-marker", "settled"])
         .arg(&session)
         .assert()
         .success();

@@ -139,11 +139,11 @@ run_isolation() {
     timeout --kill-after=2 60 "$binary" record --no-input --geometry fit --viewport 640x400 \
         --out "$session" -- /bin/sh -c \
         'printf "\033[2J\033[Hcapability isolation\n"; /bin/sleep 0.2; printf "complete\n"'
-    "$binary" analyze index --session "$session"
+    "$binary" analyze index "$session"
 
     prepare_case "$directory/video" hanging-import
     PATH="$directory/video/bin:$PATH" timeout --kill-after=2 90 \
-        "$binary" artifact capture --session "$session" --fps 24
+        "$binary" artifact capture "$session" --fps 24
     assert_not_invoked import
     jq -e '.capture_kind == "video" and .video_probe.streams[0].codec_name == "h264"' \
         "$session/visual/manifest.json" >/dev/null
