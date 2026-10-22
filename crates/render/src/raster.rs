@@ -19,10 +19,10 @@ use std::{
     sync::{Arc, LazyLock},
 };
 use termtrace_model::artifact::save::{SemanticFontRole, SemanticRasterProfile};
+use termtrace_model::terminal::state::supported_geometry_cell_count;
 use termtrace_model::terminal::state::{
     CursorStyle, Rgb, SemanticState, WideKind, MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS,
 };
-use termtrace_terminal::supported_geometry_cell_count;
 
 thread_local! {
     static INTERMEDIATE_SURFACE: RefCell<Option<Pixmap>> = const { RefCell::new(None) };
@@ -523,7 +523,7 @@ fn render_grid_direct(
 }
 
 /// Stable semantic PNG rasterizer identity.
-pub const SEMANTIC_PNG_RENDERER: &str = "termtrace-semantic-png-resvg-v4";
+pub const SEMANTIC_PNG_RENDERER: &str = "termtrace-semantic-png-resvg-v5";
 
 /// Rasterize the exact deterministic SVG scene with only the bundled font.
 ///
@@ -799,6 +799,41 @@ mod tests {
         return pixel.red() == background.r
             && pixel.green() == background.g
             && pixel.blue() == background.b;
+    }
+
+    fn rasterize_text(text: &str) -> Pixmap {
+        let mut terminal = GhosttyVt::new(3, 1, 0).expect("create text terminal");
+        terminal.write(text.as_bytes());
+        let mut state = terminal.snapshot().expect("snapshot text terminal");
+        state.cursor.visible = false;
+
+        return rasterize_state(&state);
+    }
+
+    #[test]
+    fn neighbouring_cells_render_as_separate_glyphs_without_ligatures() {
+        for (joined, first, second) in [("=>", "=", " >"), ("==>", "==", "  >"), ("!=", "!", " =")]
+        {
+            let joined = rasterize_text(joined);
+            let first = rasterize_text(first);
+            let second = rasterize_text(second);
+
+            let differing = joined
+                .pixels()
+                .iter()
+                .zip(first.pixels().iter().zip(second.pixels()))
+                .filter(|(pixel, (left, right))| {
+                    let channel = |value: u8, left: u8, right: u8| {
+                        return value.abs_diff(left.max(right)) > 32;
+                    };
+
+                    return channel(pixel.red(), left.red(), right.red())
+                        || channel(pixel.green(), left.green(), right.green())
+                        || channel(pixel.blue(), left.blue(), right.blue());
+                })
+                .count();
+            assert!(differing <= 4, "{differing} pixels differ");
+        }
     }
 
     #[test]

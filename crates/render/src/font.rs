@@ -305,6 +305,9 @@ fn precompute_font_faces_css(faces: &[SemanticFontFace; 5]) -> Result<Arc<str>> 
         )?;
     }
 
+    css.push_str(
+        "text{font-variant-ligatures:none;font-feature-settings:'liga' 0,'calt' 0,'dlig' 0}",
+    );
     css.push_str("</style>\n");
 
     return Ok(Arc::from(css));

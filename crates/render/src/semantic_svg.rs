@@ -13,7 +13,7 @@ use termtrace_model::terminal::state::{
 };
 
 /// Stable semantic SVG renderer identity.
-pub const SEMANTIC_SVG_RENDERER: &str = "termtrace-semantic-svg-v4";
+pub const SEMANTIC_SVG_RENDERER: &str = "termtrace-semantic-svg-v5";
 /// Deterministic semantic cell width in pixels.
 pub const SEMANTIC_CELL_WIDTH: u16 = 12;
 /// Deterministic semantic cell height in pixels.
@@ -187,7 +187,7 @@ struct TextRun {
     font_style: &'static str,
     opacity: &'static str,
     shape_rendering: &'static str,
-    text: String,
+    cells: Vec<(u32, String)>,
 }
 
 struct UnderlineRun {
@@ -279,7 +279,9 @@ fn write_row_content(
             });
 
             if can_merge && let Some(run) = current_text.as_mut() {
-                run.text.push_str(&resolved.cell.grapheme);
+                run.cells
+                    .push((resolved.x, resolved.cell.grapheme.to_string()));
+
                 run.span = run.span.saturating_add(resolved.span);
                 continue;
             }
@@ -301,7 +303,7 @@ fn write_row_content(
                 font_style: resolved.font_style,
                 opacity: resolved.opacity,
                 shape_rendering: resolved.shape_rendering,
-                text: resolved.cell.grapheme.to_string(),
+                cells: vec![(resolved.x, resolved.cell.grapheme.to_string())],
             });
         } else if let Some(run) = current_text.take() {
             emit_text_run(svg, &run)?;
@@ -440,13 +442,13 @@ fn emit_bg_rect(svg: &mut String, run: &BgRun) -> Result<()> {
     return Ok(());
 }
 
+// Each cell gets its own absolute x so renderers shape cells separately and never join
+// neighbouring cells into font ligatures such as `=>`.
 fn emit_text_run(svg: &mut String, run: &TextRun) -> Result<()> {
-    let escaped = EscapedXml(&run.text);
     let text_y = run.y.saturating_add(u32::from(run.baseline));
-    writeln!(
+    write!(
         svg,
-        "<text x=\"{}\" y=\"{text_y}\" fill=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" opacity=\"{}\"{} xml:space=\"preserve\">{escaped}</text>",
-        run.x,
+        "<text y=\"{text_y}\" fill=\"{}\" font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" font-style=\"{}\" opacity=\"{}\"{} xml:space=\"preserve\">",
         HexColor(run.foreground),
         run.font_family,
         run.font_size,
@@ -455,6 +457,12 @@ fn emit_text_run(svg: &mut String, run: &TextRun) -> Result<()> {
         run.opacity,
         run.shape_rendering
     )?;
+
+    for (x, grapheme) in &run.cells {
+        write!(svg, "<tspan x=\"{x}\">{}</tspan>", EscapedXml(grapheme))?;
+    }
+
+    writeln!(svg, "</text>")?;
 
     return Ok(());
 }
@@ -1061,7 +1069,8 @@ mod tests {
         let state = terminal.snapshot().expect("snapshot");
         let svg = render_svg(&state).expect("render SVG");
         let svg_str = String::from_utf8(svg).expect("valid UTF-8 SVG");
-        assert!(svg_str.contains(">Hello World</text>"));
+        assert_eq!(svg_str.matches("<text ").count(), 1);
+        assert_eq!(svg_str.matches("<tspan x=").count(), "Hello World".len());
         assert!(svg_str.contains("width=\"60\""));
         assert!(svg_str.contains("width=\"72\""));
 

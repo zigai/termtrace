@@ -71,6 +71,7 @@ pub fn resolve(
     resolve_effective: impl FnOnce(&[u8]) -> Result<Vec<u8>>,
 ) -> Result<ResolvedGhosttyProfile> {
     let mut replay_config = flatten_config(base_effective_config);
+    disable_default_ligatures(&mut replay_config);
     append_overrides(&mut replay_config, &overrides);
     let effective_config = resolve_effective(&replay_config)?;
 
@@ -187,6 +188,21 @@ fn flatten_config(config: &[u8]) -> Vec<u8> {
     }
 
     return flattened;
+}
+
+// Ligatures join neighbouring cells, so captures show them only when the user's config asks.
+fn disable_default_ligatures(config: &mut Vec<u8>) {
+    let configured = String::from_utf8_lossy(config).lines().any(|line| {
+        return line
+            .split_once('=')
+            .is_some_and(|(name, _)| return name.trim() == "font-feature");
+    });
+
+    if !configured {
+        config.extend_from_slice(
+            b"font-feature = -calt\nfont-feature = -liga\nfont-feature = -dlig\n",
+        );
+    }
 }
 
 fn append_overrides(config: &mut Vec<u8>, overrides: &GhosttyVisualOverrides) {
@@ -329,6 +345,21 @@ mod tests {
     }
 
     #[test]
+    fn disables_ligatures_unless_the_config_sets_font_features() {
+        let mut plain = b"font-size = 13\n".to_vec();
+        disable_default_ligatures(&mut plain);
+
+        assert!(
+            plain.ends_with(b"font-feature = -calt\nfont-feature = -liga\nfont-feature = -dlig\n")
+        );
+
+        let mut chosen = b"font-feature = +ss01\n".to_vec();
+        disable_default_ligatures(&mut chosen);
+
+        assert_eq!(chosen, b"font-feature = +ss01\n".to_vec());
+    }
+
+    #[test]
     fn appends_focused_overrides_after_the_base() {
         let mut config = b"font-size = 10\nbackground = #000000\n".to_vec();
         append_overrides(
@@ -363,7 +394,9 @@ mod tests {
             return output;
         }
 
-        let replay_config = b"background = #000000\nkeybind = alt+f24=text:\\x1b\\x1b[24;2~\n";
+        let replay_config =
+            b"background = #000000\nfont-feature = -liga\nkeybind = alt+f24=text:\\x1b\\x1b[24;2~\n";
+
         let profile = resolve(
             replay_config,
             None,

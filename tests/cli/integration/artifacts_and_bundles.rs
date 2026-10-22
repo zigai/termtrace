@@ -58,7 +58,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
             .find(|file| return file["path"] == "screen.svg")
             .map(|file| return &file["renderer"]),
         Some(&serde_json::Value::String(
-            "termtrace-semantic-svg-v4".to_owned()
+            "termtrace-semantic-svg-v5".to_owned()
         ))
     );
     assert_eq!(
@@ -67,7 +67,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
             .find(|file| return file["path"] == "screen.png")
             .map(|file| return &file["renderer"]),
         Some(&serde_json::Value::String(
-            "termtrace-semantic-png-resvg-v4".to_owned()
+            "termtrace-semantic-png-resvg-v5".to_owned()
         ))
     );
     assert!(fs_err::read_to_string(destination.join("screen.txt"))
