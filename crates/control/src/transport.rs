@@ -35,6 +35,8 @@ use termtrace_model::{
     terminal::{inspection::ScreenWaitOutcome, screen::ScreenProjectionRequest},
 };
 
+const POLL_SLICE: Duration = Duration::from_secs(60);
+
 /// Connect to the recorder's abstract control socket and authenticate its owner.
 pub(crate) fn connect_recorder(
     session: &Path,
@@ -72,22 +74,24 @@ pub(crate) fn connect_recorder(
         Ok(()) => {}
         Err(Errno::EINPROGRESS) => {
             let mut descriptors = [PollFd::new(fd.as_fd(), PollFlags::POLLOUT)];
+            let timeout = timing.remaining(session, "connect", MutationEffect::NotApplied)?;
+            let deadline = Instant::now().checked_add(timeout);
 
             loop {
-                let remaining = timing.remaining(session, "connect", MutationEffect::NotApplied)?;
-                let poll_timeout = PollTimeout::try_from(remaining.min(Duration::from_secs(60)))
-                    .unwrap_or(PollTimeout::NONE);
+                let Some(remaining) = remaining_until(deadline) else {
+                    return Err(transport_error(
+                        session,
+                        "connect",
+                        timeout,
+                        MutationEffect::NotApplied,
+                        IoError::new(ErrorKind::TimedOut, "control connect timed out"),
+                    ));
+                };
+                let poll_timeout =
+                    PollTimeout::try_from(remaining.min(POLL_SLICE)).unwrap_or(PollTimeout::NONE);
 
                 match poll(&mut descriptors, poll_timeout) {
-                    Ok(0) => {
-                        return Err(transport_error(
-                            session,
-                            "connect",
-                            remaining,
-                            MutationEffect::NotApplied,
-                            IoError::new(ErrorKind::TimedOut, "control connect timed out"),
-                        ));
-                    }
+                    Ok(0) => {}
                     Ok(_) => {
                         let so_error = getsockopt(&fd, SocketError).map_err(|error| {
                             return unavailable(session, IoError::from_raw_os_error(error as i32));
@@ -421,26 +425,27 @@ fn exchange_stream(
     })?;
 
     let timeout = timing.remaining(session_directory, "read response", unanswered)?;
+    let deadline = Instant::now().checked_add(timeout);
     let mut encoded = Vec::new();
     let mut chunk = [0_u8; 8192];
 
     loop {
-        let remaining = timing.remaining(session_directory, "read response", unanswered)?;
-        let poll_timeout = PollTimeout::try_from(remaining.min(Duration::from_secs(60)))
-            .unwrap_or(PollTimeout::NONE);
+        let Some(remaining) = remaining_until(deadline) else {
+            return Err(transport_error(
+                session_directory,
+                "read response",
+                timeout,
+                unanswered,
+                IoError::new(ErrorKind::TimedOut, "control read timed out"),
+            ));
+        };
+        let poll_timeout =
+            PollTimeout::try_from(remaining.min(POLL_SLICE)).unwrap_or(PollTimeout::NONE);
 
         let mut descriptors = [PollFd::new(stream.as_fd(), PollFlags::POLLIN)];
 
         match poll(&mut descriptors, poll_timeout) {
-            Ok(0) => {
-                return Err(transport_error(
-                    session_directory,
-                    "read response",
-                    remaining,
-                    unanswered,
-                    IoError::new(ErrorKind::TimedOut, "control read timed out"),
-                ));
-            }
+            Ok(0) => {}
             Ok(_) => match stream.read(&mut chunk) {
                 Ok(0) => {
                     break;
@@ -511,6 +516,17 @@ fn exchange_stream(
         });
     }
     return Ok(response);
+}
+
+// Poll waits in bounded slices; the exchange deadline decides when waiting ends.
+fn remaining_until(deadline: Option<Instant>) -> Option<Duration> {
+    let Some(deadline) = deadline else {
+        return Some(POLL_SLICE);
+    };
+
+    return deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| return !remaining.is_zero());
 }
 
 fn unavailable(session: &Path, source: IoError) -> Error {
