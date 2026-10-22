@@ -561,7 +561,7 @@ impl Snapshot<'_> {
                     soft_wrapped,
                     wrap_continuation,
                     dirty: row_dirty,
-                    cells,
+                    cells: cells.into(),
                 }
             } else {
                 reusable
@@ -980,6 +980,7 @@ impl From<sys::GhosttyColorRgb> for Rgb {
 mod tests {
     use super::*;
     use crate::ghostty_vt::terminal::GhosttyVt;
+    use std::sync::Arc;
 
     #[test]
     fn captures_unicode_truecolor_cursor_modes_and_alternate_screen() {
@@ -1011,7 +1012,7 @@ mod tests {
         assert!(alternate
             .grid
             .iter()
-            .flat_map(|row| return &row.cells)
+            .flat_map(|row| return row.cells.iter())
             .any(|cell| return cell.grapheme == "A"));
 
         terminal.write(b"\x1b[?1049l");
@@ -1063,6 +1064,32 @@ mod tests {
     }
 
     #[test]
+    fn snapshots_isolate_returned_edits_and_later_terminal_changes() {
+        let mut terminal = GhosttyVt::new(4, 2, 0).expect("create terminal");
+        terminal.write(b"ab");
+        let mut edited = terminal.snapshot().expect("first snapshot");
+        Arc::make_mut(&mut edited.grid[0].cells)[0].grapheme = "x".into();
+
+        let original = terminal.snapshot().expect("unchanged terminal snapshot");
+        assert_eq!(original.grid[0].cells[0].grapheme, "a");
+        assert_eq!(original.grid[0].cells[1].grapheme, "b");
+
+        terminal.write(b"\x1b[Hc\x1b[?2004h");
+        let updated = terminal.snapshot().expect("updated snapshot");
+        assert_eq!(updated.grid[0].cells[0].grapheme, "c");
+        assert!(updated.modes.bracketed_paste);
+        assert_eq!(original.grid[0].cells[0].grapheme, "a");
+        assert!(!original.modes.bracketed_paste);
+        assert_eq!(edited.grid[0].cells[0].grapheme, "x");
+
+        terminal.resize(2, 1, 9, 18).expect("resize terminal");
+        let resized = terminal.snapshot().expect("resized snapshot");
+        assert_eq!((resized.cols, resized.rows), (2, 1));
+        assert_eq!((original.cols, original.rows), (4, 2));
+        assert_eq!(original.grid[0].cells.len(), 4);
+    }
+
+    #[test]
     fn preserves_native_wrap_and_wide_facts_across_clean_reuse() {
         let mut terminal = GhosttyVt::new(4, 3, 0).expect("create terminal");
         terminal.write("abc界".as_bytes());
@@ -1072,21 +1099,21 @@ mod tests {
         assert!(first
             .grid
             .iter()
-            .flat_map(|row| return &row.cells)
+            .flat_map(|row| return row.cells.iter())
             .any(|cell| {
                 return cell.wide_kind == WideKind::Wide;
             }));
         assert!(first
             .grid
             .iter()
-            .flat_map(|row| return &row.cells)
+            .flat_map(|row| return row.cells.iter())
             .any(|cell| {
                 return cell.wide_kind == WideKind::SpacerTail;
             }));
         assert!(first
             .grid
             .iter()
-            .flat_map(|row| return &row.cells)
+            .flat_map(|row| return row.cells.iter())
             .any(|cell| {
                 return cell.wide_kind == WideKind::SpacerHead;
             }));

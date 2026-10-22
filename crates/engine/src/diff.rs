@@ -328,7 +328,7 @@ impl Hash for RowContent<'_> {
         self.0.soft_wrapped.hash(state);
         self.0.wrap_continuation.hash(state);
 
-        for cell in &self.0.cells {
+        for cell in self.0.cells.iter() {
             cell.grapheme.hash(state);
         }
     }

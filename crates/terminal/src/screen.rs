@@ -115,7 +115,7 @@ pub fn hash_semantic_row(row: &RowState) -> Result<blake3::Hash, ScreenFrameErro
     let cell_count = u32::try_from(row.cells.len()).unwrap_or(u32::MAX);
     hash.update(&cell_count.to_le_bytes());
 
-    for cell in &row.cells {
+    for cell in row.cells.iter() {
         hash_cell(&mut hash, cell);
     }
 
@@ -264,7 +264,7 @@ fn semantic_state_metadata_hasher(state: &SemanticState) -> blake3::Hasher {
 pub fn semantic_viewport_text(state: &SemanticState) -> String {
     let mut output = String::new();
     for (index, row) in state.grid.iter().enumerate() {
-        for cell in &row.cells {
+        for cell in row.cells.iter() {
             if !cell.grapheme.is_empty() {
                 output.push_str(&cell.grapheme);
             } else if cell.wide_kind == WideKind::Narrow {
@@ -488,7 +488,7 @@ fn validate_projection_clone_bytes(
 
     let mut requested = 0u64;
     for row in selected_rows(state, region) {
-        for cell in selected_cells(row.cells.as_slice(), region) {
+        for cell in selected_cells(&row.cells, region) {
             let grapheme_bytes = json_string_content_bytes(&cell.grapheme)?;
             let convenience_bytes =
                 if cell.grapheme.is_empty() && cell.wide_kind == WideKind::Narrow {
@@ -553,7 +553,7 @@ fn project_data(
                         row: row.row,
                         soft_wrapped: row.soft_wrapped,
                         wrap_continuation: row.wrap_continuation,
-                        text: convenience_text(selected_cells(row.cells.as_slice(), region)),
+                        text: convenience_text(selected_cells(&row.cells, region)),
                     };
                 })
                 .collect();
@@ -563,7 +563,7 @@ fn project_data(
         FrameDetail::Spans => {
             let rows: Vec<ScreenSpanRow> = selected_rows(state, region)
                 .map(|row| {
-                    let cells = selected_cells(row.cells.as_slice(), region);
+                    let cells = selected_cells(&row.cells, region);
 
                     return ScreenSpanRow {
                         row: row.row,
@@ -580,7 +580,7 @@ fn project_data(
         FrameDetail::Cells => {
             let rows: Vec<ScreenCellRow> = selected_rows(state, region)
                 .map(|row| {
-                    let cells = selected_cells(row.cells.as_slice(), region);
+                    let cells = selected_cells(&row.cells, region);
 
                     return ScreenCellRow {
                         row: row.row,

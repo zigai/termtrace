@@ -4,6 +4,7 @@ use crate::{error::ModelValidationError, value::ByteString};
 use compact_str::CompactString;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Largest supported terminal width at any trusted or imported boundary.
 pub const MAX_TERMINAL_COLUMNS: u16 = 1_000;
@@ -347,7 +348,7 @@ pub struct RowState {
     /// Whether Ghostty marked this row dirty during the update.
     pub dirty: bool,
     /// All cells, including blanks.
-    pub cells: Vec<CellState>,
+    pub cells: Arc<[CellState]>,
 }
 
 /// Global render dirtiness reported by Ghostty.

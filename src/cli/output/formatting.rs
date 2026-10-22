@@ -77,7 +77,7 @@ pub(in crate::cli) fn row_range(first: u16, count: u16) -> String {
 
 pub(in crate::cli) fn row_text(row: &RowState) -> String {
     let mut text = String::new();
-    for cell in &row.cells {
+    for cell in row.cells.iter() {
         if cell.grapheme.is_empty() {
             text.push(' ');
         } else {

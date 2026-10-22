@@ -1,7 +1,10 @@
 use super::engine::{inspect_latest_presented_fast, inspect_latest_presented_fast_with_limits};
 use super::*;
 use proptest::{collection, prelude::*};
-use std::{str::from_utf8, sync::atomic::AtomicBool};
+use std::{
+    str::from_utf8,
+    sync::{atomic::AtomicBool, Arc},
+};
 use termtrace_evidence::{
     artifact::create_private_directory,
     event_log::{EventLog, EventLogWriter, SessionClock},
@@ -474,7 +477,7 @@ fn semantic_hash_v2_binds_wrap_and_wide_but_not_dirtiness() {
     );
 
     let mut wide_changed = state.clone();
-    wide_changed.grid[0].cells[0].wide_kind = WideKind::SpacerHead;
+    Arc::make_mut(&mut wide_changed.grid[0].cells)[0].wide_kind = WideKind::SpacerHead;
 
     assert_ne!(
         baseline,
@@ -490,6 +493,54 @@ fn semantic_hash_v2_binds_wrap_and_wide_but_not_dirtiness() {
         baseline,
         semantic_state_hash(&dirty_changed).expect("dirty hash")
     );
+}
+
+#[test]
+fn row_delta_reports_only_edited_cells_in_column_order() {
+    let mut terminal = GhosttyVt::new(4, 2, 0).expect("terminal");
+    terminal.write(b"abc\r\ndef");
+    let previous = terminal.snapshot().expect("semantic state");
+    let mut first = previous.grid[0].cells[0].clone();
+    first.grapheme = "x".into();
+    let mut third = previous.grid[0].cells[2].clone();
+    third.style.bold = true;
+    let mut current = previous.clone();
+    let cells = Arc::make_mut(&mut current.grid[0].cells);
+    cells[2] = third.clone();
+    cells[0] = first.clone();
+
+    let delta = between(Some(&previous), &current);
+
+    assert_eq!(
+        delta,
+        StateDelta {
+            geometry: None,
+            cursor: None,
+            modes: None,
+            colors: None,
+            active_style: None,
+            metadata: None,
+            rows: vec![RowDiff {
+                row: 0,
+                soft_wrapped: false,
+                wrap_continuation: false,
+                cells: vec![first, third],
+            }],
+        }
+    );
+}
+
+#[test]
+fn row_delta_omits_equal_cells_loaded_from_json() {
+    let mut terminal = GhosttyVt::new(4, 2, 0).expect("terminal");
+    terminal.write("界x".as_bytes());
+    let previous = terminal.snapshot().expect("semantic state");
+    let bytes = serde_json::to_vec(&previous).expect("serialize semantic state");
+    let restored = serde_json::from_slice(&bytes).expect("deserialize semantic state");
+
+    let delta = between(Some(&previous), &restored);
+
+    assert!(delta.rows.is_empty());
 }
 
 #[test]
@@ -517,7 +568,7 @@ fn row_delta_emits_and_reconstructs_wrap_facts_without_cell_changes() {
 
         for cell in row_diff.cells {
             let column = usize::from(cell.column);
-            row.cells[column] = cell;
+            Arc::make_mut(&mut row.cells)[column] = cell;
         }
     }
 

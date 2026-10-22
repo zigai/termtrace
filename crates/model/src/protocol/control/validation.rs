@@ -517,7 +517,7 @@ fn screen_row_text(state: &SemanticState, row: u16) -> Option<String> {
     let row = state.grid.get(usize::from(row))?;
     let mut text = String::new();
 
-    for cell in &row.cells {
+    for cell in row.cells.iter() {
         text.push_str(if cell.grapheme.is_empty() { " " } else { &cell.grapheme });
     }
 

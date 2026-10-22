@@ -181,7 +181,7 @@ fn render_grid_direct(
         let row_y = (f32::from(row.row) * f32::from(SEMANTIC_CELL_HEIGHT) * scale).round();
 
         // 1. Cell Backgrounds
-        for cell in &row.cells {
+        for cell in row.cells.iter() {
             let span = match cell.wide_kind {
                 WideKind::Narrow => f32::from(SEMANTIC_CELL_WIDTH) * scale,
                 WideKind::Wide => f32::from(SEMANTIC_CELL_WIDTH) * 2.0 * scale,
@@ -223,7 +223,7 @@ fn render_grid_direct(
         }
 
         // 2. Text Glyphs
-        for cell in &row.cells {
+        for cell in row.cells.iter() {
             if cell.style.invisible || cell.grapheme.is_empty() {
                 continue;
             }
@@ -282,7 +282,7 @@ fn render_grid_direct(
         }
 
         // 3. Decorations
-        for cell in &row.cells {
+        for cell in row.cells.iter() {
             if matches!(cell.wide_kind, WideKind::SpacerTail | WideKind::SpacerHead) {
                 continue;
             }

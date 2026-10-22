@@ -216,7 +216,7 @@ fn write_row_content(
     embed_font: bool,
 ) -> Result<()> {
     let mut resolved_cells = Vec::with_capacity(row.cells.len());
-    for cell in &row.cells {
+    for cell in row.cells.iter() {
         if let Some(resolved) = resolve_cell(state, font_set, row.row, cell, embed_font) {
             resolved_cells.push(resolved);
         }
@@ -933,6 +933,7 @@ impl Display for EscapedXml<'_> {
 mod tests {
     use super::*;
     use crate::raster::render_png;
+    use std::sync::Arc;
     use termtrace_terminal::GhosttyVt;
 
     #[test]
@@ -944,7 +945,7 @@ mod tests {
         let [row] = state.grid.as_slice() else {
             panic!("one-row terminal must produce one row");
         };
-        let [cell] = row.cells.as_slice() else {
+        let [cell] = row.cells.as_ref() else {
             panic!("one-column terminal must produce one cell");
         };
         let regular = cell.style.clone();
@@ -994,7 +995,7 @@ mod tests {
         let [row] = state.grid.as_mut_slice() else {
             panic!("one-row terminal must produce one row");
         };
-        let [cell] = row.cells.as_mut_slice() else {
+        let [cell] = Arc::make_mut(&mut row.cells) else {
             panic!("one-column terminal must produce one cell");
         };
         cell.grapheme = "\u{30000}".into();

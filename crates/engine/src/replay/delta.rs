@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use termtrace_model::{
     terminal::replay::{RowDiff, StateDelta},
     terminal::state::SemanticState,
@@ -42,15 +43,19 @@ fn row_diffs(previous: Option<&SemanticState>, current: &SemanticState) -> Vec<R
                     || old.wrap_continuation != row.wrap_continuation;
             });
 
-            let cells = row
-                .cells
-                .iter()
-                .filter(|cell| {
-                    return old_row.and_then(|old| return old.cells.get(usize::from(cell.column)))
-                        != Some(*cell);
-                })
-                .cloned()
-                .collect::<Vec<_>>();
+            let cells = if old_row.is_some_and(|old| return Arc::ptr_eq(&old.cells, &row.cells)) {
+                Vec::new()
+            } else {
+                row.cells
+                    .iter()
+                    .filter(|cell| {
+                        return old_row
+                            .and_then(|old| return old.cells.get(usize::from(cell.column)))
+                            != Some(*cell);
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
 
             return (wrap_changed || !cells.is_empty()).then_some(RowDiff {
                 row: row.row,

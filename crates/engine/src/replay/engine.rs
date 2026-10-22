@@ -1681,7 +1681,7 @@ fn restore_checkpoint_grid(
     for (expected_row, actual_row) in expected.grid.iter().zip(&actual.grid) {
         let mut previous_non_ascii = false;
 
-        for (expected_cell, actual_cell) in expected_row.cells.iter().zip(&actual_row.cells) {
+        for (expected_cell, actual_cell) in expected_row.cells.iter().zip(actual_row.cells.iter()) {
             if expected_cell == actual_cell {
                 previous_non_ascii = expected_cell
                     .grapheme

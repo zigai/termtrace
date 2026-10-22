@@ -326,7 +326,7 @@ pub(super) fn find_text_regions(state: &SemanticState, needle: &str) -> Vec<Text
         let mut text = String::new();
         let mut cells = Vec::with_capacity(row.cells.len());
 
-        for cell in &row.cells {
+        for cell in row.cells.iter() {
             let start = text.len();
 
             if cell.grapheme.is_empty() {

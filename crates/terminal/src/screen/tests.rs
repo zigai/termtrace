@@ -1,6 +1,6 @@
 use super::*;
 use crate::ghostty_vt::GhosttyVt;
-use std::{collections::BTreeSet, time::Instant};
+use std::{collections::BTreeSet, sync::Arc, time::Instant};
 use termtrace_model::{
     execution::event_log::CanonicalBoundary,
     terminal::{observation::ActorBoundaries, state::DirtyState},
@@ -412,7 +412,7 @@ fn snapshot_normalization_omits_volatile_source_identity() {
 #[test]
 fn byte_limit_rejections_report_a_request_above_the_permitted_amount() {
     let mut state = semantic_fixture();
-    state.grid[0].cells[0].grapheme = "x"
+    Arc::make_mut(&mut state.grid[0].cells)[0].grapheme = "x"
         .repeat(usize::try_from(DEFAULT_MAX_SCREEN_FRAME_JSON_BYTES).expect("byte limit"))
         .into();
 
@@ -443,7 +443,7 @@ fn byte_limit_rejections_report_a_request_above_the_permitted_amount() {
 #[test]
 fn serialized_byte_limit_returns_bounded_error() {
     let mut state = semantic_fixture();
-    state.grid[0].cells[0].grapheme = "x"
+    Arc::make_mut(&mut state.grid[0].cells)[0].grapheme = "x"
         .repeat(usize::try_from(MAX_SCREEN_FRAME_JSON_BYTES).expect("byte limit") + 1)
         .into();
     let error = project_screen_frame(
@@ -469,7 +469,7 @@ fn serialized_byte_limit_returns_bounded_error() {
 #[test]
 fn escaped_projection_strings_are_bounded_before_projection_clones() {
     let mut state = semantic_fixture();
-    state.grid[0].cells[0].grapheme = "\u{0001}".repeat(1_500_000).into();
+    Arc::make_mut(&mut state.grid[0].cells)[0].grapheme = "\u{0001}".repeat(1_500_000).into();
     let region =
         validate_screen_region(&ScreenProjectionRequest::default(), state.cols, state.rows)
             .expect("region");
@@ -487,7 +487,7 @@ fn escaped_projection_strings_are_bounded_before_projection_clones() {
 #[test]
 fn span_boundaries_preserve_complete_selection_appearance() {
     let mut state = semantic_fixture();
-    state.grid[0].cells[1].selected = true;
+    Arc::make_mut(&mut state.grid[0].cells)[1].selected = true;
     let frame = project_screen_frame(
         &state,
         &ScreenProjectionRequest::default(),
@@ -517,19 +517,11 @@ fn inconsistent_semantic_grids_are_rejected_with_their_invariant_category() {
     let mut wrong_row = state.clone();
     wrong_row.grid.first_mut().expect("first row").row = 1;
     let mut missing_cell = state.clone();
-    missing_cell
-        .grid
-        .first_mut()
-        .expect("first row")
-        .cells
-        .pop();
+    let row = missing_cell.grid.first_mut().expect("first row");
+    row.cells = row.cells[..row.cells.len() - 1].into();
 
     let mut wrong_column = state;
-    wrong_column
-        .grid
-        .first_mut()
-        .expect("first row")
-        .cells
+    Arc::make_mut(&mut wrong_column.grid.first_mut().expect("first row").cells)
         .first_mut()
         .expect("first cell")
         .column = 1;
@@ -832,11 +824,7 @@ fn serialized_frame_budget_accepts_the_limit_and_rejects_one_extra_byte() {
 fn short_json_escapes_within_the_budget_are_not_rejected_as_unicode_escapes() {
     let mut state = semantic_fixture();
     let payload = "\"\\\n\r\t\u{0008}\u{000c}".repeat(400_000);
-    state
-        .grid
-        .first_mut()
-        .expect("first row")
-        .cells
+    Arc::make_mut(&mut state.grid.first_mut().expect("first row").cells)
         .first_mut()
         .expect("first cell")
         .grapheme = payload.clone().into();
@@ -865,11 +853,7 @@ fn short_json_escapes_within_the_budget_are_not_rejected_as_unicode_escapes() {
 fn large_regions_scale_the_byte_budget_but_a_small_crop_does_not() {
     let mut terminal = GhosttyVt::new(512, 256, 0).expect("large terminal");
     let mut state = terminal.snapshot().expect("large snapshot");
-    state
-        .grid
-        .first_mut()
-        .expect("first row")
-        .cells
+    Arc::make_mut(&mut state.grid.first_mut().expect("first row").cells)
         .first_mut()
         .expect("first cell")
         .grapheme = "x".repeat(9_000_000).into();
