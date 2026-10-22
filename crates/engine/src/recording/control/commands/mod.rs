@@ -39,12 +39,11 @@ use termtrace_model::{
         ScreenFrame, ScreenFrameError, ScreenFrameLimitKind, ScreenFrameSource,
         ScreenProjectionRequest,
     },
-    terminal::state::{FocusEvent, MouseAction, MouseButton},
+    terminal::state::{supported_geometry_cell_count, FocusEvent, MouseAction, MouseButton},
     value::ByteString,
 };
 use termtrace_terminal::{
-    encode_focus, project_screen_frame, semantic_viewport_text, supported_geometry_cell_count,
-    validate_screen_region,
+    encode_focus, project_screen_frame, semantic_viewport_text, validate_screen_region,
 };
 use uuid::Uuid;
 use zstd::stream::encode_all;

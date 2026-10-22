@@ -17,5 +17,5 @@ mod sys;
 mod terminal;
 
 pub use input::encode_focus;
-pub use state::{supported_geometry_cell_count, Format};
+pub use state::Format;
 pub use terminal::GhosttyVt;

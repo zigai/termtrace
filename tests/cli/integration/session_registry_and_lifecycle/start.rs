@@ -288,3 +288,22 @@ fn concurrent_start_reservation_launches_only_one_recorder() {
         .assert()
         .success();
 }
+
+#[test]
+fn start_rejects_a_grid_over_the_cell_limit_before_launching_a_recorder() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "record", "-d", "wide", "--cols", "600", "--rows", "500", "/bin/sh", "-c", "exit 0",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "terminal size 600x500 exceeds the supported limits of 1000 columns, 1000 rows, and 250000 cells",
+        ));
+
+    assert!(!state.join("sessions").exists());
+}

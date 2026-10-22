@@ -1,7 +1,10 @@
 use crate::{Error, Result};
 use rustix::termios::tcgetwinsize;
 use std::io;
-use termtrace_model::execution::session::SessionGeometry;
+use termtrace_model::{
+    execution::session::SessionGeometry,
+    terminal::state::{supported_geometry_cell_count, terminal_geometry_limits},
+};
 
 /// Measure the controlling terminal through the kernel window-size record.
 ///
@@ -24,6 +27,15 @@ pub fn inherited_geometry(
         ));
     }
 
+    if supported_geometry_cell_count(size.ws_col, size.ws_row).is_none() {
+        return Err(geometry_error(format!(
+            "controlling terminal is {}x{}; the supported limits are {}",
+            size.ws_col,
+            size.ws_row,
+            terminal_geometry_limits()
+        )));
+    }
+
     let cell_width = size
         .ws_xpixel
         .checked_div(size.ws_col)
@@ -42,15 +54,18 @@ pub fn inherited_geometry(
         ));
     }
 
-    let pixel_width = size
-        .ws_col
-        .checked_mul(cell_width)
-        .ok_or_else(|| return geometry_error("inherited terminal width overflow"))?;
-
-    let pixel_height = size
-        .ws_row
-        .checked_mul(cell_height)
-        .ok_or_else(|| return geometry_error("inherited terminal height overflow"))?;
+    let pixel_width = size.ws_col.checked_mul(cell_width).ok_or_else(|| {
+        return geometry_error(format!(
+            "inherited cell width {cell_width}px is too wide for {} columns",
+            size.ws_col
+        ));
+    })?;
+    let pixel_height = size.ws_row.checked_mul(cell_height).ok_or_else(|| {
+        return geometry_error(format!(
+            "inherited cell height {cell_height}px is too tall for {} rows",
+            size.ws_row
+        ));
+    })?;
 
     return Ok(SessionGeometry {
         cols: size.ws_col,

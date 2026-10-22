@@ -46,6 +46,10 @@ pub(super) fn run_detached_record(
         timeout: timeout.unwrap_or(defaults::WAIT_TIMEOUT),
     };
 
+    if matches!(recording.geometry, GeometryMode::Manual) {
+        manual_geometry(&recording)?;
+    }
+
     let startup_timeout = millis_or(startup_timeout_ms, defaults::STARTUP_TIMEOUT);
     let _durability_policy = durability_policy_for(&recording)?;
     let registry = RegistryService::open_default().into_diagnostic()?;

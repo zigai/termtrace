@@ -16,7 +16,7 @@ mod utf8;
 pub mod vt_framer;
 
 pub use error::{Error, Result};
-pub use ghostty_vt::{encode_focus, supported_geometry_cell_count, Format, GhosttyVt};
+pub use ghostty_vt::{encode_focus, Format, GhosttyVt};
 pub use output_projection::ControlStripper;
 pub use screen::{
     hash_semantic_row, project_screen_frame, screen_frame_hash, semantic_state_hash,

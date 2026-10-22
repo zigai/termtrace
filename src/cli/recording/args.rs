@@ -11,6 +11,7 @@ use termtrace_model::{
     execution::event_log::{DurabilityMode, DurabilityPolicy},
     execution::provenance::{ProvenanceCapture, ProvenancePolicyKind},
     execution::session::CaptureTarget,
+    terminal::state::{MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS},
     value::ByteString,
 };
 use termtrace_sdk::defaults;
@@ -280,12 +281,12 @@ pub(in crate::cli) struct RecordingArgs {
     #[arg(long, value_parser = parse_rgb_color)]
     pub(in crate::cli) background: Option<String>,
 
-    /// Terminal columns used by manual geometry (1-65535).
-    #[arg(long, default_value_t = defaults::COLS, value_parser = clap::value_parser!(u16).range(1..))]
+    /// Terminal columns used by manual geometry (1-1000; at most 250000 cells in total).
+    #[arg(long, default_value_t = defaults::COLS, value_parser = clap::value_parser!(u16).range(1..=i64::from(MAX_TERMINAL_COLUMNS)))]
     pub(in crate::cli) cols: u16,
 
-    /// Terminal rows used by manual geometry (1-65535).
-    #[arg(long, default_value_t = defaults::ROWS, value_parser = clap::value_parser!(u16).range(1..))]
+    /// Terminal rows used by manual geometry (1-1000; at most 250000 cells in total).
+    #[arg(long, default_value_t = defaults::ROWS, value_parser = clap::value_parser!(u16).range(1..=i64::from(MAX_TERMINAL_ROWS)))]
     pub(in crate::cli) rows: u16,
 
     /// Manual cell width, or inherited-geometry fallback, in pixels (1-65535).

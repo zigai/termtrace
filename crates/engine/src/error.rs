@@ -6,7 +6,7 @@ use std::{
 };
 use termtrace_model::{
     error::{ModelValidationError, ThreadPanicError},
-    terminal::screen::ScreenFrameError,
+    terminal::{screen::ScreenFrameError, state::terminal_geometry_limits},
 };
 use uuid::Uuid;
 
@@ -284,7 +284,8 @@ impl fmt::Display for Error {
             } => {
                 return write!(
                     f,
-                    "terminal geometry {cols}x{rows} at {cell_width_px}x{cell_height_px}px per cell is too large"
+                    "terminal geometry {cols}x{rows} at {cell_width_px}x{cell_height_px}px per cell is not supported; the grid must fit {} and its pixel size must fit 65535x65535",
+                    terminal_geometry_limits()
                 );
             }
             Self::TerminalOperation { operation, reason } => {

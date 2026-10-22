@@ -31,7 +31,7 @@ use std::{
     time::Instant,
 };
 use termtrace_model::protocol::control::ProcessSignal;
-use termtrace_terminal::supported_geometry_cell_count;
+use termtrace_model::terminal::state::supported_geometry_cell_count;
 
 const SESSION_DIRECTORY_MODE: u32 = 0o700;
 const READ_BUFFER_BYTES: usize = 16 * 1024;

@@ -140,37 +140,62 @@ pub(super) fn parse_terminal(bytes: &[u8]) -> Result<Option<TerminalGeometryRepo
     }));
 }
 
+pub(super) fn manual_geometry(arguments: &RecordingArgs) -> Result<SessionGeometry> {
+    if supported_geometry_cell_count(arguments.cols, arguments.rows).is_none() {
+        return Err(miette::miette!(
+            "terminal size {}x{} exceeds the supported limits of {}",
+            arguments.cols,
+            arguments.rows,
+            terminal_geometry_limits()
+        ));
+    }
+
+    if arguments.cell_width == 0 {
+        return Err(miette::miette!("resolved terminal has no cell width"));
+    }
+
+    if arguments.cell_height == 0 {
+        return Err(miette::miette!("resolved terminal has no cell height"));
+    }
+
+    let pixel_width = arguments
+        .cols
+        .checked_mul(arguments.cell_width)
+        .ok_or_else(|| {
+            return miette::miette!(
+                "cell width {}px is too wide for {} columns; the terminal must fit 65535 pixels",
+                arguments.cell_width,
+                arguments.cols
+            );
+        })?;
+
+    let pixel_height = arguments
+        .rows
+        .checked_mul(arguments.cell_height)
+        .ok_or_else(|| {
+            return miette::miette!(
+                "cell height {}px is too tall for {} rows; the terminal must fit 65535 pixels",
+                arguments.cell_height,
+                arguments.rows
+            );
+        })?;
+
+    return Ok(SessionGeometry {
+        cols: arguments.cols,
+        rows: arguments.rows,
+        pixel_width,
+        pixel_height,
+    });
+}
+
 pub(super) fn resolve_record(
     arguments: &RecordingArgs,
     ghostty_profile: Option<&ResolvedGhosttyProfile>,
 ) -> Result<(SessionGeometry, GeometryProvenance)> {
     match arguments.geometry {
         GeometryMode::Manual => {
-            if arguments.cell_width == 0 {
-                return Err(miette::miette!("resolved terminal has no cell width"));
-            }
-
-            if arguments.cell_height == 0 {
-                return Err(miette::miette!("resolved terminal has no cell height"));
-            }
-
-            let pixel_width = arguments
-                .cols
-                .checked_mul(arguments.cell_width)
-                .ok_or_else(|| miette::miette!("manual terminal width overflow"))?;
-
-            let pixel_height = arguments
-                .rows
-                .checked_mul(arguments.cell_height)
-                .ok_or_else(|| miette::miette!("manual terminal height overflow"))?;
-
             return Ok((
-                SessionGeometry {
-                    cols: arguments.cols,
-                    rows: arguments.rows,
-                    pixel_width,
-                    pixel_height,
-                },
+                manual_geometry(arguments)?,
                 GeometryProvenance {
                     source: GeometrySource::Manual,
                     capture_target: arguments.viewport,

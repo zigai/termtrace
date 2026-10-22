@@ -12,6 +12,27 @@ pub const MAX_TERMINAL_ROWS: u16 = 1_000;
 /// Largest supported viewport allocation, independent of aspect ratio.
 pub const MAX_TERMINAL_CELLS: u32 = 250_000;
 
+/// Return the cell count when a terminal geometry is within the supported limits.
+#[must_use]
+pub fn supported_geometry_cell_count(cols: u16, rows: u16) -> Option<u32> {
+    let cells = u32::from(cols).checked_mul(u32::from(rows))?;
+
+    return (cols > 0
+        && rows > 0
+        && cols <= MAX_TERMINAL_COLUMNS
+        && rows <= MAX_TERMINAL_ROWS
+        && cells <= MAX_TERMINAL_CELLS)
+        .then_some(cells);
+}
+
+/// Describe the supported terminal limits for error messages.
+#[must_use]
+pub fn terminal_geometry_limits() -> String {
+    return format!(
+        "{MAX_TERMINAL_COLUMNS} columns, {MAX_TERMINAL_ROWS} rows, and {MAX_TERMINAL_CELLS} cells"
+    );
+}
+
 /// RGB color independent of libghostty's unstable ABI.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Rgb {

@@ -8,7 +8,7 @@ use std::{
 };
 use termtrace_model::{
     execution::event::{Event, EventLogHeader, EVENT_LOG_FORMAT, EVENT_LOG_VERSION},
-    terminal::state::{MAX_TERMINAL_CELLS, MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS},
+    terminal::state::{supported_geometry_cell_count, terminal_geometry_limits},
 };
 
 pub(super) const OWNER_DIRECTORY_MODE: u32 = 0o700;
@@ -176,21 +176,10 @@ pub(super) fn validate_header(path: &Path, header: &EventLogHeader) -> Result<()
     return Ok(());
 }
 
-fn supported_geometry_cell_count(cols: u16, rows: u16) -> Option<usize> {
-    if cols == 0 || rows == 0 || cols > MAX_TERMINAL_COLUMNS || rows > MAX_TERMINAL_ROWS {
-        return None;
-    }
-
-    let cells = u32::from(cols).checked_mul(u32::from(rows))?;
-    if cells > MAX_TERMINAL_CELLS {
-        return None;
-    }
-    return usize::try_from(cells).ok();
-}
-
 fn geometry_limit_reason(kind: &str) -> String {
     return format!(
-        "{kind} terminal geometry exceeds limits of {MAX_TERMINAL_COLUMNS} columns, {MAX_TERMINAL_ROWS} rows, and {MAX_TERMINAL_CELLS} cells"
+        "{kind} terminal geometry exceeds limits of {}",
+        terminal_geometry_limits()
     );
 }
 

@@ -62,6 +62,7 @@ use termtrace_model::{
     protocol::control::{ScreenPredicate, ScreenWaitQuality},
     registry::{DetachedSessionPaths, RegistryEntry},
     terminal::screen::ScreenProjectionRequest,
+    terminal::state::{supported_geometry_cell_count, terminal_geometry_limits},
     value::geometry::TerminalGeometryReport,
     value::ByteString,
 };
@@ -82,8 +83,8 @@ mod record;
 mod restart;
 mod start;
 
-use geometry::resolve_record;
 pub(super) use geometry::run_geometry_probe;
+use geometry::{manual_geometry, resolve_record};
 use record::durability_policy_for;
 pub(super) use record::run_record;
 use restart::restarted_record_options;

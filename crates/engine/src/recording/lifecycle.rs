@@ -49,12 +49,10 @@ use termtrace_model::{
     },
     terminal::observation::StatePoint,
     terminal::replay::GHOSTTY_REVISION,
+    terminal::state::supported_geometry_cell_count,
     value::ByteString,
 };
-use termtrace_terminal::{
-    semantic_state_hash, supported_geometry_cell_count, GhosttyVt, PresentationTracker,
-    QueryTracker,
-};
+use termtrace_terminal::{semantic_state_hash, GhosttyVt, PresentationTracker, QueryTracker};
 use uuid::Uuid;
 
 const MUTATION_CACHE_CAPACITY: usize = 256;
@@ -644,6 +642,10 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
         ));
     }
 
+    if supported_geometry_cell_count(options.cols, options.rows).is_none() {
+        return Err(invalid_geometry(options));
+    }
+
     let pixel_width = options
         .cols
         .checked_mul(options.cell_width_px)
@@ -653,9 +655,6 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
         .checked_mul(options.cell_height_px)
         .ok_or_else(|| return invalid_geometry(options))?;
 
-    if supported_geometry_cell_count(options.cols, options.rows).is_none() {
-        return Err(invalid_geometry(options));
-    }
     return Ok(PtySize {
         rows: options.rows,
         cols: options.cols,
