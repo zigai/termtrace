@@ -24,6 +24,7 @@ use termtrace_evidence::{
 use termtrace_model::{
     artifact::metadata::ArtifactSourceRange,
     execution::layout::{self, SessionLayout},
+    execution::session::SessionCompletion,
     terminal::replay::{
         IndexOptions, IndexOutcome, ReplayArtifacts, ReplayManifest, SemanticReplayCheckpoint,
         SourceRange, StateIndexEntry, StateInspection, StateRecord, StateSelection, StateSelector,
@@ -309,11 +310,40 @@ impl DerivedIndex {
         let Some(session) = log.source_path.as_deref().and_then(Path::parent) else {
             return Ok(None);
         };
+
+        return Self::open_source(
+            session,
+            &log.header.session_manifest_hash,
+            log.events.last().map(|record| return record.hash.as_str()),
+        );
+    }
+
+    /// Open the default index of a completed session without loading its event log.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a cataloged index fails its catalog binding or member verification.
+    pub(crate) fn open_completed(
+        session: &Path,
+        completion: &SessionCompletion,
+    ) -> Result<Option<Self>> {
+        return Self::open_source(
+            session,
+            &completion.session_manifest_hash,
+            Some(completion.final_event_hash.as_str()),
+        );
+    }
+
+    fn open_source(
+        session: &Path,
+        session_manifest_hash: &str,
+        final_event_hash: Option<&str>,
+    ) -> Result<Option<Self>> {
         let Some(directory) = open_verified_artifact(
             session,
             layout::DERIVED,
-            &log.header.session_manifest_hash,
-            log.events.last().map(|record| return record.hash.as_str()),
+            session_manifest_hash,
+            final_event_hash,
         )?
         else {
             return Ok(None);
@@ -350,6 +380,43 @@ impl DerivedIndex {
     pub(crate) fn nearest_seed(&self, selector: &StateSelector) -> Result<Option<ReplaySeed>> {
         return load_nearest_replay_seed(&self.directory, selector);
     }
+
+    /// The last semantic state with `state_hash`, matching replay's last-occurrence selection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the verified state index cannot be read or decoded.
+    pub(crate) fn last_state_with_hash(&self, state_hash: &str) -> Result<Option<u64>> {
+        return last_state_with_hash(&self.directory, state_hash);
+    }
+}
+
+fn last_state_with_hash(directory: &Path, state_hash: &str) -> Result<Option<u64>> {
+    let index_path = directory.join(STATE_INDEX);
+    let file = fs_err::File::open(&index_path).map_err(|source| {
+        return Error::Filesystem {
+            path: index_path.clone(),
+            source,
+        };
+    })?;
+
+    let mut target_state_id = None;
+    for line in BufReader::new(file).lines() {
+        let line = line.map_err(|source| {
+            return Error::Filesystem {
+                path: index_path.clone(),
+                source,
+            };
+        })?;
+        let entry: StateIndexEntry = serde_json::from_str(&line)
+            .map_err(|source| return json_error(index_path.clone(), source))?;
+
+        if entry.state_hash == state_hash {
+            target_state_id = Some(entry.state_id);
+        }
+    }
+
+    return Ok(target_state_id);
 }
 
 fn load_nearest_replay_seed(
@@ -365,31 +432,7 @@ fn load_nearest_replay_seed(
             Some(CheckpointSelector::MonotonicNs(*monotonic_ns))
         }
         StateSelector::StateHash(state_hash) => {
-            let index_path = directory.join(STATE_INDEX);
-            let file = fs_err::File::open(&index_path).map_err(|source| {
-                return Error::Filesystem {
-                    path: index_path.clone(),
-                    source,
-                };
-            })?;
-
-            let mut target_state_id = None;
-            for line in BufReader::new(file).lines() {
-                let line = line.map_err(|source| {
-                    return Error::Filesystem {
-                        path: index_path.clone(),
-                        source,
-                    };
-                })?;
-                let entry: StateIndexEntry = serde_json::from_str(&line)
-                    .map_err(|source| return json_error(index_path.clone(), source))?;
-                if entry.state_hash == *state_hash {
-                    target_state_id = Some(entry.state_id);
-                    break;
-                }
-            }
-
-            target_state_id.map(CheckpointSelector::StateId)
+            last_state_with_hash(directory, state_hash)?.map(CheckpointSelector::StateId)
         }
     };
     let Some(checkpoint_selector) = checkpoint_selector else {

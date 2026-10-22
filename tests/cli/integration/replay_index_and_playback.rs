@@ -2,6 +2,7 @@
 
 use crate::support::*;
 use std::sync::mpsc;
+use termtrace_model::terminal::replay::StateIndexEntry;
 
 #[test]
 fn asciicast_preserves_utf8_split_between_output_and_input_events() {
@@ -401,6 +402,96 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("already exists"));
+}
+
+#[test]
+fn indexed_inspection_returns_the_same_states_as_canonical_replay() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("indexed");
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            r"for pass in 1 2 3; do printf '\033[H\033[2J'; i=0; while [ $i -lt 120 ]; do printf x; i=$((i+1)); done; sleep 0.05; done",
+        ])
+        .assert()
+        .success();
+
+    let mut index = Command::cargo_bin("termtrace").expect("binary should build");
+    index
+        .args(["analyze", "index"])
+        .arg(&session)
+        .assert()
+        .success();
+
+    let entries = fs_err::read_to_string(session.join("derived/state-index.jsonl"))
+        .expect("state index")
+        .lines()
+        .map(|line| return serde_json::from_str::<StateIndexEntry>(line).expect("index entry"))
+        .collect::<Vec<_>>();
+
+    let last = entries.last().expect("indexed states");
+
+    assert!(
+        entries
+            .iter()
+            .any(|entry| return entry.checkpoint && entry.state_id > 0),
+        "fixture must produce a late checkpoint"
+    );
+
+    let repeated_hash = entries
+        .iter()
+        .find(|entry| {
+            return entries
+                .iter()
+                .filter(|other| return other.state_hash == entry.state_hash)
+                .count()
+                > 1;
+        })
+        .expect("fixture redraws an identical screen")
+        .state_hash
+        .clone();
+
+    let middle = &entries[entries.len() / 2];
+    let selectors = [
+        vec![],
+        vec!["--state".to_owned(), last.state_id.to_string()],
+        vec!["--state".to_owned(), middle.state_id.to_string()],
+        vec!["--state-hash".to_owned(), repeated_hash],
+        vec![
+            "--event-seq".to_owned(),
+            middle.event_seq.expect("output event").to_string(),
+        ],
+        vec!["--monotonic-ns".to_owned(), middle.monotonic_ns.to_string()],
+    ];
+
+    let inspect_all = || {
+        return selectors
+            .iter()
+            .map(|selector| {
+                let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
+                let output = inspect
+                    .args(["analyze", "inspect"])
+                    .arg(&session)
+                    .args(selector)
+                    .args(["--format", "json-compact"])
+                    .assert()
+                    .success();
+
+                return output.get_output().stdout.clone();
+            })
+            .collect::<Vec<_>>();
+    };
+    let indexed = inspect_all();
+
+    fs_err::remove_file(session.join("artifact-roots.jsonl")).expect("remove artifact catalog");
+    fs_err::remove_dir_all(session.join("derived")).expect("remove derived index");
+
+    assert_eq!(indexed, inspect_all());
 }
 
 #[test]

@@ -1,5 +1,5 @@
 use super::{between, invalid_replay, DerivedIndex, EndpointInspection};
-use crate::{Error, Result};
+use crate::{completion, Error, Result};
 #[cfg(test)]
 use std::cell::Cell;
 use std::{
@@ -20,11 +20,12 @@ use termtrace_model::{
     terminal::replay::{
         CollectedReplay, ReplayArtifacts, SourceRange, StateInspection, StateRecord, StateSelector,
     },
-    terminal::state::{CellStyle, ColorSpec, DirtyState, SemanticState},
+    terminal::state::{
+        supported_geometry_cell_count, CellStyle, ColorSpec, DirtyState, SemanticState,
+    },
 };
 use termtrace_terminal::{
-    hash_semantic_row, semantic_state_hash_from_row_hashes, supported_geometry_cell_count, Format,
-    GhosttyVt,
+    hash_semantic_row, semantic_state_hash_from_row_hashes, Format, GhosttyVt,
 };
 use uuid::Uuid;
 
@@ -791,6 +792,41 @@ fn state_selector_matches(selector: &StateSelector, record: &StateRecord) -> boo
     };
 }
 
+fn selector_continues(selector: &StateSelector, record: &StateRecord) -> bool {
+    return match selector {
+        StateSelector::StateId(id) => record.state_id < *id,
+        StateSelector::EventSeq(seq) => record.event_seq.is_none_or(|event| return event <= *seq),
+        StateSelector::MonotonicNs(time) => record.monotonic_ns <= *time,
+        _ => true,
+    };
+}
+
+// A trusted index lets completed-session replay start at the nearest checkpoint and stop at the
+// target; a state hash becomes the id of its last occurrence so it can stop early too.
+fn indexed_selector(
+    session: &Path,
+    selector: StateSelector,
+) -> Result<(StateSelector, Option<ReplaySeed>)> {
+    let Some(completion) = completion::published(session)? else {
+        return Ok((selector, None));
+    };
+    let Some(index) = DerivedIndex::open_completed(session, &completion)? else {
+        return Ok((selector, None));
+    };
+    let selector = match selector {
+        StateSelector::StateHash(state_hash) => StateSelector::StateId(
+            index
+                .last_state_with_hash(&state_hash)?
+                .ok_or_else(|| return invalid_replay("no semantic state matches the selector"))?,
+        ),
+        selector => selector,
+    };
+
+    let seed = index.nearest_seed(&selector)?;
+
+    return Ok((selector, seed));
+}
+
 pub(crate) fn inspect_session_stream(
     session: &Path,
     selector: StateSelector,
@@ -814,12 +850,15 @@ fn inspect_recording_stream(
 ) -> Result<StateInspection> {
     let never_cancelled = AtomicBool::new(false);
     let mut selected = None;
+    let (selector, seed) =
+        if completed { indexed_selector(session, selector)? } else { (selector, None) };
 
     visit_recording_states_with_engine(
         session,
         cancelled.unwrap_or(&never_cancelled),
         completed,
         None,
+        seed,
         |record, state, _| {
             if state_selector_matches(&selector, record) {
                 selected = Some(StateInspection {
@@ -828,14 +867,7 @@ fn inspect_recording_stream(
                 });
             }
 
-            return Ok(match &selector {
-                StateSelector::StateId(id) => record.state_id < *id,
-                StateSelector::EventSeq(seq) => {
-                    record.event_seq.is_none_or(|event| return event <= *seq)
-                }
-                StateSelector::MonotonicNs(time) => record.monotonic_ns <= *time,
-                _ => true,
-            });
+            return Ok(selector_continues(&selector, record));
         },
     )?;
 
@@ -851,23 +883,31 @@ pub(crate) fn inspect_session_stream_with_formats(
 ) -> Result<StateInspectionWithFormats> {
     let mut selected = None;
     let mut rendered = Vec::new();
+    let (selector, seed) = indexed_selector(session, selector)?;
 
-    visit_session_states_with_engine(session, &AtomicBool::new(false), |record, state, engine| {
-        if state_selector_matches(&selector, record) {
-            selected = Some(StateInspection {
-                record: record.clone(),
-                state: state.clone(),
-            });
+    visit_recording_states_with_engine(
+        session,
+        &AtomicBool::new(false),
+        true,
+        None,
+        seed,
+        |record, state, engine| {
+            if state_selector_matches(&selector, record) {
+                selected = Some(StateInspection {
+                    record: record.clone(),
+                    state: state.clone(),
+                });
 
-            rendered.clear();
+                rendered.clear();
 
-            for format in formats {
-                rendered.push((*format, engine.format(*format)?));
+                for format in formats {
+                    rendered.push((*format, engine.format(*format)?));
+                }
             }
-        }
 
-        return Ok(true);
-    })?;
+            return Ok(selector_continues(&selector, record));
+        },
+    )?;
 
     let inspection =
         selected.ok_or_else(|| return invalid_replay("no semantic state matches the selector"))?;
@@ -1070,6 +1110,7 @@ pub fn visit_session_states_range_while(
         cancelled,
         true,
         range,
+        None,
         |record, state, _| return visitor(record, state),
     );
 }
@@ -1079,7 +1120,7 @@ fn visit_session_states_with_engine(
     cancelled: &AtomicBool,
     visitor: impl FnMut(&StateRecord, &SemanticState, &GhosttyVt) -> Result<bool>,
 ) -> Result<()> {
-    return visit_recording_states_with_engine(session, cancelled, true, None, visitor);
+    return visit_recording_states_with_engine(session, cancelled, true, None, None, visitor);
 }
 
 /// Visit exact states in an owned, verified finite prefix without claiming completion.
@@ -1097,6 +1138,7 @@ pub fn visit_snapshot_states_while(
         cancelled,
         false,
         range,
+        None,
         |record, state, _| return visitor(record, state),
     );
 }
@@ -1113,6 +1155,7 @@ pub(crate) fn visit_recording_states_range_while(
         cancelled,
         completed,
         range,
+        None,
         |record, state, _| return visitor(record, state),
     );
 }
@@ -1122,6 +1165,7 @@ fn visit_recording_states_with_engine(
     cancelled: &AtomicBool,
     completed: bool,
     range: Option<SourceRange>,
+    seed: Option<ReplaySeed>,
     mut visitor: impl FnMut(&StateRecord, &SemanticState, &GhosttyVt) -> Result<bool>,
 ) -> Result<()> {
     let source = if completed {
@@ -1131,7 +1175,20 @@ fn visit_recording_states_with_engine(
     };
 
     let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
-    let builder = ReplayBuilder::new(cursor.header(), INDEX_REPLAY_LIMITS)?;
+    let builder = match seed.as_ref() {
+        Some(seed) => ReplayBuilder::from_seed_state(cursor.header(), INDEX_REPLAY_LIMITS, seed)?,
+        None => ReplayBuilder::new(cursor.header(), INDEX_REPLAY_LIMITS)?,
+    };
+
+    let seed_source = seed.as_ref().and_then(|seed| {
+        let record = &seed.inspection.record;
+
+        return record
+            .event_seq
+            .map(|seq| return (seq, record.monotonic_ns));
+    });
+
+    let mut seed_source_seen = false;
     let mut exhausted = false;
     let records = from_fn(|| {
         let next = cursor.next_record().transpose();
@@ -1139,18 +1196,39 @@ fn visit_recording_states_with_engine(
 
         return next;
     })
-    .map(|record| return record.map(Cow::Owned).map_err(Error::from));
+    .map(|record| {
+        let record = record.map_err(Error::from)?;
+        if let Some((seq, monotonic_ns)) = seed_source
+            && record.seq == seq
+        {
+            if record.monotonic_ns != monotonic_ns {
+                return Err(invalid_replay(
+                    "replay checkpoint timestamp does not match its source event",
+                ));
+            }
+
+            seed_source_seen = true;
+        }
+
+        return Ok(Cow::Owned(record));
+    });
 
     replay_records(
         builder,
         records,
         range,
         false,
-        None,
+        seed,
         Some(cancelled),
         None,
         |record, state, engine| return visitor(&record, state, engine),
     )?;
+
+    if exhausted && seed_source.is_some() && !seed_source_seen {
+        return Err(invalid_replay(
+            "replay checkpoint source event is not in the event log",
+        ));
+    }
 
     if exhausted && completed {
         let _pending = cursor.finish()?;
