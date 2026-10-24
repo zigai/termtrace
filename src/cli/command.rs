@@ -76,7 +76,7 @@ pub(super) enum Command {
     Completion(CompletionsArgs),
     /// Diagnose the installation, dependencies, state, and capabilities.
     Doctor(DoctorArgs),
-    /// Serve the session workflow as Model Context Protocol tools over stdio.
+    /// Serve the session workflow as Model Context Protocol tools and resources over stdio.
     Mcp,
 
     /// Generate JSON Schemas for public events, controls, and artifacts.

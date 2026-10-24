@@ -21,30 +21,21 @@ use termtrace_model::{
 pub(in crate::cli) enum ResponseMode {
     Human,
     Quiet,
-    Capture,
 }
 
 /// Output mode owner for one CLI invocation.
 #[derive(Debug)]
 pub(super) struct ResponseWriter {
     mode: ResponseMode,
-    captured: Vec<u8>,
 }
 
 impl ResponseWriter {
     pub(super) fn new(mode: ResponseMode) -> Self {
-        return Self {
-            mode,
-            captured: Vec::new(),
-        };
+        return Self { mode };
     }
 
     pub(in crate::cli) fn mode(&self) -> ResponseMode {
         return self.mode;
-    }
-
-    pub(in crate::cli) fn into_captured(self) -> Vec<u8> {
-        return self.captured;
     }
 }
 
@@ -62,8 +53,8 @@ pub(in crate::cli) use human::{
     human_action_summary, human_diagnostics_summary, human_last_action_summary,
     human_screen_changes, human_screen_summary,
 };
-use io_core::{direct_stderr, direct_stdout};
-pub(in crate::cli) use io_core::{report_message, write_progress};
+pub(in crate::cli) use io_core::write_progress;
+use io_core::{direct_stderr, direct_stdout, report_message};
 pub(super) use pagination::paginate;
 pub(super) use sink::{
     finish_response, response_output, write_clap_error, write_follow_json_line,

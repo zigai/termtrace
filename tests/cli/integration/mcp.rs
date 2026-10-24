@@ -2,24 +2,54 @@ use crate::support::*;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use jsonschema::meta::is_valid;
 use rmcp::{
-    model::{CallToolRequestParams, CallToolResult, ContentBlock},
-    service::RunningService,
+    model::{
+        CallToolRequest, CallToolRequestParams, CallToolResult, ClientRequest, ContentBlock,
+        ProgressNotificationParam, ReadResourceRequestParams, ResourceContents,
+    },
+    service::{NotificationContext, PeerRequestOptions, RunningService},
     transport::TokioChildProcess,
-    RoleClient, ServiceExt as _,
+    ClientHandler, RoleClient, ServiceExt as _,
 };
-use serde_json::{json, Value};
-use tokio::process::Command as TokioCommand;
+use serde_json::{json, Map, Value};
+use std::sync::{Arc, Mutex};
+use tokio::{process::Command as TokioCommand, time::sleep};
 
 const BINARY: &str = env!("CARGO_BIN_EXE_termtrace");
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 const WAITING_SHELL: &str = "trap 'exit 0' TERM; printf 'name? '; read n; printf 'hello %s\\n' \"$n\"; while :; do sleep 0.1; done";
 
-#[allow(
-    clippy::expect_used,
-    clippy::panic,
-    reason = "MCP test helpers stop the test when the server or its output is unusable"
-)]
-async fn connect(state: &Path) -> RunningService<RoleClient, ()> {
+type Connection = RunningService<RoleClient, Client>;
+
+#[derive(Clone, Default)]
+struct Client {
+    progress: Arc<Mutex<Vec<ProgressNotificationParam>>>,
+}
+
+impl Client {
+    #[allow(
+        clippy::expect_used,
+        reason = "a poisoned progress log means another test assertion already failed"
+    )]
+    fn progress(&self) -> Vec<ProgressNotificationParam> {
+        return self.progress.lock().expect("progress log").clone();
+    }
+}
+
+impl ClientHandler for Client {
+    #[allow(
+        clippy::expect_used,
+        reason = "a poisoned progress log means another test assertion already failed"
+    )]
+    async fn on_progress(
+        &self,
+        params: ProgressNotificationParam,
+        _context: NotificationContext<RoleClient>,
+    ) {
+        self.progress.lock().expect("progress log").push(params);
+    }
+}
+
+async fn connect(state: &Path) -> Connection {
     return connect_with(Path::new(BINARY), state).await;
 }
 
@@ -28,12 +58,27 @@ async fn connect(state: &Path) -> RunningService<RoleClient, ()> {
     clippy::panic,
     reason = "MCP test helpers stop the test when the server or its output is unusable"
 )]
-async fn connect_with(binary: &Path, state: &Path) -> RunningService<RoleClient, ()> {
+async fn connect_with(binary: &Path, state: &Path) -> Connection {
     let mut command = TokioCommand::new(binary);
     command.arg("mcp").env("TERMTRACE_STATE_DIR", state);
     let transport = TokioChildProcess::new(command).expect("spawn MCP server");
 
-    return ().serve(transport).await.expect("MCP client connects");
+    return Client::default()
+        .serve(transport)
+        .await
+        .expect("MCP client connects");
+}
+
+#[allow(
+    clippy::panic,
+    reason = "MCP test helpers stop the test when the server or its output is unusable"
+)]
+fn arguments(value: Value) -> Map<String, Value> {
+    let Value::Object(arguments) = value else {
+        panic!("tool arguments must be an object");
+    };
+
+    return arguments;
 }
 
 #[allow(
@@ -41,19 +86,41 @@ async fn connect_with(binary: &Path, state: &Path) -> RunningService<RoleClient,
     clippy::panic,
     reason = "MCP test helpers stop the test when the server or its output is unusable"
 )]
-async fn call(
-    client: &RunningService<RoleClient, ()>,
-    tool: &'static str,
-    arguments: Value,
-) -> CallToolResult {
-    let Value::Object(arguments) = arguments else {
-        panic!("tool arguments must be an object");
-    };
-
-    return client
-        .call_tool(CallToolRequestParams::new(tool).with_arguments(arguments))
+async fn call(client: &Connection, tool: &'static str, input: Value) -> CallToolResult {
+    let result = client
+        .call_tool(CallToolRequestParams::new(tool).with_arguments(arguments(input)))
         .await
         .expect("tool call completes");
+
+    let Some(structured) = &result.structured_content else {
+        assert!(
+            failed(&result),
+            "{tool} succeeded without structured content"
+        );
+
+        return result;
+    };
+
+    let tools = client.list_all_tools().await.expect("list tools");
+    let schema = tools
+        .iter()
+        .find(|candidate| return candidate.name == tool)
+        .and_then(|candidate| return candidate.output_schema.clone())
+        .unwrap_or_else(|| panic!("{tool} declares no output schema"));
+
+    let validator =
+        jsonschema::validator_for(&Value::Object((*schema).clone())).expect("output schema");
+
+    let violations = validator
+        .iter_errors(structured)
+        .map(|error| return error.to_string())
+        .collect::<Vec<_>>();
+    assert!(
+        violations.is_empty(),
+        "{tool} output violates its schema: {violations:?}\n{structured}"
+    );
+
+    return result;
 }
 
 #[allow(
@@ -93,7 +160,7 @@ fn png(result: &CallToolResult) -> Vec<u8> {
     return STANDARD.decode(&image.data).expect("base64 image");
 }
 
-async fn start_waiting_shell(client: &RunningService<RoleClient, ()>, name: &str) {
+async fn start_waiting_shell(client: &Connection, name: &str) {
     let started = call(
         client,
         "start",
@@ -131,7 +198,7 @@ fn cli_screen(state: &Path, name: &str) -> Value {
 }
 
 #[tokio::test]
-async fn tools_cover_the_session_workflow_with_valid_input_schemas() {
+async fn tools_cover_the_session_workflow_with_valid_schemas() {
     let temporary = TempDir::new().expect("temporary directory");
     let client = connect(&temporary.path().join("state")).await;
 
@@ -159,8 +226,14 @@ async fn tools_cover_the_session_workflow_with_valid_input_schemas() {
     );
 
     for tool in &tools {
-        let schema = Value::Object((*tool.input_schema).clone());
-        assert!(is_valid(&schema), "{}", tool.name);
+        let input = Value::Object((*tool.input_schema).clone());
+        assert!(is_valid(&input), "{}", tool.name);
+
+        let output = tool
+            .output_schema
+            .as_ref()
+            .map(|schema| return Value::Object((**schema).clone()));
+        assert!(output.as_ref().is_some_and(is_valid), "{}", tool.name);
     }
 
     client.cancel().await.expect("close client");
@@ -435,5 +508,251 @@ async fn start_passes_environment_variables_to_the_command() {
     )
     .await;
     assert!(!failed(&stopped), "{stopped:?}");
+    client.cancel().await.expect("close client");
+}
+
+fn waiting_on(session: &str) -> bool {
+    let Ok(processes) = fs::read_dir("/proc") else {
+        return false;
+    };
+
+    return processes.flatten().any(|process| {
+        let Ok(command_line) = fs::read(process.path().join("cmdline")) else {
+            return false;
+        };
+        let words = command_line
+            .split(|byte| return *byte == 0)
+            .collect::<Vec<_>>();
+
+        return words.get(1) == Some(&b"wait".as_slice())
+            && words.get(2) == Some(&session.as_bytes());
+    });
+}
+
+#[tokio::test]
+#[allow(
+    clippy::expect_used,
+    reason = "test setup failures should stop the test with context"
+)]
+async fn long_waits_report_progress_and_stop_when_cancelled() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let client = connect(&temporary.path().join("state")).await;
+    start_waiting_shell(&client, "cancelled").await;
+
+    let request = CallToolRequestParams::new("wait").with_arguments(arguments(json!({
+        "session": "cancelled",
+        "for": {"kind": "screen", "text": "never"},
+        "timeout_ms": 60_000,
+    })));
+    let handle = client
+        .send_cancellable_request(
+            ClientRequest::CallToolRequest(CallToolRequest::new(request)),
+            PeerRequestOptions::no_options(),
+        )
+        .await
+        .expect("send wait");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !client
+        .service()
+        .progress()
+        .iter()
+        .any(|progress| return progress.progress_token == handle.progress_token)
+    {
+        assert!(
+            Instant::now() < deadline,
+            "no progress for the running wait"
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+    assert!(waiting_on("cancelled"), "the wait is not running");
+
+    handle.cancel(None).await.expect("cancel wait");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while waiting_on("cancelled") {
+        assert!(Instant::now() < deadline, "the cancelled wait kept running");
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    let screen = call(&client, "screen", json!({"session": "cancelled"})).await;
+    assert!(!failed(&screen), "{screen:?}");
+
+    let stopped = call(
+        &client,
+        "stop",
+        json!({"session": "cancelled", "wait": true}),
+    )
+    .await;
+    assert!(!failed(&stopped), "{stopped:?}");
+    client.cancel().await.expect("close client");
+}
+
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "MCP test helpers stop the test when the server or its output is unusable"
+)]
+async fn read(client: &Connection, uri: &str) -> ResourceContents {
+    let mut result = client
+        .read_resource(ReadResourceRequestParams::new(uri))
+        .await
+        .unwrap_or_else(|error| panic!("read {uri}: {error}"));
+    assert_eq!(result.contents.len(), 1, "{uri}");
+
+    return result.contents.remove(0);
+}
+
+#[tokio::test]
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test setup failures should stop the test with context"
+)]
+async fn sessions_are_readable_as_resources() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let client = connect(&temporary.path().join("state")).await;
+    start_waiting_shell(&client, "listed").await;
+
+    let listed = client
+        .list_all_resources()
+        .await
+        .expect("list resources")
+        .into_iter()
+        .map(|resource| return resource.uri)
+        .collect::<BTreeSet<_>>();
+    assert!(listed.contains("termtrace://sessions/listed"), "{listed:?}");
+    assert!(
+        listed.contains("termtrace://sessions/listed/screen"),
+        "{listed:?}"
+    );
+
+    let ResourceContents::TextResourceContents { text, .. } =
+        read(&client, "termtrace://sessions/listed/screen").await
+    else {
+        panic!("screen is text");
+    };
+    assert_eq!(text, "name?");
+
+    let ResourceContents::TextResourceContents { text, .. } =
+        read(&client, "termtrace://sessions/listed").await
+    else {
+        panic!("status is text");
+    };
+    let status: Value = serde_json::from_str(&text).expect("status JSON");
+    assert_eq!(status["lifecycle"], "live");
+
+    let stopped = call(&client, "stop", json!({"session": "listed", "wait": true})).await;
+    assert!(!failed(&stopped), "{stopped:?}");
+
+    let ResourceContents::TextResourceContents { text, .. } =
+        read(&client, "termtrace://sessions/listed/output").await
+    else {
+        panic!("output is text");
+    };
+    assert!(text.contains("name?"), "{text}");
+
+    let ResourceContents::BlobResourceContents {
+        blob, mime_type, ..
+    } = read(&client, "termtrace://sessions/listed/screenshot").await
+    else {
+        panic!("screenshot is a blob");
+    };
+    assert_eq!(mime_type.as_deref(), Some("image/png"));
+    assert!(STANDARD
+        .decode(blob)
+        .expect("base64 image")
+        .starts_with(PNG_SIGNATURE));
+
+    for uri in [
+        "termtrace://sessions/missing",
+        "termtrace://sessions/listed/unknown",
+    ] {
+        let missing = client
+            .read_resource(ReadResourceRequestParams::new(uri))
+            .await;
+        assert!(missing.is_err(), "{uri}: {missing:?}");
+    }
+
+    client.cancel().await.expect("close client");
+}
+
+#[tokio::test]
+#[allow(
+    clippy::expect_used,
+    reason = "test setup failures should stop the test with context"
+)]
+async fn every_report_of_a_recorded_session_matches_its_output_schema() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let client = connect(&temporary.path().join("state")).await;
+    start_waiting_shell(&client, "reported").await;
+
+    let before = call(&client, "screen", json!({"session": "reported"})).await;
+    let sent = call(
+        &client,
+        "send",
+        json!({
+            "session": "reported",
+            "inputs": ["text:world", "enter"],
+            "until": {"kind": "idle", "ms": 200},
+            "screen": "diff",
+        }),
+    )
+    .await;
+    assert!(!failed(&sent), "{sent:?}");
+
+    let idle = call(
+        &client,
+        "wait",
+        json!({"session": "reported", "for": {"kind": "idle", "ms": 200}}),
+    )
+    .await;
+    assert!(!failed(&idle), "{idle:?}");
+
+    let listed = call(&client, "status", json!({})).await;
+    assert!(!failed(&listed), "{listed:?}");
+    assert_eq!(structured(&listed)["sessions"][0]["alias"], "reported");
+
+    let live = call(&client, "status", json!({"session": "reported"})).await;
+    assert!(!failed(&live), "{live:?}");
+
+    let stopped = call(
+        &client,
+        "stop",
+        json!({"session": "reported", "wait": true}),
+    )
+    .await;
+    assert!(!failed(&stopped), "{stopped:?}");
+
+    let first = structured(&before)["state"].clone();
+    let path = structured(&before)["session"].clone();
+    let last =
+        structured(&call(&client, "screen", json!({"session": "reported"})).await)["state"].clone();
+
+    for report in [
+        json!({"session": "reported", "kind": "triage"}),
+        json!({"session": "reported", "kind": "timeline", "limit": 2}),
+        json!({"session": "reported", "kind": "diff", "from_state_hash": first, "to_state_hash": last}),
+        json!({"session": "reported", "kind": "explain", "state_hash": last}),
+        json!({"session": "reported", "kind": "diagnose"}),
+        json!({"session": path, "kind": "verify"}),
+        json!({"session": "reported", "kind": "output"}),
+    ] {
+        let analyzed = call(&client, "analyze", report).await;
+        assert!(!failed(&analyzed), "{analyzed:?}");
+    }
+
+    for (name, options) in [
+        ("screen", json!({})),
+        ("debug", json!({"profile": "debug"})),
+        ("archive", json!({"archive": true})),
+    ] {
+        let mut input = arguments(options);
+        input.insert("session".to_owned(), json!("reported"));
+        input.insert("out".to_owned(), json!(temporary.path().join(name)));
+        let bundled = call(&client, "bundle", Value::Object(input)).await;
+        assert!(!failed(&bundled), "{bundled:?}");
+    }
+
     client.cancel().await.expect("close client");
 }

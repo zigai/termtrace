@@ -1,18 +1,55 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::{json, Value};
 use std::{collections::BTreeMap, io::Write as _};
 use tempfile::NamedTempFile;
 use termtrace_model::{execution::environment::EnvironmentSpec, value::ByteString};
 
+/// How a command's standard output becomes the tool's structured content.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Structure {
+    Object,
+    /// An object naming a PNG that the result also carries as image content.
+    Screenshot,
+    /// A JSON array, wrapped as `{"sessions": [...]}`.
+    Sessions,
+    /// JSON Lines, wrapped as `{"records": [...]}`.
+    Records,
+    /// Plain text, wrapped as `{"text": "..."}`.
+    Text,
+}
+
+impl Structure {
+    pub(super) fn parse(self, stdout: &[u8]) -> Option<Value> {
+        return match self {
+            Self::Object | Self::Screenshot => serde_json::from_slice::<Value>(stdout)
+                .ok()
+                .filter(Value::is_object),
+            Self::Sessions => serde_json::from_slice::<Value>(stdout)
+                .ok()
+                .filter(Value::is_array)
+                .map(|sessions| return json!({ "sessions": sessions })),
+            Self::Records => serde_json::Deserializer::from_slice(stdout)
+                .into_iter::<Value>()
+                .collect::<Result<Vec<_>, _>>()
+                .ok()
+                .map(|records| return json!({ "records": records })),
+            Self::Text => Some(json!({ "text": String::from_utf8_lossy(stdout) })),
+        };
+    }
+}
+
 pub(super) struct Invocation {
     pub(super) arguments: Vec<String>,
+    pub(super) structure: Structure,
     pub(super) environment: Option<NamedTempFile>,
 }
 
-impl From<Vec<String>> for Invocation {
-    fn from(arguments: Vec<String>) -> Self {
+impl Invocation {
+    fn new(arguments: Vec<String>, structure: Structure) -> Self {
         return Self {
             arguments,
+            structure,
             environment: None,
         };
     }
@@ -103,6 +140,7 @@ impl StartInput {
 
         return Ok(Invocation {
             arguments,
+            structure: Structure::Object,
             environment,
         });
     }
@@ -142,7 +180,7 @@ pub(super) struct SendInput {
 }
 
 impl SendInput {
-    pub(super) fn arguments(self) -> Result<Vec<String>, String> {
+    pub(super) fn invocation(self) -> Result<Invocation, String> {
         if self.inputs.is_empty() {
             return Err("inputs must not be empty".to_owned());
         }
@@ -176,7 +214,7 @@ impl SendInput {
         arguments.push("--".to_owned());
         arguments.extend(self.inputs);
 
-        return Ok(arguments);
+        return Ok(Invocation::new(arguments, Structure::Object));
     }
 }
 
@@ -213,7 +251,7 @@ pub(super) struct ScreenInput {
 }
 
 impl ScreenInput {
-    pub(super) fn arguments(self) -> Vec<String> {
+    pub(super) fn invocation(self) -> Invocation {
         let mut arguments = vec!["screen".to_owned(), self.session, "--json".to_owned()];
         push_optional(&mut arguments, "--since", self.since);
         push_optional(&mut arguments, "--state-hash", self.state_hash);
@@ -232,7 +270,7 @@ impl ScreenInput {
         push_millis(&mut arguments, "--stable-for", self.stable_for_ms);
         push_millis(&mut arguments, "--timeout", self.timeout_ms);
 
-        return arguments;
+        return Invocation::new(arguments, Structure::Object);
     }
 }
 
@@ -268,7 +306,7 @@ pub(super) struct WaitInput {
 }
 
 impl WaitInput {
-    pub(super) fn arguments(self) -> Vec<String> {
+    pub(super) fn invocation(self) -> Invocation {
         let mut arguments = vec!["wait".to_owned(), self.session, "--json".to_owned()];
         match self.r#for {
             WaitFor::Screen { text } => push_value(&mut arguments, "--screen", &text),
@@ -288,7 +326,7 @@ impl WaitInput {
 
         push_millis(&mut arguments, "--timeout", self.timeout_ms);
 
-        return arguments;
+        return Invocation::new(arguments, Structure::Object);
     }
 }
 
@@ -300,11 +338,14 @@ pub(super) struct StatusInput {
 }
 
 impl StatusInput {
-    pub(super) fn arguments(self) -> Vec<String> {
+    pub(super) fn invocation(self) -> Invocation {
+        let structure =
+            if self.session.is_some() { Structure::Object } else { Structure::Sessions };
+
         let mut arguments = vec!["status".to_owned(), "--json".to_owned()];
         arguments.extend(self.session);
 
-        return arguments;
+        return Invocation::new(arguments, structure);
     }
 }
 
@@ -321,7 +362,7 @@ pub(super) struct StopInput {
 }
 
 impl StopInput {
-    pub(super) fn arguments(self) -> Vec<String> {
+    pub(super) fn invocation(self) -> Invocation {
         let mut arguments = vec!["stop".to_owned(), self.session, "--json".to_owned()];
         if self.wait.unwrap_or(true) {
             arguments.push("--wait".to_owned());
@@ -329,7 +370,7 @@ impl StopInput {
 
         push_optional(&mut arguments, "--timeout-ms", self.timeout_ms);
 
-        return arguments;
+        return Invocation::new(arguments, Structure::Object);
     }
 }
 
@@ -374,7 +415,7 @@ pub(super) struct AnalyzeInput {
 }
 
 impl AnalyzeInput {
-    pub(super) fn arguments(self) -> Result<Vec<String>, String> {
+    pub(super) fn invocation(self) -> Result<Invocation, String> {
         let kind = self.kind;
         let diff = matches!(kind, AnalyzeKind::Diff);
 
@@ -407,7 +448,7 @@ impl AnalyzeInput {
             AnalyzeKind::Triage => {
                 arguments.extend([self.session, "--json".to_owned()]);
 
-                return Ok(arguments);
+                return Ok(Invocation::new(arguments, Structure::Object));
             }
             AnalyzeKind::Timeline => ["timeline", "--jsonl"],
             AnalyzeKind::Diff => ["diff", "--format=json"],
@@ -425,7 +466,13 @@ impl AnalyzeInput {
         push_optional(&mut arguments, "--limit", self.limit);
         push_optional(&mut arguments, "--offset", self.offset);
 
-        return Ok(arguments);
+        let structure = match kind {
+            AnalyzeKind::Timeline => Structure::Records,
+            AnalyzeKind::Output => Structure::Text,
+            _ => Structure::Object,
+        };
+
+        return Ok(Invocation::new(arguments, structure));
     }
 }
 
@@ -452,7 +499,7 @@ pub(super) struct ScreenshotInput {
 }
 
 impl ScreenshotInput {
-    pub(super) fn arguments(self) -> Vec<String> {
+    pub(super) fn invocation(self) -> Invocation {
         let mut arguments = vec![
             "screenshot".to_owned(),
             self.session,
@@ -470,7 +517,7 @@ impl ScreenshotInput {
             push_value(&mut arguments, "--renderer", renderer);
         }
 
-        return arguments;
+        return Invocation::new(arguments, Structure::Screenshot);
     }
 }
 
@@ -503,7 +550,7 @@ pub(super) struct BundleInput {
 }
 
 impl BundleInput {
-    pub(super) fn arguments(self) -> Vec<String> {
+    pub(super) fn invocation(self) -> Invocation {
         let mut arguments = vec![
             "bundle".to_owned(),
             self.session,
@@ -529,7 +576,7 @@ impl BundleInput {
             arguments.push("--archive".to_owned());
         }
 
-        return arguments;
+        return Invocation::new(arguments, Structure::Object);
     }
 }
 

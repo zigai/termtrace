@@ -61,11 +61,6 @@ impl io::Write for ResponseOutput<'_> {
 
                 Ok(buf.len())
             }
-            ResponseMode::Capture => {
-                self.response.captured.extend_from_slice(buf);
-
-                Ok(buf.len())
-            }
         };
     }
 
@@ -84,11 +79,6 @@ pub(in crate::cli) fn write_follow_stdout(
 ) -> Result<bool> {
     match response.mode() {
         ResponseMode::Quiet => return Ok(true),
-        ResponseMode::Capture => {
-            response.captured.extend_from_slice(output);
-
-            return Ok(true);
-        }
         ResponseMode::Human => {}
     }
 
@@ -157,11 +147,6 @@ pub(in crate::cli) fn write_stdout(
 fn emit(response: &mut ResponseWriter, output: &[u8]) -> Result<ExitCode> {
     return match response.mode() {
         ResponseMode::Quiet => Ok(ExitCode::SUCCESS),
-        ResponseMode::Capture => {
-            response.captured.extend_from_slice(output);
-
-            Ok(ExitCode::SUCCESS)
-        }
         ResponseMode::Human => direct_stdout(output),
     };
 }
