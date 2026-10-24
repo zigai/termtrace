@@ -10,6 +10,7 @@ use std::{
     ffi::OsString, fmt::Write as _, os::unix::ffi::OsStringExt as _, path::PathBuf,
     process::ExitCode, time::Duration,
 };
+use termtrace_engine::registry::SessionRegistry;
 use termtrace_model::value::ByteString;
 use termtrace_tmux::{
     artifact::{TmuxRecordingCoverage, TmuxRecordingManifest},
@@ -231,7 +232,25 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
             Ok(ExitCode::SUCCESS)
         }
         TmuxSubcommand::Supervise => {
-            observer::supervise(&TmuxClient::inherited()).into_diagnostic()?;
+            observer::supervise(
+                &TmuxClient::inherited(),
+                &mut |state_root, retention, linked| {
+                    let report = SessionRegistry::open(state_root)?.retain_tmux_panes(
+                        retention.older_than_days,
+                        retention.max_bytes,
+                        linked,
+                    )?;
+
+                    tracing::debug!(
+                        removed = report.removed_sessions,
+                        reclaimed_bytes = report.reclaimed_bytes,
+                        "applied tmux pane retention"
+                    );
+
+                    return Ok(());
+                },
+            )
+            .into_diagnostic()?;
 
             Ok(ExitCode::SUCCESS)
         }

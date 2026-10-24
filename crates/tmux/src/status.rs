@@ -7,7 +7,7 @@ use crate::{
     observer::{ObserverRole, Observers},
     options,
     scope::TmuxScopePolicy,
-    setup::PreparedTmuxSetup,
+    setup::{PaneRetention, PreparedTmuxSetup},
 };
 use serde::Serialize;
 use std::{
@@ -32,6 +32,8 @@ pub struct Integration {
     pub output_root: PathBuf,
     /// Aggregate manifest updated by the supervisor.
     pub aggregate_manifest: Option<PathBuf>,
+    /// Automatic deletion of completed pane recordings.
+    pub retention: PaneRetention,
 }
 
 impl Integration {
@@ -54,6 +56,7 @@ impl Integration {
                 .option_path(options::OUTPUT_ROOT)?
                 .ok_or_else(|| return Error::invalid("configured tmux output root is empty"))?,
             aggregate_manifest: client.option_path(options::AGGREGATE_MANIFEST)?,
+            retention: PaneRetention::from_options(client)?,
         }));
     }
 }

@@ -164,8 +164,8 @@ pub struct TmuxPaneAddress {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum TmuxGapKind {
-    /// Transitions shorter than the supervisor polling interval may only be visible in the
-    /// composite client track.
+    /// Transitions coalesced between supervisor observations, or made without a tmux hook,
+    /// may only be visible in the composite client track.
     PollingInterval,
     /// tmux messages and command prompts are captured by the composite client track but are
     /// not separately indexed in lifecycle events.

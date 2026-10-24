@@ -385,11 +385,13 @@ impl Publication {
                     register(&mut registered)?;
 
                     if control_endpoint_is_reachable(&session) {
-                        return client.set_pane_option(
+                        client.set_pane_option(
                             &pane,
                             options::PANE_SESSION,
                             session.as_os_str(),
-                        );
+                        )?;
+
+                        return client.signal_observer();
                     }
 
                     match cancellation.recv_timeout(Duration::from_millis(5)) {

@@ -16,11 +16,15 @@ use crate::{
     reducer::{check_identity, permanent_gaps, unlinked_recordings, Input, Observation},
     setup::{self, PreparedTmuxSetup, SetupRequest},
     status::{self, Integration, PaneCoverage},
-    store::{path_from_bytes, EventPage, LockedRecording, RecordingStore, CONFIG_NAME},
+    store::{
+        path_from_bytes, EventPage, LockedRecording, RecordingStore, CONFIG_NAME,
+        RECORDINGS_DIRECTORY,
+    },
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     ffi::OsString,
+    io::ErrorKind,
     os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     thread,
@@ -394,11 +398,18 @@ fn settle(store: &RecordingStore, locked: &mut LockedRecording<'_>, now: u64) ->
 }
 
 fn unfinished_tracks(catalog: &TmuxCatalog) -> Result<Vec<TmuxTrackCatalogEntry>> {
+    return catalog_tracks(catalog, true);
+}
+
+fn catalog_tracks(
+    catalog: &TmuxCatalog,
+    unfinished_only: bool,
+) -> Result<Vec<TmuxTrackCatalogEntry>> {
     let mut entries = Vec::new();
     let mut next = 0;
 
     loop {
-        let page = catalog.tracks(next, TRACK_PAGE, true)?;
+        let page = catalog.tracks(next, TRACK_PAGE, unfinished_only)?;
         let Some(last) = page.last() else {
             return Ok(entries);
         };
@@ -409,6 +420,48 @@ fn unfinished_tracks(catalog: &TmuxCatalog) -> Result<Vec<TmuxTrackCatalogEntry>
 
         entries.extend(page);
     }
+}
+
+/// Every session directory that an aggregate recording under `state_root` links to.
+///
+/// # Errors
+/// Returns unreadable recordings, so callers never treat a linked track as unlinked.
+pub fn linked_sessions(state_root: &Path) -> Result<HashSet<PathBuf>> {
+    let directory = state_root.join(RECORDINGS_DIRECTORY);
+    let mut linked = HashSet::new();
+
+    let entries = match fs_err::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(linked),
+        Err(error) => return Err(Error::filesystem(&directory, error)),
+    };
+
+    for entry in entries {
+        let entry = entry.map_err(|error| return Error::filesystem(&directory, error))?;
+        let name = entry.file_name();
+        let name = name.to_str().ok_or_else(|| {
+            return Error::invalid("tmux recording directory name is not UTF-8");
+        })?;
+
+        let store = RecordingStore::locate(state_root, name)?;
+        let manifest = store.read()?;
+        linked.extend(
+            manifest
+                .state
+                .composite_track
+                .link
+                .iter()
+                .map(|link| return path_from_bytes(&link.session)),
+        );
+        linked.extend(manifest.state.pane_tracks.values().map(path_from_bytes));
+        linked.extend(
+            catalog_tracks(&store.catalog(&manifest)?, false)?
+                .iter()
+                .map(|entry| return path_from_bytes(&entry.track.session)),
+        );
+    }
+
+    return Ok(linked);
 }
 
 /// Record that a supervisor started observing the aggregate at `manifest`.
@@ -638,7 +691,11 @@ fn kill_pane(client: &TmuxClient, pane_id: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{artifact::TmuxRecordingCoverage, scope::ScopeTargets, setup::GhosttyProfileMode};
+    use crate::{
+        artifact::TmuxRecordingCoverage,
+        scope::ScopeTargets,
+        setup::{GhosttyProfileMode, PaneRetention},
+    };
     use std::cell::Cell;
     use tempfile::TempDir;
 
@@ -694,6 +751,7 @@ mod tests {
                 cell_width: 8,
                 cell_height: 16,
                 term: None,
+                retention: PaneRetention::default(),
             },
             command: vec![OsString::from("tmux"), OsString::from("new-session")],
         };

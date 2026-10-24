@@ -362,6 +362,22 @@ impl TmuxClient {
         return self.checked(command).map(drop);
     }
 
+    /// Wake the supervisor; a signal sent while it is not waiting is kept until it waits.
+    ///
+    /// # Errors
+    /// Returns tmux failures.
+    pub fn signal_observer(&self) -> Result<()> {
+        return self.run(["wait-for", "-S", options::OBSERVER_CHANNEL]);
+    }
+
+    /// Command that exits once the supervisor channel is signaled or the server exits.
+    pub fn observer_wait_command(&self) -> Command {
+        let mut command = self.command();
+        command.args(["wait-for", options::OBSERVER_CHANNEL]);
+
+        return command;
+    }
+
     /// Observe the answering server's PID and socket inode.
     ///
     /// # Errors

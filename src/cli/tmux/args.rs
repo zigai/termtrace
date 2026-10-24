@@ -10,7 +10,7 @@ use termtrace_tmux::{
     client::TmuxClient,
     pane::PaneRunRequest,
     scope::ScopeTargets,
-    setup::{GhosttyProfileMode, SetupRequest},
+    setup::{GhosttyProfileMode, PaneRetention, SetupRequest},
 };
 
 #[derive(Debug, Args)]
@@ -142,6 +142,10 @@ impl TmuxSetupArgs {
             cell_width: self.cell_width,
             cell_height: self.cell_height,
             term: self.term,
+            retention: PaneRetention {
+                older_than_days: self.retain_days,
+                max_bytes: self.retain_bytes,
+            },
         };
     }
 }
@@ -212,6 +216,14 @@ pub(in crate::cli) struct TmuxSetupArgs {
     /// Override the terminal identity; the default inherits tmux's pane TERM.
     #[arg(long)]
     pub(in crate::cli) term: Option<String>,
+
+    /// Delete completed pane recordings older than this many days.
+    #[arg(long, value_name = "DAYS")]
+    pub(in crate::cli) retain_days: Option<u64>,
+
+    /// Delete the oldest completed pane recordings while their total exceeds this many bytes.
+    #[arg(long, value_name = "BYTES")]
+    pub(in crate::cli) retain_bytes: Option<u64>,
 }
 
 #[derive(Debug, Args)]

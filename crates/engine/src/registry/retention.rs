@@ -6,8 +6,9 @@ use super::{
     SUPERVISOR_DIRECTORY, UNIX_EPOCH,
 };
 use std::cmp::Reverse;
-use termtrace_evidence::session::validate_completed_session;
+use termtrace_evidence::session::{read_completion, validate_completed_session};
 use termtrace_model::execution::layout::SessionLayout;
+use termtrace_model::execution::session::SessionCompletion;
 
 impl SessionRegistry {
     /// Allocate collision-free paths for a detached session and supervisor logs.
@@ -74,6 +75,49 @@ impl SessionRegistry {
         keep_latest: u64,
         max_completed_bytes: Option<u64>,
         apply: bool,
+    ) -> Result<GarbageCollectionReport> {
+        return self.collect(
+            older_than_days,
+            keep_latest,
+            max_completed_bytes,
+            apply,
+            None,
+        );
+    }
+
+    /// Delete completed tmux pane recordings past an age or beyond a byte target.
+    ///
+    /// Only recordings with tmux pane provenance are considered, and `linked` sessions, such
+    /// as tracks of an aggregate tmux recording, are never deleted. A recording counts as
+    /// completed when its completion record matches its manifest; event logs are not
+    /// re-validated, so each scan stays cheap however much evidence is retained.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when state inspection or deletion fails.
+    pub fn retain_tmux_panes(
+        &self,
+        older_than_days: Option<u64>,
+        max_completed_bytes: Option<u64>,
+        linked: &HashSet<PathBuf>,
+    ) -> Result<GarbageCollectionReport> {
+        return self.collect(
+            older_than_days.unwrap_or(u64::MAX),
+            0,
+            max_completed_bytes,
+            true,
+            Some(linked),
+        );
+    }
+
+    /// `tmux_linked` selects pane-recording retention and names sessions it must keep.
+    fn collect(
+        &self,
+        older_than_days: u64,
+        keep_latest: u64,
+        max_completed_bytes: Option<u64>,
+        apply: bool,
+        tmux_linked: Option<&HashSet<PathBuf>>,
     ) -> Result<GarbageCollectionReport> {
         // Serialize alias changes with the protection scan and apply phase.
         let _lock = self.lock()?;
@@ -151,7 +195,7 @@ impl SessionRegistry {
             }
 
             let completion_path = SessionLayout::new(&session).completion();
-            let Ok(completion) = validate_completed_session(&session) else {
+            let Ok(completion) = completed_session(&session, tmux_linked.is_some()) else {
                 report.skipped_non_completed = report.skipped_non_completed.saturating_add(1);
                 continue;
             };
@@ -165,10 +209,17 @@ impl SessionRegistry {
                 continue;
             }
 
+            if tmux_linked.is_some() && manifest.tmux_pane.is_none() {
+                continue;
+            }
+
             let bytes = directory_bytes_nofollow(&session)?;
             report.completed_bytes_before = report.completed_bytes_before.saturating_add(bytes);
 
-            if protected {
+            let linked = tmux_linked.is_some_and(|linked| {
+                return linked.contains(&canonical) || linked.contains(&session);
+            });
+            if protected || linked {
                 continue;
             }
 
@@ -229,7 +280,7 @@ impl SessionRegistry {
         let supervisor = self.state_root.join(SUPERVISOR_DIRECTORY);
 
         for candidate in &report.candidates {
-            validate_gc_candidate(candidate)?;
+            validate_gc_candidate(candidate, tmux_linked.is_some())?;
             fs::remove_dir_all(&candidate.session).map_err(|source| {
                 return Error::Filesystem {
                     path: candidate.session.clone(),
@@ -408,7 +459,20 @@ pub(super) fn directory_bytes_nofollow(directory: &Path) -> Result<u64> {
     return Ok(total);
 }
 
-pub(super) fn validate_gc_candidate(candidate: &GarbageCollectionCandidate) -> Result<()> {
+/// Completion of a finished session; `record_only` trusts the completion record without
+/// re-validating the event log.
+fn completed_session(session: &Path, record_only: bool) -> Result<SessionCompletion> {
+    if record_only {
+        return read_completion(session).map_err(Error::from);
+    }
+
+    return validate_completed_session(session).map_err(Error::from);
+}
+
+pub(super) fn validate_gc_candidate(
+    candidate: &GarbageCollectionCandidate,
+    record_only: bool,
+) -> Result<()> {
     let metadata = fs::symlink_metadata(&candidate.session).map_err(|source| {
         return Error::Filesystem {
             path: candidate.session.clone(),
@@ -423,7 +487,7 @@ pub(super) fn validate_gc_candidate(candidate: &GarbageCollectionCandidate) -> R
         ));
     }
 
-    let completion = validate_completed_session(&candidate.session)?;
+    let completion = completed_session(&candidate.session, record_only)?;
     let manifest = read_manifest(&candidate.session)?;
 
     if completion.session_id != candidate.session_id || manifest.session_id != candidate.session_id

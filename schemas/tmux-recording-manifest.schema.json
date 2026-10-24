@@ -107,7 +107,7 @@
       "oneOf": [
         {
           "const": "polling_interval",
-          "description": "Transitions shorter than the supervisor polling interval may only be visible in the\ncomposite client track.",
+          "description": "Transitions coalesced between supervisor observations, or made without a tmux hook,\nmay only be visible in the composite client track.",
           "type": "string"
         },
         {

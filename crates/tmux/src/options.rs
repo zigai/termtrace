@@ -8,8 +8,8 @@ pub const INTEGRATION_VERSION: &str = "1";
 pub const HOOK_INDEX: u16 = 991;
 /// Environment variable carrying the tmux executable to pane wrappers and observers.
 pub const WRAPPER_BINARY_ENV: &str = "TERMTRACE_TMUX_BINARY";
-/// Supervisor observation period.
-pub const SUPERVISOR_INTERVAL: Duration = Duration::from_millis(250);
+/// tmux wait channel signaled after every change the supervisor observes.
+pub const OBSERVER_CHANNEL: &str = "termtrace-observer";
 /// Time a selected pane may run without a wrapper before enforcement.
 pub const UNRECORDED_GRACE: Duration = Duration::from_millis(500);
 /// Global: integration version.
@@ -42,6 +42,10 @@ pub const COVERAGE: &str = "@termtrace-coverage";
 pub const AGGREGATE_MANIFEST: &str = "@termtrace-aggregate-manifest";
 /// Global: terminal identity override.
 pub const TERM: &str = "@termtrace-term";
+/// Global: age in days after which completed pane recordings are deleted; empty keeps them.
+pub const RETAIN_DAYS: &str = "@termtrace-retain-days";
+/// Global: byte target for completed pane recordings; empty sets none.
+pub const RETAIN_BYTES: &str = "@termtrace-retain-bytes";
 /// Global: recording scope policy.
 pub const SCOPE: &str = "@termtrace-scope";
 /// Pane: published recording session path.
@@ -57,6 +61,22 @@ pub const GUARDED_HOOKS: &[&str] = &[
     "after-new-session",
     "after-new-window",
     "after-split-window",
+];
+/// Hooks that signal [`OBSERVER_CHANNEL`] after tmux changes panes, windows, or sessions.
+pub const OBSERVED_HOOKS: &[&str] = &[
+    "client-session-changed",
+    "pane-died",
+    "pane-exited",
+    "pane-mode-changed",
+    "session-closed",
+    "session-created",
+    "session-renamed",
+    "session-window-changed",
+    "window-layout-changed",
+    "window-linked",
+    "window-pane-changed",
+    "window-renamed",
+    "window-unlinked",
 ];
 /// Global options owned by the integration and removed by disable.
 pub const RESERVED: &[&str] = &[
@@ -75,6 +95,8 @@ pub const RESERVED: &[&str] = &[
     CELL_WIDTH,
     CELL_HEIGHT,
     TERM,
+    RETAIN_DAYS,
+    RETAIN_BYTES,
     SCOPE,
 ];
 /// Pane options owned by the integration and removed by disable.

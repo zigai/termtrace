@@ -354,12 +354,14 @@ impl TmuxScopePolicy {
         return Ok(policy);
     }
 
-    /// Store this policy in the server's options.
+    /// Store this policy in the server's options and wake the supervisor.
     ///
     /// # Errors
     /// Returns malformed policies or tmux failures.
     pub fn store(&self, client: &TmuxClient) -> Result<()> {
-        return client.set_option(options::SCOPE, OsStr::from_bytes(&self.to_bytes()?));
+        client.set_option(options::SCOPE, OsStr::from_bytes(&self.to_bytes()?))?;
+
+        return client.signal_observer();
     }
 
     /// Whether the pane matches the policy's targets, ignoring cached process marks.

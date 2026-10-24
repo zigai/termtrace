@@ -3,7 +3,7 @@ use termtrace_tmux::{
     artifact::{TmuxRecordingCoverage, TmuxSocket},
     client::TmuxClient,
     scope::TmuxScopePolicy,
-    setup::{GhosttyProfileMode, PreparedTmuxSetup},
+    setup::{GhosttyProfileMode, PaneRetention, PreparedTmuxSetup},
 };
 
 #[test]
@@ -35,6 +35,7 @@ fn watchdog_keeps_tmux_format_expressions_in_executable_paths() {
         cell_height: 16,
         term: String::new(),
         scope: TmuxScopePolicy::all(),
+        retention: PaneRetention::default(),
     };
 
     let client = TmuxClient::new(

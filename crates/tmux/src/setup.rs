@@ -4,7 +4,10 @@ use crate::{
     artifact::TmuxRecordingCoverage,
     client::{config_quote, hook_name, shell_quote, TmuxClient},
     error::{Error, Result},
-    options::{self, GUARDED_HOOKS, HOOK_INDEX, INTEGRATION_VERSION, WRAPPER_BINARY_ENV},
+    options::{
+        self, GUARDED_HOOKS, HOOK_INDEX, INTEGRATION_VERSION, OBSERVED_HOOKS, OBSERVER_CHANNEL,
+        WRAPPER_BINARY_ENV,
+    },
     scope::{ScopeTargets, TmuxScopePolicy},
 };
 use std::{
@@ -102,6 +105,44 @@ impl FromStr for GhosttyProfileMode {
     }
 }
 
+/// Automatic deletion of completed pane recordings; nothing is deleted when both are unset.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PaneRetention {
+    /// Delete completed pane recordings older than this many days.
+    pub older_than_days: Option<u64>,
+    /// Delete the oldest completed pane recordings while their total exceeds this many bytes.
+    pub max_bytes: Option<u64>,
+}
+
+impl PaneRetention {
+    /// Whether any limit is set.
+    pub const fn is_enabled(self) -> bool {
+        return self.older_than_days.is_some() || self.max_bytes.is_some();
+    }
+
+    /// Read the configured limits.
+    ///
+    /// # Errors
+    /// Returns tmux failures or malformed limits.
+    pub fn from_options(client: &TmuxClient) -> Result<Self> {
+        let limit = |name: &str| -> Result<Option<u64>> {
+            let value = client.option_text(name)?;
+            if value.is_empty() {
+                return Ok(None);
+            }
+            return value
+                .parse()
+                .map(Some)
+                .map_err(|_invalid| return Error::invalid(format!("{name} is not a number")));
+        };
+
+        return Ok(Self {
+            older_than_days: limit(options::RETAIN_DAYS)?,
+            max_bytes: limit(options::RETAIN_BYTES)?,
+        });
+    }
+}
+
 /// Requested integration settings before validation.
 #[derive(Clone, Debug)]
 pub struct SetupRequest {
@@ -125,6 +166,8 @@ pub struct SetupRequest {
     pub cell_height: u16,
     /// Terminal identity override.
     pub term: Option<String>,
+    /// Automatic deletion of completed pane recordings.
+    pub retention: PaneRetention,
 }
 
 /// Validated integration settings with canonical paths.
@@ -154,6 +197,8 @@ pub struct PreparedTmuxSetup {
     pub term: String,
     /// Recording scope.
     pub scope: TmuxScopePolicy,
+    /// Automatic deletion of completed pane recordings.
+    pub retention: PaneRetention,
 }
 
 /// Outcome of enabling on a running server.
@@ -218,6 +263,7 @@ impl PreparedTmuxSetup {
             cell_height: request.cell_height,
             term: request.term.unwrap_or_default(),
             scope,
+            retention: request.retention,
         });
     }
 
@@ -244,6 +290,7 @@ impl PreparedTmuxSetup {
             cell_height: client.parse_option(options::CELL_HEIGHT)?,
             term: client.option_text(options::TERM)?,
             scope: TmuxScopePolicy::from_options(client)?,
+            retention: PaneRetention::from_options(client)?,
         });
     }
 
@@ -314,8 +361,7 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
                 .map_err(config_format_error)?;
         }
 
-        let hook = hook_command();
-        for name in GUARDED_HOOKS {
+        for (name, hook) in reserved_hooks() {
             writeln!(
                 output,
                 "set-hook -g {} {}",
@@ -378,6 +424,18 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
                 self.cell_height.to_string().into_bytes(),
             ),
             (options::TERM, self.term.as_bytes().to_vec()),
+            (
+                options::RETAIN_DAYS,
+                self.retention
+                    .older_than_days
+                    .map_or_else(Vec::new, |days| return days.to_string().into_bytes()),
+            ),
+            (
+                options::RETAIN_BYTES,
+                self.retention
+                    .max_bytes
+                    .map_or_else(Vec::new, |bytes| return bytes.to_string().into_bytes()),
+            ),
             (options::SCOPE, self.scope.to_bytes()?),
             (options::VERSION, INTEGRATION_VERSION.as_bytes().to_vec()),
             (self.launch_option(), self.wrapper_command().into_vec()),
@@ -418,6 +476,7 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
                     .map_or_else(|| return OsStr::new(""), |path| return path.as_os_str()),
             )?;
             client.run_shell_background(&self.watchdog_command())?;
+            client.signal_observer()?;
 
             return Ok(Enabled {
                 already_enabled: true,
@@ -436,8 +495,7 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
             return Err(Error::invalid("tmux default-shell is empty"));
         }
 
-        let hook = hook_command();
-        for name in GUARDED_HOOKS {
+        for (name, hook) in reserved_hooks() {
             let existing = client.hook(name)?;
             if !existing.is_empty() && existing != hook.as_bytes() {
                 return Err(Error::invalid(format!(
@@ -485,8 +543,7 @@ set-option -gF @termtrace-original-default-shell \"#{default-shell}\"\n\
             client.set_option(name, OsStr::from_bytes(&value))?;
         }
 
-        let hook = hook_command();
-        for name in GUARDED_HOOKS {
+        for (name, hook) in reserved_hooks() {
             client.set_hook(name, &hook)?;
         }
 
@@ -543,8 +600,7 @@ pub fn disable(client: &TmuxClient) -> Result<Disabled> {
         ));
     }
 
-    let hook = hook_command();
-    for name in GUARDED_HOOKS {
+    for (name, hook) in reserved_hooks() {
         let current = client.hook(name)?;
         if !current.is_empty() && current != hook.as_bytes() {
             return Err(Error::invalid(format!(
@@ -557,6 +613,7 @@ pub fn disable(client: &TmuxClient) -> Result<Disabled> {
     let original = client.option(options::ORIGINAL_COMMAND)?;
     remove(client, &original)?;
     clear_pane_marks(client)?;
+    client.signal_observer()?;
 
     return Ok(Disabled::Restored);
 }
@@ -570,7 +627,7 @@ fn remove(client: &TmuxClient, original_command: &[u8]) -> Result<()> {
     }
 
     // Removal continues past individual failures so every remaining hook and option is cleared.
-    for name in GUARDED_HOOKS {
+    for (name, _) in reserved_hooks() {
         if let Err(error) = client.unset_hook(name) {
             tracing::warn!(%error, hook = name, "could not unset termtrace tmux hook");
         }
@@ -594,6 +651,21 @@ pub fn hook_command() -> OsString {
     return OsString::from(
         "run-shell -b \"exec env TERMTRACE_TMUX_BINARY=#{q:@termtrace-tmux-executable} #{q:@termtrace-executable} tmux guard -q --pane '#{pane_id}'\"",
     );
+}
+
+/// Every hook installed at Termtrace's reserved index, with its command.
+pub fn reserved_hooks() -> impl Iterator<Item = (&'static str, OsString)> {
+    let guard = hook_command();
+    let signal = OsString::from(format!("wait-for -S {OBSERVER_CHANNEL}"));
+
+    return GUARDED_HOOKS
+        .iter()
+        .map(move |name| return (*name, guard.clone()))
+        .chain(
+            OBSERVED_HOOKS
+                .iter()
+                .map(move |name| return (*name, signal.clone())),
+        );
 }
 
 /// Exempt every current pane process from enforcement.

@@ -8,21 +8,31 @@ use crate::{
     artifact::{TmuxRecordingCoverage, TmuxServerIdentity},
     client::{valid_identifier, TmuxClient},
     error::{Error, Result},
-    options::{SUPERVISOR_INTERVAL, UNRECORDED_GRACE},
+    options::UNRECORDED_GRACE,
     recording,
     scope::mark_decision,
-    setup::PreparedTmuxSetup,
+    setup::{PaneRetention, PreparedTmuxSetup},
     status::{self, Integration, PaneCoverage},
 };
 use nix::unistd::geteuid;
+use rustix::{
+    event::{poll, PollFd, PollFlags, Timespec},
+    io::Errno,
+    process::{pidfd_open, Pid, PidfdFlags},
+};
 use serde::Serialize;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
+    error::Error as StdError,
     ffi::OsStr,
     io::{Read as _, Seek as _, SeekFrom, Write as _},
-    os::unix::{ffi::OsStrExt as _, fs::MetadataExt as _},
+    os::{
+        fd::OwnedFd,
+        unix::{ffi::OsStrExt as _, fs::MetadataExt as _},
+    },
     path::{Path, PathBuf},
-    process::{self, Command},
+    process::{self, Child, Command, Stdio},
+    result::Result as StdResult,
     thread,
     time::{Duration, Instant},
 };
@@ -308,14 +318,21 @@ fn enforce(
     }
 }
 
+/// Deletes completed pane recordings under a state root, keeping the linked sessions.
+pub type RetainPanes<'retain> = dyn FnMut(&Path, PaneRetention, &HashSet<PathBuf>) -> StdResult<(), Box<dyn StdError + Send + Sync>>
+    + 'retain;
+
 /// Supervise the inherited server until its integration is disabled.
 ///
-/// Each tick lists panes once and uses that snapshot for coverage enforcement and for the
-/// aggregate recording.
+/// Each wake lists panes once and uses that snapshot for coverage enforcement and for the
+/// aggregate recording. The supervisor wakes when a tmux hook or Termtrace signals
+/// [`crate::options::OBSERVER_CHANNEL`], when a pane process or the watchdog exits, or when
+/// an enforcement or restart deadline passes. When retention is configured, `retain` runs
+/// at start and after any pane process ends, with every aggregate-linked session kept.
 ///
 /// # Errors
-/// Returns a failure to claim the role or to read settings.
-pub fn supervise(client: &TmuxClient) -> Result<()> {
+/// Returns a failure to claim the role, to read settings, or to wait for the next change.
+pub fn supervise(client: &TmuxClient, retain: &mut RetainPanes<'_>) -> Result<()> {
     let Some(integration) = Integration::read(client)? else {
         return Ok(());
     };
@@ -329,8 +346,17 @@ pub fn supervise(client: &TmuxClient) -> Result<()> {
         recording::observer_started(path, process::id())?;
     }
 
+    // A waiter orphaned by a killed supervisor would absorb signals that tmux only stores
+    // for later when nobody waits; waking it once makes it exit.
+    client.signal_observer()?;
+
     let mut suspects = BTreeMap::new();
     let mut watchdog_restarted = None;
+    let mut previous_processes: Option<BTreeSet<(String, u32)>> = None;
+    let mut waiter = ChannelWaiter {
+        client,
+        child: None,
+    };
 
     loop {
         let Ok(Some(integration)) = Integration::read(client) else {
@@ -359,12 +385,38 @@ pub fn supervise(client: &TmuxClient) -> Result<()> {
             );
         }
 
-        let now = Instant::now();
-        let watchdog_alive = ObserverRole::Watchdog
-            .holder(&integration.output_root, &identity)
-            .is_some();
+        let processes = rows
+            .iter()
+            .filter_map(|row| {
+                return row
+                    .pid
+                    .map(|pid| return (row.snapshot.pane_id.clone(), pid));
+            })
+            .collect::<BTreeSet<_>>();
 
-        if watchdog_restart_due(watchdog_alive, watchdog_restarted, now) {
+        let process_ended = previous_processes
+            .as_ref()
+            .is_none_or(|previous| return !previous.is_subset(&processes));
+
+        if integration.retention.is_enabled() && process_ended {
+            let retained = recording::linked_sessions(&integration.output_root)
+                .map_err(|error| return error.to_string())
+                .and_then(|linked| {
+                    return retain(&integration.output_root, integration.retention, &linked)
+                        .map_err(|error| return error.to_string());
+                });
+
+            if let Err(error) = retained {
+                tracing::warn!(%error, "could not apply tmux pane retention");
+            }
+        }
+
+        previous_processes = Some(processes);
+
+        let now = Instant::now();
+        let watchdog = ObserverRole::Watchdog.holder(&integration.output_root, &identity);
+
+        if watchdog_restart_due(watchdog.is_some(), watchdog_restarted, now) {
             watchdog_restarted = Some(now);
 
             match PreparedTmuxSetup::from_options(client) {
@@ -377,14 +429,125 @@ pub fn supervise(client: &TmuxClient) -> Result<()> {
             }
         }
 
-        thread::sleep(SUPERVISOR_INTERVAL);
+        let restart_deadline = watchdog_restarted
+            .filter(|_| return watchdog.is_none())
+            .map(|restarted| return restarted + WATCHDOG_RESTART_BACKOFF);
+
+        let deadline = suspects
+            .values()
+            .map(|first_seen| return *first_seen + UNRECORDED_GRACE)
+            .chain(restart_deadline)
+            .min();
+
+        let mut processes = Vec::new();
+        for pid in panes
+            .iter()
+            .filter_map(|pane| return pane.row.pid)
+            .chain(watchdog)
+        {
+            processes.extend(watch_process(pid)?);
+        }
+
+        waiter.wait(&processes, deadline)?;
     }
 }
 
-/// Restart the supervisor whenever its lock is free, until the integration is disabled.
+/// A `tmux wait-for` client blocked on the observer channel.
+struct ChannelWaiter<'client> {
+    client: &'client TmuxClient,
+    child: Option<Child>,
+}
+
+impl ChannelWaiter<'_> {
+    fn wait(&mut self, processes: &[OwnedFd], deadline: Option<Instant>) -> Result<()> {
+        let child = match &mut self.child {
+            Some(child) => child,
+            None => self.child.insert(
+                self.client
+                    .observer_wait_command()
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|error| {
+                        return Error::Tmux(format!("could not wait for tmux changes: {error}"));
+                    })?,
+            ),
+        };
+
+        let channel = child
+            .stdout
+            .as_ref()
+            .ok_or_else(|| return Error::Tmux("tmux wait-for has no output pipe".to_owned()))?;
+
+        let mut fds = Vec::with_capacity(processes.len() + 1);
+        fds.push(PollFd::new(channel, PollFlags::IN));
+        fds.extend(
+            processes
+                .iter()
+                .map(|process| return PollFd::new(process, PollFlags::IN)),
+        );
+
+        let timeout = deadline
+            .map(|deadline| {
+                return Timespec::try_from(deadline.saturating_duration_since(Instant::now()));
+            })
+            .transpose()
+            .map_err(|error| return Error::invalid_with_source("observer deadline", error))?;
+
+        match poll(&mut fds, timeout.as_ref()) {
+            Ok(_) | Err(Errno::INTR) => {}
+            Err(error) => {
+                return Err(Error::Tmux(format!(
+                    "could not wait for tmux changes: {error}"
+                )));
+            }
+        }
+
+        if fds.first().is_none_or(|fd| return fd.revents().is_empty()) {
+            return Ok(());
+        }
+
+        let status = child.wait().map_err(|error| {
+            return Error::Tmux(format!("could not wait for tmux wait-for: {error}"));
+        })?;
+
+        self.child = None;
+
+        if !status.success() {
+            return Err(Error::Tmux(format!("tmux wait-for exited with {status}")));
+        }
+        return Ok(());
+    }
+}
+
+impl Drop for ChannelWaiter<'_> {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.child {
+            let _kill = child.kill();
+            let _wait = child.wait();
+        }
+    }
+}
+
+/// A descriptor that becomes readable when `pid` exits; none when it already exited.
+fn watch_process(pid: u32) -> Result<Option<OwnedFd>> {
+    let Some(target) = i32::try_from(pid).ok().and_then(Pid::from_raw) else {
+        return Ok(None);
+    };
+
+    return match pidfd_open(target, PidfdFlags::empty()) {
+        Ok(fd) => Ok(Some(fd)),
+        Err(Errno::SRCH) => Ok(None),
+        Err(error) => Err(Error::filesystem(format!("/proc/{pid}"), error.into())),
+    };
+}
+
+/// Restart the supervisor whenever no process holds its role, until the integration is
+/// disabled.
 ///
 /// # Errors
-/// Returns a failure to claim the role or to read settings.
+/// Returns a failure to claim the role, to read settings, or to wait for the supervisor lock.
 pub fn watchdog(client: &TmuxClient) -> Result<()> {
     let Some(integration) = Integration::read(client)? else {
         return Ok(());
@@ -395,25 +558,32 @@ pub fn watchdog(client: &TmuxClient) -> Result<()> {
         return Ok(());
     };
 
+    let supervisor = ObserverRole::Supervisor.lock_path(&integration.output_root, &identity);
+
     while client.is_integration_enabled() {
-        if ObserverRole::Supervisor
-            .holder(&integration.output_root, &identity)
-            .is_none()
-        {
-            // Waiting owns and reaps the child; both roles hold independent
-            // crash-released locks.
-            match Command::new(&integration.termtrace)
-                .args(["tmux", "supervise", "-q"])
-                .status()
-            {
-                Ok(status) => tracing::debug!(%status, "tmux observer exited"),
-                Err(error) => tracing::warn!(%error, "could not start tmux observer"),
-            }
+        // Blocks while any supervisor, including one this watchdog did not start, is alive.
+        drop(
+            ExclusiveLock::acquire(&supervisor)
+                .map_err(|error| return Error::filesystem(&supervisor, error))?,
+        );
+
+        if !client.is_integration_enabled() {
+            break;
         }
 
-        if client.is_integration_enabled() {
-            thread::sleep(SUPERVISOR_INTERVAL);
+        let started = Instant::now();
+
+        // Waiting owns and reaps the child; both roles hold independent
+        // crash-released locks.
+        match Command::new(&integration.termtrace)
+            .args(["tmux", "supervise", "-q"])
+            .status()
+        {
+            Ok(status) => tracing::debug!(%status, "tmux observer exited"),
+            Err(error) => tracing::warn!(%error, "could not start tmux observer"),
         }
+
+        thread::sleep(WATCHDOG_RESTART_BACKOFF.saturating_sub(started.elapsed()));
     }
 
     return Ok(());
