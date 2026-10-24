@@ -44,6 +44,25 @@ pub(in crate::recording) struct WaiterReaction {
     pub(super) deadline: Instant,
 }
 
+impl ScreenWaiter {
+    /// Earliest instant at which the waiter can finish without new output.
+    pub(in crate::recording) fn next_deadline(&self) -> Instant {
+        let settled = self
+            .matching_state
+            .as_ref()
+            .and_then(|(_, since, _)| return since.checked_add(self.stable_for));
+        let unchanged = self
+            .reaction
+            .as_ref()
+            .map(|reaction| return reaction.deadline);
+
+        return settled
+            .into_iter()
+            .chain(unchanged)
+            .fold(self.deadline, Instant::min);
+    }
+}
+
 pub(super) fn reaction_window(stable_for_ns: u64, reaction_timeout_ns: u64) -> Duration {
     return Duration::from_nanos(reaction_timeout_ns.max(stable_for_ns));
 }

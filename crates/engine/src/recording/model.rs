@@ -145,11 +145,15 @@ pub(super) enum RuntimeMessage {
     Resize(TerminalGeometry),
     ResizeFailed(String),
     HostSignal(ProcessSignal),
+    /// A child of the recorder changed state; the recorded child may be reapable.
+    ChildStateChanged,
     Control {
         request: ControlRequest,
         response: mpsc::SyncSender<ControlResponse>,
     },
     ControlServerFailed(String),
+    /// The control server thread finished and accepts no further requests.
+    ControlServerStopped,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

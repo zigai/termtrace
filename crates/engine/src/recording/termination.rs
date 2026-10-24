@@ -138,6 +138,22 @@ impl Termination {
         };
     }
 
+    /// Earliest instant at which [`Self::step`] acts without a new fact or output.
+    pub(super) fn next_deadline(&self) -> Option<Instant> {
+        let drain = match self.stage {
+            Stage::Draining { until, .. } => Some(until),
+            Stage::Running { .. } | Stage::Settling { .. } | Stage::Closing { .. } => None,
+        };
+        let (resource, signal) = match self.kill {
+            Kill::Pending { resource, signal } => {
+                (resource.map(|escalation| return escalation.at), signal)
+            }
+            Kill::Done => (None, None),
+        };
+
+        return [drain, resource, signal].into_iter().flatten().min();
+    }
+
     pub(super) fn observe(&mut self, fact: Fact) {
         match fact {
             Fact::OutputClosed => {

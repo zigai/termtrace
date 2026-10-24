@@ -107,6 +107,10 @@ pub(in crate::recording) fn spawn(
                     );
                 }
             }
+
+            if sender.send(RuntimeMessage::ControlServerStopped).is_err() {
+                tracing::debug!("recording runtime stopped before the control server finished");
+            }
         })
         .map_err(|error| return terminal_error("spawn control server", error.to_string()))?;
 
@@ -749,10 +753,6 @@ impl ControlWorker {
                 error.to_string(),
             )),
         };
-    }
-
-    pub(in crate::recording) fn shutdown_finished(&self) -> bool {
-        return self.thread.is_finished();
     }
 
     pub(in crate::recording) fn stop(self) -> Result<()> {

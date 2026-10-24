@@ -2,7 +2,7 @@
 
 use super::{
     actor::SessionActor,
-    control::apply_signal,
+    control::{apply_signal, PendingInputSequence, ScreenWaiter},
     input::{apply, apply_resize},
     model::{RuntimeMessage, TerminalGeometry},
     presentation::{process_semantic_bytes, process_semantic_output, resize_semantic},
@@ -18,6 +18,7 @@ use std::{
     mem::{replace, take},
     path::PathBuf,
     sync::mpsc::{self, RecvTimeoutError},
+    thread,
     time::{Duration, Instant},
 };
 use termtrace_model::execution::session::RecordingFailurePolicy;
@@ -80,20 +81,25 @@ pub(super) fn run(
 
         let started_at = Instant::now();
         let mut last_activity_at = Instant::now();
+        let mut control_server_stopped = false;
 
         loop {
-            let receive_timeout = actor.pending_input_sequence.as_ref().map_or(
-                Duration::from_millis(10),
-                |pending| {
-                    return pending
-                        .next_deadline()
-                        .saturating_duration_since(Instant::now())
-                        .min(Duration::from_millis(10));
+            let deadline = actor.next_deadline(started_at, last_activity_at);
+            let received = deadline.map_or_else(
+                || {
+                    return receiver
+                        .recv()
+                        .map_err(|_disconnected| return RecvTimeoutError::Disconnected);
+                },
+                |deadline| {
+                    return receiver
+                        .recv_timeout(deadline.saturating_duration_since(Instant::now()));
                 },
             );
 
             let mut received_output = false;
-            match receiver.recv_timeout(receive_timeout) {
+            match received {
+                Ok(RuntimeMessage::ControlServerStopped) => control_server_stopped = true,
                 Ok(message) => {
                     received_output = matches!(&message, RuntimeMessage::Output { .. });
 
@@ -115,7 +121,18 @@ pub(super) fn run(
                         "PTY reader disconnected before reporting closure",
                     ));
                 }
-                Err(RecvTimeoutError::Disconnected | RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    // A closed inbox returns at once, so wait out the deadline here instead.
+                    let Some(deadline) = deadline else {
+                        return Err(terminal_error(
+                            "receive runtime event",
+                            "runtime inbox closed with no pending deadline",
+                        ));
+                    };
+
+                    thread::sleep(deadline.saturating_duration_since(Instant::now()));
+                }
+                Err(RecvTimeoutError::Timeout) => {}
             }
 
             if !actor.termination.child_exited()
@@ -135,7 +152,6 @@ pub(super) fn run(
             let output_closed = actor.termination.output_closed();
             actor.advance_input_sequence(child_exited, output_closed)?;
             actor.event_log.flush_due()?;
-            actor.ensure_presented_snapshot()?;
             actor.evaluate_screen_waiters(child_exited, output_closed)?;
             actor.enforce_resource_limits(started_at, last_activity_at)?;
             let effects = actor.termination.step(Tick {
@@ -160,7 +176,7 @@ pub(super) fn run(
                     }
                     Effect::BeginControlShutdown => workers.begin_control_shutdown()?,
                     Effect::AwaitControlShutdown => {
-                        control_shutdown_finished = workers.control_shutdown_finished();
+                        control_shutdown_finished = control_server_stopped;
                     }
                 }
             }
@@ -170,7 +186,7 @@ pub(super) fn run(
             }
         }
 
-        actor.ensure_presented_snapshot()?;
+        actor.live.ensure_presented()?;
         actor.evaluate_screen_waiters(true, actor.termination.output_closed())?;
         actor.fail_screen_waiters(
             "child_completed",
@@ -195,7 +211,7 @@ pub(super) fn run(
 
     let status = workers.finish(receiver, result)?;
 
-    actor.ensure_presented_snapshot()?;
+    actor.live.ensure_presented()?;
 
     return Ok(RuntimeOutcome {
         status,
@@ -230,6 +246,40 @@ impl SessionActor<'_> {
             signal,
             true,
         );
+    }
+
+    /// Earliest instant at which the runtime loop must act without a new message.
+    fn next_deadline(&self, started_at: Instant, last_activity_at: Instant) -> Option<Instant> {
+        let limits = self
+            .progress
+            .resource_limit
+            .is_none()
+            .then(|| {
+                return [
+                    self.resource_limits.max_duration_ms.and_then(|limit| {
+                        return started_at.checked_add(Duration::from_millis(limit));
+                    }),
+                    self.resource_limits.idle_timeout_ms.and_then(|limit| {
+                        return last_activity_at.checked_add(Duration::from_millis(limit));
+                    }),
+                ];
+            })
+            .into_iter()
+            .flatten()
+            .flatten();
+
+        return [
+            self.pending_input_sequence
+                .as_ref()
+                .map(PendingInputSequence::next_deadline),
+            self.termination.next_deadline(),
+            self.event_log.flush_deadline(),
+        ]
+        .into_iter()
+        .flatten()
+        .chain(self.screen_waiters.iter().map(ScreenWaiter::next_deadline))
+        .chain(limits)
+        .min();
     }
 
     fn enforce_resource_limits(
@@ -390,10 +440,9 @@ impl SessionActor<'_> {
                     data
                 };
                 self.mirror_bytes(&mirrored)?;
-                self.live_needs_snapshot = true;
 
                 if !self.screen_waiters.is_empty() || self.pending_input_sequence.is_some() {
-                    self.ensure_presented_snapshot()?;
+                    self.live.ensure_presented()?;
                 }
             }
             RuntimeMessage::OutputClosed => {
@@ -406,11 +455,9 @@ impl SessionActor<'_> {
                         &mut self.mutation_history,
                         &pending,
                     )?;
-
-                    self.live_needs_snapshot = true;
                 }
 
-                self.ensure_presented_snapshot()?;
+                self.live.ensure_presented()?;
 
                 if self.live.suppress_mirrored_queries {
                     self.live
@@ -460,11 +507,7 @@ impl SessionActor<'_> {
 
                 resize_semantic(&mut self.live.semantic, geometry)?;
                 self.live.geometry = geometry;
-                let latest = self.live.semantic.snapshot()?;
-
-                if !latest.modes.synchronized_output {
-                    self.live.replace_presented(latest);
-                }
+                self.live.presented_stale = true;
             }
             RuntimeMessage::ResizeFailed(reason) => {
                 return Err(terminal_error("read terminal geometry", reason));
@@ -486,12 +529,13 @@ impl SessionActor<'_> {
                 )?;
             }
             RuntimeMessage::Control { request, response } => {
-                self.ensure_presented_snapshot()?;
+                self.live.ensure_presented()?;
                 self.handle_control_request(request, response)?;
             }
             RuntimeMessage::ControlServerFailed(reason) => {
                 return Err(terminal_error("serve control socket", reason));
             }
+            RuntimeMessage::ChildStateChanged | RuntimeMessage::ControlServerStopped => {}
         }
 
         return Ok(());

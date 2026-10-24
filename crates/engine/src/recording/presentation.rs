@@ -13,6 +13,8 @@ use uuid::Uuid;
 pub(super) struct LiveTerminal {
     pub(super) semantic: GhosttyVt,
     pub(super) presented: SemanticState,
+    /// The VT changed since `presented` was last refreshed.
+    pub(super) presented_stale: bool,
     pub(super) presentation_tracker: PresentationTracker,
     pub(super) query_tracker: QueryTracker,
     pub(super) pending_query_responses: Vec<Vec<u8>>,
@@ -57,6 +59,19 @@ impl LiveTerminal {
         *self.cached_state_hash.borrow_mut() = Some(hash.clone());
 
         return Ok(hash);
+    }
+
+    /// Refresh `presented` from the VT unless a synchronized update is still in progress.
+    pub(super) fn ensure_presented(&mut self) -> Result<()> {
+        if !self.presented_stale || self.semantic.synchronized_output()? {
+            return Ok(());
+        }
+
+        let latest = self.semantic.snapshot()?;
+        self.replace_presented(latest);
+        self.presented_stale = false;
+
+        return Ok(());
     }
 
     pub(super) fn replace_presented(&mut self, presented: SemanticState) {
@@ -143,27 +158,23 @@ pub(super) fn process_semantic_output(
 
                 live.source_byte_offset = Some(u64::try_from(current_offset).unwrap_or(u64::MAX));
 
-                let before_command =
-                    if command == Some(true) { Some(live.semantic.snapshot()?) } else { None };
+                let before_command = if command == Some(true) && live.presented_stale {
+                    Some(live.semantic.snapshot()?)
+                } else {
+                    None
+                };
                 process_semantic_bytes(live, writer, event_log, mutation_history, &bytes)?;
 
-                if command.is_some() {
-                    let after_command = live.semantic.snapshot()?;
-
-                    match live
+                // Leaving a synchronized update needs no snapshot: the bytes just written
+                // marked `presented` stale, and it refreshes when next observed.
+                if command.is_some()
+                    && live
                         .presentation_tracker
-                        .reconcile(after_command.modes.synchronized_output)
-                    {
-                        Some(PresentationTransition::EnterSynchronizedOutput) => {
-                            if let Some(before_command) = before_command {
-                                live.replace_presented(before_command);
-                            }
-                        }
-                        Some(PresentationTransition::ExitSynchronizedOutput) => {
-                            live.replace_presented(after_command);
-                        }
-                        None => {}
-                    }
+                        .reconcile(live.semantic.synchronized_output()?)
+                        == Some(PresentationTransition::EnterSynchronizedOutput)
+                    && let Some(before_command) = before_command
+                {
+                    live.replace_presented(before_command);
                 }
             }
         }
@@ -198,6 +209,7 @@ pub(super) fn process_semantic_bytes(
         return Ok(());
     }
 
+    live.presented_stale = true;
     let is_sequence = matches!(data.first(), Some(0x1b | 0x9b));
     let base_offset = live.source_byte_offset;
 
@@ -374,6 +386,7 @@ mod tests {
             semantic,
             presentation_tracker: PresentationTracker::new(presented.modes.synchronized_output),
             presented,
+            presented_stale: false,
             query_tracker: QueryTracker::default(),
             pending_query_responses: Vec::new(),
             source_event_seq: None,

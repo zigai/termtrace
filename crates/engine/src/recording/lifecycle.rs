@@ -681,6 +681,7 @@ fn initialize_live_terminal(
         semantic,
         presentation_tracker: PresentationTracker::new(presented.modes.synchronized_output),
         presented,
+        presented_stale: false,
         row_hashes: RefCell::new(Vec::new()),
         cached_state_hash: RefCell::new(None),
         query_tracker: QueryTracker::default(),

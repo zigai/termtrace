@@ -289,13 +289,7 @@ impl Snapshot<'_> {
     }
 
     fn mode(&self, value: u16, ansi: bool) -> Result<bool> {
-        let mut enabled = false;
-        let packed = (value & 0x7fff) | (u16::from(ansi) << 15);
-        check("get terminal mode", unsafe {
-            sys::ghostty_terminal_mode_get(self.terminal, packed, &raw mut enabled)
-        })?;
-
-        return Ok(enabled);
+        return terminal_mode(self.terminal, value, ansi);
     }
 
     fn modes_equal(&self, previous: &ModeState) -> Result<bool> {
@@ -974,6 +968,20 @@ impl From<sys::GhosttyColorRgb> for Rgb {
             b: color.b,
         };
     }
+}
+
+pub(super) fn terminal_mode(
+    terminal: sys::GhosttyTerminal,
+    value: u16,
+    ansi: bool,
+) -> Result<bool> {
+    let mut enabled = false;
+    let packed = (value & 0x7fff) | (u16::from(ansi) << 15);
+    check("get terminal mode", unsafe {
+        sys::ghostty_terminal_mode_get(terminal, packed, &raw mut enabled)
+    })?;
+
+    return Ok(enabled);
 }
 
 #[cfg(test)]

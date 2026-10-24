@@ -619,11 +619,7 @@ impl SessionActor<'_> {
 
                 resize_semantic(&mut self.live.semantic, geometry)?;
                 self.live.geometry = geometry;
-                let latest = self.live.semantic.snapshot()?;
-
-                if !latest.modes.synchronized_output {
-                    self.live.replace_presented(latest);
-                }
+                self.live.presented_stale = true;
 
                 return Ok(ControlPayload::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),

@@ -146,9 +146,10 @@ fn actor_snapshot_refresh_invalidates_the_presented_hash() {
 
     for bytes in [b"READY".as_slice(), b"\rCHANGED".as_slice()] {
         actor.live.semantic.write(bytes);
-        actor.live_needs_snapshot = true;
+        actor.live.presented_stale = true;
         actor
-            .ensure_presented_snapshot()
+            .live
+            .ensure_presented()
             .expect("refresh actor snapshot");
         let current = actor.live.presented_state_hash().expect("updated hash");
         assert_eq!(

@@ -549,6 +549,15 @@ impl GhosttyVt {
         return snapshot::Snapshot::new(terminal, render, &mut self.last_snapshot).snapshot();
     }
 
+    /// Whether synchronized output (DEC private mode 2026) is enabled, without a snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when libghostty-vt cannot report the mode.
+    pub fn synchronized_output(&self) -> Result<bool> {
+        return snapshot::terminal_mode(self.terminal, 2026, false);
+    }
+
     /// Return a complete snapshot only when semantic content changed.
     ///
     /// Dirty bookkeeping alone does not count as semantic content. This is

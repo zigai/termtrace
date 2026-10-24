@@ -160,6 +160,8 @@ pub(super) fn preserve_terminal(
                 RuntimeMessage::InputFailed(_)
                 | RuntimeMessage::ResizeFailed(_)
                 | RuntimeMessage::ControlServerFailed(_)
+                | RuntimeMessage::ControlServerStopped
+                | RuntimeMessage::ChildStateChanged
                 | RuntimeMessage::TerminalInputClosed,
             )
             | Err(RecvTimeoutError::Timeout) => {}

@@ -6,7 +6,6 @@ use super::{
     presentation::LiveTerminal,
     termination::Termination,
 };
-use crate::Result;
 use std::io::Write;
 use termtrace_evidence::{event_log::EventLogWriter, request_journal::MutationJournal};
 use termtrace_model::execution::session::{
@@ -38,7 +37,6 @@ pub(super) struct SessionActor<'runtime> {
     pub(super) pending_input_sequence: Option<PendingInputSequence>,
     pub(super) progress: RuntimeProgress,
     pub(super) termination: Termination,
-    pub(super) live_needs_snapshot: bool,
     pub(super) resource_limits: ResourceLimits,
     pub(super) failure_policy: RecordingFailurePolicy,
 }
@@ -72,24 +70,8 @@ impl<'runtime> SessionActor<'runtime> {
                 unrecorded_output: Vec::new(),
             },
             termination: Termination::new(),
-            live_needs_snapshot: false,
             resource_limits,
             failure_policy: RecordingFailurePolicy::Stop,
         };
-    }
-
-    pub(super) fn ensure_presented_snapshot(&mut self) -> Result<()> {
-        if !self.live_needs_snapshot {
-            return Ok(());
-        }
-
-        let latest = self.live.semantic.snapshot()?;
-        if !latest.modes.synchronized_output {
-            self.live.replace_presented(latest);
-        }
-
-        self.live_needs_snapshot = false;
-
-        return Ok(());
     }
 }

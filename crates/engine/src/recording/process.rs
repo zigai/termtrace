@@ -16,7 +16,7 @@ use nix::{
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use rustix::termios::{tcgetwinsize, Winsize};
 use signal_hook::{
-    consts::signal::{SIGHUP, SIGINT, SIGTERM, SIGWINCH},
+    consts::signal::{SIGCHLD, SIGHUP, SIGINT, SIGTERM, SIGWINCH},
     iterator::{Handle, Signals},
 };
 use std::{
@@ -200,7 +200,7 @@ fn spawn_resize(
 }
 
 pub(super) fn register_host_signals() -> Result<Signals> {
-    return Signals::new([SIGHUP, SIGINT, SIGTERM])
+    return Signals::new([SIGHUP, SIGINT, SIGTERM, SIGCHLD])
         .map_err(|error| return terminal_error("listen for recorder signals", error.to_string()));
 }
 
@@ -213,13 +213,14 @@ fn spawn_host_signals(
         .name("termtrace-signal-listener".to_owned())
         .spawn(move || {
             for signal in signals.forever() {
-                let signal = match signal {
-                    SIGHUP => ProcessSignal::Hangup,
-                    SIGINT => ProcessSignal::Interrupt,
-                    SIGTERM => ProcessSignal::Terminate,
+                let message = match signal {
+                    SIGHUP => RuntimeMessage::HostSignal(ProcessSignal::Hangup),
+                    SIGINT => RuntimeMessage::HostSignal(ProcessSignal::Interrupt),
+                    SIGTERM => RuntimeMessage::HostSignal(ProcessSignal::Terminate),
+                    SIGCHLD => RuntimeMessage::ChildStateChanged,
                     _ => continue,
                 };
-                if sender.send(RuntimeMessage::HostSignal(signal)).is_err() {
+                if sender.send(message).is_err() {
                     return;
                 }
             }
@@ -649,10 +650,6 @@ impl RuntimeWorkers {
 
     pub(super) fn begin_control_shutdown(&self) -> Result<()> {
         return self.control.begin_shutdown();
-    }
-
-    pub(super) fn control_shutdown_finished(&self) -> bool {
-        return self.control.shutdown_finished();
     }
 
     pub(super) fn finish<T>(

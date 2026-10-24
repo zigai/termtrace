@@ -367,6 +367,18 @@ impl EventLogWriter {
         return self.append_at_observation(self.clock.elapsed_ns(), observation, event, durable);
     }
 
+    /// When pending bounded-durability output reaches its time threshold, if any is pending.
+    #[must_use]
+    pub fn flush_deadline(&self) -> Option<Instant> {
+        if self.durability_policy.mode != DurabilityMode::Bounded {
+            return None;
+        }
+
+        let interval = Duration::from_millis(self.durability_policy.maximum_interval_ms?);
+
+        return self.uncommitted_since?.checked_add(interval);
+    }
+
     /// Synchronize pending bounded-durability output when its time threshold has elapsed.
     ///
     /// Returns whether synchronization occurred.
@@ -375,15 +387,9 @@ impl EventLogWriter {
     ///
     /// Returns an error when synchronization fails, poisoning the writer.
     pub fn flush_due(&mut self) -> Result<bool> {
-        if self.durability_policy.mode != DurabilityMode::Bounded
-            || self.uncommitted_since.is_none_or(|started| {
-                return started.elapsed()
-                    < Duration::from_millis(
-                        self.durability_policy
-                            .maximum_interval_ms
-                            .unwrap_or(u64::MAX),
-                    );
-            })
+        if self
+            .flush_deadline()
+            .is_none_or(|deadline| return Instant::now() < deadline)
         {
             return Ok(false);
         }
