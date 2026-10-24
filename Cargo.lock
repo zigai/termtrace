@@ -3463,6 +3463,7 @@ dependencies = [
  "nix 0.30.1",
  "percent-encoding",
  "rusqlite",
+ "rustix",
  "schemars",
  "serde",
  "serde_json",
