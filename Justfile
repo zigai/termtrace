@@ -2,11 +2,15 @@ _:
   @just help
 
 # Prepare the pinned semantic engine and native build dependencies
-bootstrap:
+setup:
   scripts/bootstrap.sh
 
+# Build a debug version
+build: setup
+  cargo build --locked
+
 # Install Termtrace from this checkout
-install: bootstrap
+install: setup
   cargo install --locked --path . --force
 
 # Regenerate public schemas
@@ -125,11 +129,11 @@ sanitize:
   ASAN_OPTIONS=detect_leaks=1 RUSTFLAGS=-Zsanitizer=address TERMTRACE_GHOSTTY_PREFIX={{justfile_directory()}}/target/ghostty-asan cargo +nightly-2026-08-25 test --locked -Zbuild-std --target x86_64-unknown-linux-gnu -p termtrace-terminal --lib
 
 # Run concurrency checks under ThreadSanitizer (requires nightly-2026-08-25 with rust-src)
-test-race:
+race:
   RUSTFLAGS="-Zsanitizer=thread" cargo +nightly-2026-08-25 test --locked -Zbuild-std --target x86_64-unknown-linux-gnu -p termtrace-engine connection_limiter
 
 # Audit Rust dependencies for security advisories
-security:
+audit:
   cargo audit --file Cargo.lock
   cargo audit --file fuzz/Cargo.lock
 
@@ -138,7 +142,7 @@ mutation:
   TERMTRACE_GHOSTTY_PREFIX={{justfile_directory()}}/vendor/ghostty/zig-out cargo mutants --cargo-arg=--locked -p termtrace-terminal -f crates/terminal/src/output_projection.rs -f crates/terminal/src/screen.rs --timeout 60 --jobs 2
 
 # Run every repository check, including native capture, fuzzing, sanitizers, Miri, and mutation testing (requires bootstrap and the tools each recipe names)
-check: lint validate test integration bindings-test native-check native-test security fuzz miri sanitize test-race mutation
+check: lint validate test integration bindings-test native-check native-test audit fuzz miri sanitize race mutation
 
 # List available commands
 help:
