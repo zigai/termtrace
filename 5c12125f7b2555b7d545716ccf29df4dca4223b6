@@ -1,0 +1,6 @@
+- Python System().capabilities() with no token takes 1.6 s and reports native-screenshot and native-video ready
+- Python probe with a token cancelled at 0.3 s returns in 0.33 s with both native rows blocked; cancelling the async capabilities() task returns in 0.02 s
+- Node probeCapabilities() with a token cancelled at 0.3 s returns in 0.33 s with both native rows blocked
+- termtrace artifact capture on a recorded 2 s session: SIGINT at 0.3 s exits 1 with 'the native-video capability probe was cancelled'; SIGINT at 4 s, during the capture, exits 130 at once; uninterrupted it finishes in 9.4 s
+- No Xvfb, Ghostty or dbus-run-session processes are left after the cancelled probes
+- just lint validate test integration bindings-test passes: 529 Rust tests, 189 CLI integration tests, 169 Python tests and the Node suite
