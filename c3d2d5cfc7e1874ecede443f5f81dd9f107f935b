@@ -1,0 +1,3 @@
+- Runs just lint validate test integration bindings-test on this tree: all pass (529 Rust tests, 189 CLI integration tests)
+- Starts a recording, stops it with stop --wait, then reads the screen twice: the first read replays, the second uses the cache (validated_checkpoint)
+- Records an original window capture of a command that exits at once (echo done): the capture status names its session and publishes
