@@ -6,6 +6,7 @@
 use crate::{
     errors::to_py_err,
     host::{Arg, Model, PathArg},
+    locator::PyCancelToken,
 };
 use pyo3::{exceptions::PyValueError, prelude::*};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
@@ -49,6 +50,7 @@ use termtrace_sdk::{
         timeout_from_ms,
     },
     instrumentation::Instrumentation,
+    locator::WaitCancellation,
     registry::RegistryService,
     system::{SystemService, Versions},
     tmux::{
@@ -916,9 +918,18 @@ impl PySystem {
     }
 
     /// Probe capabilities; unavailable tools are reported as blocked, never skipped.
-    pub fn capabilities(&self, py: Python<'_>) -> Model<CapabilityReport> {
+    ///
+    /// Cancelling `cancel` stops the native capture probe early; it then reports blocked.
+    #[pyo3(signature = (cancel = None))]
+    pub fn capabilities(
+        &self,
+        py: Python<'_>,
+        cancel: Option<PyCancelToken>,
+    ) -> Model<CapabilityReport> {
         return Model(py.detach(|| {
-            return SystemService::probe_capabilities(&std::sync::atomic::AtomicBool::new(false));
+            let token = cancel.map(|token| return token.inner);
+
+            return WaitCancellation::forward(token.as_ref(), SystemService::probe_capabilities);
         }));
     }
 

@@ -6,7 +6,7 @@
 use crate::{
     blocking_failure,
     host::{Arg, Model},
-    to_napi_err,
+    locator, to_napi_err,
 };
 use napi_derive::napi;
 use std::{
@@ -47,6 +47,7 @@ use termtrace_sdk::{
         timeout_from_ms,
     },
     instrumentation::Instrumentation,
+    locator::WaitCancellation,
     registry::RegistryService,
     system::{SystemService, Versions},
     tmux::{
@@ -851,12 +852,20 @@ impl JsSystem {
     }
 
     /// Probe capabilities; unavailable tools are reported as blocked, never skipped.
+    ///
+    /// Cancelling `cancel` stops the native capture probe early; it then reports blocked.
     #[napi]
-    pub async fn capabilities(&self) -> napi::Result<Model<CapabilityReport>> {
-        return blocking(|| {
-            Ok(SystemService::probe_capabilities(
-                &std::sync::atomic::AtomicBool::new(false),
-            ))
+    pub async fn capabilities(
+        &self,
+        cancel: Option<&locator::JsCancelToken>,
+    ) -> napi::Result<Model<CapabilityReport>> {
+        let token = cancel.map(|token| return token.inner.clone());
+
+        return blocking(move || {
+            return Ok(WaitCancellation::forward(
+                token.as_ref(),
+                SystemService::probe_capabilities,
+            ));
         })
         .await
         .map(Model);

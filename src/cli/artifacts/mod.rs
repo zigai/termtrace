@@ -19,13 +19,20 @@ use crate::cli::{
 };
 use args::ArtifactSubcommand;
 use miette::{IntoDiagnostic as _, Result};
+use signal_hook::{
+    consts::{SIGINT, SIGTERM},
+    flag,
+};
 use std::{
     env,
     io::{self, Read as _},
     os::unix::ffi::OsStrExt as _,
     path::Path,
     process::{Command as ProcessCommand, ExitCode, Stdio},
-    sync::atomic::AtomicBool,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 use termtrace_engine::Error;
 use termtrace_evidence::{
@@ -338,8 +345,18 @@ pub(super) fn run_capture(
 ) -> Result<ExitCode> {
     let session = resolve_session_path(arguments.session)?;
     let (start_monotonic_ns, end_monotonic_ns) = resolve_cli_range(&session, &arguments.range)?;
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let probed = Arc::new(AtomicBool::new(false));
 
-    require_cli_capability(NATIVE_VIDEO_CAPABILITY, &AtomicBool::new(false))?;
+    for signal in [SIGINT, SIGTERM] {
+        flag::register_conditional_default(signal, Arc::clone(&probed)).into_diagnostic()?;
+        flag::register(signal, Arc::clone(&cancelled)).into_diagnostic()?;
+    }
+
+    require_cli_capability(NATIVE_VIDEO_CAPABILITY, &cancelled)?;
+
+    // The capture itself has no cancellation, so later signals terminate as they did unhandled.
+    probed.store(true, Ordering::SeqCst);
 
     let viewport = match (arguments.width, arguments.height) {
         (Some(width), Some(height)) => Some(CaptureTarget::new(width, height)),

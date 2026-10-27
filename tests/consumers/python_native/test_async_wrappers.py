@@ -34,7 +34,6 @@ CLIENT_CALLS = [
     ("registry_gc", (1, 2, 4096, False)),
     ("tmux_bundle", ("manifest", "bundle")),
     ("tmux_verify_bundle", ("bundle", "manifest")),
-    ("probe_capabilities", ()),
 ]
 CALLS = [
     (owner, method, args)

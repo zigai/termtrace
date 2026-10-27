@@ -1481,8 +1481,12 @@ export type JsSession = Session
 export declare class System {
   /** Bind the local system service without starting a probe. */
   constructor()
-  /** Probe capabilities; unavailable tools are reported as blocked, never skipped. */
-  capabilities(): Promise<Model<CapabilityReport>>
+  /**
+   * Probe capabilities; unavailable tools are reported as blocked, never skipped.
+   *
+   * Cancelling `cancel` stops the native capture probe early; it then reports blocked.
+   */
+  capabilities(cancel?: JsCancelToken | undefined | null): Promise<Model<CapabilityReport>>
   /** Build and component versions. */
   versions(): Model<Versions>
   /** Names in the public schema catalog. */
@@ -1673,11 +1677,13 @@ export declare class Termtrace {
   /**
    * Probe runtime system capabilities across engine, media, and evidence signers.
    *
+   * Cancelling `cancel` stops the native capture probe early; it then reports blocked.
+   *
    * # Errors
    *
    * Fails only when the report cannot be serialized or the background worker panics.
    */
-  probeCapabilities(): Promise<Model<CapabilityReport>>
+  probeCapabilities(cancel?: CancelToken | undefined | null): Promise<Model<CapabilityReport>>
 }
 export type JsTermtrace = Termtrace
 

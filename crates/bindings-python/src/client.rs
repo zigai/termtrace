@@ -10,7 +10,7 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::sync::{atomic::AtomicBool, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use termtrace_model::artifact::bundle::{BundleProfile, BundleVerificationPolicy};
 use termtrace_model::execution::event_log::RecoveryReport;
 use termtrace_model::execution::session::{VerificationLevel, VerificationReport};
@@ -21,6 +21,7 @@ use termtrace_sdk::client::Terminal;
 use termtrace_sdk::contracts::LaunchOptions;
 use termtrace_sdk::defaults;
 use termtrace_sdk::integrity::IntegrityService;
+use termtrace_sdk::locator::WaitCancellation;
 use termtrace_sdk::registry::RegistryService;
 use termtrace_sdk::session::{LaunchSpec, SessionTarget};
 use termtrace_sdk::system::SystemService;
@@ -543,12 +544,21 @@ impl PyTermtrace {
 
     /// Probe runtime system capabilities across engine, media, and evidence signers.
     ///
+    /// Cancelling `cancel` stops the native capture probe early; it then reports blocked.
+    ///
     /// # Errors
     ///
     /// Raises `TermtraceError` or a subclass only when the capability report cannot be serialized.
-    pub fn probe_capabilities(&self, py: Python<'_>) -> PyResult<Model<CapabilityReport>> {
+    #[pyo3(signature = (cancel = None))]
+    pub fn probe_capabilities(
+        &self,
+        py: Python<'_>,
+        cancel: Option<crate::locator::PyCancelToken>,
+    ) -> PyResult<Model<CapabilityReport>> {
         py.detach(move || {
-            let report = SystemService::probe_capabilities(&AtomicBool::new(false));
+            let token = cancel.map(|token| return token.inner);
+            let report =
+                WaitCancellation::forward(token.as_ref(), SystemService::probe_capabilities);
 
             return Ok(Model(report));
         })

@@ -2073,9 +2073,18 @@ class AsyncSystem(Wrapper):
         self._sync = _native.System()
         self._pending = set()
 
-    async def capabilities(self) -> types.CapabilityReport:
-        r"""Probe capabilities; unavailable tools are reported as blocked, never skipped."""
-        return await asyncio.to_thread(lambda: self._sync.capabilities())
+    async def capabilities(
+        self, cancel: CancelToken | None = None
+    ) -> types.CapabilityReport:
+        r"""Probe capabilities; unavailable tools are reported as blocked, never skipped.
+
+        Cancelling `cancel` stops the native capture probe early; it then reports blocked.
+        """
+
+        def call(token: CancelToken) -> typing.Any:
+            return self._sync.capabilities(token)
+
+        return await run_cancellable(call, cancel)
 
     async def versions(self) -> types.Versions:
         r"""Build and component versions."""
@@ -2401,14 +2410,22 @@ class AsyncTermtrace(Wrapper):
             lambda: self._sync.tmux_verify_bundle(bundle_directory, manifest_path)
         )
 
-    async def probe_capabilities(self) -> types.CapabilityReport:
+    async def probe_capabilities(
+        self, cancel: CancelToken | None = None
+    ) -> types.CapabilityReport:
         r"""Probe runtime system capabilities across engine, media, and evidence signers.
+
+        Cancelling `cancel` stops the native capture probe early; it then reports blocked.
 
         # Errors
 
         Raises `TermtraceError` or a subclass only when the capability report cannot be serialized.
         """
-        return await asyncio.to_thread(lambda: self._sync.probe_capabilities())
+
+        def call(token: CancelToken) -> typing.Any:
+            return self._sync.probe_capabilities(token)
+
+        return await run_cancellable(call, cancel)
 
 
 class AsyncTmux(Wrapper):

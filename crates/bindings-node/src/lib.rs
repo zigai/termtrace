@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::PathBuf;
-use std::sync::{atomic::AtomicBool, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use termtrace_model::artifact::bundle::{BundleProfile, BundleVerificationPolicy};
 use termtrace_model::artifact::save::SaveFormat;
@@ -57,7 +57,7 @@ use termtrace_sdk::defaults;
 use termtrace_sdk::events::{EventCursor, EventsService};
 use termtrace_sdk::input::{MutationGuard, Reaction};
 use termtrace_sdk::integrity::IntegrityService;
-use termtrace_sdk::locator::{LocatorSpec, ScreenFrameQuery};
+use termtrace_sdk::locator::{LocatorSpec, ScreenFrameQuery, WaitCancellation};
 use termtrace_sdk::output::{OutputCursor, OutputService};
 use termtrace_sdk::registry::RegistryService;
 use termtrace_sdk::screen::{frame_text, StableCaptureOptions};
@@ -2680,15 +2680,21 @@ impl JsTermtrace {
 
     /// Probe runtime system capabilities across engine, media, and evidence signers.
     ///
+    /// Cancelling `cancel` stops the native capture probe early; it then reports blocked.
+    ///
     /// # Errors
     ///
     /// Fails only when the report cannot be serialized or the background worker panics.
     #[napi]
     pub async fn probe_capabilities(
         &self,
+        cancel: Option<&locator::JsCancelToken>,
     ) -> napi::Result<Model<termtrace_model::protocol::capability::CapabilityReport>> {
+        let token = cancel.map(|token| return token.inner.clone());
+
         return tokio::task::spawn_blocking(move || {
-            let report = SystemService::probe_capabilities(&AtomicBool::new(false));
+            let report =
+                WaitCancellation::forward(token.as_ref(), SystemService::probe_capabilities);
 
             return Ok(Model(report));
         })

@@ -2219,9 +2219,11 @@ class System:
         r"""
         Bind the local system service without starting a probe.
         """
-    def capabilities(self) -> types.CapabilityReport:
+    def capabilities(self, cancel: CancelToken | None = None) -> types.CapabilityReport:
         r"""
         Probe capabilities; unavailable tools are reported as blocked, never skipped.
+
+        Cancelling `cancel` stops the native capture probe early; it then reports blocked.
         """
     def versions(self) -> types.Versions:
         r"""
@@ -2494,9 +2496,13 @@ class Termtrace:
 
         Never raises; failed verification returns `False`.
         """
-    def probe_capabilities(self) -> types.CapabilityReport:
+    def probe_capabilities(
+        self, cancel: CancelToken | None = None
+    ) -> types.CapabilityReport:
         r"""
         Probe runtime system capabilities across engine, media, and evidence signers.
+
+        Cancelling `cancel` stops the native capture probe early; it then reports blocked.
 
         # Errors
 

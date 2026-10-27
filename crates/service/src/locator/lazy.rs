@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
     fmt,
-    sync::{Arc, Condvar, Mutex, PoisonError},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Condvar, Mutex, PoisonError,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -356,6 +359,7 @@ impl<'session> Locator<'session> {
     }
 }
 
+const FORWARD_POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// Upper bound on how long one locator poll asks the actor to wait for a capture.
 ///
 /// It bounds how long a cancelled wait can be blocked behind an exchange already sent.
@@ -427,6 +431,35 @@ impl WaitCancellation {
         let (flag, _) = &*self.state;
 
         return *flag.lock().unwrap_or_else(PoisonError::into_inner);
+    }
+
+    /// Run `operation` with a flag that is set once `token` is cancelled while it runs.
+    ///
+    /// Without a token the flag is never set.
+    pub fn forward<T>(token: Option<&Self>, operation: impl FnOnce(&AtomicBool) -> T) -> T {
+        let cancelled = AtomicBool::new(false);
+        let Some(token) = token else {
+            return operation(&cancelled);
+        };
+
+        let done = AtomicBool::new(false);
+
+        return thread::scope(|scope| {
+            scope.spawn(|| {
+                while !done.load(Ordering::Acquire) {
+                    if token.sleep(FORWARD_POLL_INTERVAL) {
+                        cancelled.store(true, Ordering::Release);
+
+                        return;
+                    }
+                }
+            });
+
+            let result = operation(&cancelled);
+            done.store(true, Ordering::Release);
+
+            return result;
+        });
     }
 
     fn sleep(&self, duration: Duration) -> bool {

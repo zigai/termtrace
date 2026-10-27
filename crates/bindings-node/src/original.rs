@@ -8,23 +8,18 @@ use napi_derive::napi;
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::PathBuf;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
-};
-use std::thread;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use termtrace_sdk::client::Terminal;
 use termtrace_sdk::contracts::OriginalLaunchOptions;
 use termtrace_sdk::defaults;
 use termtrace_sdk::input::MutationGuard;
+use termtrace_sdk::locator::WaitCancellation;
 use termtrace_sdk::session::{
     OriginalLaunchSpec, OriginalRecording as OriginalRecordingModel, OriginalSession,
     SessionTarget, StopRequest,
 };
 use termtrace_sdk::Uuid;
-
-const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub(crate) type PathInput = Either<String, Uint8Array>;
 
@@ -63,37 +58,13 @@ pub(crate) async fn start_original(
     cancel: Option<JsCancelToken>,
 ) -> napi::Result<JsOriginalRecording> {
     return tokio::task::spawn_blocking(move || {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let done = Arc::new(AtomicBool::new(false));
-        let late = cancel.clone();
-        let bridge = cancel.map(|token| {
-            let cancelled = Arc::clone(&cancelled);
-            let done = Arc::clone(&done);
+        let token = cancel.map(|token| return token.inner);
+        let original = WaitCancellation::forward(token.as_ref(), |cancelled| {
+            return terminal.start_original(&spec, cancelled);
+        })
+        .map_err(to_napi_err)?;
 
-            return thread::spawn(move || {
-                while !done.load(Ordering::Acquire) {
-                    if token.inner.is_cancelled() {
-                        cancelled.store(true, Ordering::Release);
-
-                        return;
-                    }
-
-                    thread::sleep(CANCEL_POLL_INTERVAL);
-                }
-            });
-        });
-
-        let started = terminal.start_original(&spec, &cancelled);
-        done.store(true, Ordering::Release);
-
-        if let Some(bridge) = bridge {
-            let _joined = bridge.join();
-        }
-
-        let original = started.map_err(to_napi_err)?;
-        if cancelled.load(Ordering::Acquire)
-            || late.is_some_and(|token| return token.inner.is_cancelled())
-        {
+        if token.is_some_and(|token| return token.is_cancelled()) {
             return Err(to_napi_err(original.cancel()));
         }
         return Ok(JsOriginalRecording::new(terminal, original));
