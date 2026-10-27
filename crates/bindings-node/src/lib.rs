@@ -12,42 +12,74 @@
     reason = "NAPI-RS derive and function macros generate FFI code, single-char lifetimes, and implicit returns"
 )]
 
+mod actions;
+mod control;
+mod diagnostics;
+mod evidence;
+mod host;
+mod locator;
+mod original;
+pub mod testing;
+
+use actions::{mutation_err, JsActionBuilder};
+use control::{JsFocusOptions, JsMutationOptions, JsPointer, JsPointerOptions, JsScrollOptions};
+pub use host::NativeValue;
+use host::{Arg, Model};
+use locator::{query_error, JsLocator, JsLocatorSpec, JsQueryResult};
 use napi_derive::napi;
 use std::collections::HashMap;
-use std::ffi::OsString;
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt as _;
 use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::Duration;
 use termtrace_model::artifact::bundle::{BundleProfile, BundleVerificationPolicy};
 use termtrace_model::artifact::save::SaveFormat;
-use termtrace_model::execution::session::VerificationLevel;
 use termtrace_model::protocol::control::ScreenPredicate;
 use termtrace_model::protocol::mutation::MutationEffect;
 use termtrace_model::terminal::observation::StatePoint;
-use termtrace_model::terminal::screen::{ScreenFrame, ScreenProjectionRequest};
-use termtrace_model::terminal::state::{KeyChord, MouseButton};
+use termtrace_model::terminal::screen::{
+    FrameDetail, ScreenFrame, ScreenProjectionRequest, ScreenRegion,
+};
+use termtrace_model::terminal::state::KeyChord;
+use termtrace_model::terminal::{
+    observation::{CaptureQuality, Observation},
+    screen::{ScreenFrameContent as ScreenFrameData, ScreenFrameSource, ScreenGeometry},
+    state::{ColorState, CursorState, ModeState},
+};
+use termtrace_model::value::ExactPath;
 use termtrace_sdk::analysis::AnalysisService;
 use termtrace_sdk::artifacts::ArtifactService;
 use termtrace_sdk::client::{Session, Terminal};
+use termtrace_sdk::contracts::LaunchOptions;
+use termtrace_sdk::contracts::StopReport;
 use termtrace_sdk::defaults;
 use termtrace_sdk::events::{EventCursor, EventsService};
-use termtrace_sdk::input::{ActRequest, MutationGuard};
+use termtrace_sdk::input::{MutationGuard, Reaction};
 use termtrace_sdk::integrity::IntegrityService;
+use termtrace_sdk::locator::{LocatorSpec, ScreenFrameQuery};
 use termtrace_sdk::output::{OutputCursor, OutputService};
 use termtrace_sdk::registry::RegistryService;
 use termtrace_sdk::screen::{frame_text, StableCaptureOptions};
-use termtrace_sdk::session::{LaunchSpec, StopRequest};
+use termtrace_sdk::session::{LaunchSpec, SessionTarget, StopOutcome, StopRequest};
 use termtrace_sdk::system::SystemService;
 use termtrace_sdk::tmux::TmuxService;
+use termtrace_sdk::{ByteString, EnvironmentSpec, Uuid};
+
+#[derive(serde::Serialize)]
+struct Empty {}
 
 /// Translate a Termtrace error; `index.js` lifts the typed `cause` into `kind`, `code`,
 /// `effect`, and `retry` properties on the thrown error.
 fn to_napi_err(err: termtrace_sdk::Error) -> napi::Error {
-    return typed_error(
+    let report = termtrace_sdk::contracts::ErrorReport::from(&err);
+
+    return typed_error_context(
         err.to_string(),
-        err.kind().as_str(),
-        err.code(),
-        err.effect(),
+        &report.kind,
+        &report.code,
+        err.failure_context(),
+        Empty {},
     );
 }
 
@@ -62,12 +94,52 @@ fn unsatisfied_wait(message: String) -> napi::Error {
 }
 
 fn typed_error(message: String, kind: &str, code: &str, effect: MutationEffect) -> napi::Error {
-    let typed = serde_json::json!({
-        "kind": kind,
-        "code": code,
-        "effect": effect,
-        "retry": effect.retry(),
-    });
+    return typed_error_with(message, kind, code, effect, Empty {});
+}
+
+/// [`typed_error`] with extra typed fields that `index.js` lifts onto the thrown error.
+fn typed_error_with<T: serde::Serialize>(
+    message: String,
+    kind: &str,
+    code: &str,
+    effect: MutationEffect,
+    extra: T,
+) -> napi::Error {
+    return typed_error_context(
+        message,
+        kind,
+        code,
+        termtrace_model::protocol::management::FailureContext::actor(effect),
+        extra,
+    );
+}
+
+fn typed_error_context<T: serde::Serialize>(
+    message: String,
+    kind: &str,
+    code: &str,
+    context: termtrace_model::protocol::management::FailureContext,
+    extra: T,
+) -> napi::Error {
+    #[derive(serde::Serialize)]
+    struct Failure<'a, T> {
+        kind: &'a str,
+        code: &'a str,
+        #[serde(flatten)]
+        context: termtrace_model::protocol::management::FailureContext,
+        #[serde(flatten)]
+        extra: T,
+    }
+
+    let typed = match host::encode(&Failure {
+        kind,
+        code,
+        context,
+        extra,
+    }) {
+        Ok(typed) => typed,
+        Err(error) => return error,
+    };
 
     let mut error = napi::Error::new(napi::Status::GenericFailure, message);
     error.cause = Some(Box::new(napi::Error::new(
@@ -88,6 +160,7 @@ fn resolved_state(frame: &ScreenFrame) -> JsResolvedState {
         text: frame_text(frame),
         cursor_row: u32::from(frame.cursor.row.unwrap_or(0)),
         cursor_col: u32::from(frame.cursor.column.unwrap_or(0)),
+        frame: Arc::new(frame.clone()),
     };
 }
 
@@ -130,6 +203,16 @@ fn parse_key(key: &str) -> napi::Result<KeyChord> {
         });
 }
 
+/// Decode the typed payload `index.js` lifts out of a native error message.
+///
+/// # Errors
+///
+/// Raises `TypeError` when the payload is not valid encoded error data.
+#[napi(skip_typescript)]
+pub fn decode_error_data(json: String) -> napi::Result<NativeValue> {
+    return serde_json::from_str(&json).map_err(|e| return host::type_error(e.to_string()));
+}
+
 /// Returns the Termtrace core version.
 #[napi]
 pub fn version() -> String {
@@ -146,6 +229,173 @@ pub struct JsFrame {
     pub cols: u32,
     /// Plain text of all rendered rows.
     pub text: String,
+    pub(crate) frame: Arc<ScreenFrame>,
+}
+
+impl JsFrame {
+    /// Wrap one exact frame.
+    pub fn new(frame: Arc<ScreenFrame>) -> Self {
+        return Self {
+            rows: u32::from(frame.geometry.rows),
+            cols: u32::from(frame.geometry.cols),
+            text: frame_text(&frame),
+            frame,
+        };
+    }
+}
+
+#[napi]
+impl JsFrame {
+    /// Projection format version.
+    #[napi(getter)]
+    pub fn version(&self) -> u32 {
+        return self.frame.version;
+    }
+
+    /// Complete semantic state identity.
+    #[napi(getter)]
+    pub fn state_hash(&self) -> String {
+        return self.frame.state_hash.clone();
+    }
+
+    /// Projection identity of this exact frame.
+    #[napi(getter)]
+    pub fn frame_hash(&self) -> String {
+        return self.frame.frame_hash.clone();
+    }
+
+    /// Whether this state was presentation eligible.
+    #[napi(getter)]
+    pub fn presented(&self) -> bool {
+        return self.frame.presented;
+    }
+
+    /// Settlement label.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the value cannot be converted.
+    #[napi(getter)]
+    pub fn capture_quality(&self) -> Model<CaptureQuality> {
+        return Model(self.frame.capture_quality);
+    }
+
+    /// Exact source occurrence, tagged by `source`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the value cannot be converted.
+    #[napi(getter)]
+    pub fn source(&self) -> Model<ScreenFrameSource> {
+        return Model(self.frame.source.clone());
+    }
+
+    /// Full viewport geometry.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the value cannot be converted.
+    #[napi(getter)]
+    pub fn geometry(&self) -> Model<ScreenGeometry> {
+        return Model(self.frame.geometry);
+    }
+
+    /// Validated requested half-open region.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the value cannot be converted.
+    #[napi(getter)]
+    pub fn requested_region(&self) -> Model<ScreenRegion> {
+        return Model(self.frame.requested_region);
+    }
+
+    /// Actually returned half-open region.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the value cannot be converted.
+    #[napi(getter)]
+    pub fn returned_region(&self) -> Model<ScreenRegion> {
+        return Model(self.frame.returned_region);
+    }
+
+    /// Complete cursor state; `row`, `column`, and `wide_tail` are `null` when unknown.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the value cannot be converted.
+    #[napi(getter)]
+    pub fn cursor(&self) -> Model<CursorState> {
+        return Model(self.frame.cursor.clone());
+    }
+
+    /// Terminal modes, including the complete ANSI and DEC mode inventory.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the value cannot be converted.
+    #[napi(getter)]
+    pub fn modes(&self) -> Model<ModeState> {
+        return Model(self.frame.modes.clone());
+    }
+
+    /// Default colors, explicit cursor color, and the active 256-color palette.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the value cannot be converted.
+    #[napi(getter)]
+    pub fn colors(&self) -> Model<ColorState> {
+        return Model(self.frame.colors.clone());
+    }
+
+    /// Structured rows tagged by `detail`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the value cannot be converted.
+    #[napi(getter)]
+    pub fn content(&self) -> Model<ScreenFrameData> {
+        return Model(self.frame.data.clone());
+    }
+
+    /// Evaluate a locator specification against this exact frame without capturing.
+    ///
+    /// # Errors
+    ///
+    /// Fails with a query kind when the specification does not fit this frame.
+    #[napi]
+    pub fn query(&self, spec: &JsLocatorSpec) -> napi::Result<JsQueryResult> {
+        return self
+            .frame
+            .query(spec.spec.clone())
+            .map(JsQueryResult::new)
+            .map_err(|error| return query_error(&error));
+    }
+
+    /// Canonical model JSON of this frame; wide integers are plain JSON numbers.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the frame cannot be serialized.
+    #[napi]
+    pub fn to_json(&self) -> napi::Result<String> {
+        return serde_json::to_string(self.frame.as_ref())
+            .map_err(|error| return napi::Error::from_reason(error.to_string()));
+    }
+
+    /// Decode canonical model JSON exactly, rejecting unknown or missing fields.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `json` is not a valid screen frame.
+    #[napi(factory)]
+    pub fn from_json(json: String) -> napi::Result<Self> {
+        return serde_json::from_str::<ScreenFrame>(&json)
+            .map(|frame| return Self::new(Arc::new(frame)))
+            .map_err(|error| return host::type_error(error.to_string()));
+    }
 }
 
 /// Immutable snapshot of a resolved presented terminal state.
@@ -156,21 +406,142 @@ pub struct JsResolvedState {
     pub hash: String,
     /// Plain text of the viewport.
     pub text: String,
-    /// Zero-indexed cursor row.
+    /// Zero-indexed cursor row, or 0 when the frame has no cursor row; see `cursor`.
     pub cursor_row: u32,
-    /// Zero-indexed cursor column.
+    /// Zero-indexed cursor column, or 0 when the frame has no cursor column; see `cursor`.
     pub cursor_col: u32,
+    pub(crate) frame: Arc<ScreenFrame>,
+}
+
+#[napi]
+impl JsResolvedState {
+    /// Complete cursor state; `row`, `column`, and `wide_tail` are `null` when unknown.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the value cannot be converted.
+    #[napi(getter)]
+    pub fn cursor(&self) -> Model<CursorState> {
+        return Model(self.frame.cursor.clone());
+    }
+
+    /// The exact rich frame this state summarizes.
+    #[napi(getter)]
+    pub fn frame(&self) -> JsFrame {
+        return JsFrame::new(Arc::clone(&self.frame));
+    }
+}
+
+/// Detail and region of a projected frame.
+#[napi(object, object_to_js = false, js_name = "FrameOptions")]
+pub struct JsFrameOptions {
+    /// `none`, `text`, `spans` (default), or `cells`, which requires `region`.
+    pub detail: Option<Arg<FrameDetail>>,
+    /// Half-open region; the whole viewport when omitted.
+    pub region: Option<Arg<ScreenRegion>>,
+}
+
+/// Point, hidden-state selection, and projection of a resolved frame.
+#[napi(object, object_to_js = false, js_name = "FrameAtOptions")]
+pub struct JsFrameAtOptions {
+    /// Whether presentation-ineligible states may be selected.
+    pub include_hidden: Option<bool>,
+    /// `none`, `text`, `spans` (default), or `cells`, which requires `region`.
+    pub detail: Option<Arg<FrameDetail>>,
+    /// Half-open region; the whole viewport when omitted.
+    pub region: Option<Arg<ScreenRegion>>,
+}
+
+/// Point and hidden-state selection of an observation.
+#[napi(object, object_to_js = false, js_name = "ObserveOptions")]
+pub struct JsObserveOptions {
+    /// State point; the latest presented state when omitted.
+    pub point: Option<Arg<StatePoint>>,
+    /// Whether presentation-ineligible states may be selected.
+    pub include_hidden: Option<bool>,
+}
+
+/// Options of one stable capture.
+#[napi(object, object_to_js = false, js_name = "CaptureStableOptions")]
+pub struct JsCaptureStableOptions {
+    /// Required unchanged interval in whole milliseconds.
+    pub stable_for_ms: Option<f64>,
+    /// Actor-side bound in whole milliseconds.
+    pub timeout_ms: Option<f64>,
+    /// `none`, `text`, `spans` (default), or `cells`, which requires `region`.
+    pub detail: Option<Arg<FrameDetail>>,
+    /// Half-open region; the whole viewport when omitted.
+    pub region: Option<Arg<ScreenRegion>>,
+    /// Return an unsettled capture instead of failing.
+    pub allow_incomplete: Option<bool>,
+    /// Reaction required before the stable interval starts.
+    pub reaction: Option<Arg<termtrace_sdk::contracts::ReactionSpec>>,
+}
+
+/// Bounds of an actor-side screen wait.
+#[napi(object, object_to_js = false, js_name = "ScreenWaitOptions")]
+pub struct JsScreenWaitOptions {
+    /// Required stable interval in whole milliseconds.
+    pub stable_for_ms: Option<f64>,
+    /// Actor-side bound in whole milliseconds.
+    pub timeout_ms: Option<f64>,
+}
+
+/// Literal-text locator options.
+#[napi(object, object_to_js = false, js_name = "TextLocatorOptions")]
+pub struct JsTextLocatorOptions {
+    /// Compare the complete row or region text instead of searching substrings.
+    pub exact: Option<bool>,
+}
+
+fn projection(
+    detail: Option<Arg<FrameDetail>>,
+    region: Option<Arg<ScreenRegion>>,
+) -> ScreenProjectionRequest {
+    return ScreenProjectionRequest {
+        detail: detail.map(|v| v.0).unwrap_or_default(),
+        region: region.map(|v| v.0),
+    };
+}
+
+fn with_frame<T>(details: T, frame: ScreenFrame) -> JsCaptured<T> {
+    return JsCaptured {
+        details: Model(details),
+        frame: JsFrame::new(Arc::new(frame)),
+    };
+}
+
+/// Model fields plus the exact frame they describe, returned as one object.
+pub struct JsCaptured<T> {
+    details: Model<T>,
+    frame: JsFrame,
+}
+
+impl<T: serde::Serialize> napi::bindgen_prelude::ToNapiValue for JsCaptured<T> {
+    unsafe fn to_napi_value(
+        env: napi::sys::napi_env,
+        val: Self,
+    ) -> napi::Result<napi::sys::napi_value> {
+        // SAFETY: napi supplies a live env; both values are created in it during this call.
+        unsafe {
+            let details = Model::to_napi_value(env, val.details)?;
+            let mut object = napi::bindgen_prelude::Object::from_raw(env, details);
+            object.set("frame", val.frame)?;
+
+            return napi::bindgen_prelude::Object::to_napi_value(env, object);
+        }
+    }
 }
 
 /// Result of reading a page of raw child PTY output bytes.
-#[napi(object)]
+#[napi(object, object_from_js = false)]
 pub struct JsOutputPage {
     /// Raw bytes produced by the child process.
-    pub bytes: Vec<u8>,
+    pub bytes: Model<ByteString>,
     /// Byte offset for fetching the subsequent page.
-    pub next_offset: i64,
+    pub next_offset: Model<u64>,
     /// Whether additional bytes remain beyond this page.
-    pub has_more: bool,
+    pub has_more: Model<bool>,
 }
 
 /// Screen inspection capability attached to a live or completed session.
@@ -178,36 +549,292 @@ pub struct JsOutputPage {
 #[derive(Clone)]
 pub struct JsScreen {
     pub(crate) terminal: Terminal,
-    pub(crate) session_path: String,
+    pub(crate) session_path: PathBuf,
+}
+
+impl JsScreen {
+    fn bind(&self, spec: LocatorSpec) -> JsLocator {
+        return JsLocator::new(self.terminal.clone(), self.session_path.clone(), spec);
+    }
 }
 
 #[napi]
 impl JsScreen {
-    /// Return the current presented screen frame.
+    /// Return the latest presented screen frame with the requested detail and region.
     ///
     /// # Errors
     ///
-    /// Fails when the session cannot be attached, the frame cannot be captured, or the background
-    /// worker panics.
+    /// Fails when `options` is malformed, the session cannot be attached, the frame cannot be
+    /// projected, or the background worker panics.
     #[napi]
-    pub async fn frame(&self) -> napi::Result<JsFrame> {
+    pub async fn frame(&self, options: Option<JsFrameOptions>) -> napi::Result<JsFrame> {
+        let projection = match options {
+            Some(options) => projection(options.detail, options.region),
+            None => ScreenProjectionRequest::default(),
+        };
         let terminal = self.terminal.clone();
         let path = self.session_path.clone();
 
         return tokio::task::spawn_blocking(move || {
-            let frame = terminal
+            return terminal
                 .attach(path)
-                .and_then(|session| return session.frame(ScreenProjectionRequest::default()))
-                .map_err(to_napi_err)?;
-
-            return Ok(JsFrame {
-                rows: u32::from(frame.geometry.rows),
-                cols: u32::from(frame.geometry.cols),
-                text: frame_text(&frame),
-            });
+                .and_then(|session| return session.frame(projection))
+                .map(|frame| return JsFrame::new(Arc::new(frame)))
+                .map_err(to_napi_err);
         })
         .await
         .map_err(blocking_failure)?;
+    }
+
+    /// Return a frame at any state point of a completed session, or the latest presented
+    /// state of a live one.
+    ///
+    /// # Errors
+    ///
+    /// Fails when an argument is malformed, a live session is asked for another point or hidden
+    /// states, resolution fails, or the background worker panics.
+    #[napi]
+    pub async fn frame_at(
+        &self,
+        point: Arg<StatePoint>,
+        options: Option<JsFrameAtOptions>,
+    ) -> napi::Result<JsFrame> {
+        let point = point.0;
+        let (include_hidden, projection) = match options {
+            Some(options) => (
+                options.include_hidden.unwrap_or(false),
+                projection(options.detail, options.region),
+            ),
+            None => (false, ScreenProjectionRequest::default()),
+        };
+        let terminal = self.terminal.clone();
+        let path = self.session_path.clone();
+
+        return tokio::task::spawn_blocking(move || {
+            return terminal
+                .attach(path)
+                .and_then(|session| return session.frame_at(point, include_hidden, projection))
+                .map(|frame| return JsFrame::new(Arc::new(frame)))
+                .map_err(to_napi_err);
+        })
+        .await
+        .map_err(blocking_failure)?;
+    }
+
+    /// Return the complete observation of a state point (latest presented by default).
+    ///
+    /// # Errors
+    ///
+    /// Fails when `point` is malformed, a live session is asked for another point, observation
+    /// fails, or the background worker panics.
+    #[napi]
+    pub async fn observe(
+        &self,
+        options: Option<JsObserveOptions>,
+    ) -> napi::Result<Model<Observation>> {
+        let (point, include_hidden) = match options {
+            Some(options) => (
+                options.point.map(|point| point.0),
+                options.include_hidden.unwrap_or(false),
+            ),
+            None => (None, false),
+        };
+        let point = point.unwrap_or(StatePoint::LatestPresented);
+        let terminal = self.terminal.clone();
+        let path = self.session_path.clone();
+
+        return tokio::task::spawn_blocking(move || {
+            let observation = terminal
+                .attach(path)
+                .and_then(|session| return session.observe(point, include_hidden))
+                .map_err(to_napi_err)?;
+
+            return Ok(Model(observation));
+        })
+        .await
+        .map_err(blocking_failure)?;
+    }
+
+    /// Capture one exact frame once it stays unchanged, optionally after a reaction.
+    ///
+    /// # Errors
+    ///
+    /// Fails when an option is malformed, the capture fails or, unless `allowIncomplete`, does
+    /// not settle, or the background worker panics.
+    #[napi]
+    pub async fn capture_stable(
+        &self,
+        options: Option<JsCaptureStableOptions>,
+    ) -> napi::Result<JsCaptured<termtrace_sdk::screen::StableScreenCapture>> {
+        let options = options.unwrap_or(JsCaptureStableOptions {
+            stable_for_ms: None,
+            timeout_ms: None,
+            detail: None,
+            region: None,
+            allow_incomplete: None,
+            reaction: None,
+        });
+        let reaction = options
+            .reaction
+            .map(|reaction| {
+                let reaction = reaction.0;
+                let mut wire = Reaction::new();
+                wire.changed_from = reaction.changed_from;
+                let milliseconds = reaction
+                    .timeout_ms
+                    .map(|ms| {
+                        return u32::try_from(ms)
+                            .map(f64::from)
+                            .map_err(|e| host::range_error(e.to_string()));
+                    })
+                    .transpose()?;
+                wire.timeout = host::millis(milliseconds, wire.timeout)?;
+
+                return Ok::<_, napi::Error>(wire);
+            })
+            .transpose()?;
+        let capture_options = StableCaptureOptions {
+            stable_for: host::millis(options.stable_for_ms, defaults::IDLE_STABLE_FOR)?,
+            timeout: host::millis(options.timeout_ms, defaults::WAIT_TIMEOUT)?,
+            projection: projection(options.detail, options.region),
+            allow_incomplete: options.allow_incomplete.unwrap_or(false),
+            reaction,
+        };
+        let terminal = self.terminal.clone();
+        let path = self.session_path.clone();
+
+        return tokio::task::spawn_blocking(move || {
+            let capture = terminal
+                .attach(path)
+                .and_then(|session| return session.capture_stable(capture_options))
+                .map_err(to_napi_err)?;
+
+            return Ok(with_frame(capture.clone(), capture.frame));
+        })
+        .await
+        .map_err(blocking_failure)?;
+    }
+
+    /// Wait on the actor for a screen predicate and resolve with the outcome even when it is
+    /// unmatched; `quality` tells a deadline from child completion or output closure.
+    ///
+    /// # Errors
+    ///
+    /// Fails when an argument is malformed, the actor rejects the predicate, the wait fails, or
+    /// the background worker panics.
+    #[napi]
+    pub async fn wait_for(
+        &self,
+        predicate: Arg<ScreenPredicate>,
+        options: Option<JsScreenWaitOptions>,
+    ) -> napi::Result<JsCaptured<termtrace_sdk::screen::ScreenWaitResult>> {
+        let predicate = predicate.0;
+        let (stable_for, timeout) = match options {
+            Some(options) => (
+                host::millis(options.stable_for_ms, Duration::ZERO)?,
+                host::millis(options.timeout_ms, defaults::WAIT_TIMEOUT)?,
+            ),
+            None => (Duration::ZERO, defaults::WAIT_TIMEOUT),
+        };
+        let terminal = self.terminal.clone();
+        let path = self.session_path.clone();
+
+        return tokio::task::spawn_blocking(move || {
+            let outcome = terminal
+                .attach(path)
+                .and_then(|session| return session.wait_screen(predicate, stable_for, timeout))
+                .map_err(to_napi_err)?;
+
+            return Ok(with_frame(
+                termtrace_sdk::screen::ScreenWaitResult::from(&outcome),
+                outcome.frame,
+            ));
+        })
+        .await
+        .map_err(blocking_failure)?;
+    }
+
+    /// Bind a locator specification without capturing; the default matches every cell.
+    #[napi]
+    pub fn locator(&self, spec: Option<&JsLocatorSpec>) -> JsLocator {
+        return self.bind(
+            spec.map(|spec| return spec.spec.clone())
+                .unwrap_or_default(),
+        );
+    }
+
+    /// Bind a nonempty literal text locator.
+    ///
+    /// # Errors
+    ///
+    /// Fails with kind `invalid_query` when `text` is empty.
+    #[napi]
+    pub fn get_by_text(
+        &self,
+        text: String,
+        options: Option<JsTextLocatorOptions>,
+    ) -> napi::Result<JsLocator> {
+        let exact = options
+            .and_then(|options| return options.exact)
+            .unwrap_or(false);
+        let spec = if exact { LocatorSpec::exact(text) } else { LocatorSpec::text(text) };
+
+        return spec
+            .map(|spec| return self.bind(spec))
+            .map_err(|error| return query_error(&error));
+    }
+
+    /// Bind a Rust regex syntax locator.
+    ///
+    /// # Errors
+    ///
+    /// Fails for anything but a string (including `RegExp`), and with kind `invalid_query` when
+    /// the pattern is invalid or can match zero-width text.
+    #[napi]
+    pub fn get_by_regex(&self, pattern: Arg<String>) -> napi::Result<JsLocator> {
+        return locator::regex_spec(pattern).map(|spec| return self.bind(spec));
+    }
+
+    /// Bind one absolute row.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `row` is not a whole number from 0 through 65535.
+    #[napi]
+    pub fn row(&self, row: f64) -> napi::Result<JsLocator> {
+        let row = host::cell_coordinate(row, "row")?;
+
+        return Ok(self.bind(LocatorSpec::default().in_row(row)));
+    }
+
+    /// Bind one nonempty absolute half-open region.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `region` is malformed, and with kind `invalid_query` when it is empty.
+    #[napi]
+    pub fn region(&self, region: Arg<ScreenRegion>) -> napi::Result<JsLocator> {
+        let region = region.0;
+
+        return LocatorSpec::default()
+            .in_region(region)
+            .map(|spec| return self.bind(spec))
+            .map_err(|error| return query_error(&error));
+    }
+
+    /// Bind a cell appearance filter.
+    ///
+    /// # Errors
+    ///
+    /// Fails with kind `invalid_query` when `style` is malformed.
+    #[napi]
+    pub fn filter(
+        &self,
+        style: Arg<termtrace_sdk::locator::StyleFilter>,
+    ) -> napi::Result<JsLocator> {
+        let style = style.0;
+
+        return Ok(self.bind(LocatorSpec::default().with_style(style)));
     }
 
     /// Return the plain text of the latest presented frame.
@@ -299,132 +926,12 @@ impl JsScreen {
     }
 }
 
-/// Fluent builder for atomic, state-guarded input sequences.
-#[napi(js_name = "ActionBuilder")]
-pub struct JsActionBuilder {
-    pub(crate) terminal: Terminal,
-    pub(crate) session_path: String,
-    pub(crate) request: Mutex<ActRequest>,
-}
-
-impl JsActionBuilder {
-    fn new(terminal: Terminal, session_path: String) -> Self {
-        return Self {
-            terminal,
-            session_path,
-            request: Mutex::new(ActRequest::new()),
-        };
-    }
-
-    fn update(&self, change: impl FnOnce(ActRequest) -> ActRequest) {
-        let mut request = self
-            .request
-            .lock()
-            .unwrap_or_else(|poisoned| return poisoned.into_inner());
-        *request = change(std::mem::take(&mut *request));
-    }
-}
-
-#[napi]
-impl JsActionBuilder {
-    /// Enforce that the terminal must be at the specified state hash before executing.
-    #[napi]
-    pub fn if_state(&self, state_hash: String) {
-        self.update(|request| return request.if_state(state_hash));
-    }
-
-    /// Append UTF-8 text to send to the terminal.
-    #[napi]
-    pub fn send_text(&self, text: String) {
-        self.update(|request| return request.text(text));
-    }
-
-    /// Append a key chord (e.g. 'Enter', 'ctrl+c', 'ctrl+shift+F5').
-    ///
-    /// # Errors
-    ///
-    /// Fails when `key` is not a valid key chord or names an unknown key.
-    #[napi]
-    pub fn send_key(&self, key: String) -> napi::Result<()> {
-        let chord = parse_key(&key)?;
-        self.update(|request| return request.key(chord));
-
-        return Ok(());
-    }
-
-    /// Set delay pacing between consecutive action atoms in milliseconds; paced text is typed
-    /// one character at a time.
-    #[napi]
-    pub fn pace(&self, delay_ms: u32) {
-        self.update(|request| return request.pace(Duration::from_millis(u64::from(delay_ms))));
-    }
-
-    /// Append exact raw bytes to send to the terminal.
-    #[napi]
-    pub fn send_bytes(&self, bytes: Vec<u8>) {
-        self.update(|request| return request.bytes(bytes));
-    }
-
-    /// Send bracketed paste text.
-    #[napi]
-    pub fn paste(&self, text: String) {
-        self.update(|request| return request.paste(text));
-    }
-
-    /// Wait until the screen contains the specified pattern after applying input.
-    #[napi]
-    pub fn until_screen(&self, pattern: String, timeout_ms: Option<u32>) {
-        let timeout = timeout_or_default(timeout_ms);
-        self.update(|request| {
-            return request.until_screen(ScreenPredicate::Contains { text: pattern }, timeout);
-        });
-    }
-
-    /// Wait until the screen changes after applying input and then stays unchanged.
-    #[napi]
-    pub fn until_idle(&self, stable_for_ms: Option<u32>, timeout_ms: Option<u32>) {
-        let stable_for = stable_for_ms.map_or(defaults::IDLE_STABLE_FOR, |millis| {
-            return Duration::from_millis(u64::from(millis));
-        });
-        let timeout = timeout_or_default(timeout_ms);
-        self.update(|request| return request.until_idle(stable_for, timeout));
-    }
-
-    /// Execute the action sequence and return the terminating screen frame.
-    ///
-    /// # Errors
-    ///
-    /// Fails when the session cannot be attached, the recorder rejects or cannot complete the
-    /// queued actions, or the background worker panics.
-    #[napi]
-    pub async fn execute(&self) -> napi::Result<Option<JsResolvedState>> {
-        let request = std::mem::take(
-            &mut *self
-                .request
-                .lock()
-                .unwrap_or_else(|poisoned| return poisoned.into_inner()),
-        );
-        let terminal = self.terminal.clone();
-        let path = self.session_path.clone();
-
-        return tokio::task::spawn_blocking(move || {
-            return terminal
-                .attach(path)
-                .and_then(|session| return session.act(request))
-                .map(|outcome| return outcome.frame().map(resolved_state))
-                .map_err(to_napi_err);
-        })
-        .await
-        .map_err(blocking_failure)?;
-    }
-}
-
 /// A logical Termtrace session reference.
 #[napi(js_name = "Session")]
 #[derive(Clone)]
 pub struct JsSession {
     pub(crate) terminal: Terminal,
-    pub(crate) session_path: String,
+    pub(crate) session_path: PathBuf,
     pub(crate) session_id: String,
 }
 
@@ -436,10 +943,62 @@ impl JsSession {
         return self.session_id.clone();
     }
 
-    /// Filesystem path to the session directory.
+    /// Filesystem path to the session directory, for display when it is not UTF-8.
     #[napi(getter)]
     pub fn path(&self) -> String {
-        return self.session_path.clone();
+        return self.session_path.display().to_string();
+    }
+
+    /// Exact session directory bytes.
+    #[napi(getter)]
+    pub fn path_bytes(&self) -> napi::bindgen_prelude::Uint8Array {
+        return napi::bindgen_prelude::Uint8Array::from(self.session_path.as_os_str().as_bytes());
+    }
+
+    /// Explicit application instrumentation with one process instance per emitter.
+    #[napi]
+    pub fn instrumentation(&self) -> diagnostics::JsInstrumentation {
+        return diagnostics::JsInstrumentation::new(Arg(ExactPath(self.session_path.clone())));
+    }
+
+    /// Typed analysis operations through the shared service.
+    #[napi]
+    pub fn analysis(&self) -> diagnostics::JsDiagnostics {
+        return diagnostics::JsDiagnostics {
+            path: self.session_path.clone(),
+        };
+    }
+
+    /// Typed evidence operations through the shared service.
+    #[napi]
+    pub fn evidence(&self) -> diagnostics::JsEvidence {
+        return diagnostics::JsEvidence {
+            path: self.session_path.clone(),
+        };
+    }
+
+    /// Typed integrity operations through the shared service.
+    #[napi]
+    pub fn integrity(&self) -> diagnostics::JsEvidence {
+        return diagnostics::JsEvidence {
+            path: self.session_path.clone(),
+        };
+    }
+
+    /// Source-bound exact PTY output pages.
+    #[napi]
+    pub fn output(&self) -> evidence::JsOutput {
+        return evidence::JsOutput {
+            path: self.session_path.clone(),
+        };
+    }
+
+    /// Source-bound filtered canonical event projections.
+    #[napi]
+    pub fn events(&self) -> evidence::JsEvents {
+        return evidence::JsEvents {
+            path: self.session_path.clone(),
+        };
     }
 
     /// Access screen inspection capabilities.
@@ -457,70 +1016,49 @@ impl JsSession {
         return JsActionBuilder::new(self.terminal.clone(), self.session_path.clone());
     }
 
-    /// Click mouse button at a terminal cell.
+    /// Mode-aware pointer, focus, and text-activation operations with typed results.
+    #[napi]
+    pub fn pointer(&self) -> JsPointer {
+        return JsPointer {
+            terminal: self.terminal.clone(),
+            session_path: self.session_path.clone(),
+        };
+    }
+
+    /// Legacy adapter: click a mouse button at a terminal cell through `pointer().click`,
+    /// discarding the typed result.
     ///
     /// # Errors
     ///
-    /// Fails when `column` or `row` exceeds 65535, `button` is unknown, the session cannot be
-    /// attached, the recorder rejects the click (with `strict`, when the application does not
-    /// report mouse input), or the background worker panics.
+    /// Fails as `Pointer.click`.
     #[napi]
     pub async fn pointer_click(
         &self,
         column: u32,
         row: u32,
-        button: Option<String>,
+        button: Option<Arg<termtrace_sdk::MouseButton>>,
         strict: Option<bool>,
     ) -> napi::Result<()> {
-        let terminal = self.terminal.clone();
-        let path = self.session_path.clone();
-        let col_val = u16::try_from(column).map_err(|error| {
-            return napi::Error::from_reason(format!(
-                "column {column} exceeds maximum 65535: {error}"
-            ));
-        })?;
-        let row_val = u16::try_from(row).map_err(|error| {
-            return napi::Error::from_reason(format!("row {row} exceeds maximum 65535: {error}"));
-        })?;
-        let btn = match button
-            .as_deref()
-            .unwrap_or("left")
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "left" => MouseButton::Left,
-            "right" => MouseButton::Right,
-            "middle" => MouseButton::Middle,
-            "wheel_up" | "wheelup" => MouseButton::WheelUp,
-            "wheel_down" | "wheeldown" => MouseButton::WheelDown,
-            other => {
-                return Err(napi::Error::from_reason(format!(
-                    "unknown mouse button: '{other}'"
-                )))
-            }
+        let options = JsPointerOptions {
+            button,
+            strict,
+            request_id: None,
+            if_state: None,
         };
-        let is_strict = strict.unwrap_or(false);
+        let _result = self
+            .pointer()
+            .click(f64::from(column), f64::from(row), Some(options))
+            .await?;
 
-        return tokio::task::spawn_blocking(move || {
-            let session = terminal.attach(path).map_err(to_napi_err)?;
-            session
-                .pointer()
-                .click(col_val, row_val, btn, is_strict, &MutationGuard::default())
-                .map_err(to_napi_err)?;
-
-            return Ok(());
-        })
-        .await
-        .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
+        return Ok(());
     }
 
-    /// Scroll mouse wheel at a terminal cell.
+    /// Legacy adapter: scroll the mouse wheel at a terminal cell through `pointer().scroll`,
+    /// discarding the typed result.
     ///
     /// # Errors
     ///
-    /// Fails when `column` or `row` exceeds 65535, the session cannot be attached, the recorder
-    /// rejects the scroll (with `strict`, when the application does not report mouse input), or the
-    /// background worker panics.
+    /// Fails as `Pointer.scroll`.
     #[napi]
     pub async fn pointer_scroll(
         &self,
@@ -529,61 +1067,126 @@ impl JsSession {
         lines: Option<i32>,
         strict: Option<bool>,
     ) -> napi::Result<()> {
-        let terminal = self.terminal.clone();
-        let path = self.session_path.clone();
-        let col_val = u16::try_from(column).map_err(|error| {
-            return napi::Error::from_reason(format!(
-                "column {column} exceeds maximum 65535: {error}"
-            ));
-        })?;
-        let row_val = u16::try_from(row).map_err(|error| {
-            return napi::Error::from_reason(format!("row {row} exceeds maximum 65535: {error}"));
-        })?;
-        let line_count = i16::try_from(lines.unwrap_or(1)).unwrap_or(1);
-        let is_strict = strict.unwrap_or(false);
+        let options = JsScrollOptions {
+            lines,
+            strict,
+            request_id: None,
+            if_state: None,
+        };
+        let _result = self
+            .pointer()
+            .scroll(f64::from(column), f64::from(row), Some(options))
+            .await?;
 
-        return tokio::task::spawn_blocking(move || {
-            let session = terminal.attach(path).map_err(to_napi_err)?;
-            session
-                .pointer()
-                .scroll(
-                    col_val,
-                    row_val,
-                    line_count,
-                    is_strict,
-                    &MutationGuard::default(),
-                )
-                .map_err(to_napi_err)?;
-
-            return Ok(());
-        })
-        .await
-        .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
+        return Ok(());
     }
 
-    /// Report terminal focus state.
+    /// Legacy adapter: report terminal focus through `pointer().focus`, discarding the typed
+    /// result.
     ///
     /// # Errors
     ///
-    /// Fails when the session cannot be attached, the recorder rejects the focus report (with
-    /// `strict`, when the application does not report focus), or the background worker panics.
+    /// Fails as `Pointer.focus`.
     #[napi]
     pub async fn pointer_focus(&self, focused: bool, strict: Option<bool>) -> napi::Result<()> {
-        let terminal = self.terminal.clone();
-        let path = self.session_path.clone();
-        let is_strict = strict.unwrap_or(false);
+        let options = JsFocusOptions {
+            strict,
+            request_id: None,
+            if_state: None,
+        };
+        let _result = self.pointer().focus(focused, Some(options)).await?;
 
-        return tokio::task::spawn_blocking(move || {
-            let session = terminal.attach(path).map_err(to_napi_err)?;
-            session
-                .pointer()
-                .focus(focused, is_strict, &MutationGuard::default())
-                .map_err(to_napi_err)?;
+        return Ok(());
+    }
 
-            return Ok(());
-        })
-        .await
-        .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
+    /// Resize the child PTY.
+    ///
+    /// # Errors
+    ///
+    /// Fails for an invalid geometry or request identity, and rejects with `request_id` when the
+    /// recorder rejects it.
+    #[napi]
+    pub async fn resize(
+        &self,
+        cols: f64,
+        rows: f64,
+        options: Option<JsMutationOptions>,
+    ) -> napi::Result<Model<termtrace_sdk::ControlAcknowledgement>> {
+        return control::resize(
+            self.terminal.clone(),
+            self.session_path.clone(),
+            cols,
+            rows,
+            options,
+        )
+        .await;
+    }
+
+    /// Send one allow-listed signal to the child process group.
+    ///
+    /// # Errors
+    ///
+    /// Fails for an unknown signal or invalid request identity, and rejects with `request_id`
+    /// when the recorder rejects it.
+    #[napi]
+    pub async fn signal(
+        &self,
+        signal: Arg<termtrace_sdk::ProcessSignal>,
+        options: Option<JsMutationOptions>,
+    ) -> napi::Result<Model<termtrace_sdk::ControlAcknowledgement>> {
+        return control::signal(
+            self.terminal.clone(),
+            self.session_path.clone(),
+            signal,
+            options,
+        )
+        .await;
+    }
+
+    /// Append a canonical marker.
+    ///
+    /// # Errors
+    ///
+    /// Fails for an invalid request identity, and rejects with `request_id` when the recorder
+    /// rejects it.
+    #[napi]
+    pub async fn mark(
+        &self,
+        label: String,
+        options: Option<JsMutationOptions>,
+    ) -> napi::Result<Model<termtrace_sdk::MarkOutcome>> {
+        return control::mark(
+            self.terminal.clone(),
+            self.session_path.clone(),
+            label,
+            options,
+        )
+        .await;
+    }
+
+    /// Apply ordered steps, each a separate mutation with an identity derived from the send's.
+    ///
+    /// # Errors
+    ///
+    /// Fails for malformed steps or options, and on a failed step rejects with the step's error
+    /// carrying `step`, its derived `request_id`, and `send_request_id`; earlier steps were
+    /// applied.
+    #[napi]
+    pub async fn send(
+        &self,
+        spec: Arg<termtrace_sdk::contracts::SendSpec>,
+    ) -> napi::Result<control::SendResult> {
+        return control::send(self.terminal.clone(), self.session_path.clone(), spec).await;
+    }
+
+    /// Live status `{ kind: 'live', ... }` or completion `{ kind: 'completed', ... }`.
+    ///
+    /// # Errors
+    ///
+    /// Rejects when the session cannot be attached or read.
+    #[napi]
+    pub async fn status(&self) -> napi::Result<Model<termtrace_sdk::SessionStatus>> {
+        return control::status(self.terminal.clone(), self.session_path.clone()).await;
     }
 
     /// Atomically publish visual representations (PNG, SVG, HTML, TXT, JSON) of a state point.
@@ -596,40 +1199,20 @@ impl JsSession {
     pub async fn save(
         &self,
         destination: String,
-        formats: Option<Vec<String>>,
+        formats: Option<Arg<Vec<SaveFormat>>>,
         state_hash: Option<String>,
         include_hidden: Option<bool>,
-    ) -> napi::Result<String> {
-        let session_path = PathBuf::from(&self.session_path);
+    ) -> napi::Result<Model<termtrace_model::artifact::save::SaveManifest>> {
+        let session_path = self.session_path.clone();
         let dest = PathBuf::from(destination);
-        let save_formats = if let Some(fmts) = formats {
-            let mut list = Vec::new();
-            for f in fmts {
-                match f.to_ascii_lowercase().as_str() {
-                    "png" => list.push(SaveFormat::Png),
-                    "svg" => list.push(SaveFormat::Svg),
-                    "html" => list.push(SaveFormat::Html),
-                    "txt" => list.push(SaveFormat::Txt),
-                    "json" => list.push(SaveFormat::Json),
-                    "deep-json" | "deep_json" => list.push(SaveFormat::DeepJson),
-                    "vt" => list.push(SaveFormat::Vt),
-                    other => {
-                        return Err(napi::Error::from_reason(format!(
-                            "unknown save format: '{other}'"
-                        )))
-                    }
-                }
-            }
-
-            list
-        } else {
-            vec![
+        let save_formats = formats.map(|formats| formats.0).unwrap_or_else(|| {
+            return vec![
                 SaveFormat::Png,
                 SaveFormat::Svg,
                 SaveFormat::Txt,
                 SaveFormat::Json,
-            ]
-        };
+            ];
+        });
         let point = state_hash.map_or(StatePoint::LatestPresented, |h| {
             return StatePoint::StateHash { state_hash: h };
         });
@@ -639,8 +1222,7 @@ impl JsSession {
             let outcome = ArtifactService::save(&session_path, &dest, point, &save_formats, hidden)
                 .map_err(to_napi_err)?;
 
-            return serde_json::to_string_pretty(&outcome.manifest)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(outcome.manifest));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
@@ -654,7 +1236,7 @@ impl JsSession {
     /// worker panics.
     #[napi]
     pub async fn export_asciicast(&self, output_path: String) -> napi::Result<()> {
-        let session_path = PathBuf::from(&self.session_path);
+        let session_path = self.session_path.clone();
         let target = PathBuf::from(output_path);
 
         return tokio::task::spawn_blocking(move || {
@@ -673,7 +1255,7 @@ impl JsSession {
     /// Fails when the bundle cannot be created or published, or the background worker panics.
     #[napi]
     pub async fn create_bundle(&self, output_path: String) -> napi::Result<()> {
-        let session_path = PathBuf::from(&self.session_path);
+        let session_path = self.session_path.clone();
         let target = PathBuf::from(output_path);
 
         return tokio::task::spawn_blocking(move || {
@@ -693,8 +1275,12 @@ impl JsSession {
     /// Fails when either state hash cannot be resolved, the session's evidence cannot be validated
     /// or replayed, the report cannot be serialized, or the background worker panics.
     #[napi]
-    pub async fn diff(&self, from_hash: String, to_hash: String) -> napi::Result<String> {
-        let session_path = PathBuf::from(&self.session_path);
+    pub async fn diff(
+        &self,
+        from_hash: String,
+        to_hash: String,
+    ) -> napi::Result<Model<termtrace_model::terminal::diff::SemanticDiff>> {
+        let session_path = self.session_path.clone();
 
         return tokio::task::spawn_blocking(move || {
             let from = StatePoint::StateHash {
@@ -706,8 +1292,7 @@ impl JsSession {
             let (diff, _, _) =
                 AnalysisService::diff(&session_path, from, to).map_err(to_napi_err)?;
 
-            return serde_json::to_string_pretty(&diff)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(diff));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
@@ -722,35 +1307,30 @@ impl JsSession {
     #[napi]
     pub async fn read_output(
         &self,
-        offset: Option<i64>,
+        offset: Option<Arg<u64>>,
         limit: Option<u32>,
     ) -> napi::Result<JsOutputPage> {
-        if let Some(off) = offset
-            && !(0..=9_007_199_254_740_991).contains(&off)
-        {
-            return Err(napi::Error::from_reason(
-                "offset must be a non-negative safe integer",
-            ));
-        }
-        let session_path = PathBuf::from(&self.session_path);
-        let cursor = offset.map(|off| {
-            return OutputCursor {
-                session_path: session_path.clone(),
-                byte_offset: u64::try_from(off).unwrap_or(0),
-                event_seq: None,
-            };
-        });
+        let offset = offset.map(|value| value.0);
+        let session_path = self.session_path.clone();
+        let cursor = offset
+            .map(|off| {
+                return Ok::<_, napi::Error>(OutputCursor {
+                    session_path: session_path.clone(),
+                    byte_offset: off,
+                    event_seq: None,
+                });
+            })
+            .transpose()?;
         let limit_val = usize::try_from(limit.unwrap_or(65536)).unwrap_or(65536);
 
         return tokio::task::spawn_blocking(move || {
             let page =
                 OutputService::read_page(&session_path, cursor, limit_val).map_err(to_napi_err)?;
-            let next_offset = i64::try_from(page.cursor.byte_offset).unwrap_or(i64::MAX);
 
             return Ok(JsOutputPage {
-                bytes: page.bytes,
-                next_offset,
-                has_more: page.has_more,
+                bytes: Model(ByteString::new(page.bytes)),
+                next_offset: Model(page.cursor.byte_offset),
+                has_more: Model(page.has_more),
             });
         })
         .await
@@ -769,7 +1349,7 @@ impl JsSession {
         pattern: String,
         timeout_ms: Option<u32>,
     ) -> napi::Result<bool> {
-        let session_path = PathBuf::from(&self.session_path);
+        let session_path = self.session_path.clone();
         let timeout = timeout_or_default(timeout_ms);
 
         return tokio::task::spawn_blocking(move || {
@@ -783,7 +1363,7 @@ impl JsSession {
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
     }
 
-    /// Read canonical event records as pretty JSON starting at an optional event sequence.
+    /// Read canonical event records starting at an optional event sequence.
     ///
     /// # Errors
     ///
@@ -792,31 +1372,26 @@ impl JsSession {
     #[napi]
     pub async fn read_events(
         &self,
-        cursor: Option<i64>,
+        cursor: Option<Arg<u64>>,
         limit: Option<u32>,
-    ) -> napi::Result<String> {
-        if let Some(seq) = cursor
-            && !(0..=9_007_199_254_740_991).contains(&seq)
-        {
-            return Err(napi::Error::from_reason(
-                "cursor must be a non-negative safe integer",
-            ));
-        }
-        let session_path = PathBuf::from(&self.session_path);
-        let event_cursor = cursor.map(|seq| {
-            return EventCursor {
-                session_path: session_path.clone(),
-                next_event_seq: u64::try_from(seq).unwrap_or(0),
-            };
-        });
+    ) -> napi::Result<Model<Vec<termtrace_model::execution::event::Event>>> {
+        let cursor = cursor.map(|value| value.0);
+        let session_path = self.session_path.clone();
+        let event_cursor = cursor
+            .map(|seq| {
+                return Ok::<_, napi::Error>(EventCursor {
+                    session_path: session_path.clone(),
+                    next_event_seq: seq,
+                });
+            })
+            .transpose()?;
         let limit_val = usize::try_from(limit.unwrap_or(100)).unwrap_or(100);
 
         return tokio::task::spawn_blocking(move || {
             let page = EventsService::read_page(&session_path, event_cursor, limit_val)
                 .map_err(to_napi_err)?;
 
-            return serde_json::to_string_pretty(&page.events)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(page.events));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
@@ -833,8 +1408,8 @@ impl JsSession {
         &self,
         target_hash: Option<String>,
         context: Option<u32>,
-    ) -> napi::Result<String> {
-        let session_path = PathBuf::from(&self.session_path);
+    ) -> napi::Result<Model<termtrace_model::terminal::analysis::ExplainReport>> {
+        let session_path = self.session_path.clone();
         let point = target_hash.map_or(StatePoint::LatestPresented, |h| {
             return StatePoint::StateHash { state_hash: h };
         });
@@ -844,8 +1419,7 @@ impl JsSession {
             let report =
                 AnalysisService::explain(&session_path, point, ctx).map_err(to_napi_err)?;
 
-            return serde_json::to_string_pretty(&report)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(report));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
@@ -858,16 +1432,18 @@ impl JsSession {
     /// Fails when visual or canonical evidence fails validation or replay, the report cannot be
     /// serialized, or the background worker panics.
     #[napi]
-    pub async fn diagnose(&self, broad_change_percent: Option<u32>) -> napi::Result<String> {
-        let session_path = PathBuf::from(&self.session_path);
+    pub async fn diagnose(
+        &self,
+        broad_change_percent: Option<u32>,
+    ) -> napi::Result<Model<termtrace_model::terminal::analysis::DiagnoseReport>> {
+        let session_path = self.session_path.clone();
         let pct = u8::try_from(broad_change_percent.unwrap_or(25)).unwrap_or(25);
 
         return tokio::task::spawn_blocking(move || {
             let report =
                 AnalysisService::diagnose(&session_path, Vec::new(), pct).map_err(to_napi_err)?;
 
-            return serde_json::to_string_pretty(&report)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(report));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
@@ -880,21 +1456,23 @@ impl JsSession {
     /// Fails when the most recent action cannot be analyzed from validated evidence, the report
     /// cannot be serialized, or the background worker panics.
     #[napi]
-    pub async fn last_action(&self, broad_change_percent: Option<u32>) -> napi::Result<String> {
-        let session_path = PathBuf::from(&self.session_path);
+    pub async fn last_action(
+        &self,
+        broad_change_percent: Option<u32>,
+    ) -> napi::Result<Model<termtrace_model::terminal::analysis::LastActionAnalysis>> {
+        let session_path = self.session_path.clone();
         let pct = u8::try_from(broad_change_percent.unwrap_or(25)).unwrap_or(25);
 
         return tokio::task::spawn_blocking(move || {
             let analysis = AnalysisService::last_action(&session_path, pct).map_err(to_napi_err)?;
 
-            return serde_json::to_string_pretty(&analysis)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(analysis));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
     }
 
-    /// Build a bounded page of timeline entries as pretty JSON.
+    /// Build a bounded page of timeline entries.
     ///
     /// # Errors
     ///
@@ -907,8 +1485,8 @@ impl JsSession {
         limit: Option<u32>,
         include_hidden: Option<bool>,
         include_controls: Option<bool>,
-    ) -> napi::Result<String> {
-        let session_path = PathBuf::from(&self.session_path);
+    ) -> napi::Result<Model<termtrace_model::terminal::timeline::TimelinePage>> {
+        let session_path = self.session_path.clone();
         let off = u64::from(offset.unwrap_or(0));
         let lim = u16::try_from(limit.unwrap_or(50)).unwrap_or(50);
         let hidden = include_hidden.unwrap_or(false);
@@ -919,8 +1497,7 @@ impl JsSession {
                 AnalysisService::timeline_page(&session_path, hidden, controls, None, off, lim)
                     .map_err(to_napi_err)?;
 
-            return serde_json::to_string_pretty(&page)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(page));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
@@ -935,6 +1512,8 @@ pub struct JsRecording {
     pub(crate) session: Arc<Mutex<Option<Session>>>,
     pub(crate) session_id: String,
     pub(crate) path: String,
+    pub(crate) finalization: Arc<Mutex<Option<termtrace_sdk::testing::CachedFinalization>>>,
+    pub(crate) lifecycle: Arc<Session>,
 }
 
 #[napi]
@@ -958,13 +1537,62 @@ impl JsRecording {
             .session
             .lock()
             .unwrap_or_else(|e| return e.into_inner());
-        return guard.is_some();
+        return guard
+            .as_ref()
+            .is_some_and(|session| !session.lifecycle_finished())
+            || (self.lifecycle.lifecycle_force_requested()
+                && !self.lifecycle.lifecycle_finished());
+    }
+
+    /// Explicit application instrumentation with one process instance per emitter.
+    #[napi]
+    pub fn instrumentation(&self) -> diagnostics::JsInstrumentation {
+        return diagnostics::JsInstrumentation::new(Arg(ExactPath(PathBuf::from(&self.path))));
+    }
+
+    /// Typed analysis operations through the shared service.
+    #[napi]
+    pub fn analysis(&self) -> diagnostics::JsDiagnostics {
+        return diagnostics::JsDiagnostics {
+            path: PathBuf::from(&self.path),
+        };
+    }
+
+    /// Typed evidence operations through the shared service.
+    #[napi]
+    pub fn evidence(&self) -> diagnostics::JsEvidence {
+        return diagnostics::JsEvidence {
+            path: PathBuf::from(&self.path),
+        };
+    }
+
+    /// Typed integrity operations through the shared service.
+    #[napi]
+    pub fn integrity(&self) -> diagnostics::JsEvidence {
+        return diagnostics::JsEvidence {
+            path: PathBuf::from(&self.path),
+        };
+    }
+
+    /// Source-bound exact PTY output pages.
+    #[napi]
+    pub fn output(&self) -> evidence::JsOutput {
+        return evidence::JsOutput {
+            path: PathBuf::from(&self.path),
+        };
+    }
+
+    /// Source-bound filtered canonical event projections.
+    #[napi]
+    pub fn events(&self) -> evidence::JsEvents {
+        return evidence::JsEvents {
+            path: PathBuf::from(&self.path),
+        };
     }
 
     /// Access screen inspection capabilities.
     ///
     /// # Errors
-    ///
     /// Fails when the recording has already been stopped or detached.
     #[napi]
     pub fn screen(&self) -> napi::Result<JsScreen> {
@@ -976,7 +1604,7 @@ impl JsRecording {
 
         return Ok(JsScreen {
             terminal: self.terminal.clone(),
-            session_path: self.path.clone(),
+            session_path: PathBuf::from(&self.path),
         });
     }
 
@@ -995,7 +1623,7 @@ impl JsRecording {
 
         return Ok(JsActionBuilder::new(
             self.terminal.clone(),
-            self.path.clone(),
+            PathBuf::from(&self.path),
         ));
     }
 
@@ -1014,23 +1642,33 @@ impl JsRecording {
 
         return Ok(JsSession {
             terminal: self.terminal.clone(),
-            session_path: self.path.clone(),
+            session_path: PathBuf::from(&self.path),
             session_id: self.session_id.clone(),
         });
     }
 
-    /// Click mouse button at a terminal cell.
+    /// Mode-aware pointer, focus, and text-activation operations with typed results.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached.
+    #[napi]
+    pub fn pointer(&self) -> napi::Result<JsPointer> {
+        return Ok(self.session()?.pointer());
+    }
+
+    /// Legacy adapter: click a mouse button at a terminal cell.
     ///
     /// # Errors
     ///
     /// Fails when the recording has already been stopped or detached, and otherwise as
-    /// `JsSession::pointer_click`.
+    /// `Pointer.click`.
     #[napi]
     pub async fn pointer_click(
         &self,
         column: u32,
         row: u32,
-        button: Option<String>,
+        button: Option<Arg<termtrace_sdk::MouseButton>>,
         strict: Option<bool>,
     ) -> napi::Result<()> {
         let sess = self.session()?;
@@ -1038,12 +1676,12 @@ impl JsRecording {
         return sess.pointer_click(column, row, button, strict).await;
     }
 
-    /// Scroll mouse wheel at a terminal cell.
+    /// Legacy adapter: scroll the mouse wheel at a terminal cell.
     ///
     /// # Errors
     ///
     /// Fails when the recording has already been stopped or detached, and otherwise as
-    /// `JsSession::pointer_scroll`.
+    /// `Pointer.scroll`.
     #[napi]
     pub async fn pointer_scroll(
         &self,
@@ -1057,17 +1695,96 @@ impl JsRecording {
         return sess.pointer_scroll(column, row, lines, strict).await;
     }
 
-    /// Report terminal focus state.
+    /// Legacy adapter: report terminal focus state.
     ///
     /// # Errors
     ///
     /// Fails when the recording has already been stopped or detached, and otherwise as
-    /// `JsSession::pointer_focus`.
+    /// `Pointer.focus`.
     #[napi]
     pub async fn pointer_focus(&self, focused: bool, strict: Option<bool>) -> napi::Result<()> {
         let sess = self.session()?;
 
         return sess.pointer_focus(focused, strict).await;
+    }
+
+    /// Resize the child PTY.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `Session.resize`.
+    #[napi]
+    pub async fn resize(
+        &self,
+        cols: f64,
+        rows: f64,
+        options: Option<JsMutationOptions>,
+    ) -> napi::Result<Model<termtrace_sdk::ControlAcknowledgement>> {
+        let sess = self.session()?;
+
+        return sess.resize(cols, rows, options).await;
+    }
+
+    /// Send one allow-listed signal to the child process group.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `Session.signal`.
+    #[napi]
+    pub async fn signal(
+        &self,
+        signal: Arg<termtrace_sdk::ProcessSignal>,
+        options: Option<JsMutationOptions>,
+    ) -> napi::Result<Model<termtrace_sdk::ControlAcknowledgement>> {
+        let sess = self.session()?;
+
+        return sess.signal(signal, options).await;
+    }
+
+    /// Append a canonical marker.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `Session.mark`.
+    #[napi]
+    pub async fn mark(
+        &self,
+        label: String,
+        options: Option<JsMutationOptions>,
+    ) -> napi::Result<Model<termtrace_sdk::MarkOutcome>> {
+        let sess = self.session()?;
+
+        return sess.mark(label, options).await;
+    }
+
+    /// Apply ordered steps, each a separate mutation with an identity derived from the send's.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the recording has already been stopped or detached, and otherwise as
+    /// `Session.send`.
+    #[napi]
+    pub async fn send(
+        &self,
+        spec: Arg<termtrace_sdk::contracts::SendSpec>,
+    ) -> napi::Result<control::SendResult> {
+        let sess = self.session()?;
+
+        return sess.send(spec).await;
+    }
+
+    /// Live status `{ kind: 'live', ... }` or completion `{ kind: 'completed', ... }`, also after
+    /// stop.
+    ///
+    /// # Errors
+    ///
+    /// Rejects when the session cannot be attached or read.
+    #[napi]
+    pub async fn status(&self) -> napi::Result<Model<termtrace_sdk::SessionStatus>> {
+        return control::status(self.terminal.clone(), PathBuf::from(&self.path)).await;
     }
 
     /// Atomically publish visual representations (PNG, SVG, HTML, TXT, JSON) of a state point.
@@ -1080,10 +1797,10 @@ impl JsRecording {
     pub async fn save(
         &self,
         destination: String,
-        formats: Option<Vec<String>>,
+        formats: Option<Arg<Vec<SaveFormat>>>,
         state_hash: Option<String>,
         include_hidden: Option<bool>,
-    ) -> napi::Result<String> {
+    ) -> napi::Result<Model<termtrace_model::artifact::save::SaveManifest>> {
         let sess = self.session()?;
 
         return sess
@@ -1100,7 +1817,7 @@ impl JsRecording {
     #[napi]
     pub async fn read_output(
         &self,
-        offset: Option<i64>,
+        offset: Option<Arg<u64>>,
         limit: Option<u32>,
     ) -> napi::Result<JsOutputPage> {
         let sess = self.session()?;
@@ -1125,7 +1842,7 @@ impl JsRecording {
         return sess.wait_for_output(pattern, timeout_ms).await;
     }
 
-    /// Read canonical event records as pretty JSON starting at an optional event sequence.
+    /// Read canonical event records starting at an optional event sequence.
     ///
     /// # Errors
     ///
@@ -1134,9 +1851,9 @@ impl JsRecording {
     #[napi]
     pub async fn read_events(
         &self,
-        cursor: Option<i64>,
+        cursor: Option<Arg<u64>>,
         limit: Option<u32>,
-    ) -> napi::Result<String> {
+    ) -> napi::Result<Model<Vec<termtrace_model::execution::event::Event>>> {
         let sess = self.session()?;
 
         return sess.read_events(cursor, limit).await;
@@ -1153,7 +1870,7 @@ impl JsRecording {
         &self,
         target_hash: Option<String>,
         context: Option<u32>,
-    ) -> napi::Result<String> {
+    ) -> napi::Result<Model<termtrace_model::terminal::analysis::ExplainReport>> {
         let sess = self.session()?;
 
         return sess.explain(target_hash, context).await;
@@ -1166,7 +1883,10 @@ impl JsRecording {
     /// Fails when the recording has already been stopped or detached, and otherwise as
     /// `JsSession::diagnose`.
     #[napi]
-    pub async fn diagnose(&self, broad_change_percent: Option<u32>) -> napi::Result<String> {
+    pub async fn diagnose(
+        &self,
+        broad_change_percent: Option<u32>,
+    ) -> napi::Result<Model<termtrace_model::terminal::analysis::DiagnoseReport>> {
         let sess = self.session()?;
 
         return sess.diagnose(broad_change_percent).await;
@@ -1179,13 +1899,17 @@ impl JsRecording {
     /// Fails when the recording has already been stopped or detached, and otherwise as
     /// `JsSession::last_action`.
     #[napi]
-    pub async fn last_action(&self, broad_change_percent: Option<u32>) -> napi::Result<String> {
+    pub async fn last_action(
+        &self,
+        broad_change_percent: Option<u32>,
+    ) -> napi::Result<Model<termtrace_model::terminal::analysis::LastActionAnalysis>> {
         let sess = self.session()?;
 
         return sess.last_action(broad_change_percent).await;
     }
 
-    /// Stop the recording session and wait for validated completion evidence.
+    /// Legacy adapter: stop the recording session through `requestStop` and wait for validated
+    /// completion evidence.
     ///
     /// # Errors
     ///
@@ -1196,19 +1920,106 @@ impl JsRecording {
         let timeout = timeout_ms.map_or(defaults::STOP_TIMEOUT, |millis| {
             return Duration::from_millis(u64::from(millis));
         });
-        let Some(mut session) = self.take() else {
-            return Ok(());
-        };
+        let _outcome = self.stop_request(Uuid::now_v7(), Some(timeout)).await?;
+
+        return Ok(());
+    }
+
+    /// Ask the recording to end; with `waitMs`, wait that long for validated completion.
+    ///
+    /// Resolves with `{ kind: 'requested', ... }` or `{ kind: 'completed', ... }`. A failed request
+    /// leaves the recording attached; pass `requestId` to retry it with the same identity.
+    ///
+    /// # Errors
+    ///
+    /// Fails when already stopped or detached or `requestId` is invalid, and rejects with
+    /// `request_id` when the stop is rejected or completion is not published in time.
+    #[napi]
+    pub async fn request_stop(
+        &self,
+        options: Option<StopOptions>,
+    ) -> napi::Result<Model<StopReport>> {
+        let (request_id, wait_ms) = options.map_or((None, None), |options| {
+            return (options.request_id, options.wait_ms);
+        });
+        let request_id =
+            actions::request_id_arg(request_id.as_deref())?.unwrap_or_else(Uuid::now_v7);
+        let wait = wait_ms.map(|millis| return Duration::from_millis(u64::from(millis)));
+        let outcome = self.stop_request(request_id, wait).await?.ok_or_else(|| {
+            return napi::Error::from_reason("recording has already been stopped or detached");
+        })?;
+
+        return Ok(Model(StopReport {
+            request_id,
+            outcome,
+        }));
+    }
+
+    /// Wait for validated completion evidence and reap the recorder; resolves with the completion.
+    ///
+    /// # Errors
+    ///
+    /// Fails when already stopped or detached, and rejects when completion is not published in
+    /// time, leaving the recording attached.
+    #[napi]
+    pub async fn wait_for_completion(
+        &self,
+        timeout_ms: Option<u32>,
+    ) -> napi::Result<Model<termtrace_model::execution::session::SessionCompletion>> {
+        let timeout = timeout_ms.map_or(defaults::STOP_TIMEOUT, |millis| {
+            return Duration::from_millis(u64::from(millis));
+        });
+        let mut session = self.take().ok_or_else(|| {
+            return napi::Error::from_reason("recording has already been stopped or detached");
+        })?;
 
         let (session, result) = tokio::task::spawn_blocking(move || {
-            let result = session.stop(StopRequest::default(), Some(timeout));
+            let result = session.complete(timeout);
             return (session, result);
         })
         .await
         .map_err(blocking_failure)?;
 
+        return match result {
+            Ok(completion) => Ok(Model(completion)),
+            Err(error) => {
+                self.restore(session);
+                Err(to_napi_err(error))
+            }
+        };
+    }
+
+    /// Delete this completed canonical session, reaping an owned recorder.
+    ///
+    /// # Errors
+    ///
+    /// Rejects when completion is missing or invalid or the session cannot be removed durably;
+    /// an owned recording stays attached.
+    #[napi]
+    pub async fn discard_completed(&self) -> napi::Result<()> {
+        let owned = self.take();
+        let attached = owned.is_some();
+        let terminal = self.terminal.clone();
+        let path = self.path.clone();
+
+        let (session, result) = tokio::task::spawn_blocking(move || {
+            let mut session = match owned {
+                Some(session) => session,
+                None => match terminal.attach(path) {
+                    Ok(session) => session,
+                    Err(error) => return (None, Err(error)),
+                },
+            };
+            let result = session.discard_completed();
+            return (Some(session), result);
+        })
+        .await
+        .map_err(blocking_failure)?;
+
         if let Err(error) = result {
-            self.restore(session);
+            if attached && let Some(session) = session {
+                self.restore(session);
+            }
             return Err(to_napi_err(error));
         }
 
@@ -1223,8 +2034,12 @@ impl JsRecording {
     /// recording attached.
     #[napi]
     pub fn force_close(&self) -> napi::Result<()> {
-        let Some(mut session) = self.take() else {
-            return Ok(());
+        let mut session = match self.take() {
+            Some(session) => session,
+            None if self.lifecycle.lifecycle_force_requested() => {
+                self.lifecycle.lifecycle_observer()
+            }
+            None => return Ok(()),
         };
 
         if let Err(error) = session.force_close() {
@@ -1262,6 +2077,47 @@ impl JsRecording {
 }
 
 impl JsRecording {
+    async fn stop_request(
+        &self,
+        request_id: Uuid,
+        wait: Option<Duration>,
+    ) -> napi::Result<Option<StopOutcome>> {
+        let Some(mut session) = self.take() else {
+            return Ok(None);
+        };
+
+        let request = StopRequest {
+            guard: MutationGuard {
+                request_id: Some(request_id),
+                if_state: None,
+            },
+        };
+
+        let (session, result) = tokio::task::spawn_blocking(move || {
+            let result = session.stop(request, wait);
+
+            return (session, result);
+        })
+        .await
+        .map_err(blocking_failure)?;
+
+        return match result {
+            Ok(StopOutcome::Completed { completion }) => {
+                Ok(Some(StopOutcome::Completed { completion }))
+            }
+            Ok(requested @ StopOutcome::Requested { .. }) => {
+                self.restore(session);
+
+                Ok(Some(requested))
+            }
+            Err(error) => {
+                self.restore(session);
+
+                Err(mutation_err(error, request_id))
+            }
+        };
+    }
+
     fn take(&self) -> Option<Session> {
         return self
             .session
@@ -1271,11 +2127,24 @@ impl JsRecording {
     }
 
     fn restore(&self, session: Session) {
+        if session.lifecycle_finished() || session.lifecycle_force_requested() {
+            return;
+        }
+
         *self
             .session
             .lock()
             .unwrap_or_else(|poisoned| return poisoned.into_inner()) = Some(session);
     }
+}
+
+/// Identity and wait of one stop request.
+#[napi(object, object_to_js = false, js_name = "StopOptions")]
+pub struct StopOptions {
+    /// Identity of this stop, to retry it safely.
+    pub request_id: Option<String>,
+    /// Wait this long for validated completion; without it, resolve once the stop is accepted.
+    pub wait_ms: Option<u32>,
 }
 
 /// Primary entry point for launching and managing Termtrace recordings in Node.js.
@@ -1287,6 +2156,56 @@ pub struct JsTermtrace {
 
 #[napi]
 impl JsTermtrace {
+    /// Typed system service, without starting probes on construction.
+    #[napi]
+    pub fn system(&self) -> diagnostics::JsSystem {
+        return diagnostics::JsSystem::new();
+    }
+    /// Instrumentation bound to one live session.
+    #[napi]
+    pub fn instrumentation(&self, source: Arg<ExactPath>) -> diagnostics::JsInstrumentation {
+        return diagnostics::JsInstrumentation::new(source);
+    }
+
+    /// Aggregate tmux recording with an explicit root, tmux executable, and socket.
+    #[napi]
+    pub fn tmux(
+        &self,
+        root: Option<Arg<ExactPath>>,
+        tmux: Option<Arg<ExactPath>>,
+        socket: Option<Arg<ExactPath>>,
+        socket_name: Option<bool>,
+    ) -> diagnostics::JsTmux {
+        return diagnostics::JsTmux::new(
+            root,
+            Some(Arg(ExactPath(self.terminal.binary().to_path_buf()))),
+            tmux,
+            socket,
+            socket_name,
+        );
+    }
+
+    /// Registry operations at an explicit or the default state root.
+    #[napi]
+    pub fn registry(&self, root: Option<Arg<ExactPath>>) -> diagnostics::JsRegistry {
+        return diagnostics::JsRegistry::new(
+            root,
+            Some(Arg(ExactPath(self.terminal.binary().to_path_buf()))),
+        );
+    }
+
+    /// Replay analysis of one canonical session.
+    #[napi]
+    pub fn analysis(&self, source: Arg<ExactPath>) -> diagnostics::JsDiagnostics {
+        return diagnostics::JsDiagnostics::new(source);
+    }
+
+    /// Evidence artifacts and integrity operations for one canonical session.
+    #[napi]
+    pub fn evidence(&self, source: Arg<ExactPath>) -> diagnostics::JsEvidence {
+        return diagnostics::JsEvidence::new(source);
+    }
+
     /// Create a new Termtrace instance with optional binary and evidence root paths.
     #[napi(constructor)]
     pub fn new(binary: Option<String>, evidence_root: Option<String>) -> Self {
@@ -1312,32 +2231,172 @@ impl JsTermtrace {
         env: Option<HashMap<String, String>>,
         cwd: Option<String>,
     ) -> napi::Result<JsRecording> {
-        let terminal = self.terminal.clone();
-        let cmd_os: Vec<OsString> = command.into_iter().map(OsString::from).collect();
-        let geometry = |value: Option<u32>, default: u16, name: &str| {
-            return value.map_or(Ok(default), |value| {
-                return u16::try_from(value).map_err(|error| {
-                    return napi::Error::from_reason(format!(
-                        "{name} {value} exceeds 65535: {error}"
-                    ));
-                });
-            });
+        let geometry = |value: Option<u32>, name: &str| {
+            return value
+                .map(|value| {
+                    return u16::try_from(value).map_err(|error| {
+                        return napi::Error::from_reason(format!(
+                            "{name} {value} exceeds 65535: {error}"
+                        ));
+                    });
+                })
+                .transpose();
         };
-        let mut spec = LaunchSpec::new(cmd_os).geometry(
-            geometry(cols, defaults::COLS, "cols")?,
-            geometry(rows, defaults::ROWS, "rows")?,
-        );
-        spec.working_directory = cwd.map(PathBuf::from);
-        for (name, value) in env.unwrap_or_default() {
-            spec = spec.environment_variable(name, value.into_bytes());
-        }
+        let environment = EnvironmentSpec {
+            set: env
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(name, value)| return (name, ByteString::new(value.into_bytes())))
+                .collect(),
+            ..EnvironmentSpec::default()
+        };
+        let options = LaunchOptions {
+            rows: geometry(rows, "rows")?,
+            cols: geometry(cols, "cols")?,
+            cwd,
+            environment: Some(environment),
+            ..LaunchOptions::default()
+        };
+
+        return self
+            .start(control::launch_spec_from(command, &options)?)
+            .await;
+    }
+
+    /// Launch a recorded command with typed options: `rows`, `cols`, `cwd`, `environment`
+    /// (`base`, `set` name to bytes, `copy`, `unset`, `color`), `startup_timeout_ms`,
+    /// `output_byte_budget`, `max_duration_ms`, and `idle_timeout_ms`.
+    ///
+    /// Resolves once the recorder answers or the session already completed. A cleared
+    /// environment still receives the reserved terminal variables.
+    ///
+    /// # Errors
+    ///
+    /// Fails for unknown or malformed options, and rejects when the options are invalid or the
+    /// command cannot be launched and recorded.
+    #[napi]
+    pub async fn launch(
+        &self,
+        command: Vec<String>,
+        options: Option<Arg<LaunchOptions>>,
+    ) -> napi::Result<JsRecording> {
+        return self.start(control::launch_spec(command, options)?).await;
+    }
+
+    /// Launch `command` as an original recording: it runs in a private Ghostty display whose
+    /// pixels are captured from before its first byte.
+    ///
+    /// Options: `grid` or `viewport`, `canvas`, `fps` (24, 30 or 60), `cwd`, `environment`,
+    /// `ghostty_config`, `alias`, `state_root`, `startup_timeout_ms`, `output_byte_budget`,
+    /// `max_duration_ms` and `idle_timeout_ms`. Cancelling `cancel` tears startup down within
+    /// a bounded deadline; the promise settles only after that.
+    ///
+    /// # Errors
+    ///
+    /// Fails for malformed options, and rejects with `original_capture_failed` when
+    /// acquisition fails or is cancelled, or when native capture is unavailable.
+    #[napi]
+    pub async fn record_original(
+        &self,
+        command: Vec<String>,
+        options: Option<Arg<termtrace_sdk::contracts::OriginalLaunchOptions>>,
+        cancel: Option<&locator::JsCancelToken>,
+    ) -> napi::Result<original::JsOriginalRecording> {
+        let spec = original::original_launch_spec(command, options)?;
+
+        return original::start_original(self.terminal.clone(), spec, cancel.cloned()).await;
+    }
+
+    /// Attach to an original recording without owning its capture supervisor.
+    ///
+    /// # Errors
+    ///
+    /// Rejects when the session or its capture status is missing or invalid.
+    #[napi]
+    pub async fn attach_original(
+        &self,
+        session_path: String,
+    ) -> napi::Result<original::JsOriginalRecording> {
+        let terminal = self.terminal.clone();
+
+        return tokio::task::spawn_blocking(move || {
+            let original = terminal
+                .attach_original(&session_path)
+                .map_err(to_napi_err)?;
+
+            return Ok(original::JsOriginalRecording::new(terminal, original));
+        })
+        .await
+        .map_err(blocking_failure)?;
+    }
+
+    /// Attach to an original recording named by path or registry alias, without owning its
+    /// capture supervisor. Strings and bytes follow the `path:`/`name:` rules; aliases resolve
+    /// under `stateRoot`, or the default registry.
+    ///
+    /// # Errors
+    ///
+    /// Rejects when the target does not resolve, or the session or its capture status is
+    /// missing, invalid, not owner-only, or published for another session.
+    #[napi]
+    pub async fn attach_original_target(
+        &self,
+        target: original::PathInput,
+        state_root: Option<original::PathInput>,
+    ) -> napi::Result<original::JsOriginalRecording> {
+        let target = original::session_target(&target)?;
+        let state_root = original::state_root(state_root.as_ref());
+        let terminal = self.terminal.clone();
+
+        return tokio::task::spawn_blocking(move || {
+            let original = terminal
+                .attach_original_target(&target, state_root.as_deref())
+                .map_err(to_napi_err)?;
+
+            return Ok(original::JsOriginalRecording::new(terminal, original));
+        })
+        .await
+        .map_err(blocking_failure)?;
+    }
+
+    /// Attach to a session named by path or registry alias; `path:` and `name:` prefixes are
+    /// explicit.
+    ///
+    /// # Errors
+    ///
+    /// Rejects when the target does not resolve or cannot be attached.
+    #[napi]
+    pub async fn attach_target(&self, target: String) -> napi::Result<JsSession> {
+        let terminal = self.terminal.clone();
+
+        return tokio::task::spawn_blocking(move || {
+            let target = SessionTarget::parse(OsStr::new(&target)).map_err(to_napi_err)?;
+            let session = terminal.attach_target(&target).map_err(to_napi_err)?;
+
+            return Ok(JsSession {
+                session_id: session.session_id().to_string(),
+                session_path: session.path().to_path_buf(),
+                terminal,
+            });
+        })
+        .await
+        .map_err(blocking_failure)?;
+    }
+}
+
+impl JsTermtrace {
+    async fn start(&self, spec: LaunchSpec) -> napi::Result<JsRecording> {
+        let terminal = self.terminal.clone();
 
         return tokio::task::spawn_blocking(move || {
             let session = terminal.start(spec).map_err(to_napi_err)?;
             let session_id = session.session_id().to_string();
             let path = session.path().display().to_string();
+            let lifecycle = Arc::new(session.lifecycle_observer());
 
             return Ok(JsRecording {
+                lifecycle,
+                finalization: Arc::new(Mutex::new(None)),
                 terminal: terminal.clone(),
                 session: Arc::new(Mutex::new(Some(session))),
                 session_id,
@@ -1347,7 +2406,10 @@ impl JsTermtrace {
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
     }
+}
 
+#[napi]
+impl JsTermtrace {
     /// Attach to an existing session directory.
     ///
     /// # Errors
@@ -1361,7 +2423,7 @@ impl JsTermtrace {
         return tokio::task::spawn_blocking(move || {
             let session = terminal.attach(&path).map_err(to_napi_err)?;
             let session_id = session.session_id().to_string();
-            let session_path = session.path().display().to_string();
+            let session_path = session.path().to_path_buf();
 
             return Ok(JsSession {
                 terminal,
@@ -1412,28 +2474,17 @@ impl JsTermtrace {
     pub async fn verify_session(
         &self,
         session_path: String,
-        level: Option<String>,
-    ) -> napi::Result<String> {
+        level: Option<Arg<termtrace_model::execution::session::VerificationLevel>>,
+    ) -> napi::Result<Model<termtrace_model::execution::session::VerificationReport>> {
         let path = PathBuf::from(session_path);
-        let lvl = match level
-            .as_deref()
-            .unwrap_or("content")
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "structure" => VerificationLevel::Structure,
-            "durability" | "durability_record" | "durability-record" => {
-                VerificationLevel::DurabilityRecord
-            }
-            "signature" => VerificationLevel::Signature,
-            _ => VerificationLevel::Content,
-        };
+        let lvl = level
+            .map(|v| v.0)
+            .unwrap_or(termtrace_model::execution::session::VerificationLevel::Content);
 
         return tokio::task::spawn_blocking(move || {
             let report = IntegrityService::verify(&path, lvl, None);
 
-            return serde_json::to_string_pretty(&report)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(report));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
@@ -1450,15 +2501,14 @@ impl JsTermtrace {
         &self,
         session_path: String,
         destination: String,
-    ) -> napi::Result<String> {
+    ) -> napi::Result<Model<termtrace_model::execution::event_log::RecoveryReport>> {
         let src = PathBuf::from(session_path);
         let dest = PathBuf::from(destination);
 
         return tokio::task::spawn_blocking(move || {
             let report = IntegrityService::recover_session(&src, &dest).map_err(to_napi_err)?;
 
-            return serde_json::to_string_pretty(&report)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(report));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
@@ -1471,15 +2521,17 @@ impl JsTermtrace {
     /// Fails when the default registry cannot be opened or read, the entries cannot be serialized,
     /// or the background worker panics.
     #[napi]
-    pub async fn registry_list(&self, include_all: Option<bool>) -> napi::Result<String> {
+    pub async fn registry_list(
+        &self,
+        include_all: Option<bool>,
+    ) -> napi::Result<Model<Vec<termtrace_model::registry::RegistryListEntry>>> {
         let all = include_all.unwrap_or(false);
 
         return tokio::task::spawn_blocking(move || {
             let reg = RegistryService::open_default().map_err(to_napi_err)?;
             let entries = reg.list(all).map_err(to_napi_err)?;
 
-            return serde_json::to_string_pretty(&entries)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(entries));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
@@ -1495,11 +2547,11 @@ impl JsTermtrace {
     pub async fn registry_resolve(&self, name: String) -> napi::Result<Option<String>> {
         return tokio::task::spawn_blocking(move || {
             let reg = RegistryService::open_default().map_err(to_napi_err)?;
-            match reg.resolve(&name) {
-                Ok(entry) => {
+            match reg.resolve_optional(&name).map_err(to_napi_err)? {
+                Some(entry) => {
                     return Ok(Some(entry.session_path().display().to_string()));
                 }
-                Err(_) => {
+                None => {
                     return Ok(None);
                 }
             }
@@ -1519,15 +2571,14 @@ impl JsTermtrace {
         &self,
         name: String,
         session_path: String,
-    ) -> napi::Result<String> {
+    ) -> napi::Result<Model<termtrace_model::registry::RegistryEntry>> {
         let path = PathBuf::from(session_path);
 
         return tokio::task::spawn_blocking(move || {
             let reg = RegistryService::open_default().map_err(to_napi_err)?;
             let entry = reg.register(&name, &path).map_err(to_napi_err)?;
 
-            return serde_json::to_string_pretty(&entry)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(entry));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
@@ -1564,7 +2615,7 @@ impl JsTermtrace {
         keep_latest: Option<u32>,
         max_completed_bytes: Option<u32>,
         apply: Option<bool>,
-    ) -> napi::Result<String> {
+    ) -> napi::Result<Model<termtrace_model::registry::GarbageCollectionReport>> {
         let days = older_than_days.map_or(defaults::GC_OLDER_THAN_DAYS, u64::from);
         let keep = keep_latest.map_or(defaults::GC_KEEP_LATEST, u64::from);
         let quota = max_completed_bytes.map(u64::from);
@@ -1574,8 +2625,7 @@ impl JsTermtrace {
             let reg = RegistryService::open_default().map_err(to_napi_err)?;
             let report = reg.gc(days, keep, quota, is_apply).map_err(to_napi_err)?;
 
-            return serde_json::to_string_pretty(&report)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(report));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
@@ -1592,15 +2642,14 @@ impl JsTermtrace {
         &self,
         manifest_path: String,
         destination: String,
-    ) -> napi::Result<String> {
+    ) -> napi::Result<Model<termtrace_sdk::tmux::TmuxStreamingBundleManifest>> {
         let manifest = PathBuf::from(manifest_path);
         let dest = PathBuf::from(destination);
 
         return tokio::task::spawn_blocking(move || {
             let report = TmuxService::bundle(&manifest, &dest).map_err(to_napi_err)?;
 
-            return serde_json::to_string_pretty(&report)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(report));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
@@ -1635,12 +2684,13 @@ impl JsTermtrace {
     ///
     /// Fails only when the report cannot be serialized or the background worker panics.
     #[napi]
-    pub async fn probe_capabilities(&self) -> napi::Result<String> {
+    pub async fn probe_capabilities(
+        &self,
+    ) -> napi::Result<Model<termtrace_model::protocol::capability::CapabilityReport>> {
         return tokio::task::spawn_blocking(move || {
             let report = SystemService::probe_capabilities(&AtomicBool::new(false));
 
-            return serde_json::to_string_pretty(&report)
-                .map_err(|e| return napi::Error::from_reason(e.to_string()));
+            return Ok(Model(report));
         })
         .await
         .map_err(|e| return napi::Error::from_reason(e.to_string()))?;

@@ -6,7 +6,8 @@
   "types": "index.d.ts",
   "exports": {
     ".": "./index.js",
-    "./testing": "./testing.js"
+    "./testing": "./testing.js",
+    "./contracts": "./contracts.js"
   },
   "napi": {
     "name": "termtrace",
@@ -16,8 +17,8 @@
     "dtsHeaderFile": "dts-header.d.ts"
   },
   "scripts": {
-    "build": "napi build --platform --release",
-    "build:debug": "napi build --platform",
+    "build": "napi build --release",
+    "build:debug": "napi build",
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {
@@ -26,5 +27,17 @@
   "license": "MIT",
   "engines": {
     "node": ">= 18.0.0"
-  }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "types.d.ts",
+    "termtrace.node",
+    "contracts.js",
+    "contracts.d.ts",
+    "locator.js",
+    "original.js",
+    "testing.js",
+    "testing.d.ts"
+  ]
 }
