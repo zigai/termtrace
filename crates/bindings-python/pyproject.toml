@@ -33,7 +33,6 @@ pytest = ["pytest>=8.0.0"]
 termtrace = "termtrace.pytest_plugin"
 
 [tool.maturin]
-features = ["pyo3/extension-module"]
 module-name = "termtrace._termtrace"
 python-source = "python"
 strip = true

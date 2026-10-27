@@ -1,31 +1,47 @@
 //! Logical session handle and forensic exports for Python.
 
 use crate::actions::PyActionBuilder;
+use crate::control::{self, PyPointer};
 use crate::errors::to_py_err;
+use crate::host::{Arg, Model};
 use crate::screen::PyScreen;
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
+use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
+use std::os::unix::ffi::OsStrExt as _;
 use std::path::PathBuf;
 use termtrace_model::artifact::bundle::BundleProfile;
 use termtrace_model::artifact::save::SaveFormat;
+use termtrace_model::artifact::save::SaveOutcome;
+use termtrace_model::execution::event::Event;
+use termtrace_model::protocol::control::ProcessSignal;
 use termtrace_model::terminal::observation::StatePoint;
-use termtrace_model::terminal::state::MouseButton;
+use termtrace_model::terminal::{
+    analysis::{DiagnoseReport, ExplainReport, LastActionAnalysis},
+    diff::SemanticDiff,
+    timeline::TimelinePage,
+};
 use termtrace_sdk::analysis::AnalysisService;
 use termtrace_sdk::artifacts::ArtifactService;
 use termtrace_sdk::client::Terminal;
+use termtrace_sdk::contracts::{ConditionSpec, SendStepSpec};
 use termtrace_sdk::defaults;
 use termtrace_sdk::events::{EventCursor, EventsService};
-use termtrace_sdk::input::MutationGuard;
 use termtrace_sdk::output::{OutputCursor, OutputService};
+use termtrace_sdk::screen::{FrameDetail, ScreenRegion};
+use termtrace_sdk::session::{ControlAcknowledgement, MarkOutcome, SessionStatus};
 
 /// A logical Termtrace session reference.
+#[gen_stub_pyclass]
 #[pyclass(name = "Session", from_py_object)]
 #[derive(Clone)]
 pub struct PySession {
     pub(crate) terminal: Terminal,
-    pub(crate) session_path: String,
+    pub(crate) session_path: PathBuf,
     pub(crate) session_id: String,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PySession {
     /// Canonical session identity string.
@@ -34,10 +50,58 @@ impl PySession {
         return &self.session_id;
     }
 
-    /// Filesystem path to the session directory.
+    /// Filesystem path to the session directory, for display when it is not UTF-8.
     #[getter]
-    pub fn path(&self) -> &str {
-        return &self.session_path;
+    pub fn path(&self) -> String {
+        return self.session_path.display().to_string();
+    }
+
+    /// Exact session directory bytes.
+    #[getter]
+    pub fn path_bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        return PyBytes::new(py, self.session_path.as_os_str().as_bytes());
+    }
+
+    /// Explicit application instrumentation; retain the emitter to share a process instance.
+    pub fn instrumentation(&self) -> crate::diagnostics::PyInstrumentation {
+        return crate::diagnostics::PyInstrumentation::new(crate::host::PathArg(
+            self.session_path.clone(),
+        ));
+    }
+
+    /// Typed analysis operations through the shared service.
+    pub fn analysis(&self) -> crate::diagnostics::PyDiagnostics {
+        return crate::diagnostics::PyDiagnostics {
+            path: self.session_path.clone(),
+        };
+    }
+
+    /// Typed evidence operations through the shared service.
+    pub fn evidence(&self) -> crate::diagnostics::PyEvidence {
+        return crate::diagnostics::PyEvidence {
+            path: self.session_path.clone(),
+        };
+    }
+
+    /// Typed integrity operations through the shared service.
+    pub fn integrity(&self) -> crate::diagnostics::PyEvidence {
+        return crate::diagnostics::PyEvidence {
+            path: self.session_path.clone(),
+        };
+    }
+
+    /// Source-bound exact PTY output pages.
+    pub fn output(&self) -> crate::evidence::PyOutput {
+        return crate::evidence::PyOutput {
+            path: self.session_path.clone(),
+        };
+    }
+
+    /// Source-bound filtered canonical event projections.
+    pub fn events(&self) -> crate::evidence::PyEvents {
+        return crate::evidence::PyEvents {
+            path: self.session_path.clone(),
+        };
     }
 
     /// Access screen inspection capabilities.
@@ -53,7 +117,15 @@ impl PySession {
         return PyActionBuilder::new(self.terminal.clone(), self.session_path.clone());
     }
 
-    /// Click mouse button at a terminal cell.
+    /// Mode-aware pointer, focus, and text-activation operations with typed results.
+    pub fn pointer(&self) -> PyPointer {
+        return PyPointer {
+            terminal: self.terminal.clone(),
+            session_path: self.session_path.clone(),
+        };
+    }
+
+    /// Legacy click adapter over `pointer().click`; returns `None`.
     ///
     /// # Errors
     ///
@@ -69,39 +141,20 @@ impl PySession {
         button: Option<String>,
         strict: Option<bool>,
     ) -> PyResult<()> {
-        let terminal = self.terminal.clone();
-        let path = self.session_path.clone();
-        let btn = match button
-            .as_deref()
-            .unwrap_or("left")
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "left" => MouseButton::Left,
-            "right" => MouseButton::Right,
-            "middle" => MouseButton::Middle,
-            "wheel_up" | "wheelup" => MouseButton::WheelUp,
-            "wheel_down" | "wheeldown" => MouseButton::WheelDown,
-            other => {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "unknown mouse button: '{other}'"
-                )))
-            }
-        };
-        let is_strict = strict.unwrap_or(false);
+        let _result = self.pointer().click(
+            py,
+            column,
+            row,
+            button.as_deref(),
+            strict.unwrap_or(false),
+            None,
+            None,
+        )?;
 
-        py.detach(move || {
-            let session = terminal.attach(path).map_err(to_py_err)?;
-            session
-                .pointer()
-                .click(column, row, btn, is_strict, &MutationGuard::default())
-                .map_err(to_py_err)?;
-
-            return Ok(());
-        })
+        return Ok(());
     }
 
-    /// Scroll mouse wheel at a terminal cell.
+    /// Legacy scroll adapter over `pointer().scroll`; returns `None`.
     ///
     /// # Errors
     ///
@@ -116,29 +169,20 @@ impl PySession {
         lines: Option<i16>,
         strict: Option<bool>,
     ) -> PyResult<()> {
-        let terminal = self.terminal.clone();
-        let path = self.session_path.clone();
-        let line_count = lines.unwrap_or(1);
-        let is_strict = strict.unwrap_or(false);
+        let _result = self.pointer().scroll(
+            py,
+            column,
+            row,
+            lines.unwrap_or(1),
+            strict.unwrap_or(false),
+            None,
+            None,
+        )?;
 
-        py.detach(move || {
-            let session = terminal.attach(path).map_err(to_py_err)?;
-            session
-                .pointer()
-                .scroll(
-                    column,
-                    row,
-                    line_count,
-                    is_strict,
-                    &MutationGuard::default(),
-                )
-                .map_err(to_py_err)?;
-
-            return Ok(());
-        })
+        return Ok(());
     }
 
-    /// Report terminal focus state.
+    /// Legacy focus adapter over `pointer().focus`; returns `None`.
     ///
     /// # Errors
     ///
@@ -151,19 +195,131 @@ impl PySession {
         focused: bool,
         strict: Option<bool>,
     ) -> PyResult<()> {
-        let terminal = self.terminal.clone();
-        let path = self.session_path.clone();
-        let is_strict = strict.unwrap_or(false);
+        let _result = self
+            .pointer()
+            .focus(py, focused, strict.unwrap_or(false), None, None)?;
 
-        py.detach(move || {
-            let session = terminal.attach(path).map_err(to_py_err)?;
-            session
-                .pointer()
-                .focus(focused, is_strict, &MutationGuard::default())
-                .map_err(to_py_err)?;
+        return Ok(());
+    }
 
-            return Ok(());
-        })
+    /// Resize the child PTY to `cols` by `rows` cells.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass with `request_id` when the recorder rejects it.
+    #[pyo3(signature = (cols, rows, *, request_id = None, if_state = None))]
+    pub fn resize(
+        &self,
+        py: Python<'_>,
+        cols: u16,
+        rows: u16,
+        request_id: Option<&Bound<'_, PyAny>>,
+        if_state: Option<String>,
+    ) -> PyResult<Model<ControlAcknowledgement>> {
+        return control::resize(
+            py,
+            &self.terminal,
+            &self.session_path,
+            cols,
+            rows,
+            request_id,
+            if_state,
+        );
+    }
+
+    /// Send `interrupt`, `terminate`, `hangup`, `user1`, or `user2` to the child process group.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` for an unknown signal and `TermtraceError` or a subclass with
+    /// `request_id` when the recorder rejects it.
+    #[pyo3(signature = (signal, *, request_id = None, if_state = None))]
+    pub fn signal(
+        &self,
+        py: Python<'_>,
+        signal: Arg<ProcessSignal>,
+        request_id: Option<&Bound<'_, PyAny>>,
+        if_state: Option<String>,
+    ) -> PyResult<Model<ControlAcknowledgement>> {
+        return control::signal(
+            py,
+            &self.terminal,
+            &self.session_path,
+            signal,
+            request_id,
+            if_state,
+        );
+    }
+
+    /// Append a named marker to the canonical event stream.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass with `request_id` when the recorder rejects it.
+    #[pyo3(signature = (label, *, request_id = None, if_state = None))]
+    pub fn mark(
+        &self,
+        py: Python<'_>,
+        label: String,
+        request_id: Option<&Bound<'_, PyAny>>,
+        if_state: Option<String>,
+    ) -> PyResult<Model<MarkOutcome>> {
+        return control::mark(
+            py,
+            &self.terminal,
+            &self.session_path,
+            label,
+            request_id,
+            if_state,
+        );
+    }
+
+    /// Apply ordered steps; each is one mutation whose identity derives from the send's, so
+    /// retrying the whole send with its `request_id` replays without duplicates. `if_state`
+    /// guards only the first step.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` for malformed steps or options, and on a failed step its
+    /// `TermtraceError` with `step`, its derived `request_id`, and `send_request_id`; earlier
+    /// steps were applied.
+    #[pyo3(signature = (steps, *, request_id = None, if_state = None, intent = None, pace_ms = None, verbose = false, until = None, detail = None, region = None, report_changes = false))]
+    pub fn send<'py>(
+        &self,
+        py: Python<'py>,
+        steps: Vec<Arg<SendStepSpec>>,
+        request_id: Option<Bound<'py, PyAny>>,
+        if_state: Option<String>,
+        intent: Option<String>,
+        pace_ms: Option<u64>,
+        verbose: bool,
+        until: Option<Arg<ConditionSpec>>,
+        detail: Option<Arg<FrameDetail>>,
+        region: Option<Arg<ScreenRegion>>,
+        report_changes: bool,
+    ) -> PyResult<Py<PyAny>> {
+        let options = control::SendOptions {
+            request_id,
+            if_state,
+            intent,
+            pace_ms,
+            verbose,
+            until,
+            detail,
+            region,
+            report_changes,
+        };
+
+        return control::send(py, &self.terminal, &self.session_path, steps, options);
+    }
+
+    /// Live status `{"kind": "live", ...}` or completion `{"kind": "completed", ...}`.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` or a subclass when the session cannot be attached or read.
+    pub fn status(&self, py: Python<'_>) -> PyResult<Model<SessionStatus>> {
+        return control::status(py, &self.terminal, &self.session_path);
     }
 
     /// Atomically publish visual representations (PNG, SVG, HTML, TXT, JSON) of a state point.
@@ -180,8 +336,8 @@ impl PySession {
         formats: Option<Vec<String>>,
         state_hash: Option<String>,
         include_hidden: Option<bool>,
-    ) -> PyResult<String> {
-        let session_path = PathBuf::from(&self.session_path);
+    ) -> PyResult<Model<SaveOutcome>> {
+        let session_path = self.session_path.clone();
         let dest = PathBuf::from(destination);
         let save_formats = if let Some(fmts) = formats {
             let mut list = Vec::new();
@@ -220,13 +376,7 @@ impl PySession {
             let outcome = ArtifactService::save(&session_path, &dest, point, &save_formats, hidden)
                 .map_err(to_py_err)?;
 
-            return serde_json::to_string_pretty(&outcome.manifest).map_err(|e| {
-                to_py_err(termtrace_sdk::Error::InvalidJson {
-                    path: dest,
-                    json_path: String::new(),
-                    source: e,
-                })
-            });
+            return Ok(Model(outcome));
         })
     }
 
@@ -237,7 +387,7 @@ impl PySession {
     /// Raises `TermtraceError` or a subclass when the event log cannot be read or the cast cannot
     /// be written.
     pub fn export_asciicast(&self, py: Python<'_>, output_path: String) -> PyResult<()> {
-        let session_path = PathBuf::from(&self.session_path);
+        let session_path = self.session_path.clone();
         let target = PathBuf::from(output_path);
 
         py.detach(move || {
@@ -253,7 +403,7 @@ impl PySession {
     ///
     /// Raises `TermtraceError` or a subclass when the bundle cannot be created or published.
     pub fn create_bundle(&self, py: Python<'_>, output_path: String) -> PyResult<()> {
-        let session_path = PathBuf::from(&self.session_path);
+        let session_path = self.session_path.clone();
         let target = PathBuf::from(output_path);
 
         py.detach(move || {
@@ -271,8 +421,13 @@ impl PySession {
     /// Raises `TermtraceError` or a subclass when either state hash cannot be resolved or the
     /// session's evidence cannot be validated or replayed, and `ValueError` when the difference
     /// cannot be serialized.
-    pub fn diff(&self, py: Python<'_>, from_hash: String, to_hash: String) -> PyResult<String> {
-        let session_path = PathBuf::from(&self.session_path);
+    pub fn diff(
+        &self,
+        py: Python<'_>,
+        from_hash: String,
+        to_hash: String,
+    ) -> PyResult<Model<SemanticDiff>> {
+        let session_path = self.session_path.clone();
 
         py.detach(move || {
             let from = StatePoint::StateHash {
@@ -283,8 +438,7 @@ impl PySession {
             };
             let (diff, _, _) = AnalysisService::diff(&session_path, from, to).map_err(to_py_err)?;
 
-            return serde_json::to_string_pretty(&diff)
-                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()));
+            return Ok(Model(diff));
         })
     }
 
@@ -300,7 +454,7 @@ impl PySession {
         offset: Option<u64>,
         limit: Option<usize>,
     ) -> PyResult<(Vec<u8>, u64, bool)> {
-        let session_path = PathBuf::from(&self.session_path);
+        let session_path = self.session_path.clone();
         let cursor = offset.map(|off| {
             return OutputCursor {
                 session_path: session_path.clone(),
@@ -332,7 +486,7 @@ impl PySession {
         pattern: String,
         timeout_secs: Option<f64>,
     ) -> PyResult<bool> {
-        let session_path = PathBuf::from(&self.session_path);
+        let session_path = self.session_path.clone();
         let timeout = crate::parse_timeout(timeout_secs, defaults::WAIT_TIMEOUT)?;
 
         return py.detach(move || {
@@ -355,8 +509,8 @@ impl PySession {
         py: Python<'_>,
         cursor: Option<u64>,
         limit: Option<usize>,
-    ) -> PyResult<String> {
-        let session_path = PathBuf::from(&self.session_path);
+    ) -> PyResult<Vec<Model<Event>>> {
+        let session_path = self.session_path.clone();
         let event_cursor = cursor.map(|seq| {
             return EventCursor {
                 session_path: session_path.clone(),
@@ -369,13 +523,7 @@ impl PySession {
             let page = EventsService::read_page(&session_path, event_cursor, limit_val)
                 .map_err(to_py_err)?;
 
-            return serde_json::to_string_pretty(&page.events).map_err(|e| {
-                return to_py_err(termtrace_sdk::Error::InvalidJson {
-                    path: session_path,
-                    json_path: String::new(),
-                    source: e,
-                });
-            });
+            return Ok(page.events.into_iter().map(Model).collect());
         })
     }
 
@@ -391,8 +539,8 @@ impl PySession {
         py: Python<'_>,
         target_hash: Option<String>,
         context: Option<u64>,
-    ) -> PyResult<String> {
-        let session_path = PathBuf::from(&self.session_path);
+    ) -> PyResult<Model<ExplainReport>> {
+        let session_path = self.session_path.clone();
         let point = target_hash.map_or(StatePoint::LatestPresented, |h| {
             return StatePoint::StateHash { state_hash: h };
         });
@@ -401,13 +549,7 @@ impl PySession {
         py.detach(move || {
             let report = AnalysisService::explain(&session_path, point, ctx).map_err(to_py_err)?;
 
-            return serde_json::to_string_pretty(&report).map_err(|e| {
-                return to_py_err(termtrace_sdk::Error::InvalidJson {
-                    path: session_path,
-                    json_path: String::new(),
-                    source: e,
-                });
-            });
+            return Ok(Model(report));
         })
     }
 
@@ -418,21 +560,19 @@ impl PySession {
     /// Raises `TermtraceError` or a subclass when visual or canonical evidence fails validation or
     /// replay, or the report cannot be serialized.
     #[pyo3(signature = (broad_change_percent = None))]
-    pub fn diagnose(&self, py: Python<'_>, broad_change_percent: Option<u8>) -> PyResult<String> {
-        let session_path = PathBuf::from(&self.session_path);
+    pub fn diagnose(
+        &self,
+        py: Python<'_>,
+        broad_change_percent: Option<u8>,
+    ) -> PyResult<Model<DiagnoseReport>> {
+        let session_path = self.session_path.clone();
         let pct = broad_change_percent.unwrap_or(25);
 
         py.detach(move || {
             let report =
                 AnalysisService::diagnose(&session_path, Vec::new(), pct).map_err(to_py_err)?;
 
-            return serde_json::to_string_pretty(&report).map_err(|e| {
-                return to_py_err(termtrace_sdk::Error::InvalidJson {
-                    path: session_path,
-                    json_path: String::new(),
-                    source: e,
-                });
-            });
+            return Ok(Model(report));
         })
     }
 
@@ -447,20 +587,14 @@ impl PySession {
         &self,
         py: Python<'_>,
         broad_change_percent: Option<u8>,
-    ) -> PyResult<String> {
-        let session_path = PathBuf::from(&self.session_path);
+    ) -> PyResult<Model<LastActionAnalysis>> {
+        let session_path = self.session_path.clone();
         let pct = broad_change_percent.unwrap_or(25);
 
         py.detach(move || {
             let analysis = AnalysisService::last_action(&session_path, pct).map_err(to_py_err)?;
 
-            return serde_json::to_string_pretty(&analysis).map_err(|e| {
-                return to_py_err(termtrace_sdk::Error::InvalidJson {
-                    path: session_path,
-                    json_path: String::new(),
-                    source: e,
-                });
-            });
+            return Ok(Model(analysis));
         })
     }
 
@@ -478,8 +612,8 @@ impl PySession {
         limit: Option<u16>,
         include_hidden: Option<bool>,
         include_controls: Option<bool>,
-    ) -> PyResult<String> {
-        let session_path = PathBuf::from(&self.session_path);
+    ) -> PyResult<Model<TimelinePage>> {
+        let session_path = self.session_path.clone();
         let off = offset.unwrap_or(0);
         let lim = limit.unwrap_or(50);
         let hidden = include_hidden.unwrap_or(false);
@@ -490,13 +624,7 @@ impl PySession {
                 AnalysisService::timeline_page(&session_path, hidden, controls, None, off, lim)
                     .map_err(to_py_err)?;
 
-            return serde_json::to_string_pretty(&page).map_err(|e| {
-                return to_py_err(termtrace_sdk::Error::InvalidJson {
-                    path: session_path,
-                    json_path: String::new(),
-                    source: e,
-                });
-            });
+            return Ok(Model(page));
         })
     }
 }
