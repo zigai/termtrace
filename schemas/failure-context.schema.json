@@ -1,0 +1,941 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "DurabilityMode": {
+      "description": "Output persistence behavior selected for one canonical recording.",
+      "oneOf": [
+        {
+          "const": "strict",
+          "description": "Synchronize every PTY output event before processing continues.",
+          "type": "string"
+        },
+        {
+          "const": "bounded",
+          "description": "Synchronize after a configured output-byte or elapsed-time threshold.",
+          "type": "string"
+        },
+        {
+          "const": "throughput",
+          "description": "Buffer PTY output until a mutation, lifecycle, or completion boundary.",
+          "type": "string"
+        }
+      ]
+    },
+    "DurabilityPolicy": {
+      "additionalProperties": false,
+      "description": "Chain-bound configuration for canonical output persistence.",
+      "properties": {
+        "maximum_interval_ms": {
+          "description": "Maximum uncommitted interval for bounded mode.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maximum_uncommitted_bytes": {
+          "description": "Maximum uncommitted PTY bytes for bounded mode.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mode": {
+          "$ref": "#/$defs/DurabilityMode",
+          "description": "Selected persistence behavior."
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "DurabilityRecord": {
+      "additionalProperties": false,
+      "description": "Recorder-observed durability outcomes bound into completion evidence.",
+      "properties": {
+        "final_sync_completed": {
+          "description": "Whether the final event boundary completed file synchronization.",
+          "type": "boolean"
+        },
+        "maximum_observed_uncommitted_bytes": {
+          "description": "Largest PTY byte count pending synchronization.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maximum_observed_uncommitted_ns": {
+          "description": "Largest measured interval with output pending synchronization.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "policy": {
+          "$ref": "#/$defs/DurabilityPolicy",
+          "description": "Chain-bound configured policy."
+        },
+        "sync_count": {
+          "description": "Number of successful event-log data synchronizations after header creation.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "policy",
+        "maximum_observed_uncommitted_bytes",
+        "maximum_observed_uncommitted_ns",
+        "sync_count",
+        "final_sync_completed"
+      ],
+      "type": "object"
+    },
+    "ManagementFailure": {
+      "description": "Discriminator for actual non-actor management progress.",
+      "oneOf": [
+        {
+          "description": "Registry restart workflow facts.",
+          "properties": {
+            "facts": {
+              "$ref": "#/$defs/RestartFailureFacts"
+            },
+            "operation": {
+              "const": "registry_restart",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "facts"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Tmux management workflow facts.",
+          "properties": {
+            "facts": {
+              "$ref": "#/$defs/TmuxFailureFacts"
+            },
+            "operation": {
+              "const": "tmux",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "facts"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Original-execution capture lifecycle facts; the application may have run.",
+          "properties": {
+            "facts": {
+              "$ref": "#/$defs/OriginalCaptureFacts"
+            },
+            "operation": {
+              "const": "original_capture",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "facts"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ManagementGuidance": {
+      "description": "Management has no automatic replay policy, regardless of nested actor effects.",
+      "oneOf": [
+        {
+          "const": "inspect_no_automatic_retry",
+          "description": "Inspect predecessor, successor/orphan, alias and aggregate before a deliberate new action.",
+          "type": "string"
+        }
+      ]
+    },
+    "MutationEffect": {
+      "description": "Effect a request had on the child, its PTY, or canonical evidence.\n\nThe recording actor states this fact in every rejection. Clients only\nsynthesize it for transport outcomes the actor could not report.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Nothing was applied.",
+          "properties": {
+            "kind": {
+              "const": "not_applied",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A known prefix of input atoms was applied completely, and nothing after it.",
+          "properties": {
+            "completed_atoms": {
+              "description": "Number of leading atoms applied completely.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "partial",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "completed_atoms"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Every requested mutation was applied.",
+          "properties": {
+            "kind": {
+              "const": "applied",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The request may or may not have been applied.",
+          "properties": {
+            "kind": {
+              "const": "unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "OriginalCaptureFacts": {
+      "additionalProperties": false,
+      "description": "What a caller learns when an original capture did not publish, or did not finish in time.\n\nThe captured application may have run and completed; `completion` is its canonical outcome\nwhen one validates. This is a lifecycle failure, not an actor mutation, so it carries no\nrequest effect and no automatic retry.",
+      "properties": {
+        "cleanup": {
+          "description": "Teardown, preservation or reaping failure reported beside the primary failure.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "code": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OriginalCaptureFailure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Failure code; `None` when finalization did not reach a final state before the deadline."
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Validated canonical completion, when one exists."
+        },
+        "reason": {
+          "description": "Primary failure description.",
+          "type": "string"
+        },
+        "session": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact canonical session path bytes."
+        },
+        "state": {
+          "$ref": "#/$defs/OriginalCaptureState",
+          "description": "Supervisor state observed when the error was built, including derived `abandoned`."
+        },
+        "surviving": {
+          "description": "Paths verified to exist when the error was built.",
+          "items": {
+            "$ref": "#/$defs/SurvivingPathRecord"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "state",
+        "session",
+        "surviving",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "OriginalCaptureFailure": {
+      "description": "Stable code for an original capture that did not publish an artifact.",
+      "oneOf": [
+        {
+          "const": "cancelled",
+          "description": "Startup or capture was cancelled by the caller.",
+          "type": "string"
+        },
+        {
+          "const": "acquisition_failed",
+          "description": "The display, terminal or encoder failed, or the acquired video did not verify.",
+          "type": "string"
+        },
+        {
+          "const": "grid_mismatch",
+          "description": "The observed terminal grid differs from the requested exact grid.",
+          "type": "string"
+        },
+        {
+          "const": "supervisor_abandoned",
+          "description": "The supervisor stopped running before it published a final state.",
+          "type": "string"
+        },
+        {
+          "const": "recording_failed",
+          "description": "The canonical recording failed or its completion did not match the captured run.",
+          "type": "string"
+        },
+        {
+          "const": "publication_failed",
+          "description": "The verified capture could not be committed beside the session.",
+          "type": "string"
+        },
+        {
+          "const": "startup_failed",
+          "description": "The supervisor could not start the capture environment.",
+          "type": "string"
+        }
+      ]
+    },
+    "OriginalCaptureState": {
+      "description": "Supervisor lifecycle state.",
+      "oneOf": [
+        {
+          "const": "acquiring",
+          "description": "Display, encoder and terminal are starting; the program has not started.",
+          "type": "string"
+        },
+        {
+          "const": "live",
+          "description": "The program runs inside the captured terminal and accepts live control.",
+          "type": "string"
+        },
+        {
+          "const": "finalizing",
+          "description": "The program completed; acquisition is stopping and the artifact is being published.",
+          "type": "string"
+        },
+        {
+          "const": "published",
+          "description": "The artifact was published; `result` names it.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "Capture failed; `failure` names the code and the paths that survived.",
+          "type": "string"
+        },
+        {
+          "const": "cancelled",
+          "description": "Capture was cancelled; `failure` names the paths that survived.",
+          "type": "string"
+        },
+        {
+          "const": "abandoned",
+          "description": "Derived by readers only: a non-terminal state whose supervisor is no longer running.",
+          "type": "string"
+        }
+      ]
+    },
+    "ResourceLimitKind": {
+      "description": "Canonical resource-limit kinds with implemented completion semantics.",
+      "oneOf": [
+        {
+          "const": "output_bytes",
+          "description": "Observed PTY output byte count.",
+          "type": "string"
+        },
+        {
+          "const": "max_duration",
+          "description": "Wall-clock session duration limit.",
+          "type": "string"
+        },
+        {
+          "const": "idle_timeout",
+          "description": "Inactivity idle timeout.",
+          "type": "string"
+        }
+      ]
+    },
+    "ResourceLimitOutcome": {
+      "additionalProperties": false,
+      "description": "Resource-limit trigger retained in immutable completion evidence.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ResourceLimitKind",
+          "description": "Stable limit kind."
+        },
+        "limit": {
+          "description": "Configured trigger threshold.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed": {
+          "description": "Exact observed count when the host triggered termination.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "limit",
+        "observed"
+      ],
+      "type": "object"
+    },
+    "RestartAttempt": {
+      "description": "Exact allocated paths and proven successor launch/readiness facts, not rollback claims.",
+      "properties": {
+        "launched": {
+          "description": "True only after spawning the actual Child.",
+          "type": "boolean"
+        },
+        "readiness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SuccessorReadiness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Last actual readiness observation, absent before observing it."
+        },
+        "session": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Authoritative session-directory bytes."
+        },
+        "stderr_log": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Authoritative stderr-log path bytes."
+        },
+        "stdout_log": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Authoritative stdout-log path bytes."
+        }
+      },
+      "required": [
+        "session",
+        "stdout_log",
+        "stderr_log",
+        "launched"
+      ],
+      "type": "object"
+    },
+    "RestartFailureFacts": {
+      "description": "Proven restart progress. No alias rollback or deduplicated replay is promised.",
+      "properties": {
+        "alias": {
+          "description": "Alias used for this orchestration.",
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/$defs/RestartFailurePhase",
+          "description": "Last reached phase."
+        },
+        "predecessor_completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Actual immutable completion returned by predecessor stop, never synthesized."
+        },
+        "predecessor_path": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Base64Bytes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact resolved predecessor path, when resolution succeeded."
+        },
+        "successor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RestartAttempt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Allocated successor/orphan locations and proven admission facts."
+        }
+      },
+      "required": [
+        "alias",
+        "phase"
+      ],
+      "type": "object"
+    },
+    "RestartFailurePhase": {
+      "description": "Where a restart stopped; workflow phases are not input atoms.",
+      "oneOf": [
+        {
+          "const": "resolve_predecessor",
+          "description": "Resolving the predecessor, before any proven completion.",
+          "type": "string"
+        },
+        {
+          "const": "stopping_predecessor",
+          "description": "Predecessor stop was invoked; inspect it if completion was not returned.",
+          "type": "string"
+        },
+        {
+          "const": "predecessor_completed",
+          "description": "The exact predecessor completion was returned.",
+          "type": "string"
+        },
+        {
+          "const": "successor_allocated",
+          "description": "Successor paths were allocated.",
+          "type": "string"
+        },
+        {
+          "const": "successor_launched",
+          "description": "The actual successor Child was spawned.",
+          "type": "string"
+        },
+        {
+          "const": "successor_ready",
+          "description": "The successor passed readiness.",
+          "type": "string"
+        },
+        {
+          "const": "lineage_validated",
+          "description": "Immutable successor lineage was validated.",
+          "type": "string"
+        },
+        {
+          "const": "alias_retarget",
+          "description": "Compare-and-retarget failed; do not assume the alias still has its old owner.",
+          "type": "string"
+        }
+      ]
+    },
+    "Retry": {
+      "description": "What a caller may safely do after a failed request.",
+      "oneOf": [
+        {
+          "const": "new_request",
+          "description": "Nothing happened; re-evaluate and submit a new request.",
+          "type": "string"
+        },
+        {
+          "const": "same_request_id",
+          "description": "Resend the identical request and identifier; the actor applies it at most once.",
+          "type": "string"
+        },
+        {
+          "const": "inspect_first",
+          "description": "Part of the request applied; inspect current state before continuing.",
+          "type": "string"
+        },
+        {
+          "const": "do_not_retry",
+          "description": "The request applied; retrying would repeat it.",
+          "type": "string"
+        }
+      ]
+    },
+    "SessionCompletion": {
+      "additionalProperties": false,
+      "description": "Immutable completion facts written after the final event is durable.",
+      "properties": {
+        "durability": {
+          "$ref": "#/$defs/DurabilityRecord",
+          "description": "Recorder-observed persistence behavior and final sync result."
+        },
+        "event_count": {
+          "description": "Number of canonical events.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "event_header_hash": {
+          "description": "BLAKE3 of the exact event-log header bytes.",
+          "type": "string"
+        },
+        "exit_code": {
+          "description": "Normal exit code when available.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionFailure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Fatal recorder failure, absent for normal child completion."
+        },
+        "final_event_hash": {
+          "description": "Hash of the final canonical event.",
+          "type": "string"
+        },
+        "format": {
+          "description": "Stable format identifier.",
+          "type": "string"
+        },
+        "output_bytes": {
+          "description": "Total raw output bytes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resource_limit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceLimitOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Resource limit that caused host termination, when one was reached."
+        },
+        "session_id": {
+          "description": "Session identifier.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "session_manifest_hash": {
+          "description": "BLAKE3 of the exact immutable session manifest bytes.",
+          "type": "string"
+        },
+        "signal_name": {
+          "description": "Signal name when available.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminal_event_seq": {
+          "description": "Sequence number of the required terminal `Exit` event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "validation_version": {
+          "description": "Validation contract applied before publication.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "description": "Completion schema version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "version",
+        "validation_version",
+        "session_id",
+        "session_manifest_hash",
+        "event_header_hash",
+        "output_bytes",
+        "final_event_hash",
+        "event_count",
+        "terminal_event_seq",
+        "durability"
+      ],
+      "type": "object"
+    },
+    "SessionFailure": {
+      "additionalProperties": false,
+      "description": "Recorder failure retained when the child could not complete normally.",
+      "properties": {
+        "code": {
+          "description": "Stable failure category.",
+          "type": "string"
+        },
+        "message": {
+          "description": "Human-readable failure context.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "SuccessorReadiness": {
+      "description": "Result of observing a spawned successor.",
+      "oneOf": [
+        {
+          "const": "live",
+          "description": "Live at readiness observation.",
+          "type": "string"
+        },
+        {
+          "const": "completed",
+          "description": "Completed at readiness observation.",
+          "type": "string"
+        },
+        {
+          "const": "exited",
+          "description": "Exited before readiness.",
+          "type": "string"
+        },
+        {
+          "const": "timed_out",
+          "description": "Readiness deadline elapsed; the successor may remain running.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "Readiness observation failed; inspect the source/logs.",
+          "type": "string"
+        }
+      ]
+    },
+    "SurvivingKind": {
+      "description": "What a surviving path holds.",
+      "oneOf": [
+        {
+          "const": "session",
+          "description": "Canonical session directory.",
+          "type": "string"
+        },
+        {
+          "const": "failed_visual",
+          "description": "Preserved failed capture staging (`visual-failed-*`).",
+          "type": "string"
+        },
+        {
+          "const": "staging",
+          "description": "Capture staging that could not be preserved under its failed name.",
+          "type": "string"
+        },
+        {
+          "const": "sidecar",
+          "description": "Original-capture status sidecar.",
+          "type": "string"
+        },
+        {
+          "const": "log",
+          "description": "Supervisor or recorder diagnostic log.",
+          "type": "string"
+        }
+      ]
+    },
+    "SurvivingPathRecord": {
+      "additionalProperties": false,
+      "description": "A path verified to exist when the failure was reported.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/SurvivingKind",
+          "description": "What the path holds."
+        },
+        "path": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact Linux path bytes."
+        }
+      },
+      "required": [
+        "path",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "TmuxFailureFacts": {
+      "description": "Actual tmux progress receipts, independent of the actor mutation/retry protocol.",
+      "properties": {
+        "action": {
+          "description": "Management entrypoint, not an actor request identifier.",
+          "type": "string"
+        },
+        "completed_track_stops": {
+          "description": "Tracks whose stop operation returned successfully (not a rollback guarantee).",
+          "items": {
+            "$ref": "#/$defs/Base64Bytes"
+          },
+          "type": "array"
+        },
+        "completed_track_waits": {
+          "description": "Tracks whose completion wait returned successfully.",
+          "items": {
+            "$ref": "#/$defs/Base64Bytes"
+          },
+          "type": "array"
+        },
+        "integration_disable_attempted": {
+          "description": "Whether integration disable was attempted, not whether it succeeded.",
+          "type": "boolean"
+        },
+        "manifest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Base64Bytes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact aggregate manifest path, when known."
+        },
+        "pane_shutdown_attempted": {
+          "description": "Pane shutdown commands attempted; command success is not asserted.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "phase": {
+          "$ref": "#/$defs/TmuxFailurePhase",
+          "description": "Last known phase."
+        },
+        "stop_requested": {
+          "description": "Whether `StopRequested` is proven committed; None means no such receipt is available.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "phase",
+        "completed_track_stops",
+        "completed_track_waits",
+        "pane_shutdown_attempted",
+        "integration_disable_attempted"
+      ],
+      "type": "object"
+    },
+    "TmuxFailurePhase": {
+      "description": "Last known tmux management phase; none of these are input-atom counts.",
+      "oneOf": [
+        {
+          "const": "inspect_state",
+          "description": "No precise progress receipt is available; inspect the aggregate/server.",
+          "type": "string"
+        },
+        {
+          "const": "stop_requested",
+          "description": "`StopRequested` was committed to the aggregate journal.",
+          "type": "string"
+        },
+        {
+          "const": "composite_stop_completed",
+          "description": "Composite stop returned successfully.",
+          "type": "string"
+        },
+        {
+          "const": "waiting_tracks",
+          "description": "Waiting for track completions.",
+          "type": "string"
+        },
+        {
+          "const": "settling",
+          "description": "Settling aggregate lifecycle after shutdown attempts.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/failure-context.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Shared failure projection. Actor-only effect/retry never describe a multi-step workflow.",
+  "oneOf": [
+    {
+      "description": "An actual actor request or its existing local admission/transport classification.",
+      "properties": {
+        "effect": {
+          "$ref": "#/$defs/MutationEffect",
+          "description": "The admitted actor effect."
+        },
+        "retry": {
+          "$ref": "#/$defs/Retry",
+          "description": "The unchanged actor-only retry rule."
+        },
+        "scope": {
+          "const": "actor",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope",
+        "effect",
+        "retry"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Non-actor management facts; no request-ID replay is available.",
+      "properties": {
+        "guidance": {
+          "$ref": "#/$defs/ManagementGuidance",
+          "description": "Explicit inspect/no-automatic-retry guidance."
+        },
+        "management": {
+          "$ref": "#/$defs/ManagementFailure",
+          "description": "Proven progress and exact paths."
+        },
+        "scope": {
+          "const": "management",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope",
+        "guidance",
+        "management"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "FailureContext"
+}

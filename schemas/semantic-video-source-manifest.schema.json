@@ -1,5 +1,21 @@
 {
   "$defs": {
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    },
     "SemanticFontResource": {
       "additionalProperties": false,
       "description": "Exact identity of one bundled semantic font face.",
@@ -194,8 +210,8 @@
           "type": "string"
         },
         "session": {
-          "description": "Canonical session path.",
-          "type": "string"
+          "$ref": "#/$defs/ExactPath",
+          "description": "Canonical session path."
         },
         "session_id": {
           "description": "Canonical session identity.",

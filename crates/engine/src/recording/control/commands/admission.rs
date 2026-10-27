@@ -59,6 +59,12 @@ impl SessionActor<'_> {
                 return Ok(());
             }
 
+            if let Some(response) = self.pending_outer_resize_retry(&request, &hash) {
+                deliver_response(&response_sender, response);
+
+                return Ok(());
+            }
+
             if self.mutation_history.is_full() {
                 let response = control_error_response(
                     request.request_id,
@@ -345,6 +351,21 @@ impl SessionActor<'_> {
                     }
                 }
             }
+        }
+
+        if !invalid_guard
+            && !stale
+            && self.owns_outer_resize()
+            && matches!(request.command, ControlCommand::Resize { .. })
+        {
+            let command_hash = command_hash.ok_or_else(|| {
+                return terminal_error(
+                    "schedule outer-terminal resize",
+                    "missing mutation command hash",
+                );
+            })?;
+
+            return self.admit_outer_resize(request, command_hash, response_sender);
         }
 
         let outcome = if invalid_guard {

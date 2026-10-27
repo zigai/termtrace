@@ -45,6 +45,7 @@ struct TestEvidenceManifest {
 )]
 pub(super) fn write_evidence_manifest(
     attempt_directory: &Path,
+    artifact_directory: &Path,
     session_id: Uuid,
     canonical_session: &Path,
     report: &FinalizationReport,
@@ -65,7 +66,7 @@ pub(super) fn write_evidence_manifest(
         artifacts,
     };
 
-    let path = attempt_directory.join("termtrace-test-evidence.json");
+    let path = artifact_directory.join("termtrace-test-evidence.json");
     let mut bytes = serde_json::to_vec_pretty(&manifest).map_err(|source| {
         return Error::InvalidJson {
             path: path.clone(),

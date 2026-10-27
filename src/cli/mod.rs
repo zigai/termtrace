@@ -50,10 +50,16 @@ pub(crate) fn run() -> ExitCode {
         Err(error) => return write_clap_error(error, quiet),
     };
 
-    let cli = match Cli::from_arg_matches(&matches) {
+    let mut cli = match Cli::from_arg_matches(&matches) {
         Ok(cli) => cli,
         Err(error) => return write_clap_error(error, quiet),
     };
+
+    if let command::Command::Record(arguments) = &mut cli.command
+        && let Some((_name, record)) = matches.subcommand()
+    {
+        recording::args::note_explicit_geometry(arguments, record);
+    }
 
     if let Err(error) = cli.validate() {
         return write_clap_error(error, quiet);

@@ -116,7 +116,8 @@ enum StepOutcome {
 
 /// Request identity of step `index`: the send's own identity for the first step, and a stable
 /// derivation for later ones, so retrying a whole send with its identity replays every step.
-fn step_request_id(send_request_id: Uuid, index: usize) -> Uuid {
+#[must_use]
+pub fn send_step_request_id(send_request_id: Uuid, index: usize) -> Uuid {
     if index == 0 {
         return send_request_id;
     }
@@ -223,7 +224,7 @@ impl Session {
         }
 
         let last = earlier_steps.len();
-        let request_id = step_request_id(send_request_id, last);
+        let request_id = send_step_request_id(send_request_id, last);
 
         let last_step = match self.send_step(
             &request,
@@ -281,7 +282,7 @@ impl Session {
         step: &SendStep,
         postcondition: ActionCondition,
     ) -> StdResult<StepOutcome, SendFailure> {
-        let request_id = step_request_id(send_request_id, index);
+        let request_id = send_step_request_id(send_request_id, index);
         let guard = MutationGuard {
             request_id: Some(request_id),
             if_state: if index == 0 { request.guard.if_state.clone() } else { None },

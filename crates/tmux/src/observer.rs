@@ -50,7 +50,7 @@ pub enum ObserverRole {
 }
 
 /// PIDs of live observers.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct Observers {
     /// Supervisor process, if one holds its lock.
     pub supervisor: Option<u32>,

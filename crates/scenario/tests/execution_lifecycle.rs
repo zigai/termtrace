@@ -1,6 +1,7 @@
 //! Scenario suite validation and launch-error propagation through the public API.
 
 use std::path::PathBuf;
+use termtrace_model::scenario::ScenarioStatus;
 use termtrace_scenario::{run_suite, Error, ScenarioSuiteOptions};
 
 #[test]
@@ -19,6 +20,7 @@ fn suite_options_error_handling_and_validation() {
         shard_count: None,
         update_snapshots: false,
         reruns: 0,
+        fail_on_flaky: false,
     };
 
     // 1. Zero jobs error
@@ -162,6 +164,7 @@ fn suite_sharding_and_matrix_expansion_lifecycle() {
         shard_count: Some(4),
         update_snapshots: false,
         reruns: 0,
+        fail_on_flaky: false,
     };
     let result = run_suite(vec![matrix_scenario, simple_scenario], &empty_shard_options);
     let err = result.unwrap_err();
@@ -202,10 +205,17 @@ fn suite_execution_error_propagation_when_launcher_binary_missing() {
         shard_count: None,
         update_snapshots: false,
         reruns: 0,
+        fail_on_flaky: false,
     };
     let result = run_suite(vec![valid_scenario], &options);
-    assert!(matches!(result, Err(Error::Operation { .. })));
+    let report = result.expect("structured launch report");
 
-    let err_str = result.unwrap_err().to_string();
-    assert!(err_str.contains("execute suite case"));
+    assert!(report.ci_failed());
+
+    let attempt = &report.cases[0].attempts[0].report;
+
+    assert_eq!(attempt.status, ScenarioStatus::Error);
+    assert_eq!(attempt.session_id, None);
+    assert_eq!(attempt.canonical_session, None);
+    assert_eq!(attempt.infrastructure_errors[0].phase, "launch");
 }

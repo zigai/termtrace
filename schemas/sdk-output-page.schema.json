@@ -1,0 +1,130 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "EventPageCursor": {
+      "additionalProperties": false,
+      "description": "A checked chain endpoint, not permission to skip validation of an imported cursor.",
+      "properties": {
+        "event_hash": {
+          "description": "Hash immediately before `next_event_seq`, or header hash at zero.",
+          "type": "string"
+        },
+        "next_event_seq": {
+          "description": "Next scanned event, including events excluded by the filter.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/PageSource",
+          "description": "File and session identity."
+        }
+      },
+      "required": [
+        "source",
+        "next_event_seq",
+        "event_hash"
+      ],
+      "type": "object"
+    },
+    "OutputPageCursor": {
+      "additionalProperties": false,
+      "description": "A byte position anchored to the chain endpoint enclosing that output prefix.",
+      "properties": {
+        "byte_offset": {
+          "description": "Exact offset in the concatenated PTY output stream.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "events": {
+          "$ref": "#/$defs/EventPageCursor",
+          "description": "Chain endpoint through the event containing the last returned byte."
+        }
+      },
+      "required": [
+        "events",
+        "byte_offset"
+      ],
+      "type": "object"
+    },
+    "PageSource": {
+      "additionalProperties": false,
+      "description": "Identity of the canonical file opened for a page. Display paths are not authoritative.",
+      "properties": {
+        "device": {
+          "description": "Device of the canonical root descriptor.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "header_hash": {
+          "description": "Hash of the exact canonical header bytes.",
+          "type": "string"
+        },
+        "inode": {
+          "description": "Inode of the canonical root descriptor.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "description": "Immutable canonical session identity.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "session_path": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact absolute canonical session directory bytes."
+        },
+        "session_path_display": {
+          "description": "Non-authoritative display only; never used to select or authenticate a source.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_path",
+        "session_path_display",
+        "session_id",
+        "device",
+        "inode",
+        "header_hash"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/sdk-output-page.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Bounded exact PTY bytes; this never promises no future output will arrive.",
+  "properties": {
+    "bytes": {
+      "$ref": "#/$defs/Base64Bytes",
+      "description": "Exact PTY bytes, including NUL and invalid UTF-8."
+    },
+    "cursor": {
+      "$ref": "#/$defs/OutputPageCursor",
+      "description": "Checked resume position."
+    },
+    "has_more": {
+      "description": "At least one further output byte is present in this snapshot.",
+      "type": "boolean"
+    },
+    "incomplete_tail": {
+      "description": "An incomplete trailing record was excluded from this live snapshot.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "bytes",
+    "cursor",
+    "has_more",
+    "incomplete_tail"
+  ],
+  "title": "ByteOutputPage",
+  "type": "object"
+}

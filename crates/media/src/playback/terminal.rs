@@ -1,4 +1,8 @@
-use crate::{error::finish_with_cleanup, Error, Result};
+use crate::{
+    error::finish_with_cleanup,
+    native_capture::window::{window_size_for_grid, GridMetrics, TerminalWindow},
+    Error, Result,
+};
 use nix::{
     errno::Errno,
     poll::{poll, PollFd, PollFlags, PollTimeout},
@@ -14,11 +18,6 @@ use std::{
     time::{Duration, Instant},
 };
 use termtrace_model::{error::ThreadPanicError, value::geometry::TerminalGeometryReport};
-use x11rb::{
-    connection::Connection as _,
-    protocol::xproto::{ConfigureWindowAux, ConnectionExt as _, MapState, Window},
-    rust_connection::RustConnection,
-};
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -33,14 +32,9 @@ pub(super) struct TerminalInputDrain {
 
 // Ghostty ignores window-resize control sequences, so playback resizes its X11 window.
 pub(super) struct ReplayTerminal {
-    window: Option<ReplayWindow>,
+    window: Option<TerminalWindow>,
     terminal_input: bool,
     drain: Option<TerminalInputDrain>,
-}
-
-struct ReplayWindow {
-    connection: RustConnection,
-    window: Window,
 }
 
 impl RawTerminalGuard {
@@ -157,15 +151,13 @@ impl ReplayTerminal {
     }
 
     pub(super) fn window_size(&mut self) -> Result<(u16, u16)> {
-        let window = self.attach()?;
-
-        return window_size(&window.connection, window.window);
+        return self.attach()?.size();
     }
 
     // Playback that never changes the grid needs no display connection.
-    fn attach(&mut self) -> Result<&ReplayWindow> {
+    fn attach(&mut self) -> Result<&TerminalWindow> {
         if self.window.is_none() {
-            self.window = Some(connect_window()?);
+            self.window = Some(TerminalWindow::connect(None, QUERY_TIMEOUT)?);
         }
 
         return self.window.as_ref().ok_or_else(|| {
@@ -205,23 +197,19 @@ impl ReplayTerminal {
         rows: u16,
         current: TerminalGeometryReport,
     ) -> Result<TerminalGeometryReport> {
-        let (window_width, window_height) = self.window_size()?;
-        let overhead_width = window_width.saturating_sub(current.text_width);
-        let overhead_height = window_height.saturating_sub(current.text_height);
-        let width = u32::from(cols) * u32::from(current.cell_width) + u32::from(overhead_width);
-        let height = u32::from(rows) * u32::from(current.cell_height) + u32::from(overhead_height);
-        let window = self.attach()?;
-        window
-            .connection
-            .configure_window(
-                window.window,
-                &ConfigureWindowAux::new().width(width).height(height),
-            )
-            .map_err(|error| return terminal_error("resize the playback window", error))?;
-        window
-            .connection
-            .flush()
-            .map_err(|error| return terminal_error("resize the playback window", error))?;
+        let window = self.window_size()?;
+        let (width, height) = window_size_for_grid(
+            cols,
+            rows,
+            GridMetrics {
+                cell_width: current.cell_width,
+                cell_height: current.cell_height,
+                text_width: current.text_width,
+                text_height: current.text_height,
+            },
+            window,
+        );
+        self.attach()?.configure(width, height)?;
 
         let deadline = Instant::now() + QUERY_TIMEOUT;
 
@@ -259,73 +247,6 @@ impl ReplayTerminal {
             .take()
             .map_or(Ok(()), |mut drain| return drain.stop());
     }
-}
-
-fn connect_window() -> Result<ReplayWindow> {
-    let (connection, screen) = x11rb::connect(None)
-        .map_err(|error| return terminal_error("connect to the playback display", error))?;
-
-    let root = connection
-        .setup()
-        .roots
-        .get(screen)
-        .ok_or_else(|| {
-            return terminal_error("connect to the playback display", "screen is missing");
-        })?
-        .root;
-
-    let deadline = Instant::now() + QUERY_TIMEOUT;
-    let window = loop {
-        let mapped = mapped_children(&connection, root)?;
-        if let [window] = mapped[..] {
-            break window;
-        }
-
-        if Instant::now() >= deadline {
-            return Err(terminal_error(
-                "find the playback window",
-                format!("expected one mapped window, found {}", mapped.len()),
-            ));
-        }
-
-        thread::sleep(Duration::from_millis(20));
-    };
-
-    return Ok(ReplayWindow { connection, window });
-}
-
-fn mapped_children(connection: &RustConnection, root: Window) -> Result<Vec<Window>> {
-    let children = connection
-        .query_tree(root)
-        .map_err(|error| return terminal_error("list playback windows", error))?
-        .reply()
-        .map_err(|error| return terminal_error("list playback windows", error))?
-        .children;
-
-    let mut mapped = Vec::new();
-    for child in children {
-        let attributes = connection
-            .get_window_attributes(child)
-            .map_err(|error| return terminal_error("inspect a playback window", error))?
-            .reply()
-            .map_err(|error| return terminal_error("inspect a playback window", error))?;
-
-        if attributes.map_state == MapState::VIEWABLE {
-            mapped.push(child);
-        }
-    }
-
-    return Ok(mapped);
-}
-
-fn window_size(connection: &RustConnection, window: Window) -> Result<(u16, u16)> {
-    let geometry = connection
-        .get_geometry(window)
-        .map_err(|error| return terminal_error("measure the playback window", error))?
-        .reply()
-        .map_err(|error| return terminal_error("measure the playback window", error))?;
-
-    return Ok((geometry.width, geometry.height));
 }
 
 pub(super) fn query() -> Result<TerminalGeometryReport> {

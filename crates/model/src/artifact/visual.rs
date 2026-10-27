@@ -176,8 +176,12 @@ pub struct VisualManifest {
     /// Exact headless launch overrides.
     pub ghostty_overrides: Vec<String>,
     /// Parsed `FFprobe` video evidence.
+    #[serde(default, with = "crate::value::json")]
+    #[schemars(with = "Option<serde_json::Value>")]
     pub video_probe: Option<serde_json::Value>,
     /// Parsed `FFprobe` screenshot evidence.
+    #[serde(with = "crate::value::json")]
+    #[schemars(with = "serde_json::Value")]
     pub screenshot_probe: serde_json::Value,
     /// Whole-file integrity and classification for every payload member.
     pub members: Vec<ArtifactMember>,

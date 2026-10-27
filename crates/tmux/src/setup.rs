@@ -215,6 +215,29 @@ impl PreparedTmuxSetup {
     /// # Errors
     /// Returns invalid settings or unresolvable paths.
     pub fn prepare(request: SetupRequest, tmux: PathBuf, state_root: &Path) -> Result<Self> {
+        return Self::prepare_inner(request, tmux, state_root, None);
+    }
+
+    /// Prepare integration using an explicitly selected Termtrace executable.
+    /// Embedded callers must use this instead of their host process executable.
+    /// Quoting, canonicalization, scope, and capture policies are unchanged.
+    /// # Errors
+    /// Returns invalid settings or unresolvable paths; never falls back to the host.
+    pub fn prepare_with_executable(
+        request: SetupRequest,
+        tmux: PathBuf,
+        state_root: &Path,
+        termtrace: &Path,
+    ) -> Result<Self> {
+        return Self::prepare_inner(request, tmux, state_root, Some(termtrace));
+    }
+
+    fn prepare_inner(
+        request: SetupRequest,
+        tmux: PathBuf,
+        state_root: &Path,
+        termtrace: Option<&Path>,
+    ) -> Result<Self> {
         if request.cell_width == 0 || request.cell_height == 0 {
             return Err(Error::invalid(
                 "tmux fallback cell dimensions must be nonzero",
@@ -243,8 +266,13 @@ impl PreparedTmuxSetup {
                 .map_err(|error| return Error::filesystem(path, error));
         };
 
-        let executable = env::current_exe()
-            .map_err(|error| return Error::filesystem("/proc/self/exe", error))?;
+        let executable = termtrace.map_or_else(
+            || {
+                return env::current_exe()
+                    .map_err(|error| return Error::filesystem("/proc/self/exe", error));
+            },
+            |binary| return Ok(binary.to_path_buf()),
+        )?;
 
         return Ok(Self {
             launch_hook: request.launch_hook,
@@ -699,3 +727,7 @@ fn clear_pane_marks(client: &TmuxClient) -> Result<()> {
 
     return Ok(());
 }
+
+#[cfg(test)]
+#[path = "setup_tests.rs"]
+mod tests;

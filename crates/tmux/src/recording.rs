@@ -104,7 +104,28 @@ pub struct StopRequest<'name> {
 /// Returns a taken name or alias, invalid settings, or a composite start failure.
 pub fn record(
     tracks: &impl Tracks,
+    request: RecordRequest,
+) -> Result<(RecordingStore, TmuxRecordingManifest)> {
+    return record_inner(tracks, request, None);
+}
+
+/// Start the existing aggregate recorder with a caller-selected Termtrace executable.
+/// Unlike the CLI-compatible [`record`], this never embeds the host interpreter.
+/// Scope, coverage, quoting, and failure rollback use the same implementation.
+/// # Errors
+/// Returns invalid settings, unavailable executable paths, or existing admission failures.
+pub fn record_with_executable(
+    tracks: &impl Tracks,
+    request: RecordRequest,
+    termtrace: &Path,
+) -> Result<(RecordingStore, TmuxRecordingManifest)> {
+    return record_inner(tracks, request, Some(termtrace));
+}
+
+fn record_inner(
+    tracks: &impl Tracks,
     mut request: RecordRequest,
+    termtrace: Option<&Path>,
 ) -> Result<(RecordingStore, TmuxRecordingManifest)> {
     let recording_id = Uuid::now_v7();
 
@@ -116,7 +137,7 @@ pub fn record(
 
     let store = RecordingStore::create(tracks.state_root(), &request.name)?;
 
-    return match start(tracks, &store, request, recording_id) {
+    return match start(tracks, &store, request, recording_id, termtrace) {
         Ok(manifest) => Ok((store, manifest)),
         Err(error) => {
             if let Err(release) = store.release() {
@@ -133,6 +154,7 @@ fn start(
     store: &RecordingStore,
     request: RecordRequest,
     recording_id: Uuid,
+    termtrace: Option<&Path>,
 ) -> Result<TmuxRecordingManifest> {
     let RecordRequest {
         name,
@@ -142,7 +164,23 @@ fn start(
         command,
     } = request;
     setup.aggregate_manifest = Some(store.manifest_path());
-    let setup = PreparedTmuxSetup::prepare(setup, client.executable.clone(), tracks.state_root())?;
+    let setup = termtrace.map_or_else(
+        || {
+            return PreparedTmuxSetup::prepare(
+                setup.clone(),
+                client.executable.clone(),
+                tracks.state_root(),
+            );
+        },
+        |binary| {
+            return PreparedTmuxSetup::prepare_with_executable(
+                setup.clone(),
+                client.executable.clone(),
+                tracks.state_root(),
+                binary,
+            );
+        },
+    )?;
 
     let alias = format!("tmux-{name}-composite");
     tracks.reserve(&alias)?;
@@ -532,76 +570,106 @@ pub fn stop(tracks: &impl Tracks, request: StopRequest<'_>) -> Result<TmuxRecord
         (locked.into_manifest(), server_validated)
     };
 
-    let composite = match &manifest.state.composite_track.link {
-        Some(link) => path_from_bytes(&link.session),
-        None => tracks.resolve(&manifest.state.composite_track.alias)?,
+    use termtrace_model::protocol::management::{
+        ManagementFailure, TmuxFailureFacts, TmuxFailurePhase,
     };
+    let mut facts = TmuxFailureFacts::inspect("stop");
+    facts.manifest = Some(ByteString::from(
+        store.manifest_path().as_os_str().as_bytes(),
+    ));
 
-    tracks.stop(&composite, request.wait, request.timeout)?;
+    facts.stop_requested = Some(true);
+    facts.phase = TmuxFailurePhase::StopRequested;
+    let result = (|| {
+        let composite = match &manifest.state.composite_track.link {
+            Some(link) => path_from_bytes(&link.session),
+            None => tracks.resolve(&manifest.state.composite_track.alias)?,
+        };
 
-    let client = client_of(&manifest);
+        tracks.stop(&composite, request.wait, request.timeout)?;
+        facts
+            .completed_track_stops
+            .push(ByteString::from(composite.as_os_str().as_bytes()));
 
-    // A wrapper can be running before its asynchronous track registration is
-    // published. Include those panes in shutdown as well as the saved links.
-    if server_validated && let Ok(report) = status::observe(&client) {
-        for pane in report.panes {
-            if pane.selected && pane.recorded {
-                kill_pane(&client, &pane.pane_id);
+        facts.phase = TmuxFailurePhase::CompositeStopCompleted;
+
+        let client = client_of(&manifest);
+
+        // A wrapper can be running before its asynchronous track registration is
+        // published. Include those panes in shutdown as well as the saved links.
+        if server_validated && let Ok(report) = status::observe(&client) {
+            for pane in report.panes {
+                if pane.selected && pane.recorded {
+                    facts.pane_shutdown_attempted.push(pane.pane_id.clone());
+                    kill_pane(&client, &pane.pane_id);
+                }
             }
         }
-    }
 
-    for (pane_id, session) in &manifest.state.pane_tracks {
-        if server_validated {
-            kill_pane(&client, pane_id);
+        for (pane_id, session) in &manifest.state.pane_tracks {
+            if server_validated {
+                facts.pane_shutdown_attempted.push(pane_id.clone());
+                kill_pane(&client, pane_id);
+            }
+
+            if request.wait {
+                facts.phase = TmuxFailurePhase::WaitingTracks;
+                tracks.wait_completed(&path_from_bytes(session), request.timeout)?;
+                facts.completed_track_waits.push(session.clone());
+            }
         }
 
         if request.wait {
-            tracks
-                .wait_completed(&path_from_bytes(session), request.timeout)
-                .map_err(|error| {
-                    return Error::invalid(format!(
-                        "could not complete pane track {pane_id}: {error}"
-                    ));
-                })?;
-        }
-    }
+            let deadline = Instant::now() + request.timeout;
 
-    if request.wait {
+            for entry in unfinished_tracks(&store.catalog(&manifest)?)? {
+                facts.phase = TmuxFailurePhase::WaitingTracks;
+                tracks.wait_completed(
+                    &path_from_bytes(&entry.track.session),
+                    deadline.saturating_duration_since(Instant::now()),
+                )?;
+
+                facts
+                    .completed_track_waits
+                    .push(entry.track.session.clone());
+            }
+        }
+
+        facts.integration_disable_attempted = server_validated;
+        if server_validated && let Err(error) = setup::disable(&client) {
+            tracing::debug!(%error, "could not disable tmux recording after stop");
+        }
+
         let deadline = Instant::now() + request.timeout;
 
-        for entry in unfinished_tracks(&store.catalog(&manifest)?)? {
-            tracks.wait_completed(
-                &path_from_bytes(&entry.track.session),
-                deadline.saturating_duration_since(Instant::now()),
-            )?;
+        facts.phase = TmuxFailurePhase::Settling;
+
+        loop {
+            let mut locked = store.lock()?;
+            settle(&store, &mut locked, unix_time_ns())?;
+            let manifest = locked.into_manifest();
+
+            if !request.wait || manifest.state.lifecycle == TmuxRecordingLifecycle::Completed {
+                return Ok(manifest);
+            }
+
+            if Instant::now() >= deadline {
+                return Err(Error::invalid(format!(
+                    "tmux recording has unfinished tracks: composite={:?}, catalog={:?}",
+                    manifest.state.composite_track.link, manifest.catalog,
+                )));
+            }
+
+            thread::sleep(Duration::from_millis(20));
         }
-    }
+    })();
 
-    if server_validated && let Err(error) = setup::disable(&client) {
-        tracing::debug!(%error, "could not disable tmux recording after stop");
-    }
-
-    let deadline = Instant::now() + request.timeout;
-
-    loop {
-        let mut locked = store.lock()?;
-        settle(&store, &mut locked, unix_time_ns())?;
-        let manifest = locked.into_manifest();
-
-        if !request.wait || manifest.state.lifecycle == TmuxRecordingLifecycle::Completed {
-            return Ok(manifest);
-        }
-
-        if Instant::now() >= deadline {
-            return Err(Error::invalid(format!(
-                "tmux recording has unfinished tracks: composite={:?}, catalog={:?}",
-                manifest.state.composite_track.link, manifest.catalog,
-            )));
-        }
-
-        thread::sleep(Duration::from_millis(20));
-    }
+    return result.map_err(|source| {
+        return Error::Management {
+            facts: Box::new(ManagementFailure::Tmux(facts)),
+            source: Box::new(source),
+        };
+    });
 }
 
 /// Session directory of a recording's composite client track.

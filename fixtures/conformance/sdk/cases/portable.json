@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "directory_bytes": "L3RtcC9kZW1v",
+  "manifest": {
+    "path": "manifest.json",
+    "blake3": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "source": {
+    "session_id": "00000000-0000-0000-0000-000000000001",
+    "session_manifest_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "boundary": {
+      "next_event_seq": "18446744073709551615",
+      "event_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "output_bytes": "18446744073709551615"
+    }
+  },
+  "provenance": {
+    "kind": "native_replay"
+  },
+  "product_kind": "video",
+  "members": [
+    {
+      "path": "demo.webm",
+      "byte_length": "9007199254740993",
+      "blake3": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "media_type": "video/webm",
+      "schema_type": null,
+      "sensitivity": "sensitive_terminal_data",
+      "relationship": "delivery"
+    }
+  ]
+}

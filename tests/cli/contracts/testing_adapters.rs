@@ -20,10 +20,10 @@ use termtrace_sdk::{
     control_endpoint_is_reachable,
     locator::{LocatorSpec, StyleFilter},
     testing::{
-        run_terminal_test, EvidencePolicy, TerminalTest, TerminalTestConfig, TestFailure,
-        TestOutcome,
+        finalize_owned_sessions, run_terminal_test, EvidencePolicy, OwnedSessionFinalization,
+        TerminalTest, TerminalTestConfig, TestFailure, TestOutcome,
     },
-    ScreenFrameQuery, StableCaptureOptions, Terminal,
+    LaunchSpec, ScreenFrameQuery, StableCaptureOptions, StopRequest, Terminal,
 };
 
 fn looping_command() -> Vec<OsString> {
@@ -436,8 +436,8 @@ fn rust_test_helper_does_not_claim_deleted_evidence_after_discard_failure() {
             .expect("restore cleanup permissions");
     }
 
-    assert!(!report.retained);
-    assert!(report.evidence_directory.is_none());
+    assert_eq!(report.retained, locked.exists());
+    assert_eq!(report.evidence_directory.is_some(), locked.exists());
     assert!(report.verified_artifacts.is_empty());
     assert!(
         report
@@ -496,4 +496,262 @@ fn rust_test_helper_reports_cleanup_failure_while_resuming_panic() {
     );
     assert!(stderr.contains("session_stop"), "{stderr}");
     assert!(stderr.contains("retained panic evidence"), "{stderr}");
+}
+
+#[test]
+fn rust_owned_adoption_validation_still_finalizes_the_consumed_session() {
+    let root = TempDir::new().expect("evidence root");
+    let terminal = Terminal::new(env!("CARGO_BIN_EXE_termtrace"), root.path());
+    let session = terminal
+        .start(LaunchSpec::new(looping_command()))
+        .expect("launch");
+
+    session
+        .output()
+        .wait_for(b"READY", Duration::from_secs(5))
+        .expect("ready");
+    let path = session.path().to_path_buf();
+    let error = TerminalTest::from_owned_session(
+        session,
+        root.path().join("wrong"),
+        EvidencePolicy::Always,
+        Duration::from_secs(2),
+    )
+    .err()
+    .expect("validation");
+    assert!(error.to_string().contains("outside the test root"));
+    assert!(path.join("completion.json").is_file());
+    assert!(!control_endpoint_is_reachable(&path));
+}
+
+#[test]
+fn rust_owned_artifact_preparation_failure_never_prevents_stop() {
+    let root = TempDir::new().expect("evidence root");
+    let terminal = Terminal::new(env!("CARGO_BIN_EXE_termtrace"), root.path());
+    let session = terminal
+        .start(LaunchSpec::new(looping_command()))
+        .expect("launch");
+
+    session
+        .output()
+        .wait_for(b"READY", Duration::from_secs(5))
+        .expect("ready");
+    let path = session.path().to_path_buf();
+    fs::write(
+        root.path()
+            .join(format!(".test-artifacts-{}", session.session_id())),
+        b"collision",
+    )
+    .expect("artifact collision");
+
+    let report = finalize_owned_sessions(
+        vec![OwnedSessionFinalization::Open(Ok(session))],
+        root.path(),
+        TestOutcome::Passed,
+        EvidencePolicy::OnFailure,
+        Duration::from_secs(2),
+        None,
+    );
+    assert!(report.retained);
+    assert!(report
+        .secondary_failures
+        .iter()
+        .any(|failure| return failure.phase == "artifact_directory"));
+    assert!(path.join("completion.json").is_file());
+    assert!(!control_endpoint_is_reachable(&path));
+    assert!(report
+        .verified_artifacts
+        .iter()
+        .all(|path| return path.exists()));
+}
+
+#[test]
+fn rust_lifecycle_views_keep_force_authority_during_stalled_control() {
+    use nix::{
+        sys::signal::{kill, Signal},
+        unistd::Pid,
+    };
+    let root = TempDir::new().expect("evidence root");
+    let pid_file = root.path().join("actor");
+    let script = "printf '%s' \"$PPID\" > \"$1\"; printf '%s' $$ > \"$1.child\"; printf READY; while IFS= read -r line; do :; done";
+    let command = vec![
+        OsString::from("/bin/sh"),
+        OsString::from("-c"),
+        OsString::from(script),
+        OsString::from("lifecycle"),
+        pid_file.as_os_str().to_owned(),
+    ];
+
+    let terminal = Terminal::new(env!("CARGO_BIN_EXE_termtrace"), root.path());
+    let mut config = TerminalTestConfig::new(terminal, command);
+    config.columns = 20;
+    config.rows = 3;
+    config.finalization_timeout = Duration::from_millis(250);
+    let mut test = TerminalTest::launch(config).expect("launch");
+    let session = test.session().expect("owned");
+    session
+        .output()
+        .wait_for(b"READY", Duration::from_secs(5))
+        .expect("ready");
+
+    let actor: i32 = fs::read_to_string(&pid_file)
+        .expect("actor PID")
+        .parse()
+        .expect("PID");
+
+    let child = fs::read_to_string(pid_file.with_extension("child")).expect("child PID");
+    let mut observer = session.lifecycle_observer();
+    assert!(observer.is_launched());
+
+    kill(Pid::from_raw(actor), Signal::SIGSTOP).expect("pause owned recorder");
+
+    let worker = thread::spawn(move || {
+        return observer.stop(StopRequest::default(), Some(Duration::from_secs(30)));
+    });
+
+    let admission = Instant::now() + Duration::from_secs(1);
+    while test
+        .session()
+        .expect("owned")
+        .drain_lifecycle_observers(Duration::ZERO)
+        .is_ok()
+    {
+        assert!(Instant::now() < admission, "control observer admission");
+
+        thread::sleep(Duration::from_millis(1));
+    }
+
+    let started = Instant::now();
+    let report = test.finalize(TestOutcome::Error);
+
+    assert!(started.elapsed() < Duration::from_secs(6));
+
+    let _observed = worker.join().expect("observer returned");
+
+    assert!(report.retained);
+    assert!(!PathBuf::from(format!("/proc/{actor}")).exists());
+    assert!(!PathBuf::from(format!("/proc/{child}")).exists());
+    assert!(test.session().is_none());
+}
+
+#[test]
+fn rust_passing_body_retains_fatal_recorder_completion_but_not_exit_seven() {
+    for (command, fatal) in [
+        (
+            vec![OsString::from("/termtrace-task04-no-such-child")],
+            true,
+        ),
+        (
+            vec![
+                OsString::from("/bin/sh"),
+                OsString::from("-c"),
+                OsString::from("exit 7"),
+            ],
+            false,
+        ),
+    ] {
+        let root = TempDir::new().expect("evidence root");
+        let terminal = Terminal::new(env!("CARGO_BIN_EXE_termtrace"), root.path());
+        let mut config = TerminalTestConfig::new(terminal, command);
+        config.columns = 20;
+        config.rows = 3;
+        let mut test = TerminalTest::launch(config).expect("launch completion-bearing recorder");
+        let completion = test
+            .session_mut()
+            .expect("owned")
+            .complete(Duration::from_secs(5))
+            .expect("validated completion");
+
+        if fatal {
+            assert_eq!(
+                completion.failure.as_ref().expect("fatal fact").code,
+                "spawn_failed"
+            );
+        } else {
+            assert!(completion.failure.is_none());
+            assert_eq!(completion.exit_code, Some(7));
+        }
+
+        let report = test.finalize(TestOutcome::Passed);
+        assert_eq!(report.retained, fatal);
+        assert_eq!(
+            report
+                .secondary_failures
+                .iter()
+                .any(|failure| return failure.phase == "session_failure"),
+            fatal
+        );
+
+        if !fatal {
+            assert!(report.secondary_failures.is_empty());
+        }
+    }
+}
+
+#[test]
+fn acknowledged_stop_wait_zero_preserves_applied_and_eventual_completion() {
+    use termtrace_model::protocol::mutation::{MutationEffect, Retry};
+    use termtrace_sdk::{input::MutationGuard, Error, ErrorKind, Uuid};
+    for bounded in [false, true] {
+        let root = TempDir::new().expect("evidence root");
+        let terminal = Terminal::new(env!("CARGO_BIN_EXE_termtrace"), root.path());
+        let command = [
+            "/bin/sh",
+            "-c",
+            "trap 'sleep .5; exit 0' TERM; printf READY; while :; do sleep .05; done",
+        ]
+        .map(OsString::from)
+        .to_vec();
+
+        let mut session = terminal.start(LaunchSpec::new(command)).expect("launch");
+        session
+            .output()
+            .wait_for(b"READY", Duration::from_secs(5))
+            .expect("ready");
+        // A completion-only query is not a Stop and must not borrow a later acknowledgement.
+        let query = session.complete(Duration::ZERO).expect_err("still running");
+        assert_eq!(query.kind(), ErrorKind::Engine);
+        assert_eq!(query.effect(), MutationEffect::NotApplied);
+        assert_eq!(query.retry(), Retry::NewRequest);
+        let request_id = Uuid::now_v7();
+        let request = StopRequest {
+            guard: MutationGuard {
+                request_id: Some(request_id),
+                if_state: None,
+            },
+        };
+        let error = if bounded {
+            session
+                .stop_bounded(request, Duration::from_millis(100))
+                .expect_err("bounded completion expires after acknowledged Stop")
+        } else {
+            session
+                .stop(request, Some(Duration::ZERO))
+                .expect_err("completion wait expires after acknowledged Stop")
+        };
+
+        if bounded && error.kind() == ErrorKind::ControlTimeout {
+            // No positive acknowledgement arrived within this graceful deadline: do not
+            // manufacture Applied merely because later evidence shows the actor stopped.
+            assert_eq!(error.effect(), MutationEffect::Unknown);
+            assert_eq!(error.retry(), Retry::SameRequestId);
+            assert!(matches!(error, Error::Control(_)));
+        } else {
+            assert_eq!(error.kind(), ErrorKind::Engine);
+            assert_eq!(error.code(), "engine");
+            assert_eq!(error.effect(), MutationEffect::Applied);
+            assert_eq!(error.retry(), Retry::DoNotRetry);
+            let Error::MutationContext { source, .. } = &error else {
+                panic!("context, not a fabricated actor rejection");
+            };
+            assert!(matches!(source.as_ref(), Error::Engine(_)));
+        }
+
+        let completion = session
+            .complete(Duration::from_secs(5))
+            .expect("eventual validated completion");
+        assert_eq!(completion.session_id, session.session_id());
+        assert!(completion.failure.is_none());
+        assert!(session.lifecycle_finished());
+    }
 }

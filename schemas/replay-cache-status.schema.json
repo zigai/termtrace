@@ -1,0 +1,63 @@
+{
+  "$defs": {
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/replay-cache-status.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Bounded disposable replay-cache inventory for one canonical session.",
+  "properties": {
+    "compressed_bytes": {
+      "description": "Total compressed bytes retained.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "directory": {
+      "$ref": "#/$defs/ExactPath",
+      "description": "Cache directory inside the canonical session."
+    },
+    "entries": {
+      "description": "Number of checkpoint files currently retained.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "maximum_compressed_bytes": {
+      "description": "Automatic per-session compressed-byte limit.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "maximum_entries": {
+      "description": "Automatic per-session checkpoint limit.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "directory",
+    "entries",
+    "compressed_bytes",
+    "maximum_entries",
+    "maximum_compressed_bytes"
+  ],
+  "title": "ReplayCacheStatus",
+  "type": "object"
+}

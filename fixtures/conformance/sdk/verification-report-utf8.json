@@ -1,0 +1,21 @@
+{
+  "format": "termtrace-verification",
+  "version": 4,
+  "session": "/fixture/é-λ-\"quote\"-\\slash-\nline",
+  "level": "content",
+  "valid": true,
+  "session_id": "01a17254-e342-78f0-82a0-6f2a7ecdb54a",
+  "session_manifest_hash": "304a344403c3b9fc47310b2c35c985aa891dbe6fc67da8ec6bd1a50dcb244fa9",
+  "final_event_hash": "04eec46e48f2e5d7d053e9024a11a0762142be6642eeca195c261ec97363e112",
+  "artifact_roots_verified": 0,
+  "artifact_authenticity_established": false,
+  "session_authenticity_established": false,
+  "mutation_journal_status": "verified",
+  "mutation_journal_records_verified": 2,
+  "mutation_journal_error": null,
+  "signature_receipt_present": false,
+  "signature_signer_key_id": null,
+  "signature_cryptographic_valid": false,
+  "signature_signer_trusted": false,
+  "findings": []
+}

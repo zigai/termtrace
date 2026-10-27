@@ -4,7 +4,7 @@ use super::ArtifactService;
 use crate::{error::Error, system::SystemService, Result};
 use std::{
     fmt,
-    io::ErrorKind as IoErrorKind,
+    io::{self, ErrorKind as IoErrorKind},
     path::{Path, PathBuf},
     sync::atomic::AtomicBool,
     time::Duration,
@@ -14,21 +14,31 @@ use termtrace_engine::{
     timeline::{resolve_session_source_selection, SourceRange},
     Error as EngineError,
 };
-use termtrace_evidence::{event_log::EventLogSummary, session::validate_completed_session};
+use termtrace_evidence::{
+    artifact::open_regular_file_nofollow, event_log::EventLogSummary,
+    session::validate_completed_session,
+};
 use termtrace_media::{
     native_capture::{
         capture, native_capture_target, CaptureKind, CaptureOptions, VISUAL_DIRECTORY,
     },
     presentation::{
-        export as export_presentation, plan_with_source as plan_presentation,
-        preview as preview_presentation, read_edit_plan, video_clip_ranges_session, video_clips,
-        EditPlan, PixelTransform, PresentationDelivery, PresentationPlan,
-        PresentationPreviewOutcome, PresentationSource, PresentationSourceRequest, PreviewOptions,
-        VideoIdlePolicy, VideoRenderConfig, EDIT_PLAN_VERSION,
+        export as export_presentation, export_derivatives, plan_with_capture_directory,
+        preview as preview_presentation, read_edit_plan, verify_source_selection,
+        video_clip_ranges_session, video_clips, EditPlan, PixelTransform, PresentationDelivery,
+        PresentationPlan, PresentationPreviewOutcome, PresentationSource,
+        PresentationSourceRequest, PreviewOptions, VideoIdlePolicy, VideoRenderConfig,
+        EDIT_PLAN_VERSION,
     },
+    Error as MediaError,
 };
 use termtrace_model::{
-    artifact::save::SemanticRasterProfile,
+    artifact::{
+        derivative::{DerivativeExportOptions, DerivativeFormat, GifLoop},
+        save::SemanticRasterProfile,
+        sdk::{ArtifactSourceKind, MediaArtifactResult},
+        visual::VisualManifest,
+    },
     execution::layout::SessionLayout,
     execution::session::CaptureTarget,
     protocol::capability::{
@@ -63,6 +73,10 @@ pub enum VideoRenderer {
     Native,
     /// Deterministic pixels generated from canonical semantic replay.
     Semantic,
+    /// Explicit native replay pixels; never original execution or semantic substitution.
+    ReplayNative,
+    /// Reuse verified original-execution CFR pixels only; never replay the application.
+    OriginalExecution,
 }
 
 impl VideoRenderer {
@@ -70,6 +84,8 @@ impl VideoRenderer {
         return match self {
             Self::Native => "native",
             Self::Semantic => "semantic",
+            Self::ReplayNative => "native_replay",
+            Self::OriginalExecution => "original_execution",
         };
     }
 }
@@ -96,9 +112,9 @@ pub enum VideoMode {
         /// Storyboard and review-video settings.
         options: PreviewOptions,
     },
-    /// Render an MP4 and keep its manifested `.termtrace` sidecar next to it.
+    /// Render MP4 (legacy replacement) or GIF/VP9 `WebM` (no-replace), retaining a `.termtrace` sidecar.
     Render {
-        /// MP4 output path.
+        /// Lowercase `.mp4`, `.gif`, or `.webm` output path.
         out: PathBuf,
     },
 }
@@ -136,6 +152,8 @@ pub struct VideoRequest {
     pub hold_end: Option<Duration>,
     /// Whether the recorded cursor stays visible.
     pub cursor_style: CursorStyle,
+    /// GIF loop policy; None defaults to infinite. Invalid for other outputs.
+    pub gif_loop: Option<GifLoop>,
 }
 
 impl VideoRequest {
@@ -157,6 +175,7 @@ impl VideoRequest {
             hold_start: None,
             hold_end: None,
             cursor_style: CursorStyle::default(),
+            gif_loop: None,
         };
     }
 }
@@ -173,7 +192,16 @@ pub enum VideoOutcome {
         /// Preview directory contents.
         preview: PresentationPreviewOutcome,
     },
-    /// A published MP4 and its manifested sidecar.
+    /// A no-replace GIF/VP9 `WebM` with the shared artifact envelope.
+    Derived {
+        /// Normalized common plan.
+        plan: Box<PresentationPlan>,
+        /// External no-replace delivery path.
+        output: PathBuf,
+        /// Shared lossless SDK result envelope for the retained sidecar.
+        artifact: MediaArtifactResult,
+    },
+    /// A published legacy MP4 and its manifested sidecar (overwrite-compatible).
     Rendered {
         /// Rendered plan.
         plan: Box<PresentationPlan>,
@@ -198,21 +226,64 @@ impl ArtifactService {
         helper: &Path,
         progress: &mut dyn FnMut(fmt::Arguments<'_>),
     ) -> Result<VideoOutcome> {
-        let sidecar = match &request.mode {
-            VideoMode::Render { out } => {
-                if out
-                    .extension()
-                    .is_none_or(|extension| return extension != "mp4")
-                {
-                    return Err(invalid("video output must use the `.mp4` extension"));
+        let format = match &request.mode {
+            VideoMode::Render { out } => match out.extension().and_then(|s| return s.to_str()) {
+                Some("mp4") => None,
+                Some("gif") => Some(DerivativeFormat::Gif {
+                    loop_policy: request.gif_loop.unwrap_or(GifLoop::Infinite),
+                }),
+                Some("webm") => Some(DerivativeFormat::Webm {}),
+                _ => {
+                    return Err(invalid(
+                        "video output must use lowercase `.mp4`, `.gif` or `.webm`",
+                    ))
                 }
-
-                Some(video_sidecar_path(out))
-            }
-            VideoMode::Plan | VideoMode::Preview { .. } => None,
+            },
+            _ => None,
         };
 
-        if request.renderer == VideoRenderer::Native && request.semantic_raster_profile.is_some() {
+        if let Some(fps) = request.fps
+            && format.is_some()
+            && (fps == 0
+                || fps > 120
+                || (matches!(format, Some(DerivativeFormat::Gif { .. })) && fps > 100))
+        {
+            return Err(invalid(
+                "derivative FPS must be positive, GIF at most 100 and WebM at most 120",
+            ));
+        }
+
+        if request.gif_loop.is_some() && !matches!(format, Some(DerivativeFormat::Gif { .. })) {
+            return Err(invalid("GIF loop policy is only valid for .gif output"));
+        }
+
+        if format.is_some() && request.preset == VideoPreset::Lossless {
+            return Err(invalid(
+                "GIF/VP9 WebM are lossy derivatives; the lossless preset is not supported",
+            ));
+        }
+
+        let sidecar = match &request.mode {
+            VideoMode::Render { out } => {
+                let sidecar = video_sidecar_path(out);
+                if format.is_some() {
+                    for path in [out, &sidecar] {
+                        if fs_err::symlink_metadata(path).is_ok() {
+                            return Err(invalid(format!(
+                                "derivative destination already exists: {}",
+                                path.display()
+                            )));
+                        }
+                    }
+                }
+
+                Some(sidecar)
+            }
+            _ => None,
+        };
+
+        if request.renderer != VideoRenderer::Semantic && request.semantic_raster_profile.is_some()
+        {
             return Err(invalid(
                 "--semantic-raster-profile configures semantic video only",
             ));
@@ -221,13 +292,35 @@ impl ArtifactService {
         let session = request.session.as_path();
         let preset = PresetConfig::from_preset(request.preset);
         let provisional_fps = request.fps.unwrap_or(preset.fps);
+        let source_kind = match request.renderer {
+            VideoRenderer::Native | VideoRenderer::ReplayNative => ArtifactSourceKind::NativeReplay,
+            VideoRenderer::OriginalExecution => ArtifactSourceKind::OriginalExecution,
+            VideoRenderer::Semantic => ArtifactSourceKind::SemanticRendering,
+        };
 
-        if request.renderer == VideoRenderer::Native {
-            ensure_native_capture(session, provisional_fps, helper, request, progress)?;
-        }
+        let capture_directory = if source_kind == ArtifactSourceKind::OriginalExecution {
+            let original = session.join("visual-original");
+            if !original.join(VISUAL_MANIFEST).is_file() {
+                return Err(MediaError::CapabilityBlocked { id: "native.original_recording".into(), code: "original_execution_source_unavailable".into(), detail: "verified original-execution CFR pixels are absent; replay and semantic pixels cannot substitute".into(), remediation: "supply a completed recording with verified CFR visual-original pixels (task07 live adapter)".into() }.into());
+            }
+
+            Some(original)
+        } else if source_kind == ArtifactSourceKind::NativeReplay {
+            Some(ensure_native_capture(
+                session,
+                provisional_fps,
+                helper,
+                request,
+                progress,
+            )?)
+        } else {
+            None
+        };
 
         let source = match request.renderer {
-            VideoRenderer::Native => PresentationSourceRequest::Native,
+            VideoRenderer::Native
+            | VideoRenderer::ReplayNative
+            | VideoRenderer::OriginalExecution => PresentationSourceRequest::Native,
             VideoRenderer::Semantic => PresentationSourceRequest::Semantic {
                 fps: provisional_fps,
                 raster_profile: request
@@ -238,7 +331,16 @@ impl ArtifactService {
 
         progress(format_args!("Planning video from {}...", session.display()));
 
-        let plan = plan_video(request, session, &preset, provisional_fps, source)?;
+        let plan = plan_video(
+            request,
+            session,
+            &preset,
+            provisional_fps,
+            source,
+            capture_directory.as_deref(),
+        )?;
+
+        verify_source_selection(&plan, session, source_kind)?;
         if let Some(requested) = request.fps
             && requested != plan.fps
         {
@@ -266,13 +368,42 @@ impl ArtifactService {
             }
         };
 
-        require_render_capabilities(source)?;
+        if format.is_none() {
+            require_render_capabilities(source)?;
+        }
+
         progress(format_args!(
             "Rendering {} frames at {} FPS with the {} renderer...",
             plan.output_frame_count,
             plan.fps,
             source_name(&plan.source),
         ));
+
+        if let Some(format) = format {
+            let artifact = export_derivatives(
+                &plan,
+                session,
+                &sidecar,
+                &DerivativeExportOptions {
+                    formats: vec![format],
+                    source_kind,
+                },
+            )?;
+
+            let video = sidecar.join(format.filename());
+            publish_no_replace(&video, out).map_err(|error| {
+                return invalid(format!(
+                    "external publication failed: {error}; valid sidecar retained at {}",
+                    sidecar.display()
+                ));
+            })?;
+
+            return Ok(VideoOutcome::Derived {
+                plan: Box::new(plan),
+                output: out.clone(),
+                artifact,
+            });
+        }
 
         let outcome = export_presentation(&plan, &sidecar)?;
         publish(&outcome.video, out)?;
@@ -304,10 +435,29 @@ fn ensure_native_capture(
     helper: &Path,
     request: &VideoRequest,
     progress: &mut dyn FnMut(fmt::Arguments<'_>),
-) -> Result<()> {
+) -> Result<PathBuf> {
     let visual = session.join(VISUAL_DIRECTORY);
     if visual.join(VISUAL_MANIFEST).is_file() {
-        return Ok(());
+        // Do not relabel original pixels as replay or recapture over an invalid artifact.
+        let path = visual.join(VISUAL_MANIFEST);
+        let bytes = fs_err::read(&path).map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+
+        let manifest: VisualManifest = serde_json::from_slice(&bytes).map_err(|source| {
+            return Error::InvalidJson {
+                path,
+                json_path: "$".into(),
+                source,
+            };
+        })?;
+
+        if manifest.capture_kind == "video" {
+            return Ok(visual);
+        }
     }
 
     SystemService::require(NATIVE_VIDEO_CAPABILITY, &AtomicBool::new(false))?;
@@ -317,22 +467,16 @@ fn ensure_native_capture(
         Err(error) => return Err(error.into()),
     }
 
-    if visual.exists() && !visual.join(VISUAL_MANIFEST).is_file() {
-        fs_err::remove_dir_all(&visual).map_err(|source| {
-            return Error::Filesystem {
-                path: visual.clone(),
-                source,
-            };
-        })?;
-    }
+    // A fresh sibling derivative, never remove/replace an existing capture (even incomplete).
+    let parent = session
+        .parent()
+        .filter(|p| return !p.as_os_str().is_empty())
+        .unwrap_or_else(|| return Path::new("."));
 
-    progress(format_args!(
-        "Capturing native video for {}...",
-        session.display()
-    ));
+    let destination = parent.join(format!("native-replay-{}.termtrace", uuid::Uuid::now_v7()));
+    progress(format_args!("Rendering canonical bytes in headless Ghostty (not rerunning the application), retained at {}...", destination.display()));
 
     let (target, geometry_solver) = native_capture_target(helper, session, request.resolution)?;
-
     capture(
         helper,
         &CaptureOptions {
@@ -346,13 +490,13 @@ fn ensure_native_capture(
             state_selection: StateSelection::All,
             geometry_solver,
             kind: CaptureKind::Video,
-            destination: None,
+            destination: Some(destination.clone()),
             scale: None,
             dpi: None,
         },
     )?;
 
-    return Ok(());
+    return Ok(destination);
 }
 
 fn plan_video(
@@ -361,11 +505,17 @@ fn plan_video(
     preset: &PresetConfig,
     provisional_fps: u16,
     source: PresentationSourceRequest,
+    capture_directory: Option<&Path>,
 ) -> Result<PresentationPlan> {
     if let Some(edit_path) = &request.edit {
         let edit = read_edit_plan(edit_path)?;
 
-        return Ok(plan_presentation(session, &edit, source)?);
+        return Ok(plan_with_capture_directory(
+            session,
+            &edit,
+            source,
+            capture_directory,
+        )?);
     }
 
     validate_completed_session(session)?;
@@ -413,7 +563,7 @@ fn plan_video(
         hold_end,
     )?;
 
-    let first_plan = plan_presentation(session, &provisional, source)?;
+    let first_plan = plan_with_capture_directory(session, &provisional, source, capture_directory)?;
     let edit = facade_edit_plan(
         request,
         preset,
@@ -426,7 +576,12 @@ fn plan_video(
     if edit == provisional {
         return Ok(first_plan);
     }
-    return Ok(plan_presentation(session, &edit, source)?);
+    return Ok(plan_with_capture_directory(
+        session,
+        &edit,
+        source,
+        capture_directory,
+    )?);
 }
 
 fn facade_edit_plan(
@@ -602,6 +757,103 @@ fn publish(video: &Path, out: &Path) -> Result<()> {
     return Ok(());
 }
 
+/// Same-parent staged file and atomic no-replace rename, unlike legacy MP4 publish.
+fn publish_no_replace(video: &Path, out: &Path) -> Result<()> {
+    use nix::{
+        errno::Errno,
+        fcntl::{open, openat, renameat2, OFlag, RenameFlags},
+        sys::stat::Mode,
+        unistd::{unlinkat, UnlinkatFlags},
+    };
+    use std::{fs::File, path::Component};
+    let parent = out
+        .parent()
+        .filter(|p| return !p.as_os_str().is_empty())
+        .unwrap_or_else(|| return Path::new("."));
+
+    let filesystem = |source| {
+        return Error::Filesystem {
+            path: out.into(),
+            source,
+        };
+    };
+
+    let nix_error = |e: Errno| return filesystem(io::Error::from_raw_os_error(e as i32));
+    let flags = OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
+    let mut directory = open(
+        if parent.is_absolute() { "/" } else { "." },
+        flags,
+        Mode::empty(),
+    )
+    .map_err(nix_error)?;
+
+    // Descriptor-relative traversal rejects symlinks in every parent component.
+    for component in parent.components() {
+        match component {
+            Component::RootDir | Component::CurDir => {}
+            Component::Normal(name) => {
+                directory = openat(&directory, name, flags, Mode::empty()).map_err(nix_error)?;
+            }
+            _ => return Err(invalid("derivative output parent must not contain '..'")),
+        }
+    }
+
+    let name = out
+        .file_name()
+        .ok_or_else(|| return invalid("output has no basename"))?;
+
+    let temporary = format!(".video-{}.tmp", uuid::Uuid::now_v7());
+    let fd = openat(
+        &directory,
+        temporary.as_str(),
+        OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+        Mode::from_bits_truncate(0o600),
+    )
+    .map_err(nix_error)?;
+
+    let primary = (|| {
+        let mut destination = File::from(fd);
+        let (mut source, _) = open_regular_file_nofollow(video)?;
+        io::copy(&mut source, &mut destination).map_err(filesystem)?;
+        destination.sync_all().map_err(filesystem)?;
+
+        renameat2(
+            &directory,
+            temporary.as_str(),
+            &directory,
+            name,
+            RenameFlags::RENAME_NOREPLACE,
+        )
+        .map_err(nix_error)?;
+
+        File::from(directory.try_clone().map_err(filesystem)?)
+            .sync_all()
+            .map_err(|e| {
+                return invalid(format!(
+                    "video published at {} but parent sync failed: {e}",
+                    out.display()
+                ));
+            })?;
+
+        return Ok(());
+    })();
+
+    let cleanup = match unlinkat(&directory, temporary.as_str(), UnlinkatFlags::NoRemoveDir) {
+        Ok(()) | Err(Errno::ENOENT) => Ok(()),
+        Err(e) => Err(nix_error(e)),
+    };
+
+    match (primary, cleanup) {
+        (Ok(()), Ok(())) => return Ok(()),
+        (Err(primary), Err(cleanup)) => {
+            return Err(invalid(format!(
+                "{primary}; cleanup also failed: {cleanup}"
+            )))
+        }
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => return Err(error),
+    }
+}
+
 fn duration_millis(duration: Duration, flag: &str) -> Result<u64> {
     return u64::try_from(duration.as_millis())
         .map_err(|_error| return invalid(format!("{flag} is too large")));
@@ -708,5 +960,98 @@ mod tests {
             profile(VideoPreset::Lossless, Some(SemanticRasterProfile::Direct)),
             SemanticRasterProfile::Direct
         );
+    }
+}
+
+#[cfg(test)]
+mod derivative_publication_tests {
+    use super::*;
+    use std::{
+        os::unix::fs::symlink,
+        sync::{Arc, Barrier},
+        thread,
+    };
+
+    #[test]
+    fn no_replace_preserves_files_symlinks_directories_and_legacy_mp4_still_replaces() {
+        let temp = tempfile::tempdir().unwrap();
+        let video = temp.path().join("source");
+        fs_err::write(&video, b"new").unwrap();
+        for name in ["file.gif", "link.webm", "directory.gif"] {
+            let out = temp.path().join(name);
+            if name.starts_with("file") {
+                fs_err::write(&out, b"old").unwrap();
+            } else if name.starts_with("link") {
+                symlink(&video, &out).unwrap();
+            } else {
+                fs_err::create_dir(&out).unwrap();
+            }
+
+            assert!(publish_no_replace(&video, &out).is_err());
+        }
+
+        assert_eq!(fs_err::read(temp.path().join("file.gif")).unwrap(), b"old");
+        assert!(fs_err::symlink_metadata(temp.path().join("link.webm"))
+            .unwrap()
+            .is_symlink());
+        assert!(temp.path().join("directory.gif").is_dir());
+
+        publish(&video, &temp.path().join("file.gif")).unwrap(); // legacy only
+
+        assert_eq!(fs_err::read(temp.path().join("file.gif")).unwrap(), b"new");
+    }
+
+    #[test]
+    fn derivative_file_publication_rejects_symlink_parent_components() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("real");
+        fs_err::create_dir(&target).unwrap();
+        let link = temp.path().join("link");
+        symlink(&target, &link).unwrap();
+        let source = temp.path().join("source");
+        fs_err::write(&source, b"pixels").unwrap();
+
+        assert!(publish_no_replace(&source, &link.join("out.gif")).is_err());
+        assert!(!target.join("out.gif").exists());
+    }
+
+    #[test]
+    #[expect(
+        clippy::needless_collect,
+        reason = "spawn every racer before joining; a lazy iterator would deadlock the barrier"
+    )]
+    fn concurrent_derivative_publishers_have_exactly_one_winner() {
+        let temp = tempfile::tempdir().unwrap();
+        let out = temp.path().join("race.webm");
+        let barrier = Arc::new(Barrier::new(2));
+        let workers: Vec<_> = (0..2)
+            .map(|i| {
+                let source = temp.path().join(format!("source-{i}"));
+                fs_err::write(&source, [i]).unwrap();
+                let out = out.clone();
+                let barrier = Arc::clone(&barrier);
+
+                return thread::spawn(move || {
+                    barrier.wait();
+
+                    return (i, publish_no_replace(&source, &out).is_ok());
+                });
+            })
+            .collect();
+
+        let results: Vec<_> = workers
+            .into_iter()
+            .map(|w| return w.join().unwrap())
+            .collect();
+        assert_eq!(results.iter().filter(|(_, ok)| return *ok).count(), 1);
+
+        let winner = results.iter().find(|(_, ok)| return *ok).unwrap().0;
+
+        assert_eq!(fs_err::read(out).unwrap(), [winner]);
+        assert!(fs_err::read_dir(temp.path()).unwrap().all(|e| return !e
+            .unwrap()
+            .file_name()
+            .as_encoded_bytes()
+            .starts_with(b".video-")));
     }
 }

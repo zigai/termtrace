@@ -141,7 +141,7 @@ pub fn is_pane_wrapper(pid: u32, executable: &Path) -> bool {
 }
 
 /// One pane in a status report.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, schemars::JsonSchema)]
 pub struct TmuxPaneStatus {
     /// Stable pane ID.
     pub pane_id: String,
@@ -162,7 +162,7 @@ pub struct TmuxPaneStatus {
 }
 
 /// Integration and coverage status of one tmux server.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, schemars::JsonSchema)]
 pub struct TmuxStatusReport {
     /// Integration contract version.
     pub integration_version: u32,

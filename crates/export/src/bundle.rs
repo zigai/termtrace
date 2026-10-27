@@ -820,4 +820,146 @@ mod tests {
             .expect_err("attacker-added canonical member must be rejected");
         assert!(inventory_error.to_string().contains("source inventory"));
     }
+
+    fn recorded_source(path: &Path) {
+        use std::{
+            env,
+            process::{Command, Stdio},
+        };
+        let binary = env::var_os("TERMTRACE_BIN").map_or_else(
+            || {
+                return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../target/debug/termtrace");
+            },
+            PathBuf::from,
+        );
+
+        let status = Command::new(binary)
+            .args(["record", "--no-input", "--out"])
+            .arg(path)
+            .args(["--", "/bin/sh", "-c", "printf VERIFIED"])
+            .stdout(Stdio::null())
+            .status()
+            .expect("build the real termtrace CLI before owning export tests");
+        assert!(status.success());
+    }
+
+    fn source_hashes(path: &Path) -> Vec<(String, (u64, String))> {
+        return canonical_file_names(path)
+            .expect("canonical inventory")
+            .into_iter()
+            .map(|name| {
+                let hash = hash_regular_file(&path.join(&name)).expect("canonical hash");
+
+                return (name, hash);
+            })
+            .collect();
+    }
+
+    #[test]
+    fn verification_member_nonutf8_roundtrip_strong_source_binding_and_utf8_compatibility() {
+        use std::{
+            ffi::OsString,
+            os::unix::ffi::{OsStrExt as _, OsStringExt as _},
+        };
+        let temp = TempDir::new().expect("private root");
+        let wrong = temp.path().join("other");
+        recorded_source(&wrong);
+
+        for (label, suffix) in [
+            ("utf8", "é-λ-\"-\\".as_bytes()),
+            ("bytes", b"source-\xff".as_slice()),
+        ] {
+            let source = temp.path().join(OsString::from_vec(suffix.to_vec()));
+            recorded_source(&source);
+            let source = source.canonicalize().expect("source");
+            let before = source_hashes(&source);
+
+            for profile in [BundleProfile::Debug, BundleProfile::Forensic] {
+                let directory = temp.path().join(format!("{label}-{profile:?}"));
+                let mut manifest = create(&source, &directory, profile, None).expect("real bundle");
+                verify_profile(&directory, &BundleVerificationPolicy::new(&source, profile))
+                    .expect("strong directory verification");
+
+                verify_archived_manifest(
+                    &manifest,
+                    &BundleVerificationPolicy::new(&source, profile),
+                )
+                .expect("exact archived-member verification");
+                assert!(verify_profile(
+                    &directory,
+                    &BundleVerificationPolicy::new(&wrong, profile)
+                )
+                .is_err());
+                let path = directory.join("verification.json");
+                let encoded = fs_err::read(&path).expect("verification bytes");
+                let report: VerificationReport =
+                    serde_json::from_slice(&encoded).expect("roundtrip");
+                assert_eq!(
+                    report.session.as_os_str().as_bytes(),
+                    source.as_os_str().as_bytes()
+                );
+                assert_eq!(report, verify_session(&source, VerificationLevel::Content));
+                if label == "utf8" {
+                    let golden: VerificationReport = serde_json::from_slice(include_bytes!(
+                        "../../../fixtures/conformance/sdk/verification-report-utf8.json"
+                    ))
+                    .expect("historical report");
+
+                    let mut historical = golden;
+                    historical.session = source.clone();
+                    let old_path =
+                        serde_json::to_string(&source).expect("historical PathBuf string");
+
+                    let current =
+                        encoded_json_member(&historical, "verification.json").expect("UTF8 report");
+                    assert!(String::from_utf8(current)
+                        .expect("UTF8")
+                        .contains(&old_path));
+                } else {
+                    let mut changed: serde_json::Value =
+                        serde_json::from_slice(&encoded).expect("metadata");
+                    assert_eq!(
+                        changed["session"],
+                        serde_json::to_value(source.as_os_str().as_bytes()).expect("path bytes")
+                    );
+                    let mut wrong_path = source.as_os_str().as_bytes().to_vec();
+                    let last = wrong_path
+                        .iter_mut()
+                        .find(|b| return **b == 255)
+                        .expect("nonUTF8 byte");
+                    *last = 254; // Identical lossy display, different exact path.
+                    changed["session"] = serde_json::to_value(wrong_path).expect("path bytes");
+                    let mut tampered = serde_json::to_vec_pretty(&changed).expect("changed member");
+                    tampered.push(b'\n');
+                    fs_err::write(&path, &tampered).expect("tamper");
+
+                    let member = manifest
+                        .members
+                        .iter_mut()
+                        .find(|m| return m.path == "verification.json")
+                        .expect("member");
+                    member.byte_length = u64::try_from(tampered.len()).expect("length");
+                    member.blake3 = blake3::hash(&tampered).to_hex().to_string();
+                    fs_err::write(
+                        directory.join("manifest.json"),
+                        serde_json::to_vec_pretty(&manifest).expect("rehashed manifest"),
+                    )
+                    .expect("manifest");
+                    assert!(verify_profile(
+                        &directory,
+                        &BundleVerificationPolicy::new(&source, profile)
+                    )
+                    .is_err());
+                    assert!(verify_archived_manifest(
+                        &manifest,
+                        &BundleVerificationPolicy::new(&source, profile)
+                    )
+                    .is_err());
+                }
+
+                assert_eq!(source_hashes(&source), before);
+            }
+        }
+    }
 }

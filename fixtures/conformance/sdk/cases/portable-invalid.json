@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "cases": [
+    {"id":"unsupported_version", "path":"/version", "value":2},
+    {"id":"numeric_wide", "path":"/members/0/byte_length", "value":9007199254740993},
+    {"id":"overflow", "path":"/members/0/byte_length", "value":"18446744073709551616"},
+    {"id":"negative", "path":"/members/0/byte_length", "value":"-1"},
+    {"id":"fraction", "path":"/members/0/byte_length", "value":"1.5"},
+    {"id":"leading_zero", "path":"/source/boundary/output_bytes", "value":"01"},
+    {"id":"bad_base64", "path":"/directory_bytes", "value":"?"},
+    {"id":"bad_padding_bits", "path":"/directory_bytes", "value":"AB=="},
+    {"id":"directory_nul", "path":"/directory_bytes", "value":"AA=="},
+    {"id":"empty_directory", "path":"/directory_bytes", "value":""},
+    {"id":"escaping_path", "path":"/manifest/path", "value":"../manifest.json"},
+    {"id":"absolute_path", "path":"/manifest/path", "value":"/manifest.json"},
+    {"id":"non_normalized_path", "path":"/manifest/path", "value":"a//manifest.json"},
+    {"id":"wrong_hash", "path":"/manifest/blake3", "value":"abc"},
+    {"id":"unknown_provenance", "path":"/provenance/kind", "value":"original_pixels_maybe"},
+    {"id":"contradictory_product", "path":"/product_kind", "value":"preview"},
+    {"id":"missing_nullable", "path":"/members/0/schema_type", "absent":true},
+    {"id":"bad_boundary", "path":"/source/boundary/event_hash", "value":null},
+    {"id":"unknown_field", "path":"/unexpected", "value":true}
+  ]
+}

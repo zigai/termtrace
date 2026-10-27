@@ -5,7 +5,7 @@ use std::{
 };
 use termtrace_engine::Error as EngineError;
 use termtrace_evidence::Error as EvidenceError;
-use termtrace_model::error::ThreadPanicError;
+use termtrace_model::{artifact::original::OriginalCaptureFailure, error::ThreadPanicError};
 use termtrace_render::Error as RenderError;
 use termtrace_terminal::Error as TerminalError;
 
@@ -98,6 +98,14 @@ pub enum Error {
         /// Directory containing retained diagnostic artifacts.
         evidence: PathBuf,
         /// Underlying capture failure.
+        source: Box<Error>,
+    },
+    /// An original-execution capture failed at a classified stage.
+    #[error("original capture failed ({}): {source}", code.code())]
+    OriginalCapture {
+        /// Stable failure code.
+        code: OriginalCaptureFailure,
+        /// Underlying failure.
         source: Box<Error>,
     },
     /// A primary media failure was followed by a cleanup failure.

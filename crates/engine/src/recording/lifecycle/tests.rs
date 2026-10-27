@@ -4,6 +4,7 @@ use super::super::{
     model::RuntimeMessage,
 };
 use super::*;
+use crate::recording::ResizeAuthority;
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::OsString,
@@ -40,6 +41,7 @@ use termtrace_model::{
     },
     terminal::observation::ActorBoundaries,
 };
+use termtrace_terminal::semantic_state_hash;
 
 fn control_socket_address(name: &str) -> SocketAddr {
     use std::os::linux::net::SocketAddrExt as _;
@@ -179,7 +181,7 @@ fn preserve_policy_keeps_the_application_alive_after_a_mirror_failure() {
     );
     options.failure_policy = RecordingFailurePolicy::Preserve;
 
-    assert!(record_to(&options, &mut FailingOutput).is_err());
+    assert!(record_to(&options, &mut FailingOutput, &ResizeAuthority::ChildPty).is_err());
     assert_eq!(
         fs_err::read(&survived).expect("application survived"),
         b"alive"
@@ -236,7 +238,7 @@ fn fatal_actor_exit_writes_durable_failure_completion() {
         ],
     );
 
-    let result = record_to(&options, &mut FailingOutput);
+    let result = record_to(&options, &mut FailingOutput, &ResizeAuthority::ChildPty);
     assert!(result.is_err(), "failing output sink must stop the actor");
 
     let completion = read_completion(&session).expect("failure completion");
@@ -291,7 +293,7 @@ fn poisoned_terminal_exit_append_preserves_incomplete_failure_without_completion
 
     POISON_FATAL_APPEND.with(|poison| poison.set(true));
 
-    let result = record_to(&options, &mut FailingOutput);
+    let result = record_to(&options, &mut FailingOutput, &ResizeAuthority::ChildPty);
     assert!(result.is_err(), "poisoned append must fail recording");
     assert!(
         !session.join("completion.json").exists(),
@@ -342,7 +344,7 @@ fn spawn_failure_after_manifest_creation_writes_valid_fatal_closure() {
         vec![OsString::from("/definitely/missing/termtrace-command")],
     );
 
-    let result = record_to(&options, &mut Vec::new());
+    let result = record_to(&options, &mut Vec::new(), &ResizeAuthority::ChildPty);
     assert!(result.is_err(), "missing command must fail to spawn");
     assert!(session.join("session.json").is_file());
 
@@ -436,7 +438,8 @@ fn output_budget_retains_observed_bytes_and_records_termination() {
     options.resource_limits.output_bytes = Some(1024);
 
     let mut mirrored_output = Vec::new();
-    let outcome = record_to(&options, &mut mirrored_output).expect("budgeted recording");
+    let outcome = record_to(&options, &mut mirrored_output, &ResizeAuthority::ChildPty)
+        .expect("budgeted recording");
     assert!(outcome.output_bytes > 1024);
     assert_eq!(mirrored_output.len() as u64, outcome.output_bytes);
 
@@ -501,7 +504,8 @@ fn max_duration_limit_terminates_session() {
     options.resource_limits.max_duration_ms = Some(100);
 
     let mut mirrored_output: Vec<u8> = Vec::new();
-    let outcome = record_to(&options, &mut mirrored_output).expect("duration-limited recording");
+    let outcome = record_to(&options, &mut mirrored_output, &ResizeAuthority::ChildPty)
+        .expect("duration-limited recording");
     assert!(outcome.resource_limit.is_some());
 
     let completion: SessionCompletion =
@@ -538,7 +542,8 @@ fn idle_timeout_limit_terminates_session() {
     options.resource_limits.idle_timeout_ms = Some(100);
 
     let mut mirrored_output: Vec<u8> = Vec::new();
-    let outcome = record_to(&options, &mut mirrored_output).expect("idle-timeout recording");
+    let outcome = record_to(&options, &mut mirrored_output, &ResizeAuthority::ChildPty)
+        .expect("idle-timeout recording");
     assert!(outcome.resource_limit.is_some());
 
     let completion: SessionCompletion =
@@ -576,7 +581,8 @@ fn completed_output_burst_refreshes_the_pty_drain_deadline() {
     );
 
     let mut mirrored_output: Vec<u8> = Vec::new();
-    let outcome = record_to(&options, &mut mirrored_output).expect("completed burst recording");
+    let outcome = record_to(&options, &mut mirrored_output, &ResizeAuthority::ChildPty)
+        .expect("completed burst recording");
     assert_eq!(outcome.exit_code, Some(0));
     assert!(mirrored_output.len() > 24_000);
 
@@ -607,7 +613,8 @@ fn spawn_and_provenance_share_the_effective_child_path() {
     };
 
     let mut output = Vec::new();
-    let outcome = record_to(&options, &mut output).expect("record child PATH command");
+    let outcome = record_to(&options, &mut output, &ResizeAuthority::ChildPty)
+        .expect("record child PATH command");
     assert_eq!(outcome.exit_code, Some(0));
     assert_eq!(output, b"CHILD_PATH");
 
@@ -697,7 +704,8 @@ fn records_exact_output_and_exit_after_output_close() {
 
     let options = isolated_options(session.clone(), command);
     let mut mirrored_output = Vec::new();
-    let outcome = record_to(&options, &mut mirrored_output).expect("record command");
+    let outcome = record_to(&options, &mut mirrored_output, &ResizeAuthority::ChildPty)
+        .expect("record command");
     assert_eq!(outcome.exit_code, Some(0));
     assert_eq!(
         fs_err::metadata(&session)
@@ -793,7 +801,8 @@ fn terminates_descendants_that_retain_the_slave_pty() {
     let options = isolated_options(temporary.path().join("recording"), command);
     let started = Instant::now();
     let mut output = Vec::new();
-    let outcome = record_to(&options, &mut output).expect("record command");
+    let outcome =
+        record_to(&options, &mut output, &ResizeAuthority::ChildPty).expect("record command");
     assert_eq!(outcome.exit_code, Some(0));
     assert_eq!(output, b"done");
     assert!(
@@ -816,7 +825,8 @@ fn attached_mirror_suppresses_answered_split_queries_and_preserves_display_seque
     let mut options = isolated_options(temporary.path().join("attached-query"), command);
     options.forward_stdin = true;
     let mut mirrored = Vec::new();
-    let outcome = record_to(&options, &mut mirrored).expect("attached recording");
+    let outcome =
+        record_to(&options, &mut mirrored, &ResizeAuthority::ChildPty).expect("attached recording");
 
     assert!(mirrored.starts_with(b"\x1b[31mvisible\x1b[0m"));
     assert!(!mirrored.windows(4).any(|bytes| return bytes == b"\x1b[6n"));
@@ -860,7 +870,8 @@ fn answers_and_audits_terminal_queries() {
 
     let options = isolated_options(temporary.path().join("query"), command);
     let mut output = Vec::new();
-    let outcome = record_to(&options, &mut output).expect("record query command");
+    let outcome =
+        record_to(&options, &mut output, &ResizeAuthority::ChildPty).expect("record query command");
     let log = EventLog::read(outcome.event_log).expect("valid query log");
     let (reply_index, query_source, offset) = log
         .events
@@ -931,7 +942,8 @@ fn preserves_complete_osc_query_when_response_precedes_st() {
 
     let options = isolated_options(temporary.path().join("osc-query"), command);
     let mut output = Vec::new();
-    let outcome = record_to(&options, &mut output).expect("record OSC query command");
+    let outcome = record_to(&options, &mut output, &ResizeAuthority::ChildPty)
+        .expect("record OSC query command");
     let log = EventLog::read(outcome.event_log).expect("valid OSC query log");
     assert!(log.events.iter().any(|record| matches!(
         &record.event,

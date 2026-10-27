@@ -1,6 +1,14 @@
 use super::*;
-use std::fs;
-use termtrace_model::execution::session::RecordingFailurePolicy;
+use nix::{
+    fcntl::{fcntl, FcntlArg, SealFlag},
+    unistd::geteuid,
+};
+use std::{
+    fs::{self, File},
+    os::{fd::AsRawFd as _, unix::fs::MetadataExt as _},
+    path::Component,
+};
+use termtrace_model::execution::session::{recorder_exit_status, RecordingFailurePolicy};
 
 pub(in crate::cli) fn run_record(
     response: &mut ResponseWriter,
@@ -18,7 +26,11 @@ pub(in crate::cli) fn run_record(
         original_native: _,
         original_fps: _,
         original_backend: _,
+        original_grid: _,
+        original_canvas: _,
+        explicit_geometry: _,
         resolved_ghostty_profile_provenance,
+        outer_resize_socket,
         on_recording_error,
         out,
         detach: _,
@@ -40,6 +52,9 @@ pub(in crate::cli) fn run_record(
         recording: arguments,
     } = arguments;
     let out = out.ok_or_else(|| miette::miette!("--out is required for foreground recording"))?;
+    let resize_authority = outer_resize_socket.map_or(ResizeAuthority::ChildPty, |socket| {
+        return ResizeAuthority::OuterTerminal { socket };
+    });
 
     let import_provenance = match (
         import_source_kind,
@@ -67,44 +82,19 @@ pub(in crate::cli) fn run_record(
         }
     };
 
-    let supplied_environment = if arguments.environment_spec_stdin {
+    let stdin = if arguments.environment_spec_stdin {
         if !no_input {
             return Err(miette::miette!(
                 "--environment-spec-stdin requires --no-input so stdin cannot be consumed twice"
             ));
         }
 
-        let mut bytes = Vec::new();
-        io::stdin()
-            .take(4 * 1024 * 1024 + 1)
-            .read_to_end(&mut bytes)
-            .into_diagnostic()?;
-
-        Some(
-            parse_environment_spec(&bytes, Path::new("<environment-spec-stdin>"))
-                .into_diagnostic()?,
-        )
-    } else if let Some(path) = arguments.environment_spec.as_deref() {
-        Some(read_environment_spec(path).into_diagnostic()?)
-    } else if arguments.clear_env
-        || !arguments.copy_env.is_empty()
-        || !arguments.unset_env.is_empty()
-        || arguments.color_policy.is_some()
-    {
-        Some(EnvironmentSpec {
-            base: if arguments.clear_env {
-                EnvironmentBase::Clear
-            } else {
-                EnvironmentBase::Inherit
-            },
-            copy: arguments.copy_env.iter().cloned().collect(),
-            unset: arguments.unset_env.iter().cloned().collect(),
-            color: arguments.color_policy.map_or(ColorPolicy::Auto, Into::into),
-            ..EnvironmentSpec::default()
-        })
+        Some(read_environment_stdin()?)
     } else {
         None
     };
+
+    let supplied_environment = supplied_environment(&arguments, stdin.as_deref())?;
 
     if let Some(predecessor) = restart_source {
         if import_provenance.is_some() {
@@ -128,7 +118,7 @@ pub(in crate::cli) fn run_record(
             supplied_environment,
         )?;
 
-        return report_record_outcome(run_with_response(response, &options)?);
+        return report_record_outcome(run_with_response(response, &options, &resize_authority)?);
     }
 
     let durability_policy = durability_policy_for(&arguments)?;
@@ -246,6 +236,7 @@ pub(in crate::cli) fn run_record(
                     .map(|d| return u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
             },
         },
+        &resize_authority,
     )?;
 
     return report_record_outcome(outcome);
@@ -282,32 +273,114 @@ pub(super) fn durability_policy_for(arguments: &RecordingArgs) -> Result<Durabil
 pub(super) fn run_with_response(
     response: &mut ResponseWriter,
     options: &RecordOptions,
+    resize_authority: &ResizeAuthority,
 ) -> Result<RecordOutcome> {
     let mut output = response_output(response);
 
-    return record_with_output(options, &mut output).into_diagnostic();
+    return record_with_resize_authority(options, &mut output, resize_authority).into_diagnostic();
 }
 
 pub(super) fn report_record_outcome(outcome: RecordOutcome) -> Result<ExitCode> {
     writeln!(io::stderr(), "recording: {}", outcome.event_log.display()).into_diagnostic()?;
 
-    if outcome.resource_limit.is_some() {
-        return Ok(ExitCode::FAILURE);
+    return recorder_exit_status(
+        outcome.exit_code,
+        outcome.signal_name.as_deref(),
+        outcome.resource_limit.is_some(),
+    )
+    .map(ExitCode::from)
+    .ok_or_else(|| return miette::miette!("child exit code does not fit a process exit status"));
+}
+
+pub(super) fn read_environment_stdin() -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    io::stdin()
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .into_diagnostic()?;
+
+    return Ok(bytes);
+}
+
+fn is_descriptor_path(path: &Path) -> bool {
+    let components: Vec<_> = path.components().collect();
+    let number = |component: &Component<'_>| {
+        return component.as_os_str().to_str().is_some_and(|text| {
+            return !text.is_empty() && text.bytes().all(|b| return b.is_ascii_digit());
+        });
+    };
+
+    return matches!(
+        components.as_slice(),
+        [Component::RootDir, Component::Normal(proc), pid, Component::Normal(fd), descriptor]
+            if *proc == "proc" && *fd == "fd" && number(pid) && number(descriptor)
+    );
+}
+
+// An original-capture supervisor passes its sealed owner-only memfd as `/proc/<pid>/fd/<n>`.
+// The magic link is followed, and the opened descriptor itself must be that memfd.
+fn read_environment_memfd(path: &Path) -> Result<EnvironmentSpec> {
+    let mut file = File::open(path).into_diagnostic()?;
+    let target = fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd())).into_diagnostic()?;
+    let metadata = file.metadata().into_diagnostic()?;
+    let required = SealFlag::F_SEAL_SHRINK | SealFlag::F_SEAL_GROW | SealFlag::F_SEAL_WRITE;
+    let seals =
+        SealFlag::from_bits_truncate(fcntl(&file, FcntlArg::F_GET_SEALS).into_diagnostic()?);
+
+    if !target.as_os_str().as_bytes().starts_with(b"/memfd:")
+        || !metadata.is_file()
+        || metadata.uid() != geteuid().as_raw()
+        || metadata.mode() & 0o077 != 0
+        || !seals.contains(required)
+    {
+        return Err(miette::miette!(
+            "{}: a descriptor environment specification must be a sealed owner-only memfd",
+            path.display()
+        ));
     }
 
-    if let Some(signal) = outcome.signal_name.as_deref() {
-        return match signal {
-            "Interrupt" | "SIGINT" | "INT" => Ok(ExitCode::from(130)),
-            "Terminate" | "Terminated" | "SIGTERM" | "TERM" => Ok(ExitCode::from(143)),
-            "Kill" | "Killed" | "SIGKILL" | "KILL" => Ok(ExitCode::from(137)),
-            "Pipe" | "BrokenPipe" | "Broken pipe" | "SIGPIPE" | "PIPE" => Ok(ExitCode::from(141)),
-            "Hangup" | "SIGHUP" | "HUP" => Ok(ExitCode::from(129)),
-            "Quit" | "SIGQUIT" | "QUIT" => Ok(ExitCode::from(131)),
-            _ => Ok(ExitCode::FAILURE),
-        };
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .into_diagnostic()?;
+
+    return parse_environment_spec(&bytes, path).into_diagnostic();
+}
+
+pub(super) fn supplied_environment(
+    arguments: &RecordingArgs,
+    stdin: Option<&[u8]>,
+) -> Result<Option<EnvironmentSpec>> {
+    if let Some(bytes) = stdin {
+        return parse_environment_spec(bytes, Path::new("<environment-spec-stdin>"))
+            .map(Some)
+            .into_diagnostic();
     }
-    return outcome.exit_code.map_or_else(
-        || return Ok(ExitCode::FAILURE),
-        |code| return u8::try_from(code).map(ExitCode::from).into_diagnostic(),
-    );
+
+    if let Some(path) = arguments.environment_spec.as_deref() {
+        if is_descriptor_path(path) {
+            return read_environment_memfd(path).map(Some);
+        }
+        return read_environment_spec(path).map(Some).into_diagnostic();
+    }
+
+    if arguments.clear_env
+        || !arguments.copy_env.is_empty()
+        || !arguments.unset_env.is_empty()
+        || arguments.color_policy.is_some()
+    {
+        return Ok(Some(EnvironmentSpec {
+            base: if arguments.clear_env {
+                EnvironmentBase::Clear
+            } else {
+                EnvironmentBase::Inherit
+            },
+            copy: arguments.copy_env.iter().cloned().collect(),
+            unset: arguments.unset_env.iter().cloned().collect(),
+            color: arguments.color_policy.map_or(ColorPolicy::Auto, Into::into),
+            ..EnvironmentSpec::default()
+        }));
+    }
+    return Ok(None);
 }

@@ -66,3 +66,66 @@ fn test_value_override_semantics() {
     let default: ValueOverride<String> = ValueOverride::default();
     assert_eq!(default, ValueOverride::Keep);
 }
+
+#[test]
+fn detached_track_adapter_reaps_its_original_child_after_completion() {
+    use std::{
+        ffi::OsString,
+        path::PathBuf,
+        thread,
+        time::{Duration, Instant},
+    };
+    use termtrace_service::{
+        client::{Session, StopRequest},
+        registry::DetachedStart,
+    };
+    let temporary = TempDir::new().expect("private root");
+    let registry = RegistryService::open(temporary.path().join("state")).expect("registry");
+    let binary = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/termtrace");
+    let started = registry
+        .start_detached(
+            &binary,
+            DetachedStart {
+                alias: "adapter-reap".into(),
+                session: None,
+                startup_timeout: Duration::from_secs(5),
+                stdin: None,
+            },
+            |path| {
+                return vec![
+                    OsString::from("record"),
+                    "--no-input".into(),
+                    "--out".into(),
+                    path.as_os_str().into(),
+                    "--".into(),
+                    "/bin/sh".into(),
+                    "-c".into(),
+                    "printf READY; read line".into(),
+                ];
+            },
+        )
+        .expect("start via shared adapter path");
+
+    let pid = started
+        .entry
+        .recorder_pid
+        .expect("live original recorder identity");
+
+    let mut attached =
+        Session::attach(&started.paths.session, &binary).expect("attach detached track");
+    attached
+        .stop(StopRequest::default(), Some(Duration::from_secs(5)))
+        .expect("validated completion");
+
+    let process = PathBuf::from(format!("/proc/{pid}"));
+    let deadline = Instant::now() + Duration::from_secs(3);
+
+    while process.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        !process.exists(),
+        "original recorder must not be left as a zombie"
+    );
+}

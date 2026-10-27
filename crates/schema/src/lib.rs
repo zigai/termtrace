@@ -9,17 +9,25 @@ use std::{
     path::{Path, PathBuf},
     result::Result as StdResult,
 };
+use termtrace_model::protocol::management::{FailureContext, ManagementFailure};
+use termtrace_model::{
+    artifact::sdk::MediaArtifactResult,
+    execution::{application::ApplicationAcknowledgement, tmux::TmuxRecordConfiguration},
+};
 use termtrace_model::{
     artifact::{
-        bundle as model_bundle, metadata as artifact, playback, presentation, save, semantic_video,
-        visual,
+        bundle as model_bundle, derivative, metadata as artifact, original, playback, presentation,
+        save, semantic_video, visual,
     },
-    execution::{environment, event, event_log, provenance, receipt, request_journal, session},
+    execution::{
+        environment, event, event_log, paging, provenance, receipt, request_journal, session,
+    },
     protocol::{capability, control, doctor, output_projection},
     registry as model_registry, scenario,
     terminal::{analysis, diff, inspection, observation, replay, reviewer, screen, timeline, vt},
 };
 use termtrace_tmux::artifact as tmux;
+use termtrace_tmux::{status::TmuxStatusReport, store::EventPage as TmuxEventPage};
 
 /// Result type for schema catalog operations.
 pub type Result<T, E = Error> = StdResult<T, E>;
@@ -127,6 +135,37 @@ fn generate_acceptance_benchmark_schema(filename: &'static str) -> Result<Genera
 }
 
 registry!(
+    ("application-acknowledgement.schema.json", ApplicationAcknowledgement),
+    ("management-failure.schema.json", ManagementFailure),
+    ("failure-context.schema.json", FailureContext),
+    ("restart-configuration.schema.json", model_registry::RestartConfiguration),
+    ("restart-report.schema.json", model_registry::RestartReport),
+    ("tmux-status.schema.json", TmuxStatusReport),
+    ("tmux-recording-start.schema.json", tmux::TmuxRecordingStart),
+    ("tmux-record-configuration.schema.json", TmuxRecordConfiguration),
+    ("tmux-events-page.schema.json", TmuxEventPage),
+    ("tmux-catalog-summary.schema.json", tmux::TmuxCatalogSummary),
+    ("save-format.schema.json", save::SaveFormat),
+    ("timeline-page.schema.json", timeline::TimelinePage),
+    ("last-action-analysis.schema.json", analysis::LastActionAnalysis),
+    ("replay-cache-status.schema.json", observation::ReplayCacheStatus),
+    ("replay-cache-prune.schema.json", observation::ReplayCachePruneReport),
+    ("garbage-collection-report.schema.json", model_registry::GarbageCollectionReport),
+    ("registry-resolution.schema.json", model_registry::RegistrySessionResolution),
+    ("sdk-event-follow.schema.json", paging::EventFollowPosition),
+    ("sdk-event-page.schema.json", paging::ProjectedEventPage),
+    ("sdk-output-page.schema.json", paging::ByteOutputPage),
+    ("sdk-event-cursor.schema.json", paging::EventPageCursor),
+    ("sdk-output-cursor.schema.json", paging::OutputPageCursor),
+    ("sdk-media-artifact-result.schema.json",
+        MediaArtifactResult
+    ),
+    ("original-capture-status.schema.json",
+        original::OriginalCaptureStatus
+    ),
+    ("window-resize-record.schema.json",
+        original::WindowResizeRecord
+    ),
     ("event-log-header.schema.json",
         event::EventLogHeader
     ),
@@ -297,6 +336,15 @@ registry!(
     ),
     ("edit-plan.schema.json",
         presentation::EditPlan
+    ),
+    ("derivative-export-options.schema.json",
+        derivative::DerivativeExportOptions
+    ),
+    ("derivative-manifest.schema.json",
+        derivative::DerivativeManifest
+    ),
+    ("gif-frame-timing.schema.json",
+        derivative::GifFrameTiming
     ),
     ("presentation-plan.schema.json",
         presentation::PresentationPlan

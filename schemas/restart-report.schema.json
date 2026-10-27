@@ -1,0 +1,118 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "RegistryEntry": {
+      "additionalProperties": false,
+      "description": "One friendly name bound to an immutable canonical session identity.",
+      "properties": {
+        "alias": {
+          "description": "Validated friendly alias.",
+          "type": "string"
+        },
+        "canonical_session": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact canonical session-directory path bytes."
+        },
+        "control_protocol_version": {
+          "description": "Control protocol expected by the registering build.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "format": {
+          "description": "Stable entry format identifier.",
+          "type": "string"
+        },
+        "recorder_pid": {
+          "description": "Recorder PID when a supervisor supplied one.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "recorder_process_start_ticks": {
+          "description": "Linux process start-time ticks paired with `recorder_pid` against PID reuse.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "registered_unix_ns": {
+          "description": "Registry publication time from the local system clock.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "description": "Immutable session ID read from `session.json` during registration.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "version": {
+          "description": "Entry schema version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "version",
+        "alias",
+        "canonical_session",
+        "session_id",
+        "control_protocol_version",
+        "registered_unix_ns"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/restart-report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Shared restart result, retaining the predecessor and compare-and-retargeted successor.",
+  "properties": {
+    "alias": {
+      "description": "Alias compare-and-retargeted after validated readiness and lineage.",
+      "type": "string"
+    },
+    "predecessor": {
+      "$ref": "#/$defs/RegistryEntry",
+      "description": "Preserved predecessor binding."
+    },
+    "ready": {
+      "description": "True only after successful retargeting.",
+      "type": "boolean"
+    },
+    "stderr_log": {
+      "$ref": "#/$defs/Base64Bytes",
+      "description": "Exact owner-only stderr log path."
+    },
+    "stdout_log": {
+      "$ref": "#/$defs/Base64Bytes",
+      "description": "Exact owner-only stdout log path."
+    },
+    "successor": {
+      "$ref": "#/$defs/RegistryEntry",
+      "description": "New binding."
+    }
+  },
+  "required": [
+    "alias",
+    "predecessor",
+    "successor",
+    "stdout_log",
+    "stderr_log",
+    "ready"
+  ],
+  "title": "RestartReport",
+  "type": "object"
+}

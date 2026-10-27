@@ -12,14 +12,14 @@ use super::{
         presentation_source_identity_hash, presentation_source_truth_layer,
         validate_preview_options,
     },
-    NANOS_PER_SECOND,
 };
 use crate::{Error, Result};
 use std::{
     fmt::Write as _,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    sync::atomic::AtomicBool,
     thread,
+    time::Duration,
 };
 use termtrace_evidence::artifact::{
     collect_artifact_members, commit_directory, create_private_directory, verify_artifact_members,
@@ -38,12 +38,15 @@ fn require_presentation_tools() -> Result<()> {
     return Ok(());
 }
 
-/// Export a normalized plan without modifying its immutable source evidence.
+/// Export a legacy MP4 without modifying source evidence.
+///
+/// This legacy API intentionally retains destination replacement compatibility.
+/// New GIF/WebM `export_derivatives` publication is strictly no-replace.
 ///
 /// # Errors
 ///
 /// Returns an error when the plan has no output frames, its source no longer verifies, the
-/// destination exists or has no parent, presentation tools are unavailable, or rendering, encoding,
+/// destination has no parent, presentation tools are unavailable, or rendering, encoding,
 /// or publication fails.
 pub fn export(
     plan: &PresentationPlan,
@@ -320,7 +323,20 @@ pub(super) fn select_preview_frames(
     return Ok(selected);
 }
 
-fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<PresentationManifest> {
+/// Shared composition path. Derivatives use FFV1 RGB, never the documentation MP4.
+pub(super) fn compose_pixels(
+    plan: &PresentationPlan,
+    staging: &Path,
+    lossless: bool,
+    cancelled: Option<&AtomicBool>,
+) -> Result<Vec<String>> {
+    if plan.fps == 0 || plan.output_frame_count == 0 || plan.clips.is_empty() {
+        return Err(plan_error(
+            "composition requires positive CFR FPS and frames",
+        ));
+    }
+
+    validate_normalized_frames(plan)?;
     let source_video = materialize_planned_source(plan, staging)?;
     let filter_path = staging.join("filter.txt");
     let mut filters = Vec::new();
@@ -328,24 +344,25 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
         && plan.clips.iter().any(|clip| return clip.caption.is_some());
 
     for (index, clip) in plan.clips.iter().enumerate() {
-        let mut filter = format!(
-            "[0:v]trim=start_frame={}:end_frame={},setpts=(PTS-STARTPTS)*{}/{}",
-            clip.source_start_frame,
-            clip.source_end_frame,
-            clip.speed.denominator,
-            clip.speed.numerator,
-        );
+        // Integer source-frame mapping is the same floor(offset*num/den) used by
+        // presentation-map.jsonl. Round input boundaries upward, so each output
+        // uses the last source frame whose exact rational boundary has arrived.
+        filters.push(format!(
+            "[0:v]trim=start_frame={}:end_frame={},settb=expr=1/({}*{}),setpts=N*{},fps=fps={}:start_time=0:round=up,tpad=stop_mode=clone:stop={},trim=end_frame={},setpts=N/({}*TB)[retimed{index}]",
+            clip.source_start_frame, clip.source_end_frame, plan.fps, clip.speed.numerator,
+            clip.speed.denominator, plan.fps, clip.retimed_frame_count, clip.retimed_frame_count, plan.fps,
+        ));
+        let mut filter = if clip.hold_frame_count > 0 {
+            filters.push(format!(
+                "[0:v]trim=start_frame={}:end_frame={},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop={},trim=end_frame={},setpts=N/({}*TB)[hold{index}]",
+                clip.source_end_frame - 1, clip.source_end_frame, clip.hold_frame_count,
+                clip.hold_frame_count, plan.fps,
+            ));
 
-        if clip.hold_frame_count > 0 {
-            write!(
-                &mut filter,
-                ",tpad=stop_mode=clone:stop_duration={}.{:09}",
-                clip.hold_frame_count / u64::from(plan.fps),
-                clip.hold_frame_count % u64::from(plan.fps) * NANOS_PER_SECOND
-                    / u64::from(plan.fps),
-            )
-            .map_err(|_error| return plan_error("could not build FFmpeg hold filter"))?;
-        }
+            format!("[retimed{index}][hold{index}]concat=n=2:v=1:a=0")
+        } else {
+            format!("[retimed{index}]null")
+        };
 
         if captioned && plan.layout.caption == CaptionLayout::Footer {
             filter.push_str(",pad=iw:ih+48:0:0:color=black");
@@ -415,14 +432,19 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
         }
     };
 
-    let ffmpeg_arguments = vec![
+    let mut ffmpeg_arguments = vec![
         "-hide_banner".to_owned(),
         "-nostdin".to_owned(),
         "-threads".to_owned(),
         "1".to_owned(),
+        "-filter_complex_threads".to_owned(),
+        "1".to_owned(),
         "-y".to_owned(),
         "-i".to_owned(),
-        source_video.display().to_string(),
+        source_video
+            .to_str()
+            .ok_or_else(|| return plan_error("FFmpeg source path must be UTF-8"))?
+            .to_owned(),
         "-filter_complex".to_owned(),
         filter.trim().to_owned(),
         "-map".to_owned(),
@@ -447,29 +469,89 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
         "presentation.mp4".to_owned(),
     ];
 
-    let process = Command::new("ffmpeg")
-        .args(&ffmpeg_arguments)
-        .current_dir(staging)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|source| {
-            return Error::Filesystem {
-                path: PathBuf::from("ffmpeg"),
-                source,
-            };
-        })?;
-
-    write_secure(&staging.join("ffmpeg.log"), &process.stderr)?;
-
-    if !process.status.success() {
-        return Err(plan_error(format!(
-            "FFmpeg presentation export failed with {}: {}",
-            process.status,
-            String::from_utf8_lossy(&process.stderr)
-        )));
+    if lossless {
+        // Replace only delivery settings; graph, source and map are shared.
+        let delivery_start = ffmpeg_arguments
+            .iter()
+            .position(|v| return v == "-c:v")
+            .ok_or_else(|| return plan_error("composition encoder argument missing"))?;
+        ffmpeg_arguments.truncate(delivery_start);
+        ffmpeg_arguments.extend(
+            [
+                "-c:v",
+                "ffv1",
+                "-level",
+                "3",
+                "-threads",
+                "1",
+                "-pix_fmt",
+                "bgr0",
+                "composed.mkv",
+            ]
+            .map(str::to_owned),
+        );
     }
 
+    super::ffmpeg::run_logged_command(
+        "ffmpeg",
+        &ffmpeg_arguments,
+        staging,
+        "composition",
+        cancelled,
+        Duration::from_secs(86_400),
+    )?;
+
+    validate_planned_source(&plan.source)?;
+
+    return Ok(ffmpeg_arguments);
+}
+
+/// Check frame arithmetic before trusting a caller-supplied mutable normalized plan.
+pub(super) fn validate_normalized_frames(plan: &PresentationPlan) -> Result<()> {
+    if plan.output_width == 0
+        || plan.output_height == 0
+        || !plan.output_width.is_multiple_of(2)
+        || !plan.output_height.is_multiple_of(2)
+    {
+        return Err(plan_error("composition requires a positive even canvas"));
+    }
+
+    let mut next = 0u64;
+    for clip in &plan.clips {
+        let frames = clip
+            .source_end_frame
+            .checked_sub(clip.source_start_frame)
+            .filter(|n| return *n > 0)
+            .ok_or_else(|| return plan_error("empty or reversed source frames"))?;
+
+        if clip.speed.numerator == 0 || clip.speed.denominator == 0 {
+            return Err(plan_error("zero rational speed"));
+        }
+
+        let retimed = u128::from(frames) * u128::from(clip.speed.denominator);
+        let retimed = retimed.div_ceil(u128::from(clip.speed.numerator));
+
+        if retimed != u128::from(clip.retimed_frame_count) || clip.output_start_frame != next {
+            return Err(plan_error("normalized retiming/map boundaries differ"));
+        }
+
+        next = next
+            .checked_add(clip.retimed_frame_count)
+            .and_then(|n| return n.checked_add(clip.hold_frame_count))
+            .ok_or_else(|| return plan_error("normalized output frame overflow"))?;
+        if clip.output_end_frame != next {
+            return Err(plan_error("normalized clip end differs"));
+        }
+    }
+
+    if next != plan.output_frame_count {
+        return Err(plan_error("normalized total frame count differs"));
+    }
+    return Ok(());
+}
+
+fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<PresentationManifest> {
+    let ffmpeg_arguments = compose_pixels(plan, staging, false, None)?;
     let (output_probe, ffmpeg_version) =
         thread::scope(|scope| -> Result<(serde_json::Value, String)> {
             let probe = scope.spawn(|| -> Result<serde_json::Value> {

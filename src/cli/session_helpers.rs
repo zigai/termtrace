@@ -71,7 +71,7 @@ pub(super) fn resolve_cli_range(
     });
 
     let live_event_count = match status {
-        Ok(SessionStatus::Completed(_)) => {
+        Ok(SessionStatus::Completed { .. }) => {
             return selection_bounds(resolve_session_source_selection(
                 session,
                 range.start_monotonic_ns,

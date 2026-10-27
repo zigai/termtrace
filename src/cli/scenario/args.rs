@@ -25,7 +25,10 @@ pub(in crate::cli) struct TestArgs {
     /// Total deterministic shard count.
     #[arg(long, requires = "shard_index", value_parser = parse_positive_usize)]
     pub(in crate::cli) shard_count: Option<usize>,
-    /// Fresh-session reruns after a failed attempt (0-10).
+    /// Reject recovered flaky cases in CI (default: tolerate; verdict stays flaky).
+    #[arg(long)]
+    pub(in crate::cli) fail_on_flaky: bool,
+    /// Fresh-session reruns after expectation failures, never infrastructure errors (0-10).
     #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=10))]
     pub(in crate::cli) reruns: u8,
 }

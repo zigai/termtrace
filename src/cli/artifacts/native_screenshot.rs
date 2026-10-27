@@ -51,7 +51,7 @@ pub(super) fn run(
     require_cli_capability(NATIVE_SCREENSHOT_CAPABILITY, &cancelled)?;
 
     let live_boundary = match attach_session(session)?.status().into_diagnostic()? {
-        SessionStatus::Completed(_) => None,
+        SessionStatus::Completed { .. } => None,
         SessionStatus::Live { boundaries, .. } => {
             if points != [StatePoint::LatestPresented] {
                 return Err(miette::miette!(

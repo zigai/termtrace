@@ -1,0 +1,85 @@
+{
+  "$defs": {
+    "ActorBoundaries": {
+      "additionalProperties": false,
+      "description": "Durable and latest actor-processed positions returned by live operations.",
+      "properties": {
+        "durable": {
+          "$ref": "#/$defs/CanonicalBoundary",
+          "description": "Latest boundary whose file synchronization completed successfully."
+        },
+        "observed": {
+          "$ref": "#/$defs/CanonicalBoundary",
+          "description": "Latest boundary processed by the session actor, possibly volatile."
+        }
+      },
+      "required": [
+        "durable",
+        "observed"
+      ],
+      "type": "object"
+    },
+    "CanonicalBoundary": {
+      "additionalProperties": false,
+      "description": "Actor-consistent position in the canonical event stream.",
+      "properties": {
+        "event_hash": {
+          "description": "Hash of the preceding event, or the event header at sequence zero.",
+          "type": "string"
+        },
+        "next_event_seq": {
+          "description": "Sequence number that will be assigned to the next event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_bytes": {
+          "description": "PTY output bytes included through this boundary.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "next_event_seq",
+        "event_hash",
+        "output_bytes"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/application-acknowledgement.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Successful acknowledged SDK instrumentation emission. This is not a persisted event envelope.",
+  "properties": {
+    "acknowledged": {
+      "description": "True only after the actor's positive acknowledgement.",
+      "type": "boolean"
+    },
+    "boundaries": {
+      "$ref": "#/$defs/ActorBoundaries",
+      "description": "Actor-observed and durable positions from the actual acknowledgement."
+    },
+    "process_instance_id": {
+      "description": "Emitting process-instance identity.",
+      "format": "uuid",
+      "type": "string"
+    },
+    "span_id": {
+      "description": "Span identity for start/end, absent for a discrete event.",
+      "format": "uuid",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "acknowledged",
+    "process_instance_id",
+    "boundaries"
+  ],
+  "title": "ApplicationAcknowledgement",
+  "type": "object"
+}

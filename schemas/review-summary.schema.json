@@ -1,12 +1,30 @@
 {
+  "$defs": {
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    }
+  },
   "$id": "https://github.com/zigai/termtrace/schemas/review-summary.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Noninteractive reviewer source summary.",
   "properties": {
     "canonical_session": {
-      "description": "Immutable completed session directory.",
-      "type": "string"
+      "$ref": "#/$defs/ExactPath",
+      "description": "Immutable completed session directory."
     },
     "final_state_hash": {
       "description": "Final semantic state hash.",

@@ -160,9 +160,11 @@ pub struct SaveManifest {
 }
 
 /// Atomic save result.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct SaveOutcome {
     /// Published directory.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub directory: PathBuf,
     /// Published manifest.
     pub manifest: SaveManifest,

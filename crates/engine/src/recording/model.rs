@@ -1,6 +1,9 @@
 //! Recording options, actor messages, and terminal geometry.
 
-use super::support::{finish_with_cleanup, terminal_error};
+use super::{
+    outer_resize::Dispatch,
+    support::{finish_with_cleanup, terminal_error},
+};
 use crate::analysis::profile::ResolvedGhosttyProfile;
 use crate::Result;
 use portable_pty::{Child, MasterPty, PtySize};
@@ -154,6 +157,11 @@ pub(super) enum RuntimeMessage {
     ControlServerFailed(String),
     /// The control server thread finished and accepts no further requests.
     ControlServerStopped,
+    /// The supervisor exchange for one outer-terminal resize finished.
+    OuterResizeReply {
+        request_id: uuid::Uuid,
+        dispatch: Dispatch,
+    },
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

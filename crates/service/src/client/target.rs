@@ -3,7 +3,7 @@ use crate::{Error, Result};
 use std::{
     ffi::{OsStr, OsString},
     os::unix::ffi::{OsStrExt as _, OsStringExt as _},
-    path::PathBuf,
+    path::{Path, PathBuf},
     str,
 };
 use termtrace_control::observe_phase;
@@ -73,11 +73,26 @@ impl SessionTarget {
     ///
     /// Returns an error when the alias is unknown, pending, or bound to changed evidence.
     pub fn path(&self) -> Result<PathBuf> {
+        return self.path_in(None);
+    }
+
+    /// Resolve to a healthy canonical session directory, reading aliases from the registry
+    /// under `state_root`, or the default registry when it is `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the alias is unknown, pending, or bound to changed evidence.
+    pub fn path_in(&self, state_root: Option<&Path>) -> Result<PathBuf> {
         return match self {
             Self::Path(path) => Ok(path.clone()),
-            Self::Name(name) => Ok(SessionRegistry::open_default()?
-                .resolve(name)?
-                .session_path()),
+            Self::Name(name) => {
+                let registry = match state_root {
+                    Some(root) => SessionRegistry::open(root)?,
+                    None => SessionRegistry::open_default()?,
+                };
+
+                Ok(registry.resolve(name)?.session_path())
+            }
         };
     }
 

@@ -17,7 +17,7 @@ use termtrace_model::value::ByteString;
 const SCOPE_VERSION: u32 = 1;
 
 /// Recording scope mode.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TmuxScopeMode {
     /// Record every future pane process.
@@ -29,7 +29,7 @@ pub enum TmuxScopeMode {
 }
 
 /// Versioned recording scope stored in a global tmux option.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TmuxScopePolicy {
     /// Policy shape version.

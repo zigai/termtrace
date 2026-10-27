@@ -208,7 +208,7 @@ pub(super) fn write_video_map(
         };
     })?;
 
-    let mut frames = AcquisitionFrames::new(BufReader::new(file).lines());
+    let mut frames = AcquisitionFrames::new(log_lines(file));
     let mut frame = frames.next_frame()?;
     let mut states = source.open()?;
 
@@ -276,7 +276,7 @@ pub(super) fn validate_acquisition_frames(path: &Path, expected_count: u64) -> R
         };
     })?;
 
-    let mut frames = AcquisitionFrames::new(BufReader::new(file).lines());
+    let mut frames = AcquisitionFrames::new(log_lines(file));
     let mut first = None;
 
     let mut count = 0;
@@ -313,7 +313,7 @@ pub(super) fn write_original_acquisition_map(
         };
     })?;
 
-    let mut frames = AcquisitionFrames::new(BufReader::new(file).lines());
+    let mut frames = AcquisitionFrames::new(log_lines(file));
     let mut writer = secure_writer(path)?;
 
     while let Some((frame, acquisition_unix_ns)) = frames.next_frame()? {
@@ -344,6 +344,13 @@ pub(super) fn write_original_acquisition_map(
     }
 
     return finish_writer(writer, path).map_err(Error::from);
+}
+
+// FFmpeg echoes input and output paths, which need not be UTF-8; the parsed lines are ASCII.
+fn log_lines(file: File) -> impl Iterator<Item = io::Result<String>> {
+    return BufReader::new(file).split(b'\n').map(|line| {
+        return line.map(|bytes| return String::from_utf8_lossy(&bytes).into_owned());
+    });
 }
 
 /// Parse integer timestamps rather than FFmpeg's rounded `pts_time` display.

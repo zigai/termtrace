@@ -569,6 +569,454 @@
         }
       ]
     },
+    "EventMetadata": {
+      "description": "Model-specific byte-elided event metadata; application attributes are deliberately excluded.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Output payload is represented by the projection byte summary.",
+          "properties": {
+            "type": {
+              "const": "output",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `InputIntent` variant.",
+          "properties": {
+            "caller_intent": {
+              "description": "Optional caller-supplied reason for applying the input.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "descriptor": {
+              "$ref": "#/$defs/InputDescriptor",
+              "description": "Structured semantic source of the exact emitted bytes."
+            },
+            "input_kind": {
+              "$ref": "#/$defs/InputKind",
+              "description": "High-level input category."
+            },
+            "operation_id": {
+              "description": "Identifier paired with the corresponding result.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "semantic_input": {
+              "description": "Canonical symbolic input, such as `ctrl+u` or `paste`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "$ref": "#/$defs/InputSource",
+              "description": "Input origin."
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical terminal modes used to encode this atom, when mode-aware.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "input_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "source",
+            "input_kind",
+            "descriptor"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `InputResult` variant.",
+          "properties": {
+            "bytes_written": {
+              "description": "Bytes written before success or failure.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "error_code": {
+              "description": "Stable diagnostic code on failure.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Identifier from the corresponding intent.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/OperationStatus",
+              "description": "Whether the entire byte sequence was applied."
+            },
+            "type": {
+              "const": "input_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "status",
+            "bytes_written"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `ResizeIntent` variant.",
+          "properties": {
+            "cols": {
+              "description": "Columns after the resize.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "operation_id": {
+              "description": "Identifier paired with the corresponding result.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "pixel_height": {
+              "description": "Total pixel height reported to the child.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pixel_width": {
+              "description": "Total pixel width reported to the child.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "description": "Rows after the resize.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "resize_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "cols",
+            "rows",
+            "pixel_width",
+            "pixel_height"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `ResizeResult` variant.",
+          "properties": {
+            "error_code": {
+              "description": "Stable diagnostic code on failure.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Identifier from the corresponding intent.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/OperationStatus",
+              "description": "Whether the new geometry was applied."
+            },
+            "type": {
+              "const": "resize_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `SignalIntent` variant.",
+          "properties": {
+            "name": {
+              "description": "Stable display name such as `SIGINT`.",
+              "type": "string"
+            },
+            "number": {
+              "description": "Platform signal number.",
+              "format": "int32",
+              "type": "integer"
+            },
+            "operation_id": {
+              "description": "Identifier paired with the corresponding result.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": {
+              "const": "signal_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "number",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `SignalResult` variant.",
+          "properties": {
+            "error_code": {
+              "description": "Stable diagnostic code on failure.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Identifier from the corresponding intent.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/OperationStatus",
+              "description": "Whether the signal syscall succeeded."
+            },
+            "type": {
+              "const": "signal_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical Marker variant.",
+          "properties": {
+            "label": {
+              "description": "User-provided marker label.",
+              "type": "string"
+            },
+            "operation_id": {
+              "description": "Caller-owned operation identifier used for durable deduplication.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": {
+              "const": "marker",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "label"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical Application variant.",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ApplicationEventKind",
+              "description": "Application lifecycle variant."
+            },
+            "operation_id": {
+              "description": "Actor request identity.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "parent_span_id": {
+              "description": "Parent span identity, when applicable.",
+              "format": "uuid",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "process_id": {
+              "description": "Caller-reported process ID.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "process_instance_id": {
+              "description": "Emitting process instance.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "span_id": {
+              "description": "Span identity, when applicable.",
+              "format": "uuid",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "application",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "process_instance_id",
+            "process_id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `QueryResponse` variant.",
+          "properties": {
+            "responder": {
+              "description": "Component that generated the elided query response.",
+              "type": "string"
+            },
+            "type": {
+              "const": "query_response",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "responder"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical Lifecycle variant.",
+          "properties": {
+            "lifecycle_kind": {
+              "$ref": "#/$defs/LifecycleKind",
+              "description": "Transition kind."
+            },
+            "pid": {
+              "description": "Child process ID when available.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "lifecycle",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "lifecycle_kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical Exit variant.",
+          "properties": {
+            "code": {
+              "description": "Exit status when the process exited normally.",
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "signal": {
+              "description": "Signal number when signal termination occurred.",
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "signal_name": {
+              "description": "Platform signal description when available.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "exit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `HostError` variant.",
+          "properties": {
+            "code": {
+              "description": "Stable diagnostic code.",
+              "type": "string"
+            },
+            "message": {
+              "description": "Redacted human-readable message.",
+              "type": "string"
+            },
+            "type": {
+              "const": "host_error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "code",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "InputDescriptor": {
       "description": "Structured semantic provenance for exact input bytes.",
       "oneOf": [
@@ -1027,6 +1475,14 @@
       "type": "string"
     },
     "metadata": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EventMetadata"
+        },
+        {
+          "type": "null"
+        }
+      ],
       "description": "Non-byte event fields when exact payloads were elided."
     },
     "metadata_only": {
@@ -1039,6 +1495,19 @@
       "minimum": 0,
       "type": "integer"
     },
+    "observed_monotonic_ns": {
+      "description": "Separately observed timestamp, when the recorder retained one.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "prev_hash": {
+      "description": "Hash of the preceding canonical record or header.",
+      "type": "string"
+    },
     "seq": {
       "description": "Canonical event sequence.",
       "format": "uint64",
@@ -1049,6 +1518,7 @@
   "required": [
     "seq",
     "monotonic_ns",
+    "prev_hash",
     "hash",
     "event_type",
     "metadata_only",

@@ -78,6 +78,7 @@ fn allowed_dependencies(package: &str) -> Option<&'static [&'static str]> {
             "termtrace-model",
             "termtrace-process",
             "termtrace-render",
+            "termtrace-schema",
             "termtrace-terminal",
             "termtrace-tmux",
         ]),

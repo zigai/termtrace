@@ -157,6 +157,14 @@ pub(super) fn parse_media_hold_duration(value: &str) -> StdResult<Duration, Stri
     return parse_duration(value, "media hold duration");
 }
 
+/// Delivery-specific rate limits are checked before session access by the video route.
+pub(super) fn parse_derivative_video_fps(value: &str) -> StdResult<u16, String> {
+    return match value.parse::<u16>() {
+        Ok(fps @ 1..=120) => Ok(fps),
+        _ => Err("video FPS must be between 1 and 120 (GIF at most 100)".to_owned()),
+    };
+}
+
 pub(super) fn parse_video_fps(value: &str) -> StdResult<u16, String> {
     return match value.parse::<u16>() {
         Ok(fps @ (24 | 30 | 60)) => Ok(fps),
@@ -267,8 +275,11 @@ pub(super) fn parse_bounded_screen_regex(value: &str) -> StdResult<String, Strin
 
 pub(super) fn parse_video_output_path(value: &str) -> StdResult<PathBuf, String> {
     let path = PathBuf::from(value);
-    if path.extension() != Some(OsStr::new("mp4")) {
-        return Err("video output must use the `.mp4` extension".to_owned());
+    if !["mp4", "gif", "webm"]
+        .iter()
+        .any(|ext| return path.extension() == Some(OsStr::new(ext)))
+    {
+        return Err("video output must use lowercase `.mp4`, `.gif` or `.webm`".to_owned());
     }
     return Ok(path);
 }
@@ -297,5 +308,23 @@ mod tests {
         assert!(parse_stability_duration("invalid").is_err());
         assert!(parse_wait_deadline_duration("invalid").is_err());
         assert!(parse_media_hold_duration("invalid").is_err());
+    }
+}
+
+#[cfg(test)]
+mod derivative_output_tests {
+    #[test]
+    fn only_lowercase_supported_video_extensions_are_accepted() {
+        assert_eq!(super::parse_derivative_video_fps("25"), Ok(25));
+        assert_eq!(super::parse_derivative_video_fps("100"), Ok(100));
+        assert!(super::parse_derivative_video_fps("0").is_err());
+        assert!(super::parse_derivative_video_fps("121").is_err());
+        for path in ["demo.mp4", "demo.gif", "demo.webm"] {
+            assert!(super::parse_video_output_path(path).is_ok());
+        }
+
+        for path in ["demo.GIF", "demo.avi", "demo", "demo.gif.tmp", "demo.WEBM"] {
+            assert!(super::parse_video_output_path(path).is_err());
+        }
     }
 }

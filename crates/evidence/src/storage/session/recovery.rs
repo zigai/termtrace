@@ -9,6 +9,7 @@ use crate::storage::{
     event_log::{EventLog, EventLogCursor, EventLogSummary},
     Error, Result,
 };
+use serde::Serialize;
 use std::{
     env::temp_dir,
     fs,
@@ -19,6 +20,19 @@ use std::{
 use termtrace_model::execution::{
     event_log::RecoveryReport, layout::SessionLayout, session::SessionManifest,
 };
+use uuid::Uuid;
+
+#[derive(Serialize)]
+struct RecoveryDiagnostic<'report> {
+    format: &'static str,
+    version: u32,
+    complete_evidence: bool,
+    #[serde(with = "termtrace_model::value::exact_path")]
+    source_session: &'report Path,
+    session_id: Uuid,
+    session_manifest_hash: &'report str,
+    recovery: &'report RecoveryReport,
+}
 
 /// Owned, verified disk snapshot of a finite canonical prefix, without a completion claim.
 pub struct SessionSnapshot {
@@ -116,6 +130,21 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
         .parent()
         .ok_or_else(|| return Error::invalid("recovery destination has no parent"))?;
 
+    // A nested destination would publish new files into the canonical source
+    // tree, even without overwriting its existing records. Resolve parent links
+    // before staging so aliases cannot bypass the non-destructive boundary.
+    let canonical_source =
+        fs::canonicalize(source).map_err(|error| return Error::filesystem(source, error))?;
+
+    let canonical_parent =
+        fs::canonicalize(parent).map_err(|error| return Error::filesystem(parent, error))?;
+
+    if canonical_parent.starts_with(&canonical_source) {
+        return Err(Error::invalid(
+            "recovery destination cannot be inside the source session",
+        ));
+    }
+
     let staging = tempfile::Builder::new()
         .prefix(".termtrace-recovery-")
         .permissions(fs::Permissions::from_mode(0o700))
@@ -138,22 +167,26 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
 
     report.recovered = SessionLayout::new(&destination).event_log();
     let recovery_path = staged.recovery_diagnostic();
-    let bytes = serde_json::to_vec(&serde_json::json!({
-        "format": "termtrace-session-recovery",
-        "version": 1,
-        "complete_evidence": false,
-        "source_session": source,
-        "session_id": manifest.session_id,
-        "session_manifest_hash": summary.header.session_manifest_hash,
-        "recovery": report,
-    }))
-    .map_err(|source| {
-        return Error::InvalidJson {
-            path: recovery_path.clone(),
-            json_path: "$".to_owned(),
-            source,
-        };
-    })?;
+    let diagnostic = RecoveryDiagnostic {
+        format: "termtrace-session-recovery",
+        version: 1,
+        complete_evidence: false,
+        source_session: source,
+        session_id: manifest.session_id,
+        session_manifest_hash: &summary.header.session_manifest_hash,
+        recovery: &report,
+    };
+    // Preserve the historical sorted JSON object bytes for UTF8 paths, but never
+    // use json!'s infallible conversion for filesystem paths.
+    let bytes = serde_json::to_value(&diagnostic)
+        .and_then(|value| return serde_json::to_vec(&value))
+        .map_err(|source| {
+            return Error::InvalidJson {
+                path: recovery_path.clone(),
+                json_path: "$".to_owned(),
+                source,
+            };
+        })?;
 
     write_secure(&recovery_path, &bytes)?;
 

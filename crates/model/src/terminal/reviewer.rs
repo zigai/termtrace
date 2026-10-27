@@ -49,6 +49,8 @@ impl Default for ReviewerCapabilities {
 #[serde(deny_unknown_fields)]
 pub struct ReviewSummary {
     /// Immutable completed session directory.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub canonical_session: PathBuf,
     /// Number of distinct semantic states.
     pub state_count: u64,
@@ -85,6 +87,8 @@ pub struct ReviewSearchMatch {
 #[serde(deny_unknown_fields)]
 pub struct ReviewSearchResult {
     /// Immutable completed session directory.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub canonical_session: PathBuf,
     /// Exact viewport substring query.
     pub query: String,
@@ -99,6 +103,8 @@ pub struct ReviewExportManifest {
     /// Reviewer export contract version.
     pub version: u32,
     /// Immutable source session.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub canonical_session: PathBuf,
     /// Exact exported semantic state identifier.
     pub state_id: u64,

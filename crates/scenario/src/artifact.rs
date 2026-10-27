@@ -5,9 +5,7 @@ use crate::{
 use serde::Serialize;
 use std::{
     fmt::Display,
-    fs::Permissions,
     io::Write as _,
-    os::unix::fs::PermissionsExt as _,
     path::{Path, PathBuf},
 };
 use termtrace_engine::{
@@ -15,7 +13,7 @@ use termtrace_engine::{
     Error as EngineError,
 };
 use termtrace_evidence::{
-    artifact::{finish_writer, secure_writer},
+    artifact::{commit_directory, create_private_directory, finish_writer, secure_writer},
     session::SessionSnapshot,
 };
 use termtrace_model::scenario::{Scenario, ScenarioReport};
@@ -40,55 +38,37 @@ pub(crate) fn publish_failure(
     scenario: &Scenario,
     report: &ScenarioReport,
     final_snapshot: Option<&ControlPayload>,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let parent = destination.parent().ok_or_else(|| {
         return invalid("scenario failure destination must have a parent directory");
     })?;
 
-    fs_err::create_dir_all(parent).map_err(|source| {
-        return Error::Filesystem {
-            path: parent.to_path_buf(),
-            source,
-        };
-    })?;
+    let temporary = parent.join(format!(".{}.tmp", uuid::Uuid::now_v7()));
+    create_private_directory(&temporary)
+        .map_err(|e| return operation("stage failure evidence", e))?;
 
-    let temporary = parent.join(format!(".{}.tmp", report.session_id));
-    fs_err::create_dir(&temporary).map_err(|source| {
-        return Error::Filesystem {
-            path: temporary.clone(),
-            source,
-        };
-    })?;
-    fs_err::set_permissions(&temporary, Permissions::from_mode(0o700)).map_err(|source| {
-        return Error::Filesystem {
-            path: temporary.clone(),
-            source,
-        };
-    })?;
+    let result = (|| {
+        let warnings = populate_failure(&temporary, destination, scenario, report, final_snapshot)?;
+        commit_directory(parent, &temporary, destination, false)
+            .map_err(|e| return operation("publish failure evidence", e))?;
 
-    let publish_result = populate_failure(&temporary, scenario, report, final_snapshot);
-    if let Err(error) = publish_result {
+        return Ok(warnings);
+    })();
+
+    if result.is_err() {
         let _remove = fs_err::remove_dir_all(&temporary);
-
-        return Err(error);
     }
 
-    fs_err::rename(&temporary, destination).map_err(|source| {
-        return Error::Filesystem {
-            path: destination.to_path_buf(),
-            source,
-        };
-    })?;
-
-    return Ok(());
+    return result;
 }
 
 fn populate_failure(
     temporary: &Path,
+    destination: &Path,
     scenario: &Scenario,
     report: &ScenarioReport,
     final_snapshot: Option<&ControlPayload>,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let mut redacted_scenario = scenario.clone();
     for value in redacted_scenario.launch.environment.set.values_mut() {
         "<redacted>".clone_into(value);
@@ -99,9 +79,13 @@ fn populate_failure(
     }
 
     write_json(temporary.join("scenario.json"), &redacted_scenario)?;
-    write_json(temporary.join("result.json"), report)?;
+    // This copy only claims publication in the transaction that successfully publishes it.
+    let mut published_report = report.clone();
+    published_report.failure_artifacts = None;
 
-    let mut derivation_errors: Vec<String> = Vec::new();
+    // Return only new publication warnings; the caller appends them to its existing
+    // diagnostics. The published report retains both sets in their original order.
+    let mut derivation_errors = Vec::new();
 
     if let Some(snapshot) = final_snapshot {
         write_json(temporary.join("final-screen.json"), snapshot)?;
@@ -124,31 +108,59 @@ fn populate_failure(
                     return termtrace_render::render_png(&state)
                         .map_err(|error| return error.to_string());
                 }) {
-                Ok(png) => write_bytes(temporary.join("final-screen.png"), &png)?,
-                Err(error) => derivation_errors.push(format!("semantic image: {error}")),
+                Ok(png) => {
+                    if write_bytes(temporary.join("final-screen.png"), &png).is_err() {
+                        let _remove = fs_err::remove_file(temporary.join("final-screen.png"));
+                        derivation_errors.push("semantic image unavailable".to_owned());
+                    }
+                }
+                Err(_) => derivation_errors.push("semantic image unavailable".to_owned()),
             }
         }
     }
 
-    match SessionSnapshot::capture(&report.canonical_session, None) {
+    match report
+        .canonical_session
+        .as_ref()
+        .ok_or_else(|| return "no canonical session".to_owned())
+        .and_then(|path| {
+            return SessionSnapshot::capture(path, None)
+                .map_err(|_error| return "canonical evidence unavailable".to_owned());
+        }) {
         Ok(snapshot) => {
-            if let Err(error) = write_timeline(&snapshot, &temporary.join("timeline.json")) {
-                derivation_errors.push(format!("timeline: {error}"));
+            if let Err(_error) = write_timeline(&snapshot, &temporary.join("timeline.json")) {
+                derivation_errors.push("timeline unavailable".to_owned());
             }
 
             match diagnose_snapshot(&snapshot, DiagnosticCheck::all(), 50) {
-                Ok(diagnosis) => write_json(temporary.join("diagnose.json"), &diagnosis)?,
-                Err(error) => derivation_errors.push(format!("diagnose: {error}")),
+                Ok(diagnosis) => {
+                    if write_json(temporary.join("diagnose.json"), &diagnosis).is_err() {
+                        let _remove = fs_err::remove_file(temporary.join("diagnose.json"));
+                        derivation_errors.push("diagnose unavailable".to_owned());
+                    }
+                }
+                Err(_) => derivation_errors.push("diagnose unavailable".to_owned()),
             }
         }
-        Err(error) => derivation_errors.push(format!("event log: {error}")),
+        Err(_) => derivation_errors.push("event log unavailable".to_owned()),
     }
 
-    if !derivation_errors.is_empty() {
-        write_json(temporary.join("derivation-errors.json"), &derivation_errors)?;
+    published_report
+        .artifact_warnings
+        .extend(derivation_errors.iter().cloned());
+
+    if !published_report.artifact_warnings.is_empty() {
+        write_json(
+            temporary.join("derivation-errors.json"),
+            &published_report.artifact_warnings,
+        )?;
     }
 
-    return Ok(());
+    // The caller sets its evidence path only after the atomic commit succeeds.
+    published_report.failure_artifacts = Some(destination.to_path_buf());
+    write_json(temporary.join("result.json"), &published_report)?;
+
+    return Ok(derivation_errors);
 }
 
 const MAX_SCENARIO_FAILURE_TIMELINE_ENTRIES: usize = 1_000;
@@ -220,4 +232,48 @@ pub(crate) fn write_json(path: PathBuf, value: &impl Serialize) -> Result<()> {
     encoded.push(b'\n');
 
     return write_bytes(path, &encoded);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution::error_report;
+
+    #[test]
+    fn failed_publication_cleans_staging_and_never_replaces_or_claims_evidence() {
+        let temp = tempfile::tempdir().unwrap();
+        let scenario: Scenario = serde_json::from_value(serde_json::json!({"version":2,"name":"publication", "launch":{"command":["/bin/true"]}, "steps":[]})).unwrap();
+        let mut report = error_report("publication", "replay", "replay_integrity");
+        let id = uuid::Uuid::now_v7();
+        report.session_id = Some(id);
+        report.canonical_session = Some(temp.path().join("missing.tt"));
+        let destination = temp.path().join(id.to_string());
+        fs_err::create_dir(&destination).unwrap();
+        fs_err::write(destination.join("existing"), "untouched").unwrap();
+
+        assert!(publish_failure(&destination, &scenario, &report, None).is_err());
+        assert_eq!(report.failure_artifacts, None);
+        assert_eq!(
+            fs_err::read_to_string(destination.join("existing")).unwrap(),
+            "untouched"
+        );
+        assert_eq!(
+            fs_err::read_dir(temp.path()).unwrap().count(),
+            1,
+            "failed rename must remove staging"
+        );
+
+        fs_err::remove_dir_all(&destination).unwrap();
+        let warnings = publish_failure(&destination, &scenario, &report, None).unwrap();
+        assert_eq!(warnings, vec!["event log unavailable"]);
+        let published: ScenarioReport =
+            serde_json::from_slice(&fs_err::read(destination.join("result.json")).unwrap())
+                .unwrap();
+        assert_eq!(published.failure_artifacts, Some(destination));
+        assert_eq!(published.artifact_warnings, warnings);
+        assert!(
+            report.failure_artifacts.is_none(),
+            "caller marks publication only after success"
+        );
+    }
 }

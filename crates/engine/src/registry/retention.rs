@@ -465,7 +465,6 @@ fn completed_session(session: &Path, record_only: bool) -> Result<SessionComplet
     if record_only {
         return read_completion(session).map_err(Error::from);
     }
-
     return validate_completed_session(session).map_err(Error::from);
 }
 

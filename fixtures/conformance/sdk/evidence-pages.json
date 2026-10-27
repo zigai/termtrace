@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "raw_base64": "QQD/QkM=",
+  "event_cursor": {
+    "source": {
+      "session_path": "L3RtcC9ub251dGY4Lf8=",
+      "session_id": "00000000-0000-0000-0000-000000000000",
+      "device": "18446744073709551615",
+      "inode": "9007199254740993",
+      "header_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "session_path_display": "/tmp/nonutf8-\ufffd"
+    },
+    "next_event_seq": "18446744073709551615",
+    "event_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "invalid_decimals": [
+    "01",
+    "-1",
+    "1.5",
+    "18446744073709551616"
+  ],
+  "invalid_numeric_tokens": [
+    "9007199254740993",
+    "18446744073709551615"
+  ]
+}

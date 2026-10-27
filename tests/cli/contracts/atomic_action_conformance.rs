@@ -2,17 +2,22 @@
 
 use crate::support::*;
 use serde::Deserialize;
-use std::{error::Error, thread, time::Instant};
+use std::{collections::BTreeMap, error::Error, thread, time::Instant};
 use termtrace_model::{
+    execution::event::EventMetadata,
+    execution::session::ResourceLimitKind,
     protocol::control::{
-        ActionPostconditionResult, ScreenPostconditionQuality, StableCaptureQuality,
+        ActionPostconditionResult, ProcessSignal, ScreenPostconditionQuality, StableCaptureQuality,
     },
     terminal::observation::CaptureQuality,
     terminal::screen::{FrameDetail, ScreenFrame, ScreenFrameContent, ScreenFrameSource},
+    terminal::state::MouseButton,
 };
 use termtrace_sdk::{
+    contracts::ActionDraft,
+    events::EventsService,
     session::{CommandPostcondition, SendLastStep, SendRequest, SendStep},
-    MutationEffect, MutationGuard, Reaction, Retry,
+    MutationEffect, MutationGuard, PointerOutcome, Reaction, Retry,
 };
 use uuid::Uuid;
 
@@ -177,7 +182,11 @@ fn marker_labels(session: &termtrace_sdk::Session) -> termtrace_sdk::Result<Vec<
         .into_iter()
         .filter(|event| return event.event_type == "marker")
         .filter_map(|event| {
-            return event.metadata?.get("label")?.as_str().map(str::to_owned);
+            let Some(EventMetadata::Marker { label, .. }) = event.metadata else {
+                return None;
+            };
+
+            return Some(label);
         })
         .collect());
 }
@@ -756,5 +765,427 @@ fn frame_contains(frame: &ScreenFrame, expected: &str) -> bool {
             return rows.iter().any(|row| return row.text.contains(expected));
         }
         ScreenFrameContent::None => return false,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct InteractionFixture {
+    echo_command: Vec<String>,
+    raw_command: Vec<String>,
+    mouse_command: Vec<String>,
+    environment_command: Vec<String>,
+    ready_text: String,
+    raw_bytes_hex: String,
+    raw_bytes_echo: String,
+    raw_bytes_base64: String,
+    set_bytes_hex: String,
+    set_bytes_echo: String,
+    activation_text: String,
+    errors: BTreeMap<String, ErrorFacts>,
+}
+
+#[derive(Debug, Deserialize, Eq, PartialEq)]
+struct ErrorFacts {
+    kind: String,
+    code: String,
+    effect: serde_json::Value,
+    retry: String,
+}
+
+impl ErrorFacts {
+    #[expect(
+        clippy::expect_used,
+        reason = "test-only conformance helper reports fixture and SDK failures"
+    )]
+    fn of(error: &termtrace_sdk::Error) -> Self {
+        return Self {
+            kind: error.kind().as_str().to_owned(),
+            code: error.code().to_owned(),
+            effect: serde_json::to_value(error.effect()).expect("effect JSON"),
+            retry: serde_json::to_value(error.retry())
+                .expect("retry JSON")
+                .as_str()
+                .expect("retry name")
+                .to_owned(),
+        };
+    }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "test-only conformance helper reports fixture and SDK failures"
+)]
+fn interaction_fixture() -> InteractionFixture {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures/conformance/actions/interaction-control.json");
+
+    return serde_json::from_slice(&fs_err::read(&path).expect("interaction fixture"))
+        .expect("interaction fixture JSON");
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "test-only conformance helper reports fixture and SDK failures"
+)]
+fn hex_bytes(hex: &str) -> Vec<u8> {
+    return (0..hex.len())
+        .step_by(2)
+        .map(|index| {
+            let pair = hex.get(index..index + 2).expect("hex pair");
+
+            return u8::from_str_radix(pair, 16).expect("hex byte");
+        })
+        .collect();
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "test-only conformance helper reports fixture and SDK failures"
+)]
+fn start_fixture(
+    temporary: &Path,
+    name: &str,
+    spec: LaunchSpec,
+    ready: &str,
+) -> termtrace_sdk::Session {
+    let terminal = ClientTerminal::new(env!("CARGO_BIN_EXE_termtrace"), temporary.join(name));
+    let session = terminal.start(spec).expect("launch interaction fixture");
+    wait_for_output(session.path(), ready.as_bytes(), Duration::from_secs(5))
+        .expect("interaction fixture ready");
+
+    return session;
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "test-only conformance helper reports fixture and SDK failures"
+)]
+fn wait_for_frame_text(session: &termtrace_sdk::Session, text: &str) -> ScreenFrame {
+    let wait = session
+        .wait_screen(
+            ScreenPredicate::Contains {
+                text: text.to_owned(),
+            },
+            Duration::ZERO,
+            Duration::from_secs(5),
+        )
+        .expect("screen wait");
+    assert!(wait.matched, "screen shows {text:?}");
+
+    return wait.frame;
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "test-only conformance helper reports fixture and SDK failures"
+)]
+fn stop_fixture(mut session: termtrace_sdk::Session) {
+    session
+        .stop(StopRequest::default(), Some(Duration::from_secs(5)))
+        .expect("stop interaction fixture");
+}
+
+#[test]
+fn interaction_failures_report_the_shared_fixture_facts_without_side_effects() {
+    let fixture = interaction_fixture();
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = start_fixture(
+        temporary.path(),
+        "errors",
+        LaunchSpec::new(&fixture.echo_command),
+        &fixture.ready_text,
+    );
+
+    let stale = session
+        .act(ActRequest {
+            guard: MutationGuard {
+                request_id: Some(Uuid::now_v7()),
+                if_state: Some("0".repeat(64)),
+            },
+            ..ActRequest::new().text("stale\n")
+        })
+        .expect_err("a stale guard is rejected");
+    assert_eq!(ErrorFacts::of(&stale), fixture.errors["stale"]);
+
+    let request_id = Uuid::now_v7();
+    let applied = session
+        .act(ActRequest {
+            guard: MutationGuard {
+                request_id: Some(request_id),
+                if_state: None,
+            },
+            ..ActRequest::new().text("first\n")
+        })
+        .expect("first action");
+    let collision = session
+        .act(ActRequest {
+            guard: MutationGuard {
+                request_id: Some(request_id),
+                if_state: None,
+            },
+            ..ActRequest::new().text("other\n")
+        })
+        .expect_err("a reused identity with other input is rejected");
+    assert_eq!(ErrorFacts::of(&collision), fixture.errors["collision"]);
+
+    let strict = session
+        .pointer()
+        .click(0, 0, MouseButton::Left, true, &MutationGuard::default())
+        .expect_err("strict pointer input without mouse reporting is rejected");
+    assert_eq!(ErrorFacts::of(&strict), fixture.errors["strict_pointer"]);
+
+    let incomplete = session
+        .act(ActRequest {
+            postcondition: ActionCondition::Screen {
+                predicate: ScreenPredicate::Contains {
+                    text: "NEVER".to_owned(),
+                },
+                timeout: Duration::from_millis(200),
+            },
+            ..ActRequest::new().text("late\n")
+        })
+        .expect_err("an unmet postcondition is incomplete");
+    assert_eq!(ErrorFacts::of(&incomplete), fixture.errors["incomplete"]);
+
+    let termtrace_sdk::Error::PostconditionIncomplete { result } = &incomplete else {
+        panic!("incomplete failures carry the applied result");
+    };
+
+    assert_eq!(result.input.atom_count, 1);
+
+    let mut draft = ActionDraft::new();
+    let _sealed = draft.seal();
+    let sealed = draft
+        .edit(|request| request.atoms.push(InputAtom::Text("x".to_owned())))
+        .expect_err("a sealed draft rejects changes");
+    assert_eq!(ErrorFacts::of(&sealed), fixture.errors["sealed"]);
+
+    let frame = wait_for_frame_text(&session, "GOT:late");
+    assert!(frame_contains(&frame, "GOT:first"));
+    assert!(!frame_contains(&frame, "GOT:stale"));
+    assert!(!frame_contains(&frame, "GOT:other"));
+    assert_eq!(applied.input.atom_count, 1);
+
+    stop_fixture(session);
+}
+
+#[test]
+fn raw_bytes_reach_the_child_and_canonical_events_exactly() {
+    let fixture = interaction_fixture();
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = start_fixture(
+        temporary.path(),
+        "raw",
+        LaunchSpec::new(&fixture.raw_command),
+        &fixture.ready_text,
+    );
+
+    let result = session
+        .act(ActRequest::new().bytes(hex_bytes(&fixture.raw_bytes_hex)))
+        .expect("raw byte action");
+    assert_eq!(result.input.bytes_written, 4);
+    wait_for_frame_text(&session, &fixture.raw_bytes_echo);
+
+    let page = EventsService::read_page(session.path(), None, 4096).expect("canonical events");
+    let written = serde_json::to_string(&page.events).expect("events JSON");
+    assert!(written.contains(&fixture.raw_bytes_base64));
+
+    stop_fixture(session);
+}
+
+#[test]
+fn typed_pointer_operations_report_applied_noop_and_activated_outcomes() {
+    let fixture = interaction_fixture();
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = start_fixture(
+        temporary.path(),
+        "mouse",
+        LaunchSpec::new(&fixture.mouse_command),
+        &fixture.ready_text,
+    );
+
+    wait_for_frame_text(&session, &fixture.ready_text);
+
+    let PointerOutcome::Applied {
+        bytes: multi_bytes, ..
+    } = session
+        .pointer()
+        .multi_click(3, 0, MouseButton::Left, 2, true, &MutationGuard::default())
+        .expect("multi-click")
+    else {
+        panic!("reported multi-click input is applied");
+    };
+    let multi_bytes = multi_bytes.as_bytes().to_vec();
+    assert_eq!(
+        multi_bytes
+            .windows(3)
+            .filter(|window| return window == b"\x1b[<")
+            .count(),
+        4,
+        "two presses and two releases"
+    );
+
+    let PointerOutcome::Applied { bytes: drag, .. } = session
+        .pointer()
+        .drag(
+            1,
+            0,
+            5,
+            0,
+            MouseButton::Left,
+            3,
+            true,
+            &MutationGuard::default(),
+        )
+        .expect("drag")
+    else {
+        panic!("reported drag input is applied");
+    };
+
+    assert!(drag
+        .as_bytes()
+        .windows(4)
+        .any(|window| return window == b"<32;"));
+
+    let PointerOutcome::Activated {
+        text,
+        start_column,
+        end_column,
+        row,
+        ..
+    } = session
+        .pointer()
+        .activate(
+            fixture.activation_text.clone(),
+            true,
+            true,
+            &MutationGuard::default(),
+        )
+        .expect("activate")
+    else {
+        panic!("visible text activates");
+    };
+
+    assert_eq!(
+        (text.as_str(), start_column, end_column, row),
+        (fixture.activation_text.as_str(), 0, 4, 0)
+    );
+    stop_fixture(session);
+
+    let echo = start_fixture(
+        temporary.path(),
+        "no-mouse",
+        LaunchSpec::new(&fixture.echo_command),
+        &fixture.ready_text,
+    );
+
+    let request_id = Uuid::now_v7();
+    let payload = echo
+        .pointer()
+        .click(
+            0,
+            0,
+            MouseButton::Left,
+            false,
+            &MutationGuard {
+                request_id: Some(request_id),
+                if_state: None,
+            },
+        )
+        .expect("non-strict click");
+
+    let PointerOutcome::Noop { reason, .. } =
+        PointerOutcome::from_payload(request_id, payload).expect("typed outcome")
+    else {
+        panic!("unreported pointer input is a no-op");
+    };
+
+    assert_eq!(reason, "pointer_reporting_disabled");
+
+    stop_fixture(echo);
+}
+
+#[test]
+fn session_controls_resize_signal_and_mark_the_live_session() {
+    let fixture = interaction_fixture();
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = start_fixture(
+        temporary.path(),
+        "controls",
+        LaunchSpec::new(&fixture.echo_command),
+        &fixture.ready_text,
+    );
+
+    session
+        .resize(100, 30, &MutationGuard::default())
+        .expect("resize");
+    let frame = session
+        .frame(ScreenProjectionRequest::default())
+        .expect("resized frame");
+    assert_eq!((frame.geometry.cols, frame.geometry.rows), (100, 30));
+
+    session
+        .signal(ProcessSignal::Interrupt, &MutationGuard::default())
+        .expect("signal");
+
+    wait_for_frame_text(&session, "SIGNAL:INT");
+
+    let marked = session
+        .mark("checkpoint", &MutationGuard::default())
+        .expect("mark");
+    assert_eq!(marked.label, "checkpoint");
+    assert_eq!(
+        marker_labels(&session).expect("read markers"),
+        ["checkpoint"]
+    );
+
+    stop_fixture(session);
+}
+
+#[test]
+fn cleared_launch_environment_keeps_exact_bytes_and_reserved_terminal_names() {
+    let fixture = interaction_fixture();
+    let temporary = TempDir::new().expect("temporary directory");
+    let spec = LaunchSpec::new(&fixture.environment_command)
+        .clear_environment()
+        .environment_variable("TT_SET", hex_bytes(&fixture.set_bytes_hex));
+
+    let session = start_fixture(temporary.path(), "environment", spec, "DONE");
+    let frame = wait_for_frame_text(&session, "DONE");
+    assert!(frame_contains(
+        &frame,
+        &format!("SET= {}", fixture.set_bytes_echo)
+    ));
+    assert!(frame_contains(&frame, "SECRET=absent"));
+    assert!(frame_contains(&frame, "TERM=xterm"));
+
+    stop_fixture(session);
+}
+
+#[test]
+fn launch_limits_end_the_session_with_their_resource_limit() {
+    let temporary = TempDir::new().expect("temporary directory");
+
+    for (name, spec, kind) in [
+        (
+            "max-duration",
+            LaunchSpec::new(["/bin/sh", "-c", "printf READY; sleep 30"])
+                .max_duration(Duration::from_millis(400)),
+            ResourceLimitKind::MaxDuration,
+        ),
+        (
+            "idle-timeout",
+            LaunchSpec::new(["/bin/sh", "-c", "printf READY; sleep 30"])
+                .idle_timeout(Duration::from_millis(400)),
+            ResourceLimitKind::IdleTimeout,
+        ),
+    ] {
+        let mut session = start_fixture(temporary.path(), name, spec, "READY");
+        let completion = session
+            .complete(Duration::from_secs(10))
+            .expect("limited session completes");
+        let limit = completion.resource_limit.expect("resource limit outcome");
+        assert_eq!(limit.kind, kind, "{name}");
+        assert_eq!(limit.limit, 400, "{name} limit in milliseconds");
     }
 }

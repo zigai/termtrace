@@ -36,6 +36,8 @@ pub struct SemanticVideoSourcePlan {
     /// Source-plan schema version.
     pub version: u32,
     /// Canonical session path.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub session: PathBuf,
     /// Canonical session identity.
     pub session_id: Uuid,
@@ -104,5 +106,7 @@ pub struct SemanticVideoSourceManifest {
     /// Exact FFmpeg argument vector.
     pub ffmpeg_arguments: Vec<String>,
     /// Parsed FFprobe source-video evidence.
+    #[serde(with = "crate::value::json")]
+    #[schemars(with = "serde_json::Value")]
     pub video_probe: serde_json::Value,
 }

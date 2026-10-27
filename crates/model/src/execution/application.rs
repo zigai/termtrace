@@ -1,5 +1,6 @@
 //! Application-reported diagnostics received independently of terminal bytes.
 
+use crate::terminal::observation::ActorBoundaries;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -43,6 +44,8 @@ pub struct ApplicationEvent {
     /// Optional parent span in the same process instance.
     pub parent_span_id: Option<Uuid>,
     /// Sensitive application data, excluded from metadata-only exports.
+    #[serde(with = "crate::value::json")]
+    #[schemars(with = "BTreeMap<String, Value>")]
     pub attributes: BTreeMap<String, Value>,
 }
 
@@ -85,4 +88,110 @@ impl ApplicationEvent {
 /// echo are sensitive application data, so the serializer's detail is deliberately dropped.
 fn encoding_failure(_: serde_json::Error) -> &'static str {
     return "invalid application JSON";
+}
+
+/// Successful acknowledged SDK instrumentation emission. This is not a persisted event envelope.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicationAcknowledgement {
+    /// True only after the actor's positive acknowledgement.
+    pub acknowledged: bool,
+    /// Emitting process-instance identity.
+    pub process_instance_id: Uuid,
+    /// Span identity for start/end, absent for a discrete event.
+    pub span_id: Option<Uuid>,
+    /// Actor-observed and durable positions from the actual acknowledgement.
+    pub boundaries: ActorBoundaries,
+}
+
+/// Shared bounded SDK JSON domain. This does not reinterpret or invalidate persisted JSON records.
+/// # Errors
+/// Rejects unsupported unsafe integral numbers instead of rounding them for a host language.
+pub fn validate_sdk_json(value: &Value) -> Result<(), &'static str> {
+    let mut remaining = MAX_APPLICATION_EVENT_BYTES;
+
+    return validate_sdk_json_inner(value, 0, &mut remaining);
+}
+
+/// SDK input recursion bound, matching the JSON parser's default maximum.
+pub const MAX_SDK_JSON_DEPTH: usize = 128;
+
+fn validate_sdk_json_inner(
+    value: &Value,
+    depth: usize,
+    remaining: &mut usize,
+) -> Result<(), &'static str> {
+    if depth > MAX_SDK_JSON_DEPTH {
+        return Err("SDK JSON nesting exceeds the bounded domain");
+    }
+
+    let cost = match value {
+        Value::String(text) => text.len().saturating_add(1),
+        _ => 1,
+    };
+
+    *remaining = remaining
+        .checked_sub(cost)
+        .ok_or("SDK JSON exceeds attribute budget")?;
+    match value {
+        Value::Number(number) => {
+            if number
+                .as_u64()
+                .is_some_and(|n| return n > 9_007_199_254_740_991)
+                || number
+                    .as_i64()
+                    .is_some_and(|n| return n.unsigned_abs() > 9_007_199_254_740_991)
+                || number
+                    .as_f64()
+                    .is_some_and(|n| return n.fract() == 0.0 && n.abs() > 9_007_199_254_740_991.0)
+            {
+                return Err("SDK JSON integer exceeds the shared safe-integer domain");
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                validate_sdk_json_inner(item, depth + 1, remaining)?;
+            }
+        }
+        Value::Object(fields) => {
+            for (key, item) in fields {
+                *remaining = remaining
+                    .checked_sub(key.len())
+                    .ok_or("SDK JSON exceeds attribute budget")?;
+                validate_sdk_json_inner(item, depth + 1, remaining)?;
+            }
+        }
+        _ => {}
+    }
+
+    return Ok(());
+}
+
+#[cfg(test)]
+mod sdk_json_tests {
+    use super::{validate_sdk_json, MAX_APPLICATION_EVENT_BYTES, MAX_SDK_JSON_DEPTH};
+    use serde_json::{json, Value};
+
+    #[test]
+    fn sdk_json_bounds_depth_and_work_without_reinterpreting_canonical_values() {
+        let mut deep = Value::Null;
+        for _ in 0..=MAX_SDK_JSON_DEPTH {
+            deep = Value::Array(vec![deep]);
+        }
+
+        assert!(validate_sdk_json(&deep).is_err());
+        assert!(
+            validate_sdk_json(&Value::String("x".repeat(MAX_APPLICATION_EVENT_BYTES))).is_err()
+        );
+        assert!(validate_sdk_json(&Value::Array(vec![
+            Value::Null;
+            MAX_APPLICATION_EVENT_BYTES
+        ]))
+        .is_err());
+        assert!(
+            validate_sdk_json(&json!({"data": [null, true, 1.25], "monotonic_ns": 42})).is_ok()
+        );
+        // A lower bound on encoded cost must not exclude valid compact arrays.
+        assert!(validate_sdk_json(&json!(vec![0; 30_000])).is_ok());
+    }
 }

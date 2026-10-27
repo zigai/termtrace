@@ -165,6 +165,23 @@ impl MutationHistory {
         return Ok(());
     }
 
+    /// Replace the cached outcome of a deferred mutation with a later authoritative one.
+    /// The durable journal keeps the outcome that was returned to the caller.
+    pub(in crate::recording) fn evolve(
+        &mut self,
+        request_id: Uuid,
+        command_hash: String,
+        response: ControlResponse,
+    ) {
+        self.cache(
+            request_id,
+            CachedMutation {
+                command_hash,
+                response,
+            },
+        );
+    }
+
     fn cache(&mut self, request_id: Uuid, value: CachedMutation) {
         if self.cached.insert(request_id, value).is_none() {
             self.order.push_back(request_id);

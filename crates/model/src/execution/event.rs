@@ -434,6 +434,132 @@ pub struct BytePayloadSummary {
     pub blake3: String,
 }
 
+/// Model-specific byte-elided event metadata; application attributes are deliberately excluded.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EventMetadata {
+    /// Output payload is represented by the projection byte summary.
+    Output,
+    /// Metadata for the canonical `InputIntent` variant.
+    InputIntent {
+        /// Identifier paired with the corresponding result.
+        operation_id: Uuid,
+        /// Input origin.
+        source: InputSource,
+        /// High-level input category.
+        input_kind: InputKind,
+        /// Structured semantic source of the exact emitted bytes.
+        descriptor: InputDescriptor,
+        /// BLAKE3 of canonical terminal modes used to encode this atom, when mode-aware.
+        terminal_modes_hash: Option<String>,
+        /// Canonical symbolic input, such as `ctrl+u` or `paste`.
+        semantic_input: Option<String>,
+        /// Optional caller-supplied reason for applying the input.
+        caller_intent: Option<String>,
+    },
+    /// Metadata for the canonical `InputResult` variant.
+    InputResult {
+        /// Identifier from the corresponding intent.
+        operation_id: Uuid,
+        /// Whether the entire byte sequence was applied.
+        status: OperationStatus,
+        /// Bytes written before success or failure.
+        bytes_written: u64,
+        /// Stable diagnostic code on failure.
+        error_code: Option<String>,
+    },
+    /// Metadata for the canonical `ResizeIntent` variant.
+    ResizeIntent {
+        /// Identifier paired with the corresponding result.
+        operation_id: Uuid,
+        /// Columns after the resize.
+        cols: u16,
+        /// Rows after the resize.
+        rows: u16,
+        /// Total pixel width reported to the child.
+        pixel_width: u16,
+        /// Total pixel height reported to the child.
+        pixel_height: u16,
+    },
+    /// Metadata for the canonical `ResizeResult` variant.
+    ResizeResult {
+        /// Identifier from the corresponding intent.
+        operation_id: Uuid,
+        /// Whether the new geometry was applied.
+        status: OperationStatus,
+        /// Stable diagnostic code on failure.
+        error_code: Option<String>,
+    },
+    /// Metadata for the canonical `SignalIntent` variant.
+    SignalIntent {
+        /// Identifier paired with the corresponding result.
+        operation_id: Uuid,
+        /// Platform signal number.
+        number: i32,
+        /// Stable display name such as `SIGINT`.
+        name: String,
+    },
+    /// Metadata for the canonical `SignalResult` variant.
+    SignalResult {
+        /// Identifier from the corresponding intent.
+        operation_id: Uuid,
+        /// Whether the signal syscall succeeded.
+        status: OperationStatus,
+        /// Stable diagnostic code on failure.
+        error_code: Option<String>,
+    },
+    /// Metadata for the canonical Marker variant.
+    Marker {
+        /// Caller-owned operation identifier used for durable deduplication.
+        operation_id: Uuid,
+        /// User-provided marker label.
+        label: String,
+    },
+    /// Metadata for the canonical Application variant.
+    Application {
+        /// Actor request identity.
+        operation_id: Uuid,
+        /// Emitting process instance.
+        process_instance_id: Uuid,
+        /// Caller-reported process ID.
+        process_id: u32,
+        /// Application lifecycle variant.
+        kind: super::application::ApplicationEventKind,
+        /// Span identity, when applicable.
+        span_id: Option<Uuid>,
+        /// Parent span identity, when applicable.
+        parent_span_id: Option<Uuid>,
+    },
+    /// Metadata for the canonical `QueryResponse` variant.
+    QueryResponse {
+        /// Component that generated the elided query response.
+        responder: String,
+    },
+    /// Metadata for the canonical Lifecycle variant.
+    Lifecycle {
+        /// Transition kind.
+        lifecycle_kind: LifecycleKind,
+        /// Child process ID when available.
+        pid: Option<u32>,
+    },
+    /// Metadata for the canonical Exit variant.
+    Exit {
+        /// Exit status when the process exited normally.
+        code: Option<i32>,
+        /// Signal number when signal termination occurred.
+        signal: Option<i32>,
+        /// Platform signal description when available.
+        signal_name: Option<String>,
+    },
+    /// Metadata for the canonical `HostError` variant.
+    HostError {
+        /// Stable diagnostic code.
+        code: String,
+        /// Redacted human-readable message.
+        message: String,
+    },
+}
+
 /// Stable JSONL projection of one canonical event record.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -442,6 +568,11 @@ pub struct EventProjection {
     pub seq: u64,
     /// Session-monotonic event timestamp.
     pub monotonic_ns: u64,
+    /// Separately observed timestamp, when the recorder retained one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_monotonic_ns: Option<u64>,
+    /// Hash of the preceding canonical record or header.
+    pub prev_hash: String,
     /// Canonical event hash.
     pub hash: String,
     /// Stable event variant name.
@@ -451,7 +582,7 @@ pub struct EventProjection {
     /// Exact typed event when byte payloads were retained.
     pub event: Option<Event>,
     /// Non-byte event fields when exact payloads were elided.
-    pub metadata: Option<serde_json::Value>,
+    pub metadata: Option<EventMetadata>,
     /// Hash-and-length summaries when byte fields were elided.
     pub byte_payloads: Vec<BytePayloadSummary>,
 }
@@ -465,6 +596,8 @@ impl EventProjection {
         return Self {
             seq: record.seq,
             monotonic_ns: record.monotonic_ns,
+            observed_monotonic_ns: record.observed_monotonic_ns,
+            prev_hash: record.prev_hash.clone(),
             hash: record.hash.clone(),
             event_type: event_type(&record.event).to_owned(),
             metadata_only,
@@ -475,24 +608,13 @@ impl EventProjection {
     }
 }
 
-fn event_metadata(event: &Event) -> serde_json::Value {
-    match event {
-        Event::Application { operation_id, data } => {
-            return serde_json::json!({
-                "type": "application",
-                "operation_id": operation_id,
-                "process_instance_id": data.process_instance_id,
-                "process_id": data.process_id,
-                "kind": data.kind,
-                "span_id": data.span_id,
-                "parent_span_id": data.parent_span_id,
-            });
-        }
-        Event::Output { .. } => {
-            return serde_json::json!({
-                "type": "output",
-            });
-        }
+fn event_metadata(event: &Event) -> EventMetadata {
+    // Output payloads can be large and carry no metadata; avoid cloning them.
+    if matches!(event, Event::Output { .. }) {
+        return EventMetadata::Output;
+    }
+    return match event.clone() {
+        Event::Output { .. } => EventMetadata::Output,
         Event::InputIntent {
             operation_id,
             source,
@@ -502,26 +624,100 @@ fn event_metadata(event: &Event) -> serde_json::Value {
             semantic_input,
             caller_intent,
             ..
-        } => {
-            return serde_json::json!({
-                "type": "input_intent",
-                "operation_id": operation_id,
-                "source": source,
-                "input_kind": input_kind,
-                "descriptor": descriptor,
-                "terminal_modes_hash": terminal_modes_hash,
-                "semantic_input": semantic_input,
-                "caller_intent": caller_intent,
-            });
-        }
-        Event::QueryResponse { responder, .. } => {
-            return serde_json::json!({
-                "type": "query_response",
-                "responder": responder,
-            });
-        }
-        other => return serde_json::to_value(other).unwrap_or(serde_json::Value::Null),
-    }
+        } => EventMetadata::InputIntent {
+            operation_id,
+            source,
+            input_kind,
+            descriptor,
+            terminal_modes_hash,
+            semantic_input,
+            caller_intent,
+        },
+        Event::InputResult {
+            operation_id,
+            status,
+            bytes_written,
+            error_code,
+        } => EventMetadata::InputResult {
+            operation_id,
+            status,
+            bytes_written,
+            error_code,
+        },
+        Event::ResizeIntent {
+            operation_id,
+            cols,
+            rows,
+            pixel_width,
+            pixel_height,
+        } => EventMetadata::ResizeIntent {
+            operation_id,
+            cols,
+            rows,
+            pixel_width,
+            pixel_height,
+        },
+        Event::ResizeResult {
+            operation_id,
+            status,
+            error_code,
+        } => EventMetadata::ResizeResult {
+            operation_id,
+            status,
+            error_code,
+        },
+        Event::SignalIntent {
+            operation_id,
+            number,
+            name,
+        } => EventMetadata::SignalIntent {
+            operation_id,
+            number,
+            name,
+        },
+        Event::SignalResult {
+            operation_id,
+            status,
+            error_code,
+        } => EventMetadata::SignalResult {
+            operation_id,
+            status,
+            error_code,
+        },
+        Event::Marker {
+            operation_id,
+            label,
+        } => EventMetadata::Marker {
+            operation_id,
+            label,
+        },
+        Event::Application { operation_id, data } => EventMetadata::Application {
+            operation_id,
+            process_instance_id: data.process_instance_id,
+            process_id: data.process_id,
+            kind: data.kind,
+            span_id: data.span_id,
+            parent_span_id: data.parent_span_id,
+        },
+        Event::QueryResponse { responder, .. } => EventMetadata::QueryResponse { responder },
+        Event::Lifecycle {
+            lifecycle_kind,
+            pid,
+        } => EventMetadata::Lifecycle {
+            lifecycle_kind,
+            pid,
+        },
+        Event::Exit {
+            code,
+            signal,
+            signal_name,
+        } => EventMetadata::Exit {
+            code,
+            signal,
+            signal_name,
+        },
+        Event::HostError { code, message } => EventMetadata::HostError { code, message },
+    };
 }
 
 /// Stable snake-case event variant name.

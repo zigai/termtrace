@@ -2,7 +2,7 @@
 
 use super::{control::MutationHistory, input::apply_query_response, model::TerminalGeometry};
 use crate::{Error, Result};
-use std::{cell::RefCell, io::Write, mem::take, slice};
+use std::{cell::RefCell, io::Write, mem::take};
 use termtrace_evidence::event_log::EventLogWriter;
 use termtrace_model::{execution::event::Event, terminal::state::SemanticState, value::ByteString};
 use termtrace_terminal::{
@@ -210,8 +210,10 @@ pub(super) fn process_semantic_bytes(
     }
 
     live.presented_stale = true;
+
     let is_sequence = matches!(data.first(), Some(0x1b | 0x9b));
     let base_offset = live.source_byte_offset;
+    let mut unwritten: Option<usize> = None;
 
     let mut index = 0;
     while index < data.len() {
@@ -252,15 +254,22 @@ pub(super) fn process_semantic_bytes(
 
         let was_tracking = live.query_tracker.is_tracking();
         let complete = live.query_tracker.push(byte);
-        live.semantic.write(slice::from_ref(&byte));
+        // Bytes of an open control sequence reach the VT in one write once the sequence
+        // ends; the parser state is the same as for byte-wise writes, at far lower FFI cost.
+        let start = *unwritten.get_or_insert(index - 1);
 
-        if was_tracking
-            || complete
-            || live.query_tracker.is_tracking()
-            || !live.pending_query_responses.is_empty()
-        {
-            live.pending_query_responses
-                .extend(live.semantic.take_responses());
+        if complete || !live.query_tracker.is_tracking() {
+            live.semantic.write(data.get(start..index).unwrap_or(&[]));
+            unwritten = None;
+
+            if was_tracking
+                || complete
+                || live.query_tracker.is_tracking()
+                || !live.pending_query_responses.is_empty()
+            {
+                live.pending_query_responses
+                    .extend(live.semantic.take_responses());
+            }
         }
 
         if live.suppress_mirrored_queries {
@@ -303,6 +312,12 @@ pub(super) fn process_semantic_bytes(
         if complete {
             live.query_tracker.clear();
         }
+    }
+
+    if let Some(start) = unwritten {
+        live.semantic.write(data.get(start..).unwrap_or(&[]));
+        live.pending_query_responses
+            .extend(live.semantic.take_responses());
     }
 
     return Ok(());

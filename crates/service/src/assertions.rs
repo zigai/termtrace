@@ -1,7 +1,12 @@
 //! Runner-neutral expectation classification and deterministic frame snapshots.
 
 use crate::locator::{QueryError, QueryResult, ScreenMatch, StyleFilter};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+mod masked;
+
+pub use masked::{masked_snapshot, MaskedSnapshotOptions};
 use std::{error::Error as StdError, fmt};
 use termtrace_engine::observation::{
     normalize_screen_frame_cells, normalize_screen_frame_spans, normalize_screen_frame_text,
@@ -18,7 +23,10 @@ const MAX_ASSERTION_CHARS: usize = 512;
 const MAX_EXCERPT_ROWS: usize = 8;
 
 /// Deterministic reviewed representation of an already captured exact frame.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum SnapshotProfile {
     /// Geometry, regions, wrap facts, convenience text, and selected cursor/mode facts.
     #[default]
@@ -30,7 +38,7 @@ pub enum SnapshotProfile {
 }
 
 /// Stable frame identity included in bounded assertion diagnostics.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct AssertionFrameIdentity {
     /// Exact semantic-state hash.
     pub state_hash: String,
@@ -43,7 +51,7 @@ pub struct AssertionFrameIdentity {
 /// A valid expectation that did not match.
 ///
 /// Only this type is suitable for conversion into a runner's negatable mismatch value.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct ExpectationMismatchError {
     /// Stable expectation family.
     pub assertion: &'static str,
@@ -93,6 +101,20 @@ impl fmt::Display for AssertionError {
 }
 
 impl StdError for AssertionError {}
+
+/// Structured mismatch for a negated expectation that matched successfully.
+/// Host adapters catch only [`ExpectationMismatchError`] and use this for the opposite verdict.
+#[must_use]
+pub fn negation_mismatch() -> ExpectationMismatchError {
+    return ExpectationMismatchError {
+        assertion: "not",
+        expected: "expectation mismatch".to_owned(),
+        actual: "expectation matched".to_owned(),
+        excerpt: String::new(),
+        frame: None,
+        truncated: false,
+    };
+}
 
 /// Purely normalize an exact frame with one of the three stable profiles.
 ///
@@ -338,21 +360,25 @@ pub fn assert_count(result: &QueryResult, expected: usize) -> Result<(), Expecta
 /// Require literal text to occur in the deterministic presented row stream.
 ///
 /// # Errors
-/// Returns an `ExpectationMismatchError` when `expected` is empty or absent from the presented row text.
-pub fn assert_screen_text(
-    frame: &ScreenFrame,
-    expected: &str,
-) -> Result<(), ExpectationMismatchError> {
+/// Returns a non-negatable detail error for metadata-only captures, or a mismatch when `expected`
+/// is empty or absent from the presented row text.
+pub fn assert_screen_text(frame: &ScreenFrame, expected: &str) -> Result<(), AssertionError> {
+    if matches!(&frame.data, ScreenFrameContent::None) {
+        return Err(AssertionError::Query(QueryError::InsufficientFrameDetail {
+            reason: "assertion requires row detail".to_owned(),
+        }));
+    }
+
     let text = frame_text(frame);
     if !expected.is_empty() && text.contains(expected) {
         return Ok(());
     }
-    return Err(mismatch(
+    return Err(AssertionError::Mismatch(mismatch(
         "screen_text",
         &format!("screen contains {expected:?}"),
         &format!("screen text {text:?}"),
         frame,
-    ));
+    )));
 }
 
 /// Require exact text evidence on one already selected match.
@@ -377,12 +403,21 @@ pub fn assert_match_text(
 /// Require every covered authoritative head cell to satisfy a complete appearance filter.
 ///
 /// # Errors
-/// Returns an `ExpectationMismatchError` when the match covers no authoritative head cells or any
-/// covered cell fails `expected`.
+/// Returns a non-negatable detail error without spans/cells, or a mismatch when the match covers
+/// no authoritative head cells or any covered cell fails `expected`.
 pub fn assert_match_style(
     screen_match: &ScreenMatch,
     expected: &StyleFilter,
-) -> Result<(), ExpectationMismatchError> {
+) -> Result<(), AssertionError> {
+    if matches!(
+        &screen_match.frame.data,
+        ScreenFrameContent::None | ScreenFrameContent::Text { .. }
+    ) {
+        return Err(AssertionError::Query(QueryError::InsufficientFrameDetail {
+            reason: "style assertion requires spans or cells".to_owned(),
+        }));
+    }
+
     let mut covered = 0usize;
     let mut mismatched = 0usize;
 
@@ -413,12 +448,12 @@ pub fn assert_match_style(
     if covered > 0 && mismatched == 0 {
         return Ok(());
     }
-    return Err(mismatch(
+    return Err(AssertionError::Mismatch(mismatch(
         "match_style",
         &format!("all covered cells match {expected:?}"),
         &format!("covered {covered}; mismatched {mismatched}"),
         &screen_match.frame,
-    ));
+    )));
 }
 
 /// Require the complete exact cursor state.
@@ -443,9 +478,15 @@ pub fn assert_cursor(
 /// Require no native soft-wrap or wrap-continuation facts.
 ///
 /// # Errors
-/// Returns an `ExpectationMismatchError` naming the rows that carry soft-wrap or wrap-continuation
-/// facts.
-pub fn assert_no_wrapped_rows(frame: &ScreenFrame) -> Result<(), ExpectationMismatchError> {
+/// Returns a non-negatable detail error without row detail, or a mismatch naming rows carrying
+/// soft-wrap or wrap-continuation facts.
+pub fn assert_no_wrapped_rows(frame: &ScreenFrame) -> Result<(), AssertionError> {
+    if matches!(&frame.data, ScreenFrameContent::None) {
+        return Err(AssertionError::Query(QueryError::InsufficientFrameDetail {
+            reason: "assertion requires row detail".to_owned(),
+        }));
+    }
+
     let wrapped: Vec<u16> = match &frame.data {
         ScreenFrameContent::Text { rows } => rows
             .iter()
@@ -468,12 +509,12 @@ pub fn assert_no_wrapped_rows(frame: &ScreenFrame) -> Result<(), ExpectationMism
     if wrapped.is_empty() {
         return Ok(());
     }
-    return Err(mismatch(
+    return Err(AssertionError::Mismatch(mismatch(
         "no_wrapped_rows",
         "no native wrapped rows",
         &format!("wrapped rows {wrapped:?}"),
         frame,
-    ));
+    )));
 }
 
 /// Require a region to contain only unselected blanks with default source colors and no attributes.
@@ -514,7 +555,10 @@ pub fn assert_neutral_region(
         }));
     }
 
-    if matches!(&frame.data, ScreenFrameContent::Text { .. }) {
+    if matches!(
+        &frame.data,
+        ScreenFrameContent::Text { .. } | ScreenFrameContent::None
+    ) {
         return Err(AssertionError::Query(QueryError::InsufficientFrameDetail {
             reason: "neutral-region assertion requires spans or cells".to_owned(),
         }));

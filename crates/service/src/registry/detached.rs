@@ -12,6 +12,7 @@ use std::{
     os::unix::fs::OpenOptionsExt as _,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    thread,
     time::{Duration, Instant},
 };
 use termtrace_model::{
@@ -93,7 +94,15 @@ impl RegistryService {
         };
 
         let deadline = Instant::now() + request.startup_timeout;
-        let completion = match await_ready(&paths.session, &mut recorder, deadline)? {
+        let readiness = await_ready(&paths.session, &mut recorder, deadline);
+        // The CLI used to exit after this operation. Persistent SDK callers must
+        // retain and eventually reap the same Child, including readiness failures.
+        // This does not kill an orphan or change lease/promotion error semantics.
+        thread::spawn(move || {
+            let _status = recorder.wait();
+        });
+
+        let completion = match readiness? {
             Readiness::Live => None,
             Readiness::Completed(completion) => Some(completion),
             Readiness::Exited(status) => {
@@ -134,6 +143,26 @@ impl RegistryService {
             paths,
             completion,
         });
+    }
+
+    pub(crate) fn reserve_session_alias(
+        &self,
+        alias: &str,
+        session: &Path,
+        lease: Duration,
+    ) -> Result<AliasReservation> {
+        return Ok(self.registry.reserve(alias, session, lease)?);
+    }
+
+    pub(crate) fn promote_session_alias(
+        &self,
+        reservation: &AliasReservation,
+    ) -> Result<RegistryEntry> {
+        return Ok(self.registry.promote(reservation)?);
+    }
+
+    pub(crate) fn release_session_alias(&self, reservation: &AliasReservation) {
+        self.release_reservation(reservation);
     }
 
     fn release_reservation(&self, reservation: &AliasReservation) {

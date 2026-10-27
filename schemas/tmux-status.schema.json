@@ -1,0 +1,293 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "Observers": {
+      "description": "PIDs of live observers.",
+      "properties": {
+        "supervisor": {
+          "description": "Supervisor process, if one holds its lock.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "watchdog": {
+          "description": "Watchdog process, if one holds its lock.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "TmuxPaneStatus": {
+      "description": "One pane in a status report.",
+      "properties": {
+        "current_command": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Current foreground command."
+        },
+        "pane_id": {
+          "description": "Stable pane ID.",
+          "type": "string"
+        },
+        "pane_pid": {
+          "description": "Pane root process.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "recorded": {
+          "description": "Run by a pane wrapper.",
+          "type": "boolean"
+        },
+        "recording_session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Base64Bytes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Published recording session."
+        },
+        "selected": {
+          "description": "In scope.",
+          "type": "boolean"
+        },
+        "session_id": {
+          "description": "Stable session ID.",
+          "type": "string"
+        },
+        "window_id": {
+          "description": "Stable window ID.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pane_id",
+        "session_id",
+        "window_id",
+        "current_command",
+        "selected",
+        "recorded"
+      ],
+      "type": "object"
+    },
+    "TmuxScopeMode": {
+      "description": "Recording scope mode.",
+      "oneOf": [
+        {
+          "const": "all",
+          "description": "Record every future pane process.",
+          "type": "string"
+        },
+        {
+          "const": "explicit",
+          "description": "Record only processes launched explicitly through `tmux run`.",
+          "type": "string"
+        },
+        {
+          "const": "selected",
+          "description": "Record processes in the listed sessions, windows, or panes.",
+          "type": "string"
+        }
+      ]
+    },
+    "TmuxScopePolicy": {
+      "additionalProperties": false,
+      "description": "Versioned recording scope stored in a global tmux option.",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/TmuxScopeMode",
+          "description": "Scope mode."
+        },
+        "pane_ids": {
+          "description": "Selected stable pane IDs.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "session_ids": {
+          "description": "Selected stable session IDs.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "session_names": {
+          "description": "Selected session names.",
+          "items": {
+            "$ref": "#/$defs/Base64Bytes"
+          },
+          "type": "array"
+        },
+        "version": {
+          "description": "Policy shape version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "window_ids": {
+          "description": "Selected stable window IDs.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "window_names": {
+          "description": "Selected window names.",
+          "items": {
+            "$ref": "#/$defs/Base64Bytes"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "version",
+        "mode",
+        "session_ids",
+        "session_names",
+        "window_ids",
+        "window_names",
+        "pane_ids"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/tmux-status.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Integration and coverage status of one tmux server.",
+  "properties": {
+    "configured_executable": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Base64Bytes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Configured Termtrace executable."
+    },
+    "default_command_matches": {
+      "description": "The launch option still runs the pane wrapper.",
+      "type": "boolean"
+    },
+    "enabled": {
+      "description": "The current integration version is enabled.",
+      "type": "boolean"
+    },
+    "excluded_panes": {
+      "description": "Panes not selected.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "integration_version": {
+      "description": "Integration contract version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "observers": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Observers"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Live observer processes."
+    },
+    "output_root": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Base64Bytes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Managed state root."
+    },
+    "pane_count": {
+      "description": "Live panes.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "panes": {
+      "description": "Every live pane.",
+      "items": {
+        "$ref": "#/$defs/TmuxPaneStatus"
+      },
+      "type": "array"
+    },
+    "recorded_panes": {
+      "description": "Panes run by a wrapper.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TmuxScopePolicy"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Recording scope."
+    },
+    "selected_panes": {
+      "description": "Selected panes.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "strict": {
+      "description": "Coverage is strict.",
+      "type": "boolean"
+    },
+    "unrecorded_panes": {
+      "description": "Selected panes not run by a wrapper.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "integration_version",
+    "enabled",
+    "strict",
+    "default_command_matches",
+    "pane_count",
+    "selected_panes",
+    "excluded_panes",
+    "recorded_panes",
+    "unrecorded_panes",
+    "panes"
+  ],
+  "title": "TmuxStatusReport",
+  "type": "object"
+}

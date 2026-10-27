@@ -1,0 +1,634 @@
+{
+  "$defs": {
+    "ArtifactManifestRef": {
+      "additionalProperties": false,
+      "description": "Exact manifest reference, relative to the artifact directory.",
+      "properties": {
+        "blake3": {
+          "description": "BLAKE3 of the exact manifest bytes.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "path": {
+          "$ref": "#/$defs/ArtifactRelativePath",
+          "description": "Normalized relative filename."
+        }
+      },
+      "required": [
+        "path",
+        "blake3"
+      ],
+      "type": "object"
+    },
+    "ArtifactProductKind": {
+      "description": "Explicit output kind, including previews rather than inferring from extensions.",
+      "oneOf": [
+        {
+          "const": "snapshot",
+          "description": "Saved state.",
+          "type": "string"
+        },
+        {
+          "const": "video",
+          "description": "Moving output.",
+          "type": "string"
+        },
+        {
+          "const": "playback",
+          "description": "Replay delivery.",
+          "type": "string"
+        },
+        {
+          "const": "presentation",
+          "description": "Presentation derivative.",
+          "type": "string"
+        },
+        {
+          "const": "preview",
+          "description": "Preview derivative.",
+          "type": "string"
+        }
+      ]
+    },
+    "ArtifactProvenance": {
+      "description": "Product provenance, with presentation explicitly retaining its source truth.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Semantic reconstruction, not original pixels.",
+          "properties": {
+            "kind": {
+              "const": "semantic_rendering",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Native replay pixels, not original execution.",
+          "properties": {
+            "kind": {
+              "const": "native_replay",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Original execution capture.",
+          "properties": {
+            "kind": {
+              "const": "original_execution",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Derived presentation; authoritative mapping remains in its manifest.",
+          "properties": {
+            "kind": {
+              "const": "presentation_output",
+              "type": "string"
+            },
+            "source_kind": {
+              "$ref": "#/$defs/ArtifactSourceKind",
+              "description": "Truth of the input to presentation."
+            }
+          },
+          "required": [
+            "kind",
+            "source_kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ArtifactRelativePath": {
+      "not": {
+        "pattern": "(^|/)\\.{1,2}(/|$)"
+      },
+      "pattern": "^[^/\\\\:\\u0000]+(?:/[^/\\\\:\\u0000]+)*$",
+      "type": "string"
+    },
+    "ArtifactSensitivity": {
+      "description": "Sensitivity classification for one derived artifact member.",
+      "oneOf": [
+        {
+          "const": "sensitive_terminal_data",
+          "description": "Member contains or may reveal terminal content.",
+          "type": "string"
+        },
+        {
+          "const": "operational_metadata",
+          "description": "Member contains only non-content operational metadata.",
+          "type": "string"
+        }
+      ]
+    },
+    "ArtifactSourceKind": {
+      "description": "Non-derived source truth; not a replacement for manifest truth-layer strings.",
+      "oneOf": [
+        {
+          "const": "semantic_rendering",
+          "description": "Reconstructed terminal state rendered semantically.",
+          "type": "string"
+        },
+        {
+          "const": "native_replay",
+          "description": "Pixels rendered while replaying canonical evidence.",
+          "type": "string"
+        },
+        {
+          "const": "original_execution",
+          "description": "Pixels captured during the original execution.",
+          "type": "string"
+        }
+      ]
+    },
+    "ArtifactSourceRef": {
+      "additionalProperties": false,
+      "description": "Binding to canonical source; no frame-exact original-capture correlation implied.",
+      "properties": {
+        "boundary": {
+          "$ref": "#/$defs/SdkCanonicalBoundary",
+          "description": "Exact canonical prefix (header hash at sequence zero)."
+        },
+        "session_id": {
+          "description": "Canonical session UUID.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "session_manifest_hash": {
+          "description": "Hash of the source session manifest.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "session_manifest_hash",
+        "boundary"
+      ],
+      "type": "object"
+    },
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "CellGrid": {
+      "additionalProperties": false,
+      "description": "Terminal grid in cells.",
+      "properties": {
+        "cols": {
+          "description": "Columns.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "description": "Rows.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cols",
+        "rows"
+      ],
+      "type": "object"
+    },
+    "DecimalU64": {
+      "maxLength": 20,
+      "pattern": "^(?:0|[1-9][0-9]{0,18}|1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|1844674407370955[0-0][0-9]{3}|18446744073709551[0-5][0-9]{2}|184467440737095516[0-0][0-9]{1}|1844674407370955161[0-4][0-9]{0}|18446744073709551615)$",
+      "type": "string",
+      "x-termtrace-native-integer": "uint64"
+    },
+    "MediaArtifactResult": {
+      "additionalProperties": false,
+      "description": "Versioned SDK envelope. Data only; does not promise runtime capture/export support.",
+      "properties": {
+        "directory_bytes": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact OS directory bytes, standard padded Base64 in JSON."
+        },
+        "manifest": {
+          "$ref": "#/$defs/ArtifactManifestRef",
+          "description": "Manifest is authoritative for mappings and publication facts."
+        },
+        "members": {
+          "description": "Complete member metadata.",
+          "items": {
+            "$ref": "#/$defs/SdkArtifactMember"
+          },
+          "type": "array"
+        },
+        "product_kind": {
+          "$ref": "#/$defs/ArtifactProductKind",
+          "description": "Product classification."
+        },
+        "provenance": {
+          "$ref": "#/$defs/ArtifactProvenance",
+          "description": "Product truth."
+        },
+        "source": {
+          "$ref": "#/$defs/ArtifactSourceRef",
+          "description": "Canonical source boundary."
+        },
+        "version": {
+          "description": "Exactly 1. Decoders must reject other versions.",
+          "format": "uint32",
+          "maximum": 1,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "directory_bytes",
+        "manifest",
+        "source",
+        "provenance",
+        "product_kind",
+        "members"
+      ],
+      "type": "object"
+    },
+    "NullableString": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "OriginalCaptureFailure": {
+      "description": "Stable code for an original capture that did not publish an artifact.",
+      "oneOf": [
+        {
+          "const": "cancelled",
+          "description": "Startup or capture was cancelled by the caller.",
+          "type": "string"
+        },
+        {
+          "const": "acquisition_failed",
+          "description": "The display, terminal or encoder failed, or the acquired video did not verify.",
+          "type": "string"
+        },
+        {
+          "const": "grid_mismatch",
+          "description": "The observed terminal grid differs from the requested exact grid.",
+          "type": "string"
+        },
+        {
+          "const": "supervisor_abandoned",
+          "description": "The supervisor stopped running before it published a final state.",
+          "type": "string"
+        },
+        {
+          "const": "recording_failed",
+          "description": "The canonical recording failed or its completion did not match the captured run.",
+          "type": "string"
+        },
+        {
+          "const": "publication_failed",
+          "description": "The verified capture could not be committed beside the session.",
+          "type": "string"
+        },
+        {
+          "const": "startup_failed",
+          "description": "The supervisor could not start the capture environment.",
+          "type": "string"
+        }
+      ]
+    },
+    "OriginalCaptureFailureRecord": {
+      "additionalProperties": false,
+      "description": "Terminal failure facts written by the supervisor.",
+      "properties": {
+        "cleanup": {
+          "description": "Teardown or preservation failure reported beside the primary failure.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "code": {
+          "$ref": "#/$defs/OriginalCaptureFailure",
+          "description": "Stable failure code."
+        },
+        "reason": {
+          "description": "Primary failure description.",
+          "type": "string"
+        },
+        "surviving": {
+          "description": "Paths that existed after bounded cleanup; nothing else is implied to exist.",
+          "items": {
+            "$ref": "#/$defs/SurvivingPathRecord"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "reason",
+        "surviving"
+      ],
+      "type": "object"
+    },
+    "OriginalCaptureState": {
+      "description": "Supervisor lifecycle state.",
+      "oneOf": [
+        {
+          "const": "acquiring",
+          "description": "Display, encoder and terminal are starting; the program has not started.",
+          "type": "string"
+        },
+        {
+          "const": "live",
+          "description": "The program runs inside the captured terminal and accepts live control.",
+          "type": "string"
+        },
+        {
+          "const": "finalizing",
+          "description": "The program completed; acquisition is stopping and the artifact is being published.",
+          "type": "string"
+        },
+        {
+          "const": "published",
+          "description": "The artifact was published; `result` names it.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "Capture failed; `failure` names the code and the paths that survived.",
+          "type": "string"
+        },
+        {
+          "const": "cancelled",
+          "description": "Capture was cancelled; `failure` names the paths that survived.",
+          "type": "string"
+        },
+        {
+          "const": "abandoned",
+          "description": "Derived by readers only: a non-terminal state whose supervisor is no longer running.",
+          "type": "string"
+        }
+      ]
+    },
+    "PixelCanvas": {
+      "additionalProperties": false,
+      "description": "Captured display size in pixels; constant for the whole video.",
+      "properties": {
+        "height": {
+          "description": "Height in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "description": "Width in pixels.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "type": "object"
+    },
+    "SdkArtifactMember": {
+      "additionalProperties": false,
+      "description": "Portable member metadata. Canonical `ArtifactMember` serialization is unchanged.",
+      "properties": {
+        "blake3": {
+          "description": "Whole-file BLAKE3.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "byte_length": {
+          "$ref": "#/$defs/DecimalU64",
+          "description": "Exact bytes in the complete file."
+        },
+        "media_type": {
+          "description": "MIME type.",
+          "type": "string"
+        },
+        "path": {
+          "$ref": "#/$defs/ArtifactRelativePath",
+          "description": "Relative filename."
+        },
+        "relationship": {
+          "description": "Existing manifest relationship.",
+          "type": "string"
+        },
+        "schema_type": {
+          "$ref": "#/$defs/NullableString",
+          "description": "Schema identifier, or explicit null."
+        },
+        "sensitivity": {
+          "$ref": "#/$defs/ArtifactSensitivity",
+          "description": "Existing sensitivity contract."
+        }
+      },
+      "required": [
+        "path",
+        "byte_length",
+        "blake3",
+        "media_type",
+        "schema_type",
+        "sensitivity",
+        "relationship"
+      ],
+      "type": "object"
+    },
+    "SdkCanonicalBoundary": {
+      "additionalProperties": false,
+      "description": "Exact canonical boundary with portable wide integers.",
+      "properties": {
+        "event_hash": {
+          "description": "Prior event hash, or the event header hash at sequence zero.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "next_event_seq": {
+          "$ref": "#/$defs/DecimalU64",
+          "description": "Sequence assigned to the next event."
+        },
+        "output_bytes": {
+          "$ref": "#/$defs/DecimalU64",
+          "description": "Canonical PTY bytes through this boundary."
+        }
+      },
+      "required": [
+        "next_event_seq",
+        "event_hash",
+        "output_bytes"
+      ],
+      "type": "object"
+    },
+    "SurvivingKind": {
+      "description": "What a surviving path holds.",
+      "oneOf": [
+        {
+          "const": "session",
+          "description": "Canonical session directory.",
+          "type": "string"
+        },
+        {
+          "const": "failed_visual",
+          "description": "Preserved failed capture staging (`visual-failed-*`).",
+          "type": "string"
+        },
+        {
+          "const": "staging",
+          "description": "Capture staging that could not be preserved under its failed name.",
+          "type": "string"
+        },
+        {
+          "const": "sidecar",
+          "description": "Original-capture status sidecar.",
+          "type": "string"
+        },
+        {
+          "const": "log",
+          "description": "Supervisor or recorder diagnostic log.",
+          "type": "string"
+        }
+      ]
+    },
+    "SurvivingPathRecord": {
+      "additionalProperties": false,
+      "description": "A path verified to exist when the failure was reported.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/SurvivingKind",
+          "description": "What the path holds."
+        },
+        "path": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact Linux path bytes."
+        }
+      },
+      "required": [
+        "path",
+        "kind"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/original-capture-status.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Owner-only supervisor status, published beside the session as\n`<session>.original-capture.json`. Not canonical evidence.",
+  "properties": {
+    "backend": {
+      "description": "Pixel source; `private_x11` is the only supervised backend.",
+      "type": "string"
+    },
+    "canvas": {
+      "$ref": "#/$defs/PixelCanvas",
+      "description": "Captured display size."
+    },
+    "failure": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OriginalCaptureFailureRecord"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Failure facts, present only in `failed` and `cancelled`."
+    },
+    "format": {
+      "description": "Exactly [`ORIGINAL_CAPTURE_STATUS_FORMAT`].",
+      "type": "string"
+    },
+    "fps": {
+      "description": "Acquisition frame rate.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "grid": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CellGrid"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Requested exact grid, or the observed grid once live for a viewport-derived grid."
+    },
+    "result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MediaArtifactResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Published artifact, present only in `published`."
+    },
+    "session_id": {
+      "description": "Canonical session this supervisor records, written when the capture becomes live and\nkept afterwards; `None` only before the session exists.",
+      "format": "uuid",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "state": {
+      "$ref": "#/$defs/OriginalCaptureState",
+      "description": "Supervisor state as written; readers derive `abandoned`."
+    },
+    "supervisor_pid": {
+      "$ref": "#/$defs/DecimalU64",
+      "description": "Supervisor process ID."
+    },
+    "supervisor_start_ticks": {
+      "$ref": "#/$defs/DecimalU64",
+      "description": "Supervisor kernel start ticks, so a reused PID never reads as the supervisor."
+    },
+    "version": {
+      "description": "Exactly [`ORIGINAL_CAPTURE_STATUS_VERSION`].",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "backend",
+    "supervisor_pid",
+    "supervisor_start_ticks",
+    "state",
+    "canvas",
+    "fps"
+  ],
+  "title": "OriginalCaptureStatus",
+  "type": "object"
+}

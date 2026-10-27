@@ -7,6 +7,9 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     str,
+    sync::atomic::AtomicBool,
+    thread,
+    time::Duration,
 };
 use termtrace_evidence::artifact::{secure_file, write_secure};
 use termtrace_model::artifact::presentation::{
@@ -882,4 +885,109 @@ pub(super) fn write_source_frame_hashes(source_video: &Path, staging: &Path) -> 
         return Err(plan_error("FFmpeg source-frame hash output was empty"));
     }
     return Ok(());
+}
+
+/// Run a file-backed command under process-group ownership; no unbounded pipe buffering.
+pub(super) fn run_logged_command(
+    program: &str,
+    arguments: &[String],
+    directory: &Path,
+    stem: &str,
+    cancelled: Option<&AtomicBool>,
+    timeout: Duration,
+) -> Result<()> {
+    use std::{
+        sync::atomic::Ordering,
+        time::{Duration, Instant},
+    };
+    use termtrace_process::SupervisedChild;
+    let stdout = secure_file(&directory.join(format!("{stem}.stdout")))?;
+    let stderr = secure_file(&directory.join(format!("{stem}.log")))?;
+    let mut command = Command::new(program);
+    command
+        .args(arguments)
+        .current_dir(directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
+    let mut child = SupervisedChild::spawn(&mut command).map_err(|source| {
+        return Error::Filesystem {
+            path: program.into(),
+            source,
+        };
+    })?;
+
+    let deadline = Instant::now() + timeout;
+    let result = loop {
+        if cancelled.is_some_and(|flag| return flag.load(Ordering::Acquire)) {
+            break Err(plan_error(format!(
+                "{program} {stem} cancelled; no output publication"
+            )));
+        }
+
+        if Instant::now() >= deadline {
+            break Err(plan_error(format!("{program} {stem} timed out")));
+        }
+
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break Ok(()),
+            Ok(Some(status)) => {
+                break Err(plan_error(format!(
+                    "{program} {stem} failed with {status}; see {stem}.log"
+                )))
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(10)),
+            Err(source) => {
+                break Err(Error::Filesystem {
+                    path: program.into(),
+                    source,
+                })
+            }
+        }
+    };
+    // Terminate any descendants even when the leader exited successfully.
+    child.terminate(Duration::from_millis(250));
+
+    return result;
+}
+
+/// Probe an explicit file and actually decode all frames. GIF delay clamping is disabled.
+pub(super) fn probe_video_file(
+    directory: &Path,
+    filename: &str,
+    gif: bool,
+) -> Result<serde_json::Value> {
+    let mut args: Vec<String> = ["-v", "error"].map(str::to_owned).to_vec();
+    if gif {
+        args.extend(["-min_delay", "0"].map(str::to_owned));
+    }
+
+    args.extend(["-i", filename, "-select_streams", "v:0", "-count_frames", "-show_entries",
+        "stream=codec_name,pix_fmt,width,height,r_frame_rate,avg_frame_rate,time_base,nb_read_frames,color_range,color_space,color_transfer,color_primaries:format=format_name,duration", "-of", "json"].map(str::to_owned));
+
+    let stem = format!("{filename}-probe");
+    run_logged_command(
+        "ffprobe",
+        &args,
+        directory,
+        &stem,
+        None,
+        Duration::from_secs(3600),
+    )?;
+
+    let path = directory.join(format!("{stem}.stdout"));
+    let bytes = fs_err::read(&path).map_err(|source| {
+        return Error::Filesystem {
+            path: path.clone(),
+            source,
+        };
+    })?;
+
+    return serde_json::from_slice(&bytes).map_err(|source| {
+        return Error::InvalidJson {
+            path,
+            json_path: "$".into(),
+            source,
+        };
+    });
 }

@@ -24,6 +24,25 @@ pub const DEFAULT_MAX_SCREEN_FRAME_JSON_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_SCREEN_FRAME_CELLS: u32 = CANVAS_MAX_CELLS;
 /// Maximum serialized bytes in one rich projection.
 pub const MAX_SCREEN_FRAME_JSON_BYTES: u64 = DEFAULT_MAX_SCREEN_FRAME_JSON_BYTES;
+/// Unsigned 64-bit field names in screen frames, observations, state points, screen
+/// predicates, stable captures, and screen waits.
+///
+/// SDK bindings carry exactly these fields as host big integers (Python `int`, TypeScript
+/// `bigint`) and every other number as an ordinary host number.
+pub const SDK_WIDE_UNSIGNED_FIELDS: &[&str] = &[
+    "event_seq",
+    "first_match_monotonic_ns",
+    "first_observed_monotonic_ns",
+    "monotonic_ns",
+    "next_event_seq",
+    "observed_monotonic_ns",
+    "output_bytes",
+    "stable_for_ns",
+    "state_id",
+];
+/// Raw byte field names in the same observation types, serialized as standard padded Base64
+/// and carried by SDK bindings as host byte strings.
+pub const SDK_BYTE_FIELDS: &[&str] = &["canonical_session", "semantic_state_zstd"];
 
 /// Stable snapshot fields optionally retained by pure normalizers.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -464,3 +483,124 @@ impl fmt::Display for ScreenFrameError {
 }
 
 impl StdError for ScreenFrameError {}
+
+#[cfg(test)]
+mod tests {
+    use super::{ScreenFrame, SDK_BYTE_FIELDS, SDK_WIDE_UNSIGNED_FIELDS};
+    use crate::{
+        protocol::control::ScreenPredicate,
+        terminal::observation::{Observation, StatePoint},
+    };
+    use serde_json::Value;
+    use std::collections::BTreeSet;
+
+    fn resolve<'schema>(root: &'schema Value, schema: &'schema Value) -> Vec<&'schema Value> {
+        if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+            let pointer = reference.trim_start_matches('#');
+
+            return root
+                .pointer(pointer)
+                .map(|target| return resolve(root, target))
+                .unwrap_or_default();
+        }
+
+        let mut resolved = vec![schema];
+        for combinator in ["anyOf", "oneOf", "allOf"] {
+            for member in schema
+                .get(combinator)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                resolved.extend(resolve(root, member));
+            }
+        }
+
+        if let Some(items) = schema.get("items") {
+            resolved.extend(resolve(root, items));
+        }
+
+        return resolved;
+    }
+
+    fn collect(
+        root: &Value,
+        schema: &Value,
+        wide: &mut BTreeSet<String>,
+        bytes: &mut BTreeSet<String>,
+    ) {
+        match schema {
+            Value::Object(map) => {
+                if let Some(Value::Object(properties)) = map.get("properties") {
+                    for (name, property) in properties {
+                        for resolved in resolve(root, property) {
+                            let format = resolved.get("format").and_then(Value::as_str);
+                            if matches!(format, Some("uint64" | "int64" | "uint" | "int")) {
+                                wide.insert(name.clone());
+                            }
+
+                            if resolved.get("contentEncoding").and_then(Value::as_str)
+                                == Some("base64")
+                            {
+                                bytes.insert(name.clone());
+                            }
+                        }
+                    }
+                }
+
+                for value in map.values() {
+                    collect(root, value, wide, bytes);
+                }
+            }
+            Value::Array(values) => {
+                for value in values {
+                    collect(root, value, wide, bytes);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn sdk_field_tables_cover_every_wide_and_byte_schema_field() {
+        let mut wide = BTreeSet::new();
+        let mut bytes = BTreeSet::new();
+
+        for schema in [
+            schemars::schema_for!(ScreenFrame),
+            schemars::schema_for!(Observation),
+            schemars::schema_for!(StatePoint),
+            schemars::schema_for!(ScreenPredicate),
+        ] {
+            let root = serde_json::to_value(&schema).expect("schema JSON");
+            collect(&root, &root, &mut wide, &mut bytes);
+        }
+
+        // Stable-capture and screen-wait outcomes are service types without a schema; their
+        // timestamp and byte fields are listed explicitly.
+        wide.extend(
+            [
+                "first_match_monotonic_ns",
+                "first_observed_monotonic_ns",
+                "observed_monotonic_ns",
+                "stable_for_ns",
+            ]
+            .map(str::to_owned),
+        );
+
+        bytes.insert("semantic_state_zstd".to_owned());
+
+        let expected_wide: BTreeSet<String> = SDK_WIDE_UNSIGNED_FIELDS
+            .iter()
+            .map(|name| return (*name).to_owned())
+            .collect();
+
+        let expected_bytes: BTreeSet<String> = SDK_BYTE_FIELDS
+            .iter()
+            .map(|name| return (*name).to_owned())
+            .collect();
+
+        assert_eq!(wide, expected_wide);
+        assert_eq!(bytes, expected_bytes);
+    }
+}

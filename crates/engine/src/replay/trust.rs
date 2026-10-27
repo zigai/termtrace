@@ -74,35 +74,6 @@ impl ValidatedSession {
         });
     }
 
-    /// Adopt a completion the recorder validated against `candidate` and then published.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the source changed during validation or publication.
-    pub(crate) fn published(
-        session: &Path,
-        candidate: SourceIdentity,
-        completion: SessionCompletion,
-    ) -> Result<Self> {
-        if candidate != SourceIdentity::capture_candidate(session)? {
-            return Err(invalid_replay(
-                "canonical source changed during completion validation",
-            ));
-        }
-
-        let source = SourceIdentity::capture(session)?;
-        if !source.0.starts_with(&candidate.0) {
-            return Err(invalid_replay(
-                "canonical source changed while publishing completion",
-            ));
-        }
-        return Ok(Self {
-            root: session.to_path_buf(),
-            completion,
-            source,
-        });
-    }
-
     /// The validated session directory.
     pub fn root(&self) -> &Path {
         return &self.root;

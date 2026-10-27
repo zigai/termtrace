@@ -132,8 +132,12 @@ pub struct RecoveryIssue {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct RecoveryReport {
     /// Original source path.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub source: PathBuf,
     /// New owner-only recovered path.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub recovered: PathBuf,
     /// Number of integrity-checked events retained.
     pub valid_events: u64,

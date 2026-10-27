@@ -48,6 +48,7 @@ struct VtInputLimiter {
     discarding: bool,
     max_osc_bytes: usize,
     utf8_continuations: u8,
+    output: Vec<u8>,
 }
 
 impl Default for VtInputLimiter {
@@ -64,20 +65,25 @@ impl VtInputLimiter {
             discarding: false,
             max_osc_bytes,
             utf8_continuations: 0,
+            output: Vec::with_capacity(TERMINAL_WRITE_CHUNK_BYTES),
         };
     }
 
     fn write(&mut self, bytes: &[u8], mut emit: impl FnMut(&[u8])) {
-        let mut output = [0_u8; TERMINAL_WRITE_CHUNK_BYTES];
-        let mut output_len = 0;
-        let mut offset = 0;
+        // A reused buffer: zeroing a fresh chunk per call dominated byte-wise writes.
+        let mut output = take(&mut self.output);
+        self.write_buffered(bytes, &mut output, &mut emit);
+        self.output = output;
+    }
 
+    fn write_buffered(&mut self, bytes: &[u8], output: &mut Vec<u8>, mut emit: impl FnMut(&[u8])) {
+        let mut offset = 0;
         while offset < bytes.len() {
             if self.state == VtInputState::Ground && self.utf8_continuations == 0 {
                 let remaining = bytes.get(offset..).unwrap_or(&[]);
                 match memchr::memchr2(0x1b, 0x9d, remaining) {
                     None => {
-                        flush_output(&output, &mut output_len, &mut emit);
+                        flush_output(output, &mut emit);
                         self.utf8_continuations = tail_utf8_continuations(remaining);
                         emit(remaining);
 
@@ -87,7 +93,7 @@ impl VtInputLimiter {
                         // Byte at offset is 0x1b or 0x9d, handle below
                     }
                     Some(pos) => {
-                        flush_output(&output, &mut output_len, &mut emit);
+                        flush_output(output, &mut emit);
 
                         let prefix = remaining.get(..pos).unwrap_or(&[]);
                         self.utf8_continuations = tail_utf8_continuations(prefix);
@@ -106,7 +112,7 @@ impl VtInputLimiter {
             if self.state == VtInputState::Ground && self.utf8_continuations > 0 {
                 if (0x80..=0xbf).contains(&byte) {
                     self.utf8_continuations -= 1;
-                    push_output(byte, &mut output, &mut output_len, &mut emit);
+                    push_output(byte, output, &mut emit);
                     continue;
                 }
 
@@ -116,14 +122,14 @@ impl VtInputLimiter {
             match self.state {
                 VtInputState::Ground => match byte {
                     0x1b => {
-                        flush_output(&output, &mut output_len, &mut emit);
+                        flush_output(output, &mut emit);
                         self.sequence.clear();
                         self.discarding = false;
                         let _ = self.push_sequence(byte);
                         self.state = VtInputState::Escape;
                     }
                     0x9d => {
-                        flush_output(&output, &mut output_len, &mut emit);
+                        flush_output(output, &mut emit);
                         self.begin_osc(byte);
                     }
                     value => {
@@ -134,7 +140,7 @@ impl VtInputLimiter {
                             _ => 0,
                         };
 
-                        push_output(byte, &mut output, &mut output_len, &mut emit);
+                        push_output(byte, output, &mut emit);
                     }
                 },
                 VtInputState::Escape => match byte {
@@ -145,15 +151,15 @@ impl VtInputLimiter {
                     0x1b => {
                         self.sequence.clear();
                         self.discarding = false;
-                        push_output(0x1b, &mut output, &mut output_len, &mut emit);
+                        push_output(0x1b, output, &mut emit);
 
                         let _ = self.push_sequence(byte);
                     }
                     _ => {
                         self.sequence.clear();
                         self.discarding = false;
-                        push_output(0x1b, &mut output, &mut output_len, &mut emit);
-                        push_output(byte, &mut output, &mut output_len, &mut emit);
+                        push_output(0x1b, output, &mut emit);
+                        push_output(byte, output, &mut emit);
                         self.state = VtInputState::Ground;
                     }
                 },
@@ -163,7 +169,7 @@ impl VtInputLimiter {
             }
         }
 
-        flush_output(&output, &mut output_len, &mut emit);
+        flush_output(output, &mut emit);
     }
 
     fn begin_osc(&mut self, introducer: u8) {
@@ -229,38 +235,21 @@ impl VtInputLimiter {
     }
 }
 
-#[expect(
-    clippy::indexing_slicing,
-    reason = "output_len is bounded by TERMINAL_WRITE_CHUNK_BYTES"
-)]
-fn push_output(
-    byte: u8,
-    output: &mut [u8; TERMINAL_WRITE_CHUNK_BYTES],
-    output_len: &mut usize,
-    emit: &mut impl FnMut(&[u8]),
-) {
-    if *output_len == output.len() {
-        flush_output(output, output_len, emit);
+fn push_output(byte: u8, output: &mut Vec<u8>, emit: &mut impl FnMut(&[u8])) {
+    if output.len() == TERMINAL_WRITE_CHUNK_BYTES {
+        flush_output(output, emit);
     }
 
-    output[*output_len] = byte;
-    *output_len += 1;
+    output.push(byte);
 }
 
-fn flush_output(
-    output: &[u8; TERMINAL_WRITE_CHUNK_BYTES],
-    output_len: &mut usize,
-    emit: &mut impl FnMut(&[u8]),
-) {
-    if *output_len == 0 {
+fn flush_output(output: &mut Vec<u8>, emit: &mut impl FnMut(&[u8])) {
+    if output.is_empty() {
         return;
     }
 
-    if let Some(bytes) = output.get(..*output_len) {
-        emit(bytes);
-    }
-
-    *output_len = 0;
+    emit(output);
+    output.clear();
 }
 
 fn tail_utf8_continuations(bytes: &[u8]) -> u8 {

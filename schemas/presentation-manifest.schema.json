@@ -355,6 +355,22 @@
       ],
       "type": "object"
     },
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    },
     "MarkerRecord": {
       "additionalProperties": false,
       "description": "Canonical marker with duplicate and nominal-frame context.",
@@ -631,8 +647,8 @@
           "type": "string"
         },
         "source_path": {
-          "description": "Resolved caller resource path used for this export.",
-          "type": "string"
+          "$ref": "#/$defs/ExactPath",
+          "description": "Resolved caller resource path used for this export."
         }
       },
       "required": [
@@ -1310,8 +1326,8 @@
           "type": "string"
         },
         "session": {
-          "description": "Canonical session path.",
-          "type": "string"
+          "$ref": "#/$defs/ExactPath",
+          "description": "Canonical session path."
         },
         "session_id": {
           "description": "Canonical session identity.",

@@ -1,5 +1,21 @@
 {
   "$defs": {
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    },
     "PendingOperationReport": {
       "description": "Serializable uncertain-operation summary.",
       "properties": {
@@ -79,12 +95,12 @@
       "type": "array"
     },
     "recovered": {
-      "description": "New owner-only recovered path.",
-      "type": "string"
+      "$ref": "#/$defs/ExactPath",
+      "description": "New owner-only recovered path."
     },
     "source": {
-      "description": "Original source path.",
-      "type": "string"
+      "$ref": "#/$defs/ExactPath",
+      "description": "Original source path."
     },
     "valid_events": {
       "description": "Number of integrity-checked events retained.",

@@ -15,8 +15,10 @@ pub mod events;
 pub mod integrity;
 pub mod locator;
 pub mod output;
+mod paging;
 pub mod registry;
 pub mod screen;
+pub mod sdk_contract;
 pub mod system;
 pub mod testing;
 pub mod tmux;
@@ -33,10 +35,12 @@ pub use analysis::AnalysisService;
 pub use artifacts::ArtifactService;
 pub use assertions::{assert_screen_text, SnapshotProfile};
 pub use client::{
-    await_ready, CommandPostcondition, Events, Evidence, FollowPosition, LaunchSpec,
-    LocatedSession, Native, Output, Pointer, Readiness, Semantic, SendFailure, SendLastStep,
-    SendOutcome, SendRequest, SendStep, Session, SessionStatus, SessionTarget, StopOutcome,
-    StopRequest, Terminal,
+    await_ready, original_capture_status, send_step_request_id, CommandPostcondition,
+    ControlAcknowledgement, Events, Evidence, FollowPosition, LaunchSpec, LocatedSession,
+    MarkOutcome, Native, OriginalFps, OriginalGeometry, OriginalLaunchSpec, OriginalRecording,
+    OriginalSession, Output, Pointer, PointerOutcome, Readiness, Semantic, SendFailure,
+    SendLastStep, SendOutcome, SendRequest, SendStep, Session, SessionStatus, SessionTarget,
+    StopOutcome, StopRequest, Terminal,
 };
 pub use error::{ControlError, Error, ErrorKind, Result};
 pub use events::{EventCursor, EventPage, EventsService};

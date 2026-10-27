@@ -5,6 +5,7 @@ use super::{
     control::{apply_signal, PendingInputSequence, ScreenWaiter},
     input::{apply, apply_resize},
     model::{RuntimeMessage, TerminalGeometry},
+    outer_resize::{OuterResize, ResizeAuthority},
     presentation::{process_semantic_bytes, process_semantic_output, resize_semantic},
     process::RuntimeWorkers,
     support::{finish_with_cleanup, terminal_error},
@@ -26,7 +27,6 @@ use termtrace_model::{
     execution::event::{Event, InputDescriptor, InputKind, InputSource, LifecycleKind},
     execution::session::{ResourceLimitKind, ResourceLimitOutcome},
     protocol::control::ProcessSignal,
-    terminal::state::SemanticState,
     value::ByteString,
 };
 use uuid::Uuid;
@@ -35,7 +35,6 @@ pub(super) struct RuntimeOutcome {
     pub(super) status: ExitStatus,
     pub(super) output_bytes: u64,
     pub(super) resource_limit: Option<ResourceLimitOutcome>,
-    pub(super) final_presented: SemanticState,
 }
 
 /// Record a command running in a real pseudo-terminal and mirror its output.
@@ -51,10 +50,17 @@ pub(super) fn run(
     control_socket: &str,
     host_signals: Signals,
     startup_error: Option<Error>,
+    resize_authority: &ResizeAuthority,
 ) -> Result<RuntimeOutcome> {
     let (sender, receiver) = mpsc::sync_channel::<RuntimeMessage>(64);
     let reader = replace(&mut actor.spawned.reader, Box::new(io::empty()));
     let master_fd = actor.spawned.master.as_raw_fd();
+    actor.outer_resize = match OuterResize::start(resize_authority, &sender) {
+        Ok(outer_resize) => outer_resize,
+        Err(error) => {
+            return finish_with_cleanup(Err(error), actor.spawned.reap_after_failure());
+        }
+    };
     let started = RuntimeWorkers::start(
         reader,
         master_fd,
@@ -81,8 +87,8 @@ pub(super) fn run(
 
         let started_at = Instant::now();
         let mut last_activity_at = Instant::now();
-        let mut control_server_stopped = false;
 
+        let mut control_server_stopped = false;
         loop {
             let deadline = actor.next_deadline(started_at, last_activity_at);
             let received = deadline.map_or_else(
@@ -129,7 +135,6 @@ pub(super) fn run(
                             "runtime inbox closed with no pending deadline",
                         ));
                     };
-
                     thread::sleep(deadline.saturating_duration_since(Instant::now()));
                 }
                 Err(RecvTimeoutError::Timeout) => {}
@@ -151,6 +156,7 @@ pub(super) fn run(
             let child_exited = actor.termination.child_exited();
             let output_closed = actor.termination.output_closed();
             actor.advance_input_sequence(child_exited, output_closed)?;
+            actor.expire_outer_resize(false)?;
             actor.event_log.flush_due()?;
             actor.evaluate_screen_waiters(child_exited, output_closed)?;
             actor.enforce_resource_limits(started_at, last_activity_at)?;
@@ -192,6 +198,7 @@ pub(super) fn run(
             "child_completed",
             "child completed before screen predicate matched",
         );
+        actor.expire_outer_resize(true)?;
 
         return actor
             .termination
@@ -217,7 +224,6 @@ pub(super) fn run(
         status,
         output_bytes: actor.progress.output_bytes,
         resource_limit: actor.progress.resource_limit.clone(),
-        final_presented: actor.live.presented.clone(),
     });
 }
 
@@ -274,6 +280,7 @@ impl SessionActor<'_> {
                 .map(PendingInputSequence::next_deadline),
             self.termination.next_deadline(),
             self.event_log.flush_deadline(),
+            self.outer_resize_deadline(),
         ]
         .into_iter()
         .flatten()
@@ -440,7 +447,6 @@ impl SessionActor<'_> {
                     data
                 };
                 self.mirror_bytes(&mirrored)?;
-
                 if !self.screen_waiters.is_empty() || self.pending_input_sequence.is_some() {
                     self.live.ensure_presented()?;
                 }
@@ -494,6 +500,15 @@ impl SessionActor<'_> {
             }
             RuntimeMessage::InputFailed(reason) => {
                 return Err(terminal_error("read standard input", reason));
+            }
+            RuntimeMessage::Resize(geometry) if self.owns_outer_resize() => {
+                self.observe_outer_grid(geometry)?;
+            }
+            RuntimeMessage::OuterResizeReply {
+                request_id,
+                dispatch,
+            } => {
+                self.handle_outer_resize_reply(request_id, dispatch)?;
             }
             RuntimeMessage::Resize(geometry) => {
                 let operation_id = Uuid::now_v7();

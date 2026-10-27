@@ -144,6 +144,7 @@ impl Termination {
             Stage::Draining { until, .. } => Some(until),
             Stage::Running { .. } | Stage::Settling { .. } | Stage::Closing { .. } => None,
         };
+
         let (resource, signal) = match self.kill {
             Kill::Pending { resource, signal } => {
                 (resource.map(|escalation| return escalation.at), signal)

@@ -374,3 +374,286 @@ fn original_native_cancellation_stops_the_managed_command() {
     assert!(diagnostic.contains("capture cancelled"), "{diagnostic}");
     assert!(!session.join("visual-original").exists());
 }
+
+#[allow(
+    clippy::expect_used,
+    reason = "test helper should stop when the capture status fixture is invalid"
+)]
+fn original_status(session: &Path) -> serde_json::Value {
+    let path = PathBuf::from(format!("{}.original-capture.json", session.display()));
+
+    return serde_json::from_slice(&fs::read(path).expect("status sidecar")).expect("status JSON");
+}
+
+#[allow(
+    clippy::indexing_slicing,
+    reason = "test helper should stop when the capture status fixture is invalid"
+)]
+fn await_original_state(session: &Path, states: &[&str]) -> serde_json::Value {
+    let deadline = Instant::now() + Duration::from_secs(60);
+
+    loop {
+        let status = original_status(session);
+        if states.iter().any(|state| return status["state"] == *state) {
+            return status;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "capture stayed {}",
+            status["state"]
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[allow(
+    clippy::expect_used,
+    reason = "test helper should stop when the capture status fixture is invalid"
+)]
+fn termtrace(state: &Path) -> Command {
+    let mut command = Command::cargo_bin("termtrace").expect("binary");
+    command.env("TERMTRACE_STATE_DIR", state);
+
+    return command;
+}
+
+fn start_detached(state: &Path, session: &Path, alias: &str, script: &str) {
+    termtrace(state)
+        .args(["record", "--original-native", "--original-grid", "100x30"])
+        .args(["--original-canvas", "1600x900", "-d", alias, "--out"])
+        .arg(session)
+        .args(["--", "/bin/sh", "-c", script])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .success();
+}
+
+const WINCH_SCRIPT: &str =
+    "trap 'echo winch $(stty size)' WINCH; echo ready $(stty size); while :; do sleep 0.05; done";
+
+#[test]
+#[ignore = "requires Ghostty, Xvfb, dbus-run-session, FFmpeg and FFprobe"]
+fn detached_original_resizes_its_window_inside_a_constant_canvas() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let session = temporary.path().join("resized");
+    start_detached(&state, &session, "resized", WINCH_SCRIPT);
+
+    let live = original_status(&session);
+    assert_eq!(live["state"], "live");
+    assert_eq!(live["grid"], serde_json::json!({"cols": 100, "rows": 30}));
+
+    validate_json_value("original-capture-status.schema.json", &live);
+
+    termtrace(&state)
+        .args(["send", "resized", "--resize", "120x34", "--json"])
+        .assert()
+        .success();
+
+    termtrace(&state)
+        .args(["send", "resized", "--resize", "240x80", "--json"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("exceeds_native_canvas"))
+        .stdout(predicate::str::contains("not_applied"));
+
+    termtrace(&state)
+        .args(["status", "resized", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""original_capture""#));
+
+    termtrace(&state)
+        .args(["stop", "resized", "--wait"])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .success();
+
+    let published = await_original_state(&session, &["published", "failed"]);
+    assert_eq!(published["state"], "published", "{published}");
+
+    validate_json_value("original-capture-status.schema.json", &published);
+
+    let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
+    let output = String::from_utf8(canonical_output_bytes(&log)).expect("text output");
+    assert!(output.contains("ready 30 100"), "{output}");
+    assert!(output.contains("winch 34 120"), "{output}");
+    assert!(!output.contains("winch 80 240"), "{output}");
+
+    let visual = session.join("visual-original");
+    let resizes = visual.join("window-resizes.jsonl");
+    validate_json_lines("window-resize-record.schema.json", &resizes);
+    let records: Vec<serde_json::Value> = fs::read_to_string(&resizes)
+        .expect("resize timeline")
+        .lines()
+        .map(|line| return serde_json::from_str(line).expect("resize record"))
+        .collect();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["decision"], "configured");
+    assert_eq!(
+        records[0]["observed"],
+        serde_json::json!({"cols": 120, "rows": 34})
+    );
+    assert_eq!(records[1]["decision"], "rejected");
+    assert_eq!(records[1]["code"], "exceeds_native_canvas");
+
+    let probe = ProcessCommand::new("ffprobe")
+        .args(["-v", "error", "-select_streams", "v:0", "-show_entries"])
+        .args(["stream=width,height,r_frame_rate", "-of", "csv=p=0"])
+        .arg(visual.join("session.mkv"))
+        .output()
+        .expect("ffprobe");
+    assert_eq!(
+        String::from_utf8_lossy(&probe.stdout).trim(),
+        "1600,900,24/1"
+    );
+}
+
+#[test]
+#[ignore = "requires Ghostty, Xvfb, dbus-run-session, FFmpeg and FFprobe"]
+fn killed_original_supervisor_reads_as_abandoned_and_leaves_no_processes() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let session = temporary.path().join("abandoned");
+    start_detached(&state, &session, "abandoned", WINCH_SCRIPT);
+    let supervisor: i32 = original_status(&session)["supervisor_pid"]
+        .as_str()
+        .expect("supervisor pid")
+        .parse()
+        .expect("decimal pid");
+
+    let children = ProcessCommand::new("pgrep")
+        .args(["-P", &supervisor.to_string()])
+        .output()
+        .expect("pgrep");
+
+    let children: Vec<String> = String::from_utf8_lossy(&children.stdout)
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        children.len() >= 3,
+        "display, encoder and terminal are owned: {children:?}"
+    );
+    assert!(ProcessCommand::new("kill")
+        .args(["-KILL", &supervisor.to_string()])
+        .status()
+        .expect("kill supervisor")
+        .success());
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while children
+        .iter()
+        .any(|pid| return Path::new(&format!("/proc/{pid}")).exists())
+    {
+        assert!(
+            Instant::now() < deadline,
+            "owned processes outlived their supervisor"
+        );
+
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+
+    loop {
+        let status = termtrace(&state)
+            .args(["status", "abandoned", "--json"])
+            .output()
+            .expect("status");
+
+        let text = String::from_utf8_lossy(&status.stdout);
+        if text.contains(r#""state": "abandoned""#) {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "status never derived abandoned: {text}"
+        );
+
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[test]
+#[ignore = "requires Ghostty, Xvfb, dbus-run-session, FFmpeg and FFprobe"]
+fn original_restart_waits_for_the_predecessor_capture_and_keeps_its_grid() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let session = temporary.path().join("first");
+    start_detached(&state, &session, "restarted", WINCH_SCRIPT);
+
+    let restarted = termtrace(&state)
+        .args(["restart", "restarted", "--json"])
+        .timeout(Duration::from_secs(120))
+        .assert()
+        .success();
+
+    assert_eq!(original_status(&session)["state"], "published");
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&restarted.get_output().stdout).expect("restart report");
+
+    let successor = PathBuf::from(
+        report["successor"]["canonical_session_display"]
+            .as_str()
+            .expect("successor path"),
+    );
+
+    let live = original_status(&successor);
+    assert_eq!(live["state"], "live");
+    assert_eq!(live["grid"], serde_json::json!({"cols": 100, "rows": 30}));
+    assert_eq!(
+        live["canvas"],
+        serde_json::json!({"width": 1600, "height": 900})
+    );
+
+    let manifest = read_manifest(&successor).expect("successor manifest");
+    assert!(manifest.lineage.is_some());
+
+    termtrace(&state)
+        .args(["restart", "restarted", "--cols", "90"])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("overrides are not supported"));
+
+    termtrace(&state)
+        .args(["stop", "restarted", "--wait"])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .success();
+
+    assert_eq!(
+        await_original_state(&successor, &["published", "failed"])["state"],
+        "published"
+    );
+}
+
+#[test]
+#[ignore = "requires Ghostty, Xvfb, dbus-run-session, FFmpeg and FFprobe"]
+fn original_native_warns_about_ignored_geometry_flags() {
+    let temporary = TempDir::new().expect("temporary directory");
+
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["record", "--original-native", "--cols", "100", "--out"])
+        .arg(temporary.path().join("warned"))
+        .args(["--", "/bin/true"])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("--cols is ignored"))
+        .stderr(predicate::str::contains("--original-grid"));
+    let quiet = Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["record", "--original-native", "--out"])
+        .arg(temporary.path().join("quiet"))
+        .args(["--", "/bin/true"])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .success();
+    assert!(!String::from_utf8_lossy(&quiet.get_output().stderr).contains("ignored"));
+}

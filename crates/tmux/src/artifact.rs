@@ -517,3 +517,14 @@ pub struct TmuxStreamingBundleManifest {
     /// BLAKE3 of tracks.jsonl; each row is a `TmuxBundleTrack`.
     pub track_inventory_blake3: String,
 }
+
+/// Aggregate admission result with an exact binding to its persisted manifest.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct TmuxRecordingStart {
+    /// Exact manifest path bytes; authoritative for subsequent track/bundle operations.
+    pub manifest: ByteString,
+    /// Human-readable manifest path, explicitly nonauthoritative.
+    pub manifest_display: String,
+    /// Existing aggregate recording contract, including real coverage and lifecycle.
+    pub recording: TmuxRecordingManifest,
+}

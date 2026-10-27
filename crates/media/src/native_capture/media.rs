@@ -1,6 +1,8 @@
 use super::{
     capture_io::{external_error, unix_now_ns},
-    process::{probe_output, probe_output_with_check, wait_for_success, ManagedChild},
+    process::{
+        owned_command, probe_output, probe_output_with_check, wait_for_success, ManagedChild,
+    },
     Error, Result,
 };
 use std::{
@@ -14,6 +16,7 @@ use termtrace_evidence::artifact::{secure_file, write_secure};
 use termtrace_model::artifact::visual::{CaptureOptions, NativeFrameSample};
 
 pub(super) fn spawn_video_ffmpeg(
+    helper: Option<&Path>,
     options: &CaptureOptions,
     staging: &Path,
     display: &str,
@@ -28,9 +31,15 @@ pub(super) fn spawn_video_ffmpeg(
     let size = format!("{}x{}", options.width, options.height);
     let fps = options.fps.to_string();
 
+    // An owned encoder exits with the supervisor, even when the supervisor is killed.
+    let mut command = match helper {
+        Some(helper) => owned_command(helper, "ffmpeg")?,
+        None => Command::new("ffmpeg"),
+    };
+
     return ManagedChild::spawn_logged(
         "ffmpeg",
-        Command::new("ffmpeg")
+        command
             .args([
                 "-hide_banner",
                 "-loglevel",

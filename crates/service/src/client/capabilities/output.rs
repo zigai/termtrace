@@ -1,4 +1,6 @@
 use super::super::{wait_for_output, Duration, Result, Session, WaitOutcome};
+use crate::output::OutputService;
+use termtrace_model::execution::paging::{ByteOutputPage, OutputPageCursor};
 
 /// Canonical child-output history operations.
 pub struct Output<'session> {
@@ -6,6 +8,14 @@ pub struct Output<'session> {
 }
 
 impl Output<'_> {
+    /// Read exact source-bound PTY bytes with snapshot-relative lookahead.
+    ///
+    /// # Errors
+    /// Rejects invalid cursors/limits and invalid canonical evidence.
+    pub fn page(&self, cursor: Option<OutputPageCursor>, limit: usize) -> Result<ByteOutputPage> {
+        return OutputService::page(self.session.path(), cursor, limit);
+    }
+
     /// Wait for exact bytes ever emitted by the canonical child stream.
     ///
     /// # Errors

@@ -1,3 +1,4 @@
+use super::BYTES_MARKER;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::{borrow::Cow, fmt, result::Result as StdResult};
@@ -44,12 +45,50 @@ impl From<&[u8]> for ByteString {
     }
 }
 
+struct Base64<'bytes>(&'bytes [u8]);
+
+impl Serialize for Base64<'_> {
+    fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        return serializer.serialize_str(&STANDARD.encode(self.0));
+    }
+}
+
+// Text formats see a transparent Base64 string. Native host converters recognize the
+// marker name and produce their language's byte type instead.
 impl Serialize for ByteString {
     fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        return serializer.serialize_str(&STANDARD.encode(&self.0));
+        return serializer.serialize_newtype_struct(BYTES_MARKER, &Base64(&self.0));
+    }
+}
+
+struct ByteStringVisitor;
+
+impl<'de> de::Visitor<'de> for ByteStringVisitor {
+    type Value = ByteString;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        return formatter.write_str("Base64 text or raw bytes");
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> StdResult<ByteString, E> {
+        return STANDARD
+            .decode(v)
+            .map(ByteString)
+            .map_err(de::Error::custom);
+    }
+
+    fn visit_bytes<E: de::Error>(self, v: &[u8]) -> StdResult<ByteString, E> {
+        return Ok(ByteString(v.to_vec()));
+    }
+
+    fn visit_byte_buf<E: de::Error>(self, v: Vec<u8>) -> StdResult<ByteString, E> {
+        return Ok(ByteString(v));
     }
 }
 
@@ -58,12 +97,7 @@ impl<'de> Deserialize<'de> for ByteString {
     where
         D: Deserializer<'de>,
     {
-        let encoded = String::deserialize(deserializer)?;
-
-        return STANDARD
-            .decode(encoded)
-            .map(Self)
-            .map_err(de::Error::custom);
+        return deserializer.deserialize_any(ByteStringVisitor);
     }
 }
 

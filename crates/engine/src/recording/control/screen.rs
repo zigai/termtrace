@@ -51,6 +51,7 @@ impl ScreenWaiter {
             .matching_state
             .as_ref()
             .and_then(|(_, since, _)| return since.checked_add(self.stable_for));
+
         let unchanged = self
             .reaction
             .as_ref()

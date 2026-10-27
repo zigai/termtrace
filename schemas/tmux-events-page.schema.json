@@ -1,0 +1,670 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "TmuxCoverageGap": {
+      "description": "One uncovered pane or explicit observation limitation.",
+      "properties": {
+        "first_observed_unix_ns": {
+          "description": "First observation wall-clock time.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/TmuxGapKind",
+          "description": "Gap category."
+        },
+        "last_observed_unix_ns": {
+          "description": "Most recent observation wall-clock time.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pane_id": {
+          "description": "Related pane ID, or none for an aggregate limitation.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolved_unix_ns": {
+          "description": "Wall-clock time when the gap was first observed to be resolved.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "first_observed_unix_ns",
+        "last_observed_unix_ns"
+      ],
+      "type": "object"
+    },
+    "TmuxEventRecord": {
+      "description": "One sequenced, timestamped lifecycle event as committed to the journal.",
+      "oneOf": [
+        {
+          "description": "The aggregate identity was created.",
+          "properties": {
+            "coverage": {
+              "$ref": "#/$defs/TmuxRecordingCoverage",
+              "description": "Committed coverage policy."
+            },
+            "kind": {
+              "const": "recording_started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "coverage"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The composite client track started.",
+          "properties": {
+            "kind": {
+              "const": "composite_track_linked",
+              "type": "string"
+            },
+            "link": {
+              "$ref": "#/$defs/TmuxSessionLink",
+              "description": "Composite session identity and path."
+            }
+          },
+          "required": [
+            "kind",
+            "link"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A stop request was committed.",
+          "properties": {
+            "kind": {
+              "const": "recording_stopping",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Every track completed; no further events follow.",
+          "properties": {
+            "kind": {
+              "const": "recording_completed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The first reachable server identity was bound.",
+          "properties": {
+            "identity": {
+              "$ref": "#/$defs/TmuxServerIdentity",
+              "description": "Bound identity."
+            },
+            "kind": {
+              "const": "server_identity_bound",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "identity"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A supervisor process started observing the server.",
+          "properties": {
+            "kind": {
+              "const": "observer_started",
+              "type": "string"
+            },
+            "pid": {
+              "description": "Supervisor process ID.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "pid"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A tmux session appeared.",
+          "properties": {
+            "kind": {
+              "const": "session_created",
+              "type": "string"
+            },
+            "session_id": {
+              "description": "Stable tmux session ID.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A tmux session disappeared.",
+          "properties": {
+            "kind": {
+              "const": "session_destroyed",
+              "type": "string"
+            },
+            "session_id": {
+              "description": "Stable tmux session ID.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A tmux window appeared.",
+          "properties": {
+            "kind": {
+              "const": "window_created",
+              "type": "string"
+            },
+            "window_id": {
+              "description": "Stable tmux window ID.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "window_id"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A tmux window disappeared.",
+          "properties": {
+            "kind": {
+              "const": "window_destroyed",
+              "type": "string"
+            },
+            "window_id": {
+              "description": "Stable tmux window ID.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "window_id"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A pane appeared.",
+          "properties": {
+            "kind": {
+              "const": "pane_created",
+              "type": "string"
+            },
+            "pane": {
+              "$ref": "#/$defs/TmuxPaneAddress",
+              "description": "Pane identifiers."
+            }
+          },
+          "required": [
+            "kind",
+            "pane"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A pane disappeared.",
+          "properties": {
+            "kind": {
+              "const": "pane_destroyed",
+              "type": "string"
+            },
+            "pane": {
+              "$ref": "#/$defs/TmuxPaneAddress",
+              "description": "Last observed pane identifiers."
+            }
+          },
+          "required": [
+            "kind",
+            "pane"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A pane moved into another window.",
+          "properties": {
+            "kind": {
+              "const": "pane_moved",
+              "type": "string"
+            },
+            "pane": {
+              "$ref": "#/$defs/TmuxPaneAddress",
+              "description": "Pane identifiers after the move."
+            }
+          },
+          "required": [
+            "kind",
+            "pane"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A pane's window layout changed.",
+          "properties": {
+            "kind": {
+              "const": "layout_changed",
+              "type": "string"
+            },
+            "layout": {
+              "description": "New layout.",
+              "type": "string"
+            },
+            "pane": {
+              "$ref": "#/$defs/TmuxPaneAddress",
+              "description": "Pane identifiers."
+            }
+          },
+          "required": [
+            "kind",
+            "pane",
+            "layout"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A pane's window became active or inactive.",
+          "properties": {
+            "active": {
+              "description": "Whether the window is now active.",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "active_window_changed",
+              "type": "string"
+            },
+            "pane": {
+              "$ref": "#/$defs/TmuxPaneAddress",
+              "description": "Pane identifiers."
+            }
+          },
+          "required": [
+            "kind",
+            "pane",
+            "active"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A pane became active or inactive in its window.",
+          "properties": {
+            "active": {
+              "description": "Whether the pane is now active.",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "active_pane_changed",
+              "type": "string"
+            },
+            "pane": {
+              "$ref": "#/$defs/TmuxPaneAddress",
+              "description": "Pane identifiers."
+            }
+          },
+          "required": [
+            "kind",
+            "pane",
+            "active"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A pane's window was zoomed or unzoomed.",
+          "properties": {
+            "kind": {
+              "const": "zoom_changed",
+              "type": "string"
+            },
+            "pane": {
+              "$ref": "#/$defs/TmuxPaneAddress",
+              "description": "Pane identifiers."
+            },
+            "zoomed": {
+              "description": "Whether the window is now zoomed.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "pane",
+            "zoomed"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A pane entered, changed, or left a tmux mode such as copy mode.",
+          "properties": {
+            "kind": {
+              "const": "pane_mode_changed",
+              "type": "string"
+            },
+            "mode": {
+              "description": "Active mode name, or none when no mode is active.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane": {
+              "$ref": "#/$defs/TmuxPaneAddress",
+              "description": "Pane identifiers."
+            }
+          },
+          "required": [
+            "kind",
+            "pane"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A pane recording incarnation was linked.",
+          "properties": {
+            "kind": {
+              "const": "pane_track_linked",
+              "type": "string"
+            },
+            "track": {
+              "$ref": "#/$defs/TmuxPaneTrack",
+              "description": "Linked incarnation."
+            }
+          },
+          "required": [
+            "kind",
+            "track"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A linked pane recording published canonical completion.",
+          "properties": {
+            "kind": {
+              "const": "pane_track_completed",
+              "type": "string"
+            },
+            "pane_id": {
+              "description": "Stable pane ID.",
+              "type": "string"
+            },
+            "session_id": {
+              "description": "Completed recording identity.",
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "pane_id",
+            "session_id"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A coverage interval opened.",
+          "properties": {
+            "gap": {
+              "$ref": "#/$defs/TmuxCoverageGap",
+              "description": "Opened interval."
+            },
+            "kind": {
+              "const": "coverage_gap_opened",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "gap"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A coverage interval resolved.",
+          "properties": {
+            "gap": {
+              "$ref": "#/$defs/TmuxCoverageGap",
+              "description": "Final interval state."
+            },
+            "kind": {
+              "const": "coverage_gap_resolved",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "gap"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "observed_unix_ns": {
+          "description": "Observation wall-clock time.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sequence": {
+          "description": "Monotonic sequence within this aggregate, starting at one.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sequence",
+        "observed_unix_ns"
+      ],
+      "type": "object"
+    },
+    "TmuxGapKind": {
+      "description": "Category of an uncovered pane or observation limitation.",
+      "oneOf": [
+        {
+          "const": "polling_interval",
+          "description": "Transitions coalesced between supervisor observations, or made without a tmux hook,\nmay only be visible in the composite client track.",
+          "type": "string"
+        },
+        {
+          "const": "client_overlay_index",
+          "description": "tmux messages and command prompts are captured by the composite client track but are\nnot separately indexed in lifecycle events.",
+          "type": "string"
+        },
+        {
+          "const": "observer_start",
+          "description": "Aggregate observation resumed; transitions since the preceding snapshot may be missing.\nPane recording runs independently.",
+          "type": "string"
+        },
+        {
+          "const": "uncovered_pane",
+          "description": "A selected pane's root process is not a Termtrace pane wrapper.",
+          "type": "string"
+        }
+      ]
+    },
+    "TmuxPaneAddress": {
+      "description": "Stable tmux object identifiers of one pane at observation time.",
+      "properties": {
+        "pane_id": {
+          "description": "Stable tmux pane ID.",
+          "type": "string"
+        },
+        "session_id": {
+          "description": "Stable tmux session ID.",
+          "type": "string"
+        },
+        "window_id": {
+          "description": "Stable tmux window ID.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "window_id",
+        "pane_id"
+      ],
+      "type": "object"
+    },
+    "TmuxPaneTrack": {
+      "description": "One immutable pane recording incarnation linked to an aggregate.",
+      "properties": {
+        "linked_unix_ns": {
+          "description": "Time this incarnation was first linked to the aggregate.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pane_id": {
+          "description": "Stable pane ID; a pane may have arbitrarily many recording incarnations.",
+          "type": "string"
+        },
+        "session": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact canonical session path."
+        },
+        "session_id": {
+          "description": "Immutable canonical recording identity.",
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pane_id",
+        "session_id",
+        "session",
+        "linked_unix_ns"
+      ],
+      "type": "object"
+    },
+    "TmuxRecordingCoverage": {
+      "description": "Coverage policy committed by an aggregate tmux recording.",
+      "oneOf": [
+        {
+          "const": "warn",
+          "description": "Report uncovered panes without terminating them.",
+          "type": "string"
+        },
+        {
+          "const": "strict",
+          "description": "Permit termination of uncovered panes after the configured grace period.",
+          "type": "string"
+        }
+      ]
+    },
+    "TmuxServerIdentity": {
+      "description": "Immutable tmux server identity bound by the first successful observation.",
+      "properties": {
+        "pid": {
+          "description": "tmux server PID.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "socket_device": {
+          "description": "Device containing the server socket.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "socket_inode": {
+          "description": "Inode of the server socket.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "socket_path": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Server socket path bytes."
+        }
+      },
+      "required": [
+        "pid",
+        "socket_path",
+        "socket_device",
+        "socket_inode"
+      ],
+      "type": "object"
+    },
+    "TmuxSessionLink": {
+      "description": "Immutable identity and exact path of one canonical Termtrace session.",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact canonical session path bytes."
+        },
+        "session_id": {
+          "description": "Canonical Termtrace session identity.",
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "session"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/tmux-events-page.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A bounded page of lifecycle history.",
+  "properties": {
+    "events": {
+      "description": "Events in sequence order.",
+      "items": {
+        "$ref": "#/$defs/TmuxEventRecord"
+      },
+      "type": "array"
+    },
+    "next_sequence": {
+      "description": "First sequence of the following page, if any.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "events"
+  ],
+  "title": "EventPage",
+  "type": "object"
+}

@@ -1,5 +1,21 @@
 {
   "$defs": {
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    },
     "MutationJournalStatus": {
       "description": "Offline status of the disposable mutation request journal.",
       "oneOf": [
@@ -186,8 +202,8 @@
       "description": "Page coordinates when CLI output intentionally contains a bounded subset."
     },
     "session": {
-      "description": "Canonical session directory checked by the verifier.",
-      "type": "string"
+      "$ref": "#/$defs/ExactPath",
+      "description": "Canonical session directory checked by the verifier."
     },
     "session_authenticity_established": {
       "description": "Whether canonical session authenticity was established from a trusted receipt.",

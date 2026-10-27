@@ -2,15 +2,17 @@ use crate::{
     artifact::{publish_failure, snapshot_path, write_json},
     document::{to_environment_spec, validate},
     error::{invalid, operation},
-    Result,
+    Error, Result,
 };
 use std::{
     collections::BTreeSet,
     ffi::OsString,
+    io::ErrorKind,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     result::Result as StdResult,
     sync::atomic::AtomicBool,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use termtrace_engine::{
     analysis::diagnostics::diagnose_snapshot,
@@ -23,12 +25,13 @@ use termtrace_evidence::{
     session::{validate_completed_session, SessionSnapshot},
 };
 use termtrace_model::scenario::{
-    Scenario, ScenarioFailure, ScenarioFrameSnapshot, ScenarioInput, ScenarioReport,
-    ScenarioStatus, ScenarioStep, ScenarioStepResult, ScenarioTimelineAssertion, SCENARIO_VERSION,
+    Scenario, ScenarioFailure, ScenarioFrameSnapshot, ScenarioInfrastructureError, ScenarioInput,
+    ScenarioReport, ScenarioStatus, ScenarioStep, ScenarioStepResult, ScenarioTimelineAssertion,
+    SCENARIO_REPORT_VERSION,
 };
 use termtrace_model::{
     execution::{event::Event, layout::SessionLayout},
-    protocol::control::{ControlCommand, ControlRequest, ScreenPredicate},
+    protocol::control::{ControlCommand, ControlPayload, ControlRequest, ScreenPredicate},
     terminal::analysis::DiagnosticCheck,
     terminal::screen::{ScreenFrame, ScreenFrameContent},
     terminal::state::{KeyChord, KeyModifiers},
@@ -43,8 +46,8 @@ use uuid::Uuid;
 ///
 /// # Errors
 ///
-/// Returns an error when the scenario fails validation or its session cannot be launched, stopped,
-/// or published; step failures are reported in the returned report.
+/// Returns an error for document/preflight failures. Executed expectation and infrastructure
+/// outcomes (including launch failures) are retained in the returned versioned report.
 pub fn run(
     scenario: &Scenario,
     binary: impl Into<PathBuf>,
@@ -82,15 +85,40 @@ pub(crate) fn run_validated(
 
     spec.working_directory
         .clone_from(&scenario.launch.working_directory);
-    let mut session = terminal
-        .start(spec)
-        .map_err(|error| return operation("launch", error))?;
+    let session = match terminal.start(spec) {
+        Ok(session) => session,
+        Err(error) => return Ok(error_report(&scenario.name, "launch", error.code())),
+    };
 
-    let stop_timeout = Some(Duration::from_millis(scenario.launch.timeout_ms));
-    let mut steps: Vec<ScenarioStepResult> = Vec::new();
+    // A worker panic must not abandon its recorder/process group. Ordinary errors use the
+    // bounded graceful lifecycle below and retain diagnostics; unwinding gets force-close.
+    let mut session = OwnedSession(session);
+    let timeout = Duration::from_millis(scenario.launch.timeout_ms);
+    let mut report = ScenarioReport {
+        version: SCENARIO_REPORT_VERSION,
+        name: scenario.name.clone(),
+        status: ScenarioStatus::Passed,
+        session_id: Some(session.session_id()),
+        canonical_session: Some(session.path().to_path_buf()),
+        steps: Vec::new(),
+        failure: None,
+        failure_artifacts: None,
+        infrastructure_errors: Vec::new(),
+        artifact_warnings: Vec::new(),
+    };
+
+    if let Some(error) = completion_failure(&session) {
+        report.infrastructure_errors.push(error);
+    }
 
     let mut stopped = false;
+    let mut final_snapshot = None;
+
     for (index, step) in scenario.steps.iter().enumerate() {
+        if !report.infrastructure_errors.is_empty() {
+            break;
+        }
+
         match execute_step(
             &mut session,
             scenario,
@@ -101,78 +129,217 @@ pub(crate) fn run_validated(
         ) {
             Ok(result) => {
                 stopped |= matches!(step, ScenarioStep::Stop {});
-                steps.push(result);
+                report.steps.push(result);
             }
-            Err(failure) => {
-                let final_snapshot = session
-                    .control(&ControlRequest::new(ControlCommand::Snapshot))
-                    .ok();
-                let _stop_result = session.stop(StopRequest::default(), stop_timeout);
-                let failure_artifacts = failure_root.join(session.session_id().to_string());
+            Err(error) => {
+                report.failure = Some(error.failure);
 
-                let report = ScenarioReport {
-                    version: SCENARIO_VERSION,
-                    name: scenario.name.clone(),
-                    status: ScenarioStatus::Failed,
-                    session_id: session.session_id(),
-                    canonical_session: session.path().to_path_buf(),
-                    steps,
-                    failure: Some(failure),
-                    failure_artifacts: Some(failure_artifacts.clone()),
-                };
+                if let Some(infrastructure) = error.infrastructure {
+                    report.infrastructure_errors.push(*infrastructure);
+                }
 
-                publish_failure(
-                    &failure_artifacts,
-                    scenario,
-                    &report,
-                    final_snapshot.as_ref(),
-                )?;
+                match session.control(&ControlRequest::new(ControlCommand::Snapshot)) {
+                    Ok(snapshot) => final_snapshot = Some(snapshot),
+                    Err(_) => report
+                        .artifact_warnings
+                        .push("final screen unavailable".to_owned()),
+                }
 
-                return Ok(report);
+                break;
             }
         }
     }
 
     if !stopped {
-        session
-            .stop(StopRequest::default(), stop_timeout)
-            .map_err(|error| return operation("stop", error))?;
+        finalize_session(&mut session.0, timeout, &mut report.infrastructure_errors);
     }
 
-    if let Err(error) = validate_replay_closure(session.path(), &steps) {
-        let failure_artifacts = failure_root.join(session.session_id().to_string());
-
-        let report = ScenarioReport {
-            version: SCENARIO_VERSION,
-            name: scenario.name.clone(),
-            status: ScenarioStatus::Failed,
-            session_id: session.session_id(),
-            canonical_session: session.path().to_path_buf(),
-            steps,
-            failure: Some(ScenarioFailure {
-                step_index: scenario.steps.len(),
-                step_kind: "replay_closure".to_owned(),
-                request_ids: Vec::new(),
-                message: error.to_string(),
-            }),
-            failure_artifacts: Some(failure_artifacts.clone()),
-        };
-
-        publish_failure(&failure_artifacts, scenario, &report, None)?;
-
-        return Ok(report);
+    if let Some(error) = completion_failure(&session)
+        && !report.infrastructure_errors.contains(&error)
+    {
+        report.infrastructure_errors.push(error);
     }
 
-    return Ok(ScenarioReport {
-        version: SCENARIO_VERSION,
-        name: scenario.name.clone(),
-        status: ScenarioStatus::Passed,
-        session_id: session.session_id(),
-        canonical_session: session.path().to_path_buf(),
-        steps,
+    if let Err(_error) = validate_replay_closure(session.path(), &report.steps) {
+        report
+            .infrastructure_errors
+            .push(infrastructure("replay", "replay_integrity"));
+    }
+
+    report.status = if !report.infrastructure_errors.is_empty() {
+        ScenarioStatus::Error
+    } else if report.failure.is_some() {
+        ScenarioStatus::Failed
+    } else {
+        ScenarioStatus::Passed
+    };
+
+    if report.status != ScenarioStatus::Passed {
+        let destination = failure_root.join(session.session_id().to_string());
+        publish_report_failure(destination, scenario, &mut report, final_snapshot.as_ref());
+    }
+
+    return Ok(report);
+}
+
+fn publish_report_failure(
+    destination: PathBuf,
+    scenario: &Scenario,
+    report: &mut ScenarioReport,
+    final_snapshot: Option<&ControlPayload>,
+) {
+    match publish_failure(&destination, scenario, report, final_snapshot) {
+        Ok(warnings) => {
+            report.failure_artifacts = Some(destination);
+            report.artifact_warnings.extend(warnings);
+        }
+        Err(_) => {
+            report
+                .infrastructure_errors
+                .push(infrastructure("publication", "artifact_write"));
+
+            report.status = ScenarioStatus::Error;
+        }
+    }
+}
+
+fn completion_failure(session: &Session) -> Option<ScenarioInfrastructureError> {
+    match session.completion() {
+        Ok(Some(completion)) => {
+            return completion.failure.map(|failure| {
+                if failure.code == "spawn_failed" {
+                    return infrastructure("launch", "spawn_failed");
+                }
+                return infrastructure("completion", "recorder_failure");
+            })
+        }
+        Ok(None) => return None,
+        Err(error) => return Some(infrastructure("completion", error.code())),
+    }
+}
+
+struct OwnedSession(Session);
+
+impl Deref for OwnedSession {
+    type Target = Session;
+
+    fn deref(&self) -> &Session {
+        return &self.0;
+    }
+}
+
+impl DerefMut for OwnedSession {
+    fn deref_mut(&mut self) -> &mut Session {
+        return &mut self.0;
+    }
+}
+
+impl Drop for OwnedSession {
+    fn drop(&mut self) {
+        let _closed = self.0.force_close();
+    }
+}
+
+pub(crate) fn infrastructure(phase: &str, code: &str) -> ScenarioInfrastructureError {
+    return ScenarioInfrastructureError {
+        phase: phase.to_owned(),
+        code: code.to_owned(),
+        // Never stringify lower-layer errors: they can contain child launch values or output.
+        message: format!("scenario {phase} failed ({code}); inspect retained canonical evidence"),
+    };
+}
+
+pub(crate) fn error_report(name: &str, phase: &str, code: &str) -> ScenarioReport {
+    return ScenarioReport {
+        version: SCENARIO_REPORT_VERSION,
+        name: name.to_owned(),
+        status: ScenarioStatus::Error,
+        session_id: None,
+        canonical_session: None,
+        steps: Vec::new(),
         failure: None,
         failure_artifacts: None,
-    });
+        infrastructure_errors: vec![infrastructure(phase, code)],
+        artifact_warnings: Vec::new(),
+    };
+}
+
+trait Lifecycle {
+    fn stop(&mut self, timeout: Duration) -> termtrace_service::Result<()>;
+    fn complete(&mut self, timeout: Duration) -> termtrace_service::Result<()>;
+    fn force_close(&mut self) -> termtrace_service::Result<()>;
+}
+
+impl Lifecycle for Session {
+    fn stop(&mut self, timeout: Duration) -> termtrace_service::Result<()> {
+        return Session::stop(self, StopRequest::default(), Some(timeout)).map(|_| ());
+    }
+
+    fn complete(&mut self, timeout: Duration) -> termtrace_service::Result<()> {
+        return Session::complete(self, timeout).map(|_| ());
+    }
+
+    fn force_close(&mut self) -> termtrace_service::Result<()> {
+        return Session::force_close(self);
+    }
+}
+
+fn finalize_session(
+    session: &mut impl Lifecycle,
+    timeout: Duration,
+    errors: &mut Vec<ScenarioInfrastructureError>,
+) {
+    let started = Instant::now();
+
+    if let Err(error) = session.stop(timeout) {
+        errors.push(infrastructure("stop", error.code()));
+
+        if let Err(error) = session.complete(timeout.saturating_sub(started.elapsed())) {
+            errors.push(infrastructure("completion", error.code()));
+
+            if let Err(error) = session.force_close() {
+                errors.push(infrastructure("force_close", error.code()));
+            }
+        }
+    }
+}
+
+struct StepError {
+    failure: ScenarioFailure,
+    infrastructure: Option<Box<ScenarioInfrastructureError>>,
+}
+
+fn service_failure(
+    index: usize,
+    step: &ScenarioStep,
+    ids: Vec<Uuid>,
+    error: &termtrace_service::Error,
+) -> StepError {
+    if matches!(
+        error,
+        termtrace_service::Error::StableCaptureIncomplete { .. }
+            | termtrace_service::Error::PostconditionIncomplete { .. }
+    ) {
+        return step_failure(
+            index,
+            step,
+            ids,
+            "requested screen condition did not complete",
+        );
+    }
+    return infrastructure_step(index, step, ids, error.code());
+}
+
+fn infrastructure_step(index: usize, step: &ScenarioStep, ids: Vec<Uuid>, code: &str) -> StepError {
+    return StepError {
+        failure: ScenarioFailure {
+            step_index: index,
+            step_kind: step.kind().to_owned(),
+            request_ids: ids,
+            message: format!("scenario step infrastructure error ({code})"),
+        },
+        infrastructure: Some(Box::new(infrastructure(step.kind(), code))),
+    };
 }
 
 fn validate_replay_closure(session: &Path, steps: &[ScenarioStepResult]) -> Result<()> {
@@ -227,7 +394,7 @@ fn execute_step(
     step: &ScenarioStep,
     failure_root: &Path,
     update_snapshots: bool,
-) -> StdResult<ScenarioStepResult, ScenarioFailure> {
+) -> StdResult<ScenarioStepResult, StepError> {
     let mut request_ids: Vec<Uuid> = Vec::new();
     let state_hash = match step {
         ScenarioStep::WaitScreen(wait) => {
@@ -250,7 +417,7 @@ fn execute_step(
                     Duration::from_millis(wait.stable_for_ms),
                     Duration::from_millis(wait.timeout_ms.unwrap_or(scenario.launch.timeout_ms)),
                 )
-                .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
+                .map_err(|error| return service_failure(index, step, Vec::new(), &error))?;
 
             if !matched.is_satisfied() {
                 return Err(step_failure(
@@ -298,7 +465,7 @@ fn execute_step(
                     ..ActRequest::default()
                 })
                 .map_err(|error| {
-                    return step_failure(index, step, request_ids.clone(), error.to_string());
+                    return service_failure(index, step, request_ids.clone(), &error);
                 })?;
 
             None
@@ -310,7 +477,7 @@ fn execute_step(
             });
             request_ids.push(request.request_id);
             session.control(&request).map_err(|error| {
-                return step_failure(index, step, request_ids.clone(), error.to_string());
+                return service_failure(index, step, request_ids.clone(), &error);
             })?;
             None
         }
@@ -326,32 +493,38 @@ fn execute_step(
                     allow_incomplete: false,
                     reaction: None,
                 })
-                .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
+                .map_err(|error| return service_failure(index, step, Vec::new(), &error))?;
 
             let state_hash = capture.frame.state_hash.clone();
             let baseline = rich_frame_snapshot(&capture.frame);
-            let path = snapshot_path(failure_root, &snapshot.name)
-                .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
+            let path = snapshot_path(failure_root, &snapshot.name).map_err(|_error| {
+                return infrastructure_step(index, step, Vec::new(), "snapshot_storage");
+            })?;
 
             if update_snapshots {
                 if let Some(parent) = path.parent() {
-                    fs_err::create_dir_all(parent).map_err(|error| {
-                        return step_failure(index, step, Vec::new(), error.to_string());
+                    fs_err::create_dir_all(parent).map_err(|_error| {
+                        return infrastructure_step(index, step, Vec::new(), "snapshot_storage");
                     })?;
                 }
 
-                write_json(path, &baseline).map_err(|error| {
-                    return step_failure(index, step, Vec::new(), error.to_string());
+                write_json(path, &baseline).map_err(|_error| {
+                    return infrastructure_step(index, step, Vec::new(), "snapshot_storage");
                 })?;
             } else {
                 let bytes = fs_err::read(&path).map_err(|error| {
-                    return step_failure(
-                        index,
-                        step,
-                        Vec::new(),
-                        format!("read snapshot {}: {error}", path.display()),
-                    );
+                    return if error.kind() == ErrorKind::NotFound {
+                        step_failure(
+                            index,
+                            step,
+                            Vec::new(),
+                            format!("missing snapshot baseline {}", path.display()),
+                        )
+                    } else {
+                        infrastructure_step(index, step, Vec::new(), "snapshot_read")
+                    };
                 })?;
+
                 let expected: ScenarioFrameSnapshot =
                     serde_json::from_slice(&bytes).map_err(|error| {
                         return step_failure(
@@ -385,8 +558,14 @@ fn execute_step(
         }
 
         ScenarioStep::AssertTimeline(assertion) => {
-            assert_timeline(session.path(), assertion)
-                .map_err(|error| return step_failure(index, step, Vec::new(), error.to_string()))?;
+            assert_timeline(session.path(), assertion).map_err(|error| {
+                return match error {
+                    Error::InvalidScenario { reason } => {
+                        step_failure(index, step, Vec::new(), reason)
+                    }
+                    _ => infrastructure_step(index, step, Vec::new(), "timeline_replay"),
+                };
+            })?;
             None
         }
 
@@ -405,7 +584,7 @@ fn execute_step(
                     Some(Duration::from_millis(scenario.launch.timeout_ms)),
                 )
                 .map_err(|error| {
-                    return step_failure(index, step, request_ids.clone(), error.to_string());
+                    return service_failure(index, step, request_ids.clone(), &error);
                 })?;
 
             None
@@ -425,12 +604,15 @@ fn step_failure(
     step: &ScenarioStep,
     request_ids: Vec<Uuid>,
     message: impl Into<String>,
-) -> ScenarioFailure {
-    return ScenarioFailure {
-        step_index: index,
-        step_kind: step.kind().to_owned(),
-        request_ids,
-        message: message.into(),
+) -> StepError {
+    return StepError {
+        infrastructure: None,
+        failure: ScenarioFailure {
+            step_index: index,
+            step_kind: step.kind().to_owned(),
+            request_ids,
+            message: message.into(),
+        },
     };
 }
 
@@ -559,4 +741,205 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
     }
 
     return Ok(());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::suite::scenario_junit;
+    use std::io::Error as IoError;
+    use termtrace_model::protocol::mutation::MutationEffect;
+
+    struct FakeLifecycle {
+        fail: [bool; 3],
+        calls: Vec<&'static str>,
+        complete_timeout: Option<Duration>,
+    }
+
+    impl FakeLifecycle {
+        fn call(&mut self, i: usize, name: &'static str) -> termtrace_service::Result<()> {
+            self.calls.push(name);
+
+            if self.fail[i] {
+                return Err(termtrace_service::Error::InvalidOperation {
+                    reason: "private child data".into(),
+                    source: None,
+                });
+            }
+            return Ok(());
+        }
+    }
+
+    impl Lifecycle for FakeLifecycle {
+        fn stop(&mut self, _: Duration) -> termtrace_service::Result<()> {
+            return self.call(0, "stop");
+        }
+
+        fn complete(&mut self, timeout: Duration) -> termtrace_service::Result<()> {
+            self.complete_timeout = Some(timeout);
+
+            return self.call(1, "completion");
+        }
+
+        fn force_close(&mut self) -> termtrace_service::Result<()> {
+            return self.call(2, "force_close");
+        }
+    }
+
+    #[test]
+    fn cleanup_preserves_order_and_primary_and_uses_force_close_fallback() {
+        for (fail, expected) in [
+            ([false, false, false], vec![]),
+            ([true, false, false], vec!["stop"]),
+            ([true, true, false], vec!["stop", "completion"]),
+            (
+                [true, true, true],
+                vec!["stop", "completion", "force_close"],
+            ),
+        ] {
+            let mut lifecycle = FakeLifecycle {
+                fail,
+                calls: vec![],
+                complete_timeout: None,
+            };
+
+            let mut report = error_report("cleanup", "wait_screen", "control_transport");
+            report.session_id = Some(Uuid::nil());
+            report.canonical_session = Some(PathBuf::from("/canonical.tt"));
+            report.failure = Some(ScenarioFailure {
+                step_index: 2,
+                step_kind: "wait_screen".into(),
+                request_ids: vec![Uuid::nil()],
+                message: "primary expectation failure".into(),
+            });
+
+            finalize_session(
+                &mut lifecycle,
+                Duration::from_secs(1),
+                &mut report.infrastructure_errors,
+            );
+            assert!(lifecycle
+                .complete_timeout
+                .is_none_or(|timeout| return timeout <= Duration::from_secs(1)));
+            assert_eq!(
+                report
+                    .infrastructure_errors
+                    .iter()
+                    .skip(1)
+                    .map(|e| return e.phase.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(
+                report.failure.as_ref().unwrap().message,
+                "primary expectation failure"
+            );
+            assert_eq!(
+                lifecycle.calls.len(),
+                if !fail[0] {
+                    1
+                } else if !fail[1] {
+                    2
+                } else {
+                    3
+                }
+            );
+            assert!(!serde_json::to_string(&report)
+                .unwrap()
+                .contains("private child data"));
+            use termtrace_model::scenario::{
+                ScenarioAttemptReport, ScenarioCaseReport, ScenarioCaseStatus, ScenarioSuiteReport,
+                ScenarioSuiteStatus, SCENARIO_SUITE_REPORT_VERSION,
+            };
+            let case = ScenarioCaseReport {
+                scenario: "cleanup.json".into(),
+                status: ScenarioCaseStatus::Failed,
+                attempts: vec![ScenarioAttemptReport {
+                    attempt: 1,
+                    duration_ms: 10,
+                    report,
+                }],
+            };
+            assert_eq!(case.verdict(), Ok(ScenarioCaseStatus::Failed));
+            let suite = ScenarioSuiteReport {
+                version: SCENARIO_SUITE_REPORT_VERSION,
+                status: ScenarioSuiteStatus::Failed,
+                duration_ms: 10,
+                fail_on_flaky: false,
+                infrastructure_errors: vec![],
+                jobs: 1,
+                shard_index: None,
+                shard_count: None,
+                cases: vec![case],
+            };
+            assert!(suite.ci_failed());
+            let xml = scenario_junit(&suite);
+            assert!(xml.contains("primary expectation failure"));
+            assert!(xml.contains("errors=\"1\""));
+            assert!(xml.contains("failures=\"0\""));
+        }
+    }
+
+    #[test]
+    fn publication_appends_warnings_after_existing_diagnostics() {
+        let temp = tempfile::tempdir().unwrap();
+        let scenario: Scenario = serde_json::from_value(serde_json::json!({
+            "version": 2, "name": "publication warnings",
+            "launch": { "command": ["/bin/true"] }, "steps": []
+        }))
+        .unwrap();
+
+        let mut report = error_report(&scenario.name, "replay", "replay_integrity");
+        let id = Uuid::now_v7();
+        report.session_id = Some(id);
+        report.canonical_session = Some(temp.path().join("missing.tt"));
+        report
+            .artifact_warnings
+            .push("final screen unavailable".to_owned());
+
+        let destination = temp.path().join(id.to_string());
+
+        // Exercise the same publication/merge path as run_validated. The missing
+        // canonical fixture produces a new, optional publication warning.
+        publish_report_failure(destination.clone(), &scenario, &mut report, None);
+
+        assert_eq!(
+            report.artifact_warnings,
+            vec!["final screen unavailable", "event log unavailable"]
+        );
+        assert_eq!(report.failure_artifacts, Some(destination.clone()));
+        assert_eq!(report.infrastructure_errors.len(), 1);
+
+        let published: ScenarioReport =
+            serde_json::from_slice(&fs_err::read(destination.join("result.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            published, report,
+            "published and returned reports must agree without duplicated warnings"
+        );
+        let diagnostics: Vec<String> = serde_json::from_slice(
+            &fs_err::read(destination.join("derivation-errors.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(diagnostics, report.artifact_warnings);
+    }
+
+    #[test]
+    fn typed_step_errors_and_replay_integrity_are_infrastructure() {
+        let service_error =
+            termtrace_service::Error::Control(termtrace_service::ControlError::Transport {
+                session: "/canonical.tt".into(),
+                step: "receive",
+                effect: MutationEffect::NotApplied,
+                source: IoError::other("private child data"),
+            });
+
+        let error = service_failure(2, &ScenarioStep::Stop {}, vec![Uuid::nil()], &service_error);
+        assert_eq!(error.infrastructure.unwrap().phase, "stop");
+        assert_eq!(error.failure.request_ids, vec![Uuid::nil()]);
+        assert!(!error.failure.message.contains("private child data"));
+
+        let temp = tempfile::tempdir().unwrap();
+        assert!(validate_replay_closure(temp.path(), &[]).is_err());
+    }
 }

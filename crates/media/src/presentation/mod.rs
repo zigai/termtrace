@@ -1,6 +1,13 @@
 //! Marker-resolved presentation edit plans over native or semantic sources.
 
+mod derivative;
 mod ffmpeg;
+
+pub use derivative::{
+    export_derivatives, export_derivatives_with_cancel, verify_derivative_artifact,
+    verify_source_selection,
+};
+
 mod mapping;
 mod pipeline;
 mod planning;
@@ -11,8 +18,8 @@ mod validation;
 use crate::{Error, Result};
 pub use pipeline::{export, preview};
 pub use planning::{
-    markers, plan, plan_with_source, video_clip_ranges, video_clip_ranges_session, video_clips,
-    VideoIdlePolicy,
+    markers, plan, plan_with_capture_directory, plan_with_source, video_clip_ranges,
+    video_clip_ranges_session, video_clips, VideoIdlePolicy,
 };
 use std::path::Path;
 pub use termtrace_model::artifact::presentation::{

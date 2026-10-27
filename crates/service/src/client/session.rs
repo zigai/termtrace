@@ -5,10 +5,18 @@ use crate::{
     screen::{StableCaptureOptions, StableScreenCapture},
     Error, Result,
 };
+use nix::{
+    sys::signal::{kill, Signal},
+    unistd::Pid,
+};
 use std::{
     io,
     path::{Path, PathBuf},
     process::Child,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -29,11 +37,12 @@ use termtrace_evidence::{
     session::{read_manifest, validate_completed_session},
 };
 use termtrace_model::{
-    execution::session::SessionCompletion,
+    execution::{layout::SessionLayout, session::SessionCompletion},
     protocol::control::{
         ClockSample, CommandError, ControlCommand, ControlPayload, ControlRequest, ScreenPredicate,
         ScreenWaitQuality, StableCaptureQuality,
     },
+    protocol::mutation::MutationEffect,
     terminal::{
         inspection::ScreenWaitOutcome,
         observation::{ActorBoundaries, CaptureQuality, Observation, StatePoint},
@@ -41,7 +50,7 @@ use termtrace_model::{
         state::SemanticState,
     },
 };
-use termtrace_process::ProcessGroup;
+use termtrace_process::{ProcessGroup, ProcessIdentity};
 use uuid::Uuid;
 
 /// One live or completed canonical session, owning its recorder when this process launched it.
@@ -58,12 +67,114 @@ pub struct Session {
 
 enum Ownership {
     Attached,
-    Launched(Option<Recorder>),
+    Launched(Arc<RecorderOwner>),
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RecorderDisposition {
+    Pending,
+    Completed,
+    Forced,
 }
 
 struct Recorder {
-    process: Child,
+    process: Option<Child>,
     recorded_group: Option<ProcessGroup>,
+    recorded_identity: Option<ProcessIdentity>,
+    group_identity_refused: bool,
+    force_at: Option<Instant>,
+    recorder_kill_sent: bool,
+    force_error: Option<StoredIoError>,
+    disposition: RecorderDisposition,
+}
+
+// Preserve repeatable OS error diagnostics after another view reaps the shared Child.
+struct StoredIoError {
+    kind: io::ErrorKind,
+    raw: Option<i32>,
+    message: String,
+}
+
+impl From<io::Error> for StoredIoError {
+    fn from(error: io::Error) -> Self {
+        return Self {
+            kind: error.kind(),
+            raw: error.raw_os_error(),
+            message: error.to_string(),
+        };
+    }
+}
+
+impl StoredIoError {
+    fn restore(&self) -> io::Error {
+        return self.raw.map_or_else(
+            || return io::Error::new(self.kind, self.message.clone()),
+            io::Error::from_raw_os_error,
+        );
+    }
+}
+
+// The Child is never copied or reconstructed from a PID. All lifecycle views share this exact
+// unreaped process capability, serialize nonblocking wait/kill, and retire it once only.
+struct RecorderOwner {
+    recorder: Mutex<Recorder>,
+    forced: AtomicBool,
+    sealed: AtomicBool,
+    operations: AtomicUsize,
+}
+
+impl RecorderOwner {
+    fn new(
+        process: Child,
+        recorded_group: Option<ProcessGroup>,
+        recorded_identity: Option<ProcessIdentity>,
+    ) -> Self {
+        return Self {
+            recorder: Mutex::new(Recorder {
+                process: Some(process),
+                recorded_group,
+                recorded_identity,
+                group_identity_refused: false,
+                force_at: None,
+                recorder_kill_sent: false,
+                force_error: None,
+                disposition: RecorderDisposition::Pending,
+            }),
+            forced: AtomicBool::new(false),
+            sealed: AtomicBool::new(false),
+            operations: AtomicUsize::new(0),
+        };
+    }
+}
+
+impl Drop for RecorderOwner {
+    fn drop(&mut self) {
+        if let Some(mut process) = self
+            .recorder
+            .get_mut()
+            .unwrap_or_else(|error| return error.into_inner())
+            .process
+            .take()
+        {
+            // Dropping a view never stops input. A last dropped owner keeps an actual Child in
+            // an eventual reaper, including after a bounded force-reap timeout (e.g. D-state I/O).
+            thread::spawn(move || {
+                if let Err(error) = process.wait() {
+                    tracing::warn!(%error, "failed to reap released recorder");
+                }
+            });
+        }
+    }
+}
+
+struct LifecycleOperation(Option<Arc<RecorderOwner>>);
+
+impl Drop for LifecycleOperation {
+    fn drop(&mut self) {
+        if let Some(owner) = &self.0 {
+            owner.operations.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
 }
 
 /// One stop request: the actor stops the child and finalizes evidence.
@@ -74,7 +185,8 @@ pub struct StopRequest {
 }
 
 /// What [`Session::stop`] observed.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StopOutcome {
     /// The actor acknowledged the request; completion was not awaited.
     Requested {
@@ -82,11 +194,15 @@ pub enum StopOutcome {
         boundaries: ActorBoundaries,
     },
     /// Validated completion evidence, published before or after the request.
-    Completed(Box<SessionCompletion>),
+    Completed {
+        /// Final completion record.
+        completion: Box<SessionCompletion>,
+    },
 }
 
 /// What [`Session::status`] observed.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionStatus {
     /// The live actor answered.
     Live {
@@ -98,25 +214,30 @@ pub enum SessionStatus {
         clock_sample: ClockSample,
     },
     /// The session has completed.
-    Completed(Box<SessionCompletion>),
+    Completed {
+        /// Final completion record.
+        completion: Box<SessionCompletion>,
+    },
 }
 
 impl Session {
     pub(super) fn open(path: PathBuf, helper: PathBuf, recorder: Option<Child>) -> Result<Self> {
         let manifest = read_manifest(&path)?;
         let ownership = recorder.map_or(Ownership::Attached, |process| {
-            let recorded_group =
+            let (recorded_group, recorded_identity) =
                 match send_request(&path, &ControlRequest::new(ControlCommand::Status)) {
-                    Ok(ControlPayload::Status { pid, .. }) => {
-                        pid.and_then(ProcessGroup::from_leader)
-                    }
-                    _ => None,
+                    Ok(ControlPayload::Status { pid, .. }) => (
+                        pid.and_then(ProcessGroup::from_leader),
+                        pid.and_then(|pid| return ProcessIdentity::of(pid).ok()),
+                    ),
+                    _ => (None, None),
                 };
 
-            return Ownership::Launched(Some(Recorder {
+            return Ownership::Launched(Arc::new(RecorderOwner::new(
                 process,
                 recorded_group,
-            }));
+                recorded_identity,
+            )));
         });
 
         return Ok(Self {
@@ -168,6 +289,136 @@ impl Session {
         return matches!(self.ownership, Ownership::Launched(_));
     }
 
+    /// Per-session force/reap budget after the graceful lifecycle deadline.
+    pub const FORCE_REAP_TIMEOUT: Duration = Duration::from_secs(2);
+    /// Additional bounded drain for already admitted lifecycle observers.
+    pub const OBSERVER_DRAIN_TIMEOUT: Duration = Duration::from_millis(2250);
+
+    /// Create a lifecycle view sharing the original recorder authority, not an attachment.
+    /// A cancelled worker can hold a view without hiding force-close or duplicating a Child/PID.
+    #[must_use]
+    pub fn lifecycle_observer(&self) -> Self {
+        let ownership = match &self.ownership {
+            Ownership::Attached => Ownership::Attached,
+            Ownership::Launched(owner) => Ownership::Launched(Arc::clone(owner)),
+        };
+
+        return Self {
+            path: self.path.clone(),
+            helper: self.helper.clone(),
+            session_id: self.session_id,
+            ownership,
+        };
+    }
+
+    /// Whether a shared launched recorder has been reaped exactly once.
+    #[must_use]
+    pub fn lifecycle_finished(&self) -> bool {
+        return match &self.ownership {
+            Ownership::Attached => false,
+            Ownership::Launched(owner) => owner
+                .recorder
+                .lock()
+                .unwrap_or_else(|error| return error.into_inner())
+                .process
+                .is_none(),
+        };
+    }
+
+    /// Whether force-close was admitted on any view of the original recorder.
+    #[must_use]
+    pub fn lifecycle_force_requested(&self) -> bool {
+        return match &self.ownership {
+            Ownership::Attached => false,
+            Ownership::Launched(owner) => owner.forced.load(Ordering::Acquire),
+        };
+    }
+
+    /// Reap a launched recorder that has exited, without waiting; `true` once it is gone.
+    /// Attached sessions own no recorder and report `false`.
+    ///
+    /// # Errors
+    /// Returns the nonblocking wait failure.
+    pub fn reap_exited_recorder(&self) -> Result<bool> {
+        let Ownership::Launched(owner) = &self.ownership else {
+            return Ok(false);
+        };
+        let mut recorder = owner
+            .recorder
+            .lock()
+            .unwrap_or_else(|error| return error.into_inner());
+
+        if let Some(process) = recorder.process.as_mut()
+            && process
+                .try_wait()
+                .map_err(|source| return self.lifecycle_filesystem(source))?
+                .is_some()
+        {
+            let _reaped = recorder.process.take();
+        }
+
+        return Ok(recorder.process.is_none());
+    }
+
+    fn lifecycle_operation(&self) -> Result<LifecycleOperation> {
+        return match &self.ownership {
+            Ownership::Attached => Ok(LifecycleOperation(None)),
+            Ownership::Launched(owner) => {
+                let _admission = owner
+                    .recorder
+                    .lock()
+                    .unwrap_or_else(|error| return error.into_inner());
+
+                if owner.sealed.load(Ordering::Acquire) {
+                    return Err(client_error(
+                        "lifecycle observer was sealed by finalization",
+                    ));
+                }
+
+                owner.operations.fetch_add(1, Ordering::AcqRel);
+
+                Ok(LifecycleOperation(Some(Arc::clone(owner))))
+            }
+        };
+    }
+
+    /// Close lifecycle admission before draining, including workers queued but not yet started.
+    /// Does not discard force-close authority or interrupt arbitrarily blocked filesystem I/O.
+    pub fn seal_lifecycle_observers(&self) {
+        if let Ownership::Launched(owner) = &self.ownership {
+            let _admission = owner
+                .recorder
+                .lock()
+                .unwrap_or_else(|error| return error.into_inner());
+
+            owner.sealed.store(true, Ordering::Release);
+        }
+    }
+
+    /// Drain previously admitted lifecycle I/O before helper evidence disposal.
+    ///
+    /// # Errors
+    /// Reports an observer-drain timeout without discarding recorder authority. Arbitrarily
+    /// blocked filesystem I/O is not made interruptible by this deadline.
+    pub fn drain_lifecycle_observers(&self, timeout: Duration) -> Result<()> {
+        let Ownership::Launched(owner) = &self.ownership else {
+            return Ok(());
+        };
+
+        let deadline = lifecycle_deadline(timeout)?;
+        while owner.operations.load(Ordering::Acquire) != 0 {
+            if Instant::now() >= deadline {
+                return Err(client_error("lifecycle observer drain deadline expired"));
+            }
+
+            thread::sleep(
+                Duration::from_millis(10).min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
+
+        return Ok(());
+    }
+
     /// Observe the session phase now.
     #[must_use]
     pub fn phase(&self) -> PhaseObservation {
@@ -184,6 +435,16 @@ impl Session {
     #[must_use]
     pub const fn output(&self) -> Output<'_> {
         return Output { session: self };
+    }
+
+    /// Typed analysis namespace, an alias of the existing semantic capability.
+    pub const fn analysis(&self) -> Semantic<'_> {
+        return self.semantic();
+    }
+
+    /// Typed integrity namespace, sharing evidence operations and source identity.
+    pub const fn integrity(&self) -> Evidence<'_> {
+        return self.evidence();
     }
 
     /// Completed semantic derivation namespace.
@@ -242,7 +503,7 @@ impl Session {
                 }),
                 _ => Err(client_error("actor returned the wrong status payload")),
             },
-            Reached::Completed(completion) => Ok(SessionStatus::Completed(completion)),
+            Reached::Completed(completion) => Ok(SessionStatus::Completed { completion }),
         };
     }
 
@@ -431,7 +692,8 @@ impl Session {
         return self.capture_stable_by(options, None);
     }
 
-    /// [`Self::capture_stable`], abandoning the exchange at `deadline` when one is given.
+    /// [`Self::capture_stable`], abandoning the exchange at `deadline` when one is given and the
+    /// command's client response bound is later.
     pub(crate) fn capture_stable_by(
         &self,
         options: StableCaptureOptions,
@@ -445,10 +707,15 @@ impl Session {
             reaction: options.reaction.as_ref().map(Reaction::to_wire),
         });
 
-        let timing = deadline.map_or_else(
-            || return ExchangeTiming::Timeout(request.command.client_response_timeout()),
-            ExchangeTiming::Deadline,
-        );
+        let client_timeout = request.command.client_response_timeout();
+        let timing = deadline.map_or(ExchangeTiming::Timeout(client_timeout), |deadline| {
+            // The client still outwaits the actor's own bound, but never the caller's deadline.
+            let exchange_deadline = Instant::now()
+                .checked_add(client_timeout)
+                .map_or(deadline, |bound| return bound.min(deadline));
+
+            return ExchangeTiming::Deadline(exchange_deadline);
+        });
 
         let capture = match self.reach_within(&request, timing)? {
             Reached::Live(data) => {
@@ -621,6 +888,7 @@ impl Session {
     ///
     /// Returns the actor's rejection, a transport failure, or a completion failure.
     pub fn stop(&mut self, request: StopRequest, wait: Option<Duration>) -> Result<StopOutcome> {
+        let _operation = self.lifecycle_operation()?;
         let wire = request.guard.request(ControlCommand::Stop);
 
         return match (self.reach(&wire)?, wait) {
@@ -630,65 +898,257 @@ impl Session {
                 }
                 _ => Err(client_error("actor returned the wrong stop payload")),
             },
-            (Reached::Live(_) | Reached::Completed(_), wait) => Ok(StopOutcome::Completed(
-                Box::new(self.complete(wait.unwrap_or(Duration::ZERO))?),
-            )),
+            (reached, wait) => Ok(StopOutcome::Completed {
+                completion: Box::new(
+                    self.complete_after_stop(reached, wait.unwrap_or(Duration::ZERO))?,
+                ),
+            }),
+        };
+    }
+
+    /// Stop and observe completion within one graceful deadline, keeping the shared owner.
+    ///
+    /// # Errors
+    /// Preserves the protocol's transport/effect/retry errors. On expiry the caller still has
+    /// force-close authority; no stop request is resent and no input is rolled back.
+    pub fn stop_bounded(
+        &mut self,
+        request: StopRequest,
+        timeout: Duration,
+    ) -> Result<SessionCompletion> {
+        let _operation = self.lifecycle_operation()?;
+        let deadline = lifecycle_deadline(timeout)?;
+        let wire = request.guard.request(ControlCommand::Stop);
+        let reached = self.reach_within(&wire, ExchangeTiming::Deadline(deadline))?;
+
+        return self
+            .complete_after_stop(reached, deadline.saturating_duration_since(Instant::now()));
+    }
+
+    fn complete_after_stop(
+        &mut self,
+        reached: Reached,
+        timeout: Duration,
+    ) -> Result<SessionCompletion> {
+        return match reached {
+            Reached::Live(payload) => match *payload {
+                ControlPayload::Acknowledged { .. } => self
+                    .complete(timeout)
+                    .map_err(|error| return error.with_proven_effect(MutationEffect::Applied)),
+                _ => Err(client_error("actor returned the wrong stop payload")),
+            },
+            // Existing completion proves no mutation by this request. A query failure must
+            // not inherit another request's Stop acknowledgement.
+            Reached::Completed(_) => self.complete(timeout),
         };
     }
 
     /// Wait for validated completion evidence and reap an owned recorder.
     ///
     /// # Errors
-    ///
-    /// Returns an error when completion is not published in time or is invalid.
+    /// Returns the original completion-validation/timeout errors, or a bounded owner-reap error.
+    /// A force-close on another shared view wakes this wait without losing the original Child.
     pub fn complete(&mut self, timeout: Duration) -> Result<SessionCompletion> {
-        let completion = wait_for_completion(&self.path, timeout)?;
+        let _operation = self.lifecycle_operation()?;
+        let deadline = lifecycle_deadline(timeout)?;
+        let completion_path = SessionLayout::new(&self.path).completion();
 
-        if let Some(mut recorder) = self.take_recorder() {
-            let _status = recorder.process.wait();
+        loop {
+            if completion_path.is_file() || Instant::now() >= deadline {
+                // Keep the existing full content validator and its error taxonomy.
+                let completion = wait_for_completion(&self.path, Duration::ZERO)?;
+                self.reap_recorder(Some(deadline), true)?;
+
+                return Ok(completion);
+            }
+
+            if self.lifecycle_force_requested() {
+                return Err(client_error(
+                    "recording was force-closed while waiting for completion",
+                ));
+            }
+
+            thread::sleep(
+                Duration::from_millis(10).min(deadline.saturating_duration_since(Instant::now())),
+            );
         }
-
-        return Ok(completion);
     }
 
-    fn take_recorder(&mut self) -> Option<Recorder> {
-        let Ownership::Launched(recorder) = &mut self.ownership else {
-            return None;
-        };
-
-        return recorder.take();
-    }
-
-    /// Kill the recorded process group and the owned recorder after graceful stop failed.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when a kill signal or reaping the recorder fails.
-    pub fn force_close(&mut self) -> Result<()> {
-        let Some(mut recorder) = self.take_recorder() else {
+    fn reap_recorder(&self, deadline: Option<Instant>, valid_completion: bool) -> Result<()> {
+        let Ownership::Launched(owner) = &self.ownership else {
             return Ok(());
         };
 
-        let filesystem = |source| {
-            return Error::Filesystem {
-                path: self.path.clone(),
-                source,
-            };
+        loop {
+            {
+                let mut recorder = owner
+                    .recorder
+                    .lock()
+                    .unwrap_or_else(|error| return error.into_inner());
+
+                if recorder.process.is_some() && owner.forced.load(Ordering::Acquire) {
+                    if !valid_completion {
+                        return Ok(());
+                    } // detach yields reaping to the force owner
+                    return Err(client_error(
+                        "recording was force-closed while reaping completion",
+                    ));
+                }
+
+                if let Some(process) = recorder.process.as_mut()
+                    && process
+                        .try_wait()
+                        .map_err(|source| return self.lifecycle_filesystem(source))?
+                        .is_some()
+                {
+                    let _reaped = recorder.process.take();
+                }
+
+                if recorder.process.is_none() {
+                    if valid_completion {
+                        recorder.disposition = RecorderDisposition::Completed;
+                    }
+
+                    return Ok(());
+                }
+            }
+
+            if deadline.is_some_and(|deadline| return Instant::now() >= deadline) {
+                return Err(client_error(
+                    "owned recorder reap deadline expired; authority is retained",
+                ));
+            }
+
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn lifecycle_filesystem(&self, source: io::Error) -> Error {
+        return Error::Filesystem {
+            path: self.path.clone(),
+            source,
         };
+    }
 
-        let group_result = recorder
-            .recorded_group
-            .map_or(Ok(()), |group| return group.kill())
-            .map_err(|error| return filesystem(io::Error::from(error)));
+    /// Forcefully terminate and exactly-once reap the original recorded group and recorder.
+    ///
+    /// # Errors
+    /// Returns signal/wait failures or a force-reap deadline error. Authority is retained for
+    /// recovery, or by an eventual reaper if all handles are dropped; no PID is reconstructed.
+    pub fn force_close(&mut self) -> Result<()> {
+        return self.force_close_with_grace(Duration::ZERO);
+    }
 
-        let kill_result = recorder.process.kill().map_err(filesystem);
-        let wait_result = recorder.process.wait().map(|_| ()).map_err(filesystem);
+    /// Bounded helper fallback: kill the recorded group, briefly resume an owned stopped
+    /// recorder so it can reap that group, then kill/reap the recorder if it has not exited.
+    /// The 250ms grace is included in [`Self::FORCE_REAP_TIMEOUT`], not added to it.
+    ///
+    /// # Errors
+    /// Preserves force-close signal/wait errors and retains the original authority on timeout.
+    pub fn force_close_for_finalization(&mut self) -> Result<()> {
+        return self.force_close_with_grace(Duration::from_millis(250));
+    }
 
-        group_result?;
+    fn force_close_with_grace(&mut self, recorder_grace: Duration) -> Result<()> {
+        let Ownership::Launched(owner) = &self.ownership else {
+            return Ok(());
+        };
+        owner.forced.store(true, Ordering::Release);
 
-        kill_result?;
+        let deadline = lifecycle_deadline(Self::FORCE_REAP_TIMEOUT)?;
 
-        return wait_result;
+        loop {
+            {
+                let mut recorder = owner
+                    .recorder
+                    .lock()
+                    .unwrap_or_else(|error| return error.into_inner());
+
+                if recorder.disposition != RecorderDisposition::Pending {
+                    return recorder.force_error.as_ref().map_or(Ok(()), |error| {
+                        return Err(self.lifecycle_filesystem(error.restore()));
+                    });
+                }
+
+                if let Some(process) = recorder.process.as_mut()
+                    && process
+                        .try_wait()
+                        .map_err(|source| return self.lifecycle_filesystem(source))?
+                        .is_some()
+                {
+                    let _reaped = recorder.process.take();
+                }
+
+                if recorder.force_at.is_none() {
+                    recorder.force_at = Some(Instant::now());
+                    if let Some(group) = recorder.recorded_group {
+                        if recorder
+                            .recorded_identity
+                            .is_some_and(|identity| return recorded_identity_matches(identity))
+                        {
+                            recorder.force_error = group
+                                .kill()
+                                .err()
+                                .map(io::Error::from)
+                                .map(StoredIoError::from);
+                        } else if group.is_alive() {
+                            recorder.group_identity_refused = true;
+                            recorder.force_error = Some(io::Error::new(io::ErrorKind::PermissionDenied,
+                                "recorded group leader identity is unavailable or changed; refusing a stale group signal").into());
+                        }
+                    }
+
+                    // A detached eventual reaper may already have reaped the recorder, but not
+                    // its original recorded group. Retain that identity-guarded capability above.
+                    if !recorder_grace.is_zero()
+                        && let Some(process) = &recorder.process
+                    {
+                        // This exact Child is unreaped and reserved while the mutex is held.
+                        // Never signal the numeric recorder PID after try_wait has reaped it.
+                        if let Ok(pid) = i32::try_from(process.id()) {
+                            let _resume = kill(Pid::from_raw(pid), Signal::SIGCONT);
+                        }
+                    }
+                }
+
+                if recorder.process.is_none() {
+                    if recorder.group_identity_refused
+                        && recorder
+                            .recorded_group
+                            .is_some_and(|group| return !group.is_alive())
+                    {
+                        recorder.force_error = None;
+                    }
+
+                    recorder.disposition = RecorderDisposition::Forced;
+
+                    return recorder.force_error.as_ref().map_or(Ok(()), |error| {
+                        return Err(self.lifecycle_filesystem(error.restore()));
+                    });
+                }
+
+                if !recorder.recorder_kill_sent
+                    && recorder.force_at.is_some_and(|started| {
+                        return started.elapsed() >= recorder_grace;
+                    })
+                {
+                    recorder.recorder_kill_sent = true;
+
+                    if let Some(process) = recorder.process.as_mut()
+                        && let Err(error) = process.kill()
+                        && recorder.force_error.is_none()
+                    {
+                        recorder.force_error = Some(error.into());
+                    }
+                }
+            }
+
+            if Instant::now() >= deadline {
+                return Err(client_error("force-close reap deadline expired; original recorder authority retained for eventual reaping"));
+            }
+
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     /// Delete one validated completed canonical session.
@@ -700,14 +1160,7 @@ impl Session {
     pub fn discard_completed(&mut self) -> Result<()> {
         validate_completed_session(&self.path)?;
 
-        if let Some(mut recorder) = self.take_recorder() {
-            recorder.process.wait().map_err(|source| {
-                return Error::Filesystem {
-                    path: self.path.clone(),
-                    source,
-                };
-            })?;
-        }
+        self.reap_recorder(Some(lifecycle_deadline(Self::FORCE_REAP_TIMEOUT)?), true)?;
 
         fs_err::remove_dir_all(&self.path).map_err(|source| {
             return Error::Filesystem {
@@ -726,10 +1179,11 @@ impl Session {
     /// Stop managing the recording without stopping it; an owned recorder is reaped when it
     /// exits.
     #[must_use]
-    pub fn detach(mut self) -> PathBuf {
-        if let Some(mut recorder) = self.take_recorder() {
+    pub fn detach(self) -> PathBuf {
+        if matches!(self.ownership, Ownership::Launched(_)) {
+            let observer = self.lifecycle_observer();
             thread::spawn(move || {
-                if let Err(error) = recorder.process.wait() {
+                if let Err(error) = observer.reap_recorder(None, false) {
                     tracing::warn!(%error, "failed to reap detached recorder");
                 }
             });
@@ -737,6 +1191,29 @@ impl Session {
 
         return self.path;
     }
+}
+
+// ProcessIdentity::is_running deliberately excludes zombies. A still-present original zombie
+// leader nevertheless reserves its PID and may have live group members that must be killed.
+// Compare the same kernel start-ticks field without requiring a running leader; never treat a
+// missing/unreadable/malformed identity as authority for a numeric group signal.
+fn recorded_identity_matches(identity: ProcessIdentity) -> bool {
+    let Ok(stat) = fs_err::read_to_string(format!("/proc/{}/stat", identity.pid)) else {
+        return false;
+    };
+
+    // Linux stat field 22; comm can contain spaces/parentheses, as in ProcessIdentity's parser.
+    return stat
+        .rsplit_once(')')
+        .and_then(|(_, fields)| return fields.split_whitespace().nth(19))
+        .and_then(|ticks| return ticks.parse::<u64>().ok())
+        == Some(identity.start_ticks);
+}
+
+fn lifecycle_deadline(timeout: Duration) -> Result<Instant> {
+    return Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| return client_error("lifecycle timeout is out of range"));
 }
 
 fn frame_monotonic_ns(frame: &ScreenFrame) -> u64 {
@@ -752,7 +1229,7 @@ fn frame_monotonic_ns(frame: &ScreenFrame) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{process::Command, time::Instant};
+    use std::{os::unix::process::CommandExt as _, process::Command, time::Instant};
 
     #[test]
     fn detach_reaps_the_recorder_after_it_exits() {
@@ -766,10 +1243,7 @@ mod tests {
             path: PathBuf::from("/unused"),
             helper: PathBuf::from("/unused-termtrace"),
             session_id: Uuid::now_v7(),
-            ownership: Ownership::Launched(Some(Recorder {
-                process,
-                recorded_group: None,
-            })),
+            ownership: Ownership::Launched(Arc::new(RecorderOwner::new(process, None, None))),
         };
         let _path = session.detach();
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -782,6 +1256,296 @@ mod tests {
             !process_path.exists(),
             "detached recorder remained as an unreaped process"
         );
+    }
+
+    #[test]
+    fn lifecycle_views_share_one_child_and_concurrent_reaping() {
+        let process = Command::new("/bin/sh")
+            .args(["-c", "exec sleep 60"])
+            .spawn()
+            .expect("recorder stand-in");
+
+        let process_path = PathBuf::from(format!("/proc/{}", process.id()));
+        let mut session = Session {
+            path: PathBuf::from("/unused"),
+            helper: PathBuf::from("/unused"),
+            session_id: Uuid::now_v7(),
+            ownership: Ownership::Launched(Arc::new(RecorderOwner::new(process, None, None))),
+        };
+        let mut observer = session.lifecycle_observer();
+        let (Ownership::Launched(first), Ownership::Launched(second)) =
+            (&session.ownership, &observer.ownership)
+        else {
+            panic!("owned views");
+        };
+
+        assert!(Arc::ptr_eq(first, second));
+        assert!(observer.is_launched());
+
+        let worker = thread::spawn(move || return observer.force_close());
+        session.force_close().expect("force original");
+
+        worker.join().expect("worker").expect("force shared view");
+
+        assert!(session.lifecycle_finished());
+
+        session.seal_lifecycle_observers();
+        let error = session
+            .lifecycle_observer()
+            .complete(Duration::from_secs(60))
+            .expect_err("queued observer denied without I/O");
+        assert!(
+            matches!(error, Error::InvalidOperation { reason, .. } if reason.contains("sealed"))
+        );
+
+        session
+            .drain_lifecycle_observers(Duration::ZERO)
+            .expect("no new admission");
+
+        assert!(
+            !process_path.exists(),
+            "original recorder was reaped before return"
+        );
+
+        // A stale lifecycle view has no remaining Child/PID target to signal.
+        let mut unrelated = Command::new("/bin/sh")
+            .args(["-c", "exec sleep 60"])
+            .spawn()
+            .expect("unrelated child");
+        session
+            .lifecycle_observer()
+            .force_close()
+            .expect("idempotent retired view");
+
+        assert!(unrelated.try_wait().expect("unrelated status").is_none());
+
+        unrelated.kill().expect("kill unrelated test child");
+        unrelated.wait().expect("reap unrelated test child");
+    }
+
+    #[test]
+    fn force_close_refuses_a_reused_group_identity_and_caches_the_failure() {
+        let process = Command::new("/bin/sh")
+            .args(["-c", "exec sleep 60"])
+            .spawn()
+            .expect("recorder");
+
+        let mut unrelated = Command::new("/bin/sh")
+            .args(["-c", "exec sleep 60"])
+            .process_group(0)
+            .spawn()
+            .expect("other group");
+
+        let group = ProcessGroup::from_leader(unrelated.id()).expect("group");
+        let mut identity = ProcessIdentity::of(unrelated.id()).expect("identity");
+        identity.start_ticks += 1; // deterministic PID-reuse mismatch, never signal this group
+        let mut session = Session {
+            path: PathBuf::from("/unused"),
+            helper: PathBuf::from("/unused"),
+            session_id: Uuid::now_v7(),
+            ownership: Ownership::Launched(Arc::new(RecorderOwner::new(
+                process,
+                Some(group),
+                Some(identity),
+            ))),
+        };
+        let first = session.force_close();
+        let repeated = session.lifecycle_observer().force_close();
+        let survived = unrelated.try_wait().expect("other status").is_none();
+
+        if survived {
+            unrelated.kill().expect("kill other test child");
+        }
+
+        unrelated.wait().expect("reap other test child");
+
+        assert!(
+            survived,
+            "a mismatched group identity must never receive a kill"
+        );
+        assert!(session.lifecycle_finished());
+
+        for result in [first, repeated] {
+            let Error::Filesystem { source, .. } = result.expect_err("identity refusal") else {
+                panic!("typed filesystem failure");
+            };
+
+            assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
+            assert!(source.to_string().contains("identity"));
+        }
+    }
+
+    #[test]
+    fn detached_reaping_retains_original_group_authority_for_the_scope_owner() {
+        let process = Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .expect("recorder");
+
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "exec sleep 60"])
+            .process_group(0)
+            .spawn()
+            .expect("recorded group stand-in");
+
+        let identity = ProcessIdentity::of(child.id()).expect("identity");
+        let session = Session {
+            path: PathBuf::from("/unused"),
+            helper: PathBuf::from("/unused"),
+            session_id: Uuid::now_v7(),
+            ownership: Ownership::Launched(Arc::new(RecorderOwner::new(
+                process,
+                ProcessGroup::from_leader(child.id()),
+                Some(identity),
+            ))),
+        };
+        let mut scope_owner = session.lifecycle_observer();
+        let _path = session.detach();
+        let deadline = Instant::now() + Duration::from_secs(1);
+
+        while !scope_owner.lifecycle_finished() {
+            assert!(Instant::now() < deadline, "detached recorder reaping");
+
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        let forced = scope_owner.force_close();
+        if forced.is_err() {
+            child.kill().expect("recover stand-in");
+        }
+
+        let status = child.wait().expect("reap group stand-in");
+        forced.expect("original group capability remains available after recorder reaping");
+
+        assert!(!status.success());
+    }
+
+    #[test]
+    fn original_zombie_group_leader_does_not_hide_live_group_members() {
+        use std::{io::Write as _, process::Stdio};
+        let mut leader = Command::new("/bin/sh")
+            .args(["-c", "read ignored; exit 0"])
+            .stdin(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .expect("group leader");
+
+        let identity = ProcessIdentity::of(leader.id()).expect("original leader identity");
+        let mut member = Command::new("/bin/sleep")
+            .arg("60")
+            .process_group(i32::try_from(leader.id()).expect("PGID"))
+            .spawn()
+            .expect("live group member");
+        leader
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(b"exit\n")
+            .expect("release leader");
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while identity.is_running() {
+            assert!(Instant::now() < deadline, "leader exit");
+
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        assert!(
+            PathBuf::from(format!("/proc/{}", identity.pid)).exists(),
+            "leader remains unreaped"
+        );
+
+        let process = Command::new("/bin/sleep")
+            .arg("60")
+            .spawn()
+            .expect("recorder stand-in");
+
+        let mut session = Session {
+            path: PathBuf::from("/unused"),
+            helper: PathBuf::from("/unused"),
+            session_id: Uuid::now_v7(),
+            ownership: Ownership::Launched(Arc::new(RecorderOwner::new(
+                process,
+                ProcessGroup::from_leader(identity.pid),
+                Some(identity),
+            ))),
+        };
+        let forced = session.force_close();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let killed = loop {
+            if member.try_wait().expect("member status").is_some() {
+                break true;
+            }
+
+            if Instant::now() >= deadline {
+                break false;
+            }
+
+            thread::sleep(Duration::from_millis(1));
+        };
+
+        if !killed {
+            member.kill().expect("recover member");
+        }
+
+        member.wait().expect("reap member");
+        leader.wait().expect("reap original leader");
+
+        forced.expect("zombie original identity remains group authority");
+
+        assert!(
+            killed,
+            "live group member must not escape because its original leader is a zombie"
+        );
+    }
+
+    #[test]
+    fn acknowledged_stop_keeps_applied_when_completion_observer_is_sealed() {
+        let process = Command::new("/bin/sleep")
+            .arg("60")
+            .spawn()
+            .expect("recorder stand-in");
+
+        let mut session = Session {
+            path: PathBuf::from("/unused"),
+            helper: PathBuf::from("/unused"),
+            session_id: Uuid::now_v7(),
+            ownership: Ownership::Launched(Arc::new(RecorderOwner::new(process, None, None))),
+        };
+
+        let frame: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/conformance/locators/parity-frame.json"
+        ))
+        .expect("frame");
+
+        let boundaries =
+            serde_json::from_value(frame["source"]["boundaries"].clone()).expect("boundaries");
+
+        session.seal_lifecycle_observers();
+        let error = session
+            .complete_after_stop(
+                Reached::Live(Box::new(ControlPayload::Acknowledged { boundaries })),
+                Duration::ZERO,
+            )
+            .expect_err("sealed observer after acknowledgement");
+        let query = session
+            .complete(Duration::ZERO)
+            .expect_err("completion-only query is sealed");
+        session.force_close().expect("reap test child");
+
+        assert_eq!(error.kind(), crate::ErrorKind::InvalidOperation);
+        assert_eq!(error.code(), "invalid_operation");
+        assert_eq!(error.effect(), MutationEffect::Applied);
+        assert_eq!(error.retry(), MutationEffect::Applied.retry());
+
+        let Error::MutationContext { source, .. } = error else {
+            panic!("proven effect context");
+        };
+
+        assert!(
+            matches!(source.as_ref(), Error::InvalidOperation { reason, .. } if reason.contains("sealed"))
+        );
+        assert_eq!(query.effect(), MutationEffect::NotApplied);
     }
 
     #[test]

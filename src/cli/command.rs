@@ -63,7 +63,7 @@ pub(super) enum Command {
     Analyze(AnalyzeArgs),
     /// Capture a rendered PNG/SVG screenshot of a session.
     Screenshot(ScreenshotArgs),
-    /// Export a presentation MP4 video from a session.
+    /// Export a presentation MP4, GIF, or VP9 `WebM` from a completed session.
     Video(VideoFacadeArgs),
     /// Create an evidence bundle (supports --profile debug and --screenshot).
     Bundle(BundleArgs),

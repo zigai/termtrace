@@ -4,7 +4,6 @@ use crate::cli::{
     artifacts,
     output::{optional_display, write_json_line, write_json_pretty, write_stdout, ResponseWriter},
 };
-use adapter::CliTracks;
 use miette::{IntoDiagnostic as _, Result};
 use std::{
     ffi::OsString, fmt::Write as _, os::unix::ffi::OsStringExt as _, path::PathBuf,
@@ -12,12 +11,13 @@ use std::{
 };
 use termtrace_engine::registry::SessionRegistry;
 use termtrace_model::value::ByteString;
+use termtrace_tmux::recording::Tracks as _;
 use termtrace_tmux::{
     artifact::{TmuxRecordingCoverage, TmuxRecordingManifest},
     client::TmuxClient,
     observer,
     pane::exec_pane_launch,
-    recording::{self, CatalogPage, RecordRequest, StopRequest, Tracks as _},
+    recording::{self, CatalogPage, RecordRequest, StopRequest},
     scope::{ScopeTargets, TmuxScopePolicy},
     setup::{self, Disabled, PreparedTmuxSetup},
     status::{self, TmuxStatusReport},
@@ -33,7 +33,7 @@ pub(super) use args::{TmuxArgs, TmuxSubcommand};
 pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -> Result<ExitCode> {
     return match command {
         TmuxSubcommand::Record(arguments) => {
-            let tracks = CliTracks::open(arguments.setup.output_root.as_deref())?;
+            let tracks = adapter::open(arguments.setup.output_root.as_deref())?;
             let (store, manifest) = recording::record(
                 &tracks,
                 RecordRequest {
@@ -50,7 +50,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
         }
         TmuxSubcommand::Status(arguments) => match arguments.recording.as_deref() {
             Some(name) => {
-                let tracks = CliTracks::open(arguments.output_root.as_deref())?;
+                let tracks = adapter::open(arguments.output_root.as_deref())?;
                 let manifest = recording::status(tracks.state_root(), name).into_diagnostic()?;
 
                 write_json_line(response, &manifest)
@@ -65,7 +65,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
             }
         },
         TmuxSubcommand::Events(arguments) => {
-            let tracks = CliTracks::open(arguments.output_root.as_deref())?;
+            let tracks = adapter::open(arguments.output_root.as_deref())?;
             let (manifest, page) = recording::events(
                 tracks.state_root(),
                 &arguments.name,
@@ -87,7 +87,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
         TmuxSubcommand::Tracks(arguments) => run_catalog(response, arguments, false),
         TmuxSubcommand::Gaps(arguments) => run_catalog(response, arguments, true),
         TmuxSubcommand::Stop(arguments) => {
-            let tracks = CliTracks::open(arguments.output_root.as_deref())?;
+            let tracks = adapter::open(arguments.output_root.as_deref())?;
             let manifest = recording::stop(
                 &tracks,
                 StopRequest {
@@ -104,12 +104,12 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
             write_recording(response, "tmux_recording_stopped", &store, &manifest)
         }
         TmuxSubcommand::Video(arguments) => {
-            let tracks = CliTracks::open(arguments.output_root.as_deref())?;
+            let tracks = adapter::open(arguments.output_root.as_deref())?;
 
             artifacts::render_video(response, &adapter::video_request(&tracks, arguments)?)
         }
         TmuxSubcommand::Bundle(arguments) => {
-            let tracks = CliTracks::open(arguments.output_root.as_deref())?;
+            let tracks = adapter::open(arguments.output_root.as_deref())?;
             let manifest = adapter::bundle(&tracks, &arguments)?;
 
             write_json_line(
@@ -125,7 +125,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
             )
         }
         TmuxSubcommand::Config(arguments) => {
-            let tracks = CliTracks::open(arguments.setup.output_root.as_deref())?;
+            let tracks = adapter::open(arguments.setup.output_root.as_deref())?;
             let setup = PreparedTmuxSetup::prepare(
                 arguments.setup.request(),
                 arguments.tmux,
@@ -136,7 +136,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
             write_stdout(response, setup.config_fragment().into_diagnostic()?)
         }
         TmuxSubcommand::Enable(arguments) => {
-            let tracks = CliTracks::open(arguments.setup.output_root.as_deref())?;
+            let tracks = adapter::open(arguments.setup.output_root.as_deref())?;
             let client = arguments.connection.client();
             let mut setup = PreparedTmuxSetup::prepare(
                 arguments.setup.request(),
@@ -267,7 +267,7 @@ fn run_catalog(
     arguments: args::TmuxCatalogArgs,
     gaps: bool,
 ) -> Result<ExitCode> {
-    let tracks = CliTracks::open(arguments.page.output_root.as_deref())?;
+    let tracks = adapter::open(arguments.page.output_root.as_deref())?;
     let limit = arguments.page.limit;
     let (manifest, summary, page) = recording::catalog_page(
         tracks.state_root(),

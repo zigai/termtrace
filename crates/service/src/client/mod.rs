@@ -8,7 +8,7 @@ use termtrace_engine::{
     inspection::wait_for_output,
     timeline::visit_session_timeline_while,
 };
-use termtrace_evidence::{event_log::EventLog, session::verify_session};
+use termtrace_evidence::session::verify_session;
 use termtrace_export::bundle::{create as create_bundle, verify_profile as verify_bundle};
 use termtrace_media::{
     native_capture::{
@@ -32,16 +32,26 @@ use termtrace_model::{
 };
 
 mod capabilities;
+mod control;
 mod launch;
+mod original;
 mod send;
 mod session;
 mod target;
 mod terminal;
 
-pub use capabilities::{Events, Evidence, FollowPosition, Native, Output, Pointer, Semantic};
+pub use capabilities::{
+    Events, Evidence, FollowPosition, Native, Output, Pointer, PointerOutcome, Semantic,
+};
+pub use control::{ControlAcknowledgement, MarkOutcome};
 pub use launch::{await_ready, LaunchSpec, Readiness};
+pub use original::{
+    original_capture_status, OriginalFps, OriginalGeometry, OriginalLaunchSpec, OriginalRecording,
+    OriginalSession,
+};
 pub use send::{
-    CommandPostcondition, SendFailure, SendLastStep, SendOutcome, SendRequest, SendStep,
+    send_step_request_id, CommandPostcondition, SendFailure, SendLastStep, SendOutcome,
+    SendRequest, SendStep,
 };
 pub use session::{Session, SessionStatus, StopOutcome, StopRequest};
 pub use target::{LocatedSession, SessionTarget};

@@ -14,6 +14,7 @@ mod capture;
 mod concurrency;
 mod environment;
 mod guards;
+mod outer_resize;
 mod transport;
 
 #[allow(

@@ -4,7 +4,7 @@ use crate::{
     value::ByteString,
 };
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as _, Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
@@ -19,6 +19,8 @@ pub enum ScenarioStatus {
     Passed,
     /// One step failed and later steps did not run.
     Failed,
+    /// Infrastructure prevented trustworthy completion.
+    Error,
 }
 
 /// One executed step and its canonical provenance.
@@ -53,21 +55,31 @@ pub struct ScenarioFailure {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioReport {
-    /// Scenario format version.
+    /// Scenario report contract version (independent of documents).
+    #[schemars(range(equal = SCENARIO_REPORT_VERSION))]
+    #[serde(deserialize_with = "deserialize_report_version")]
     pub version: u32,
     /// Scenario name.
     pub name: String,
     /// Overall disposition.
     pub status: ScenarioStatus,
-    /// Immutable canonical session identity.
-    pub session_id: Uuid,
-    /// Owner-only canonical evidence path.
-    pub canonical_session: PathBuf,
+    /// Immutable canonical session identity, absent when launch never returned a session.
+    pub session_id: Option<Uuid>,
+    /// Owner-only canonical evidence path, absent for prelaunch failures.
+    #[serde(default, with = "crate::value::exact_path::option")]
+    #[schemars(with = "Option<crate::value::ExactPath>")]
+    pub canonical_session: Option<PathBuf>,
     /// Successfully completed steps.
     pub steps: Vec<ScenarioStepResult>,
     /// First failure, if any.
     pub failure: Option<ScenarioFailure>,
-    /// Atomic failure evidence directory, if the scenario failed.
+    /// Ordered required infrastructure failures, including secondary cleanup errors.
+    pub infrastructure_errors: Vec<ScenarioInfrastructureError>,
+    /// Optional evidence derivations that could not be produced.
+    pub artifact_warnings: Vec<String>,
+    /// Atomic failure evidence directory, only after successful publication.
+    #[serde(default, with = "crate::value::exact_path::option")]
+    #[schemars(with = "Option<crate::value::ExactPath>")]
     pub failure_artifacts: Option<PathBuf>,
 }
 
@@ -77,6 +89,8 @@ pub struct ScenarioReport {
 pub struct ScenarioAttemptReport {
     /// One-based attempt number.
     pub attempt: u32,
+    /// Wall-clock duration including cleanup and evidence publication, in milliseconds.
+    pub duration_ms: u64,
     /// Complete fresh-session result.
     pub report: ScenarioReport,
 }
@@ -86,7 +100,11 @@ pub struct ScenarioAttemptReport {
 #[serde(deny_unknown_fields)]
 pub struct ScenarioCaseReport {
     /// Input scenario document path.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub scenario: PathBuf,
+    /// Factual verdict, independent of exit policy.
+    pub status: ScenarioCaseStatus,
     /// Ordered fresh-session attempts, including failed attempts before a pass.
     pub attempts: Vec<ScenarioAttemptReport>,
 }
@@ -95,9 +113,11 @@ pub struct ScenarioCaseReport {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ScenarioSuiteStatus {
-    /// Every selected scenario eventually passed.
+    /// Every selected scenario passed on its first attempt.
     Passed,
-    /// At least one selected scenario exhausted its attempts without passing.
+    /// Some expectation failures recovered, with no infrastructure errors.
+    Flaky,
+    /// At least one case exhausted its attempts, or infrastructure/reporting failed.
     Failed,
 }
 
@@ -106,9 +126,17 @@ pub enum ScenarioSuiteStatus {
 #[serde(deny_unknown_fields)]
 pub struct ScenarioSuiteReport {
     /// Suite result contract version.
+    #[schemars(range(equal = SCENARIO_SUITE_REPORT_VERSION))]
+    #[serde(deserialize_with = "deserialize_suite_report_version")]
     pub version: u32,
     /// Overall disposition.
     pub status: ScenarioSuiteStatus,
+    /// Wall-clock suite duration in milliseconds (not summed worker time).
+    pub duration_ms: u64,
+    /// Effective policy: recovered expectation failures make CI fail when true.
+    pub fail_on_flaky: bool,
+    /// Ordered suite-level reporting/orchestration errors.
+    pub infrastructure_errors: Vec<ScenarioInfrastructureError>,
     /// Requested maximum worker count.
     pub jobs: usize,
     /// Optional zero-based shard index.
@@ -117,6 +145,172 @@ pub struct ScenarioSuiteReport {
     pub shard_count: Option<usize>,
     /// Ordered selected scenarios and their retained attempts.
     pub cases: Vec<ScenarioCaseReport>,
+}
+
+/// Current attempt reporting contract version.
+pub const SCENARIO_REPORT_VERSION: u32 = 3;
+/// Current suite reporting contract version.
+pub const SCENARIO_SUITE_REPORT_VERSION: u32 = 2;
+
+/// Safe structured infrastructure diagnostic. No child output or environment values.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioInfrastructureError {
+    /// Lifecycle or reporting phase.
+    pub phase: String,
+    /// Stable machine-readable error code.
+    pub code: String,
+    /// Safe bounded explanation.
+    pub message: String,
+}
+
+/// Factual verdict for a selected case.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScenarioCaseStatus {
+    /// First attempt passed.
+    Passed,
+    /// Expectation failures followed by a pass.
+    Flaky,
+    /// Exhausted expectation failures or infrastructure failure.
+    Failed,
+}
+
+fn deserialize_report_version<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+    let version = u32::deserialize(d)?;
+    if version != SCENARIO_REPORT_VERSION {
+        return Err(D::Error::custom("unsupported scenario report version"));
+    }
+    return Ok(version);
+}
+
+fn deserialize_suite_report_version<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<u32, D::Error> {
+    let version = u32::deserialize(d)?;
+    if version != SCENARIO_SUITE_REPORT_VERSION {
+        return Err(D::Error::custom(
+            "unsupported scenario suite report version",
+        ));
+    }
+    return Ok(version);
+}
+
+impl ScenarioCaseReport {
+    /// Validate attempt ordering and outcome invariants, and derive the factual verdict.
+    ///
+    /// # Errors
+    /// Returns a safe invariant diagnostic for malformed externally constructed reports.
+    pub fn verdict(&self) -> Result<ScenarioCaseStatus, &'static str> {
+        if self.attempts.is_empty() {
+            return Err("case has no attempts");
+        }
+
+        if self
+            .attempts
+            .iter()
+            .try_fold(0_u64, |sum, a| return sum.checked_add(a.duration_ms))
+            .is_none()
+        {
+            return Err("case duration overflows milliseconds");
+        }
+
+        for (index, attempt) in self.attempts.iter().enumerate() {
+            if usize::try_from(attempt.attempt).ok() != index.checked_add(1) {
+                return Err("attempt numbers must be contiguous from one");
+            }
+
+            let r = &attempt.report;
+            if r.version != SCENARIO_REPORT_VERSION
+                || r.session_id.is_some() != r.canonical_session.is_some()
+            {
+                return Err("invalid attempt version or session identity");
+            }
+
+            if r.infrastructure_errors
+                .iter()
+                .any(|e| return e.phase.is_empty() || e.code.is_empty() || e.message.is_empty())
+                || (r.session_id.is_none()
+                    && (!r.steps.is_empty()
+                        || r.failure.is_some()
+                        || r.failure_artifacts.is_some()))
+            {
+                return Err("invalid sessionless result or infrastructure diagnostic");
+            }
+
+            match r.status {
+                ScenarioStatus::Passed
+                    if r.failure.is_none()
+                        && r.infrastructure_errors.is_empty()
+                        && r.session_id.is_some()
+                        && r.failure_artifacts.is_none() => {}
+                ScenarioStatus::Failed
+                    if r.failure.is_some()
+                        && r.infrastructure_errors.is_empty()
+                        && r.session_id.is_some() => {}
+                ScenarioStatus::Error if !r.infrastructure_errors.is_empty() => {}
+                _ => return Err("inconsistent attempt outcome"),
+            }
+            if index + 1 < self.attempts.len() && r.status != ScenarioStatus::Failed {
+                return Err("only expectation failures may be retried");
+            }
+        }
+
+        return Ok(match self.attempts.last().map(|a| return a.report.status) {
+            Some(ScenarioStatus::Passed) if self.attempts.len() == 1 => ScenarioCaseStatus::Passed,
+            Some(ScenarioStatus::Passed) => ScenarioCaseStatus::Flaky,
+            _ => ScenarioCaseStatus::Failed,
+        });
+    }
+}
+
+impl ScenarioSuiteReport {
+    /// Derive a factual suite verdict; malformed reports fail closed.
+    #[must_use]
+    pub fn verdict(&self) -> ScenarioSuiteStatus {
+        if self.version != SCENARIO_SUITE_REPORT_VERSION
+            || self.cases.is_empty()
+            || self.jobs == 0
+            || !self.infrastructure_errors.is_empty()
+            || !matches!(
+                (self.shard_index, self.shard_count),
+                (None, None) | (Some(_), Some(_))
+            )
+            || self
+                .shard_index
+                .zip(self.shard_count)
+                .is_some_and(|(i, n)| return n == 0 || i >= n)
+        {
+            return ScenarioSuiteStatus::Failed;
+        }
+
+        let mut flaky = false;
+        for case in &self.cases {
+            match case.verdict() {
+                Ok(v) if v == case.status => match v {
+                    ScenarioCaseStatus::Passed => {}
+                    ScenarioCaseStatus::Flaky => flaky = true,
+                    ScenarioCaseStatus::Failed => return ScenarioSuiteStatus::Failed,
+                },
+                _ => return ScenarioSuiteStatus::Failed,
+            }
+        }
+
+        if flaky {
+            return ScenarioSuiteStatus::Flaky;
+        }
+        return ScenarioSuiteStatus::Passed;
+    }
+
+    /// Centralized CI policy shared by CLI and report consumers. Invalid status fails closed.
+    #[must_use]
+    pub fn ci_failed(&self) -> bool {
+        let verdict = self.verdict();
+
+        return self.status != verdict
+            || verdict == ScenarioSuiteStatus::Failed
+            || (self.fail_on_flaky && verdict == ScenarioSuiteStatus::Flaky);
+    }
 }
 
 /// Current scenario document version.
@@ -150,6 +344,8 @@ pub struct ScenarioLaunch {
     #[serde(default)]
     pub geometry: ScenarioGeometry,
     /// Optional child working directory.
+    #[serde(default, with = "crate::value::exact_path::option")]
+    #[schemars(with = "Option<crate::value::ExactPath>")]
     pub working_directory: Option<PathBuf>,
     /// Deterministic child environment.
     #[serde(default)]

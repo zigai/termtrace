@@ -14,6 +14,8 @@ pub const CELL_HEIGHT: u16 = 24;
 pub const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a screen wait, stable capture, or action postcondition may run.
 pub const WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Pause between locator wait polls.
+pub const LOCATOR_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// How long the presented screen must stay unchanged to count as idle.
 pub const IDLE_STABLE_FOR: Duration = Duration::from_millis(500);
 /// How long an idle condition waits for output or a changed screen before reporting

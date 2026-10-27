@@ -1,10 +1,15 @@
 //! Stable-capture requests and outcomes, and plain text of rich frames.
 
 use crate::{actions::Reaction, defaults};
+use schemars::JsonSchema;
+use serde::Serialize;
 use std::time::Duration;
 use termtrace_model::{
-    protocol::control::StableCaptureQuality,
-    terminal::screen::{ScreenFrame, ScreenFrameContent, ScreenProjectionRequest},
+    protocol::control::{ScreenPredicate, ScreenWaitQuality, StableCaptureQuality},
+    terminal::{
+        inspection::ScreenWaitOutcome,
+        screen::{ScreenFrame, ScreenFrameContent, ScreenProjectionRequest},
+    },
     value::ByteString,
 };
 
@@ -36,11 +41,15 @@ impl Default for StableCaptureOptions {
 }
 
 /// Atomic stable-screen outcome retaining the exact frame.
-#[derive(Clone, Debug, Eq, PartialEq)]
+///
+/// The frame is not serialized; bindings attach it as a native frame object.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, JsonSchema)]
+#[schemars(extend("x-termtrace-frame" = true))]
 pub struct StableScreenCapture {
     /// Why the capture returned; `Completed` when the session had already completed.
     pub quality: StableCaptureQuality,
     /// Exact frame projected before waiter ordering was released, or the final frame.
+    #[serde(skip)]
     pub frame: ScreenFrame,
     /// First actor timestamp at which this exact state was observed.
     pub first_observed_monotonic_ns: u64,
@@ -50,6 +59,41 @@ pub struct StableScreenCapture {
     pub stable_for_ns: u64,
     /// Zstandard-compressed canonical JSON of the captured live state; `None` once completed.
     pub semantic_state_zstd: Option<ByteString>,
+}
+
+/// Screen wait evidence with the derived satisfaction verdict and without its frame, which
+/// bindings attach as a native frame object.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, JsonSchema)]
+#[schemars(extend("x-termtrace-frame" = true))]
+pub struct ScreenWaitResult {
+    /// Predicate evaluated by the actor.
+    pub predicate: ScreenPredicate,
+    /// Whether the predicate matched before termination.
+    pub matched: bool,
+    /// Whether the predicate held on a frame that met the requested stability.
+    pub satisfied: bool,
+    /// Closed completion classification.
+    pub quality: ScreenWaitQuality,
+    /// First matching actor timestamp, when matched.
+    pub first_match_monotonic_ns: Option<u64>,
+    /// Actor timestamp of the returned frame.
+    pub observed_monotonic_ns: u64,
+    /// Requested stability duration.
+    pub stable_for_ns: u64,
+}
+
+impl From<&ScreenWaitOutcome> for ScreenWaitResult {
+    fn from(outcome: &ScreenWaitOutcome) -> Self {
+        return Self {
+            predicate: outcome.predicate.clone(),
+            matched: outcome.matched,
+            satisfied: outcome.is_satisfied(),
+            quality: outcome.quality,
+            first_match_monotonic_ns: outcome.first_match_monotonic_ns,
+            observed_monotonic_ns: outcome.observed_monotonic_ns,
+            stable_for_ns: outcome.stable_for_ns,
+        };
+    }
 }
 
 /// Extract normalized plain text from any rich screen frame variant.

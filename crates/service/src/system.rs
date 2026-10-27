@@ -1,6 +1,7 @@
 //! Capability reports, system metadata, and schema generation services.
 
-use crate::Result;
+use crate::{Error, Result};
+use std::env::consts::{ARCH, OS};
 use std::sync::atomic::AtomicBool;
 use termtrace_engine::{
     analysis::capability::{
@@ -17,6 +18,10 @@ use termtrace_model::protocol::capability::{
     CapabilityReport, CapabilityStatus, NATIVE_SCREENSHOT_CAPABILITY, NATIVE_VIDEO_CAPABILITY,
     PRESENTATION_CAPABILITY, RECEIPT_SIGNING_CAPABILITY, SEMANTIC_VIDEO_CAPABILITY,
 };
+use termtrace_model::{
+    protocol::control::CONTROL_PROTOCOL_VERSION, terminal::replay::GHOSTTY_REVISION,
+};
+use termtrace_schema::catalog;
 
 /// System capability and environment introspection service.
 pub struct SystemService;
@@ -78,5 +83,88 @@ impl SystemService {
                 .unwrap_or_else(|| return "no automatic remediation is available".to_owned()),
         }
         .into());
+    }
+}
+
+/// Build and component versions of this Termtrace library.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, schemars::JsonSchema)]
+pub struct Versions {
+    /// Termtrace package version.
+    pub termtrace: String,
+    /// Control protocol version.
+    pub control_protocol: String,
+    /// Pinned Ghostty VT revision.
+    pub ghostty_revision: String,
+    /// Target operating system.
+    pub target_os: String,
+    /// Target CPU architecture.
+    pub target_arch: String,
+}
+
+impl SystemService {
+    /// Typed component/build versions without starting probes.
+    #[must_use]
+    pub fn versions() -> Versions {
+        return Versions {
+            termtrace: env!("CARGO_PKG_VERSION").into(),
+            control_protocol: CONTROL_PROTOCOL_VERSION.to_string(),
+            ghostty_revision: GHOSTTY_REVISION.into(),
+            target_os: OS.into(),
+            target_arch: ARCH.into(),
+        };
+    }
+
+    /// Names from the existing canonical schema catalog.
+    /// # Errors
+    /// Propagates catalog registration failures.
+    pub fn schemas() -> Result<Vec<String>> {
+        return catalog()
+            .map(|entries| {
+                return entries
+                    .iter()
+                    .map(|entry| return entry.filename.to_owned())
+                    .collect();
+            })
+            .map_err(|error| {
+                return Error::InvalidOperation {
+                    reason: error.to_string(),
+                    source: Some(Box::new(error)),
+                };
+            });
+    }
+
+    /// One canonical schema as explicit JSON-domain data.
+    /// # Errors
+    /// Unknown names and catalog/generation failures propagate.
+    pub fn schema(name: &str) -> Result<serde_json::Value> {
+        let entries = catalog().map_err(|error| {
+            return Error::InvalidOperation {
+                reason: error.to_string(),
+                source: Some(Box::new(error)),
+            };
+        })?;
+        let entry = entries
+            .iter()
+            .find(|entry| return entry.filename == name)
+            .ok_or_else(|| {
+                return Error::InvalidOperation {
+                    reason: format!("unknown schema {name}"),
+                    source: None,
+                };
+            })?;
+        let schema = entry.generate().map_err(|error| {
+            return Error::InvalidOperation {
+                reason: error.to_string(),
+                source: Some(Box::new(error)),
+            };
+        })?;
+
+        return serde_json::from_slice(&schema.json).map_err(|source| {
+            return Error::InvalidJson {
+                path: name.into(),
+                json_path: "$".into(),
+                source,
+            };
+        });
     }
 }

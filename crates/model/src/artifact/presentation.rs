@@ -229,6 +229,8 @@ impl Default for AnnotationStyle {
 #[serde(deny_unknown_fields)]
 pub struct SubtitleTrack {
     /// ASS subtitle document.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub ass: PathBuf,
 }
 
@@ -237,6 +239,8 @@ pub struct SubtitleTrack {
 #[serde(deny_unknown_fields)]
 pub struct NormalizedSubtitle {
     /// Resolved caller resource path used for this export.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub source_path: PathBuf,
     /// BLAKE3 of the exact imported ASS bytes.
     pub resource_hash: String,
@@ -657,6 +661,8 @@ pub struct PresentationManifest {
     /// Exact direct-process FFmpeg argument vector.
     pub ffmpeg_arguments: Vec<String>,
     /// Parsed FFprobe delivery-video evidence.
+    #[serde(with = "crate::value::json")]
+    #[schemars(with = "serde_json::Value")]
     pub output_probe: serde_json::Value,
     /// Product truth layer, distinct from immutable native evidence.
     pub truth_layer: String,

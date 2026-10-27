@@ -8,11 +8,14 @@ use crate::{
     Error,
 };
 use std::{
-    collections::BTreeMap, ffi::OsString, fs::Permissions, os::unix::fs::PermissionsExt as _,
+    collections::BTreeMap,
+    ffi::OsString,
+    fs::Permissions,
+    os::unix::fs::{symlink, PermissionsExt as _},
     path::Path,
 };
 use tempfile::TempDir;
-use termtrace_model::execution::layout;
+use termtrace_model::execution::layout::{self, SessionLayout};
 use termtrace_model::{
     execution::environment::ChildEnvironmentPolicy,
     execution::event::{Event, EventLogHeader, InputDescriptor, InputKind, InputSource},
@@ -388,4 +391,152 @@ fn persisted_format_readers_reject_version_corpus_without_compatibility_fallback
             "{surface} emitted unexpected rejection: {error}"
         );
     }
+}
+
+fn recovery_source_hashes(source: &Path) -> BTreeMap<OsString, String> {
+    return fs_err::read_dir(source)
+        .expect("source directory")
+        .map(|entry| {
+            let entry = entry.expect("source member");
+            let bytes = fs_err::read(entry.path()).expect("immutable source member");
+
+            return (entry.file_name(), blake3::hash(&bytes).to_hex().to_string());
+        })
+        .collect();
+}
+
+#[test]
+fn recovery_utf8_preserves_historical_report_and_diagnostic_bytes_and_hashes() {
+    let (temporary, _) = completed_fixture(vec![Event::Exit {
+        code: Some(0),
+        signal: None,
+        signal_name: None,
+    }]);
+
+    let source = temporary.path().join("source-é-\"-\\");
+    fs_err::rename(temporary.path().join("session"), &source).expect("UTF8 escaping fixture");
+    let destination = temporary.path().join("recovered-λ-\"-\\");
+    let before = recovery_source_hashes(&source);
+    let report = recover_session(&source, &destination).expect("recover UTF8 source");
+    let legacy_report = serde_json::json!({
+        "source": source.join("events.jsonl"),
+        "recovered": destination.join("events.jsonl"),
+        "valid_events": report.valid_events,
+        "discarded_tail": report.discarded_tail,
+        "pending_operations": report.pending_operations,
+    });
+
+    // Direct report serialization retains historical struct field order too.
+    let expected_direct = format!(
+        "{{\"source\":{},\"recovered\":{},\"valid_events\":{},\"discarded_tail\":null,\"pending_operations\":[]}}",
+        serde_json::to_string(&source.join("events.jsonl")).expect("legacy source"),
+        serde_json::to_string(&destination.join("events.jsonl")).expect("legacy destination"),
+        report.valid_events,
+    );
+
+    assert_eq!(
+        serde_json::to_vec(&report).expect("report"),
+        expected_direct.as_bytes()
+    );
+    let manifest = read_manifest(&source).expect("manifest");
+    let expected = serde_json::to_vec(&serde_json::json!({
+        "format": "termtrace-session-recovery", "version": 1, "complete_evidence": false,
+        "source_session": source, "session_id": manifest.session_id,
+        "session_manifest_hash": manifest_hash(&fs_err::read(source.join("session.json")).expect("source manifest")),
+        "recovery": legacy_report,
+    })).expect("legacy diagnostic bytes");
+
+    let actual =
+        fs_err::read(SessionLayout::new(&destination).recovery_diagnostic()).expect("diagnostic");
+    assert_eq!(blake3::hash(&actual), blake3::hash(&expected));
+    assert_eq!(actual, expected);
+
+    let mut wide = report;
+    wide.valid_events = u64::MAX;
+    let encoded = serde_json::to_string(&wide).expect("wide report");
+    assert!(encoded.contains("\"valid_events\":18446744073709551615"));
+    assert_eq!(before, recovery_source_hashes(&source));
+    assert!(!destination.join("completion.json").exists());
+
+    EventLog::read(destination.join("events.jsonl")).expect("validated recovered prefix");
+}
+
+#[test]
+fn recovery_non_utf8_binds_exact_bytes_for_both_paths_without_rewriting_source() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
+    let (temporary, _) = completed_fixture(vec![Event::Exit {
+        code: Some(0),
+        signal: None,
+        signal_name: None,
+    }]);
+
+    let source = temporary.path().join(OsStr::from_bytes(b"source-\xff"));
+    fs_err::rename(temporary.path().join("session"), &source).expect("nonUTF8 source");
+    let destination = temporary.path().join(OsStr::from_bytes(b"recovered-\xfe"));
+    let before = recovery_source_hashes(&source);
+    let report =
+        recover_session(&source, &destination).expect("recover nonUTF8 source and destination");
+    assert_eq!(report.source, source.join("events.jsonl"));
+    assert_eq!(report.recovered, destination.join("events.jsonl"));
+
+    let serialized = serde_json::to_value(&report).expect("byte-bound report");
+    let diagnostic: serde_json::Value = serde_json::from_slice(
+        &fs_err::read(SessionLayout::new(&destination).recovery_diagnostic()).expect("diagnostic"),
+    )
+    .expect("byte-bound diagnostic");
+
+    for (value, path) in [
+        (&diagnostic["source_session"], source.as_path()),
+        (&serialized["source"], report.source.as_path()),
+        (&serialized["recovered"], report.recovered.as_path()),
+    ] {
+        assert_eq!(*value, serde_json::json!(path.as_os_str().as_bytes()));
+    }
+
+    assert_eq!(diagnostic["recovery"], serialized);
+    assert_eq!(before, recovery_source_hashes(&source));
+
+    EventLog::read(destination.join("events.jsonl")).expect("validated recovered prefix");
+
+    assert!(!destination.join("completion.json").exists());
+
+    let published = recovery_source_hashes(&destination);
+
+    assert!(recover_session(&source, &destination).is_err());
+    assert_eq!(published, recovery_source_hashes(&destination));
+    assert_eq!(before, recovery_source_hashes(&source));
+    assert!(recover_session(&source, &source).is_err());
+    assert!(recover_session(&source, &source.join("nested-recovery")).is_err());
+    assert!(!source.join("nested-recovery").exists());
+
+    let alias = temporary.path().join("source-link");
+    symlink(&source, &alias).expect("private source alias");
+
+    assert!(recover_session(&source, &alias.join("nested-recovery")).is_err());
+    assert_eq!(before, recovery_source_hashes(&source));
+}
+
+#[test]
+fn recovery_non_utf8_failure_leaves_destination_absent_and_source_unchanged() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
+    let (temporary, _) = completed_fixture(Vec::new());
+    let source = temporary.path().join(OsStr::from_bytes(b"broken-\xff"));
+    fs_err::rename(temporary.path().join("session"), &source).expect("nonUTF8 source");
+    fs_err::write(source.join("events.jsonl"), b"invalid header\n")
+        .expect("corrupt private fixture");
+
+    let before = recovery_source_hashes(&source);
+    let destination = temporary.path().join(OsStr::from_bytes(b"absent-\xfe"));
+    assert!(recover_session(&source, &destination).is_err());
+    assert!(!destination.exists());
+    assert_eq!(before, recovery_source_hashes(&source));
+    assert!(fs_err::read_dir(temporary.path())
+        .expect("private root")
+        .all(|entry| {
+            return !entry
+                .expect("private member")
+                .file_name()
+                .as_bytes()
+                .starts_with(b".termtrace-recovery-");
+        }));
 }

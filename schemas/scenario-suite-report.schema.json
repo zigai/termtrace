@@ -1,5 +1,21 @@
 {
   "$defs": {
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    },
     "ScenarioAttemptReport": {
       "additionalProperties": false,
       "description": "One fresh-session attempt retained within a scenario suite result.",
@@ -10,6 +26,12 @@
           "minimum": 0,
           "type": "integer"
         },
+        "duration_ms": {
+          "description": "Wall-clock duration including cleanup and evidence publication, in milliseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "report": {
           "$ref": "#/$defs/ScenarioReport",
           "description": "Complete fresh-session result."
@@ -17,6 +39,7 @@
       },
       "required": [
         "attempt",
+        "duration_ms",
         "report"
       ],
       "type": "object"
@@ -33,15 +56,40 @@
           "type": "array"
         },
         "scenario": {
-          "description": "Input scenario document path.",
-          "type": "string"
+          "$ref": "#/$defs/ExactPath",
+          "description": "Input scenario document path."
+        },
+        "status": {
+          "$ref": "#/$defs/ScenarioCaseStatus",
+          "description": "Factual verdict, independent of exit policy."
         }
       },
       "required": [
         "scenario",
+        "status",
         "attempts"
       ],
       "type": "object"
+    },
+    "ScenarioCaseStatus": {
+      "description": "Factual verdict for a selected case.",
+      "oneOf": [
+        {
+          "const": "passed",
+          "description": "First attempt passed.",
+          "type": "string"
+        },
+        {
+          "const": "flaky",
+          "description": "Expectation failures followed by a pass.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "Exhausted expectation failures or infrastructure failure.",
+          "type": "string"
+        }
+      ]
     },
     "ScenarioFailure": {
       "additionalProperties": false,
@@ -78,13 +126,52 @@
       ],
       "type": "object"
     },
+    "ScenarioInfrastructureError": {
+      "additionalProperties": false,
+      "description": "Safe structured infrastructure diagnostic. No child output or environment values.",
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable error code.",
+          "type": "string"
+        },
+        "message": {
+          "description": "Safe bounded explanation.",
+          "type": "string"
+        },
+        "phase": {
+          "description": "Lifecycle or reporting phase.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase",
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
     "ScenarioReport": {
       "additionalProperties": false,
       "description": "Machine-readable scenario outcome.",
       "properties": {
+        "artifact_warnings": {
+          "description": "Optional evidence derivations that could not be produced.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "canonical_session": {
-          "description": "Owner-only canonical evidence path.",
-          "type": "string"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExactPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Owner-only canonical evidence path, absent for prelaunch failures."
         },
         "failure": {
           "anyOf": [
@@ -98,20 +185,35 @@
           "description": "First failure, if any."
         },
         "failure_artifacts": {
-          "description": "Atomic failure evidence directory, if the scenario failed.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExactPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Atomic failure evidence directory, only after successful publication."
+        },
+        "infrastructure_errors": {
+          "description": "Ordered required infrastructure failures, including secondary cleanup errors.",
+          "items": {
+            "$ref": "#/$defs/ScenarioInfrastructureError"
+          },
+          "type": "array"
         },
         "name": {
           "description": "Scenario name.",
           "type": "string"
         },
         "session_id": {
-          "description": "Immutable canonical session identity.",
+          "description": "Immutable canonical session identity, absent when launch never returned a session.",
           "format": "uuid",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "status": {
           "$ref": "#/$defs/ScenarioStatus",
@@ -125,9 +227,10 @@
           "type": "array"
         },
         "version": {
-          "description": "Scenario format version.",
+          "description": "Scenario report contract version (independent of documents).",
           "format": "uint32",
-          "minimum": 0,
+          "maximum": 3,
+          "minimum": 3,
           "type": "integer"
         }
       },
@@ -135,9 +238,9 @@
         "version",
         "name",
         "status",
-        "session_id",
-        "canonical_session",
-        "steps"
+        "steps",
+        "infrastructure_errors",
+        "artifact_warnings"
       ],
       "type": "object"
     },
@@ -152,6 +255,11 @@
         {
           "const": "failed",
           "description": "One step failed and later steps did not run.",
+          "type": "string"
+        },
+        {
+          "const": "error",
+          "description": "Infrastructure prevented trustworthy completion.",
           "type": "string"
         }
       ]
@@ -198,12 +306,17 @@
       "oneOf": [
         {
           "const": "passed",
-          "description": "Every selected scenario eventually passed.",
+          "description": "Every selected scenario passed on its first attempt.",
+          "type": "string"
+        },
+        {
+          "const": "flaky",
+          "description": "Some expectation failures recovered, with no infrastructure errors.",
           "type": "string"
         },
         {
           "const": "failed",
-          "description": "At least one selected scenario exhausted its attempts without passing.",
+          "description": "At least one case exhausted its attempts, or infrastructure/reporting failed.",
           "type": "string"
         }
       ]
@@ -218,6 +331,23 @@
       "description": "Ordered selected scenarios and their retained attempts.",
       "items": {
         "$ref": "#/$defs/ScenarioCaseReport"
+      },
+      "type": "array"
+    },
+    "duration_ms": {
+      "description": "Wall-clock suite duration in milliseconds (not summed worker time).",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "fail_on_flaky": {
+      "description": "Effective policy: recovered expectation failures make CI fail when true.",
+      "type": "boolean"
+    },
+    "infrastructure_errors": {
+      "description": "Ordered suite-level reporting/orchestration errors.",
+      "items": {
+        "$ref": "#/$defs/ScenarioInfrastructureError"
       },
       "type": "array"
     },
@@ -252,13 +382,17 @@
     "version": {
       "description": "Suite result contract version.",
       "format": "uint32",
-      "minimum": 0,
+      "maximum": 2,
+      "minimum": 2,
       "type": "integer"
     }
   },
   "required": [
     "version",
     "status",
+    "duration_ms",
+    "fail_on_flaky",
+    "infrastructure_errors",
     "jobs",
     "cases"
   ],

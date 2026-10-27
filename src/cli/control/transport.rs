@@ -1,8 +1,9 @@
 use super::*;
 use std::{ffi::OsString, fmt::Write as _, os::unix::ffi::OsStringExt as _};
 use termtrace_engine::registry::SessionRegistry;
+use termtrace_model::artifact::original::{original_capture_status_path, OriginalCaptureStatus};
 use termtrace_model::protocol::control::ClockSample;
-use termtrace_sdk::session::SessionStatus;
+use termtrace_sdk::session::{original_capture_status, SessionStatus};
 
 pub(in crate::cli) fn run_status(
     response: &mut ResponseWriter,
@@ -115,6 +116,12 @@ pub(in crate::cli) fn run_status(
     };
     let session_label = requested_session.display().to_string();
     let resolved = resolve_session(requested_session)?;
+    let original_capture = original_capture(&resolved.path)?;
+    let capture_note = match &original_capture {
+        Some(status) => format!("; original capture {}", stable_enum_label(&status.state)?),
+        None => String::new(),
+    };
+
     if arguments.wait_complete || resolved.phase == SessionPhase::Completed {
         let completion = wait_for_completion(
             &resolved.path,
@@ -127,6 +134,7 @@ pub(in crate::cli) fn run_status(
             "session": session_label,
             "lifecycle": "completed",
             "completion": completion,
+            "original_capture": original_capture,
         });
 
         if arguments.json {
@@ -139,7 +147,7 @@ pub(in crate::cli) fn run_status(
 
         return write_stdout(
             response,
-            format!("Session {session_label} completed (exit code {exit_str})\n"),
+            format!("Session {session_label} completed (exit code {exit_str}){capture_note}\n"),
         );
     }
 
@@ -168,6 +176,7 @@ pub(in crate::cli) fn run_status(
             pid,
             boundary: compact_boundaries(&boundaries),
             clock_sample,
+            original_capture,
         };
 
         if arguments.json {
@@ -179,7 +188,7 @@ pub(in crate::cli) fn run_status(
         return write_stdout(
             response,
             format!(
-                "Session {session_label} live (PID {pid_str}, next event seq {})\n",
+                "Session {session_label} live (PID {pid_str}, next event seq {}){capture_note}\n",
                 boundaries.observed.next_event_seq
             ),
         );
@@ -198,6 +207,8 @@ struct LiveStatusResponse<'session> {
     session_state: &'static str,
     pid: Option<u32>,
     boundary: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    original_capture: Option<OriginalCaptureStatus>,
     clock_sample: ClockSample,
 }
 
@@ -250,7 +261,7 @@ pub(in crate::cli) fn run_stop(
             }),
             "stop requested",
         ),
-        StopOutcome::Completed(completion) => (
+        StopOutcome::Completed { completion } => (
             serde_json::json!({
                 "kind": "completed",
                 "completion": completion,
@@ -266,4 +277,11 @@ pub(in crate::cli) fn run_stop(
         response,
         format!("Session {} {summary}\n", resolved.path.display()),
     );
+}
+
+fn original_capture(session: &Path) -> Result<Option<OriginalCaptureStatus>> {
+    if !original_capture_status_path(session).exists() {
+        return Ok(None);
+    }
+    return original_capture_status(session).map(Some).into_diagnostic();
 }

@@ -1,5 +1,21 @@
 {
   "$defs": {
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    },
     "ReviewSearchMatch": {
       "additionalProperties": false,
       "description": "One semantic viewport text match with a copyable canonical selector.",
@@ -47,8 +63,8 @@
   "description": "Stable noninteractive reviewer text-search result.",
   "properties": {
     "canonical_session": {
-      "description": "Immutable completed session directory.",
-      "type": "string"
+      "$ref": "#/$defs/ExactPath",
+      "description": "Immutable completed session directory."
     },
     "matches": {
       "description": "Ordered semantic state matches.",

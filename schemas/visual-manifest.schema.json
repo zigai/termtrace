@@ -345,6 +345,7 @@
       "type": "integer"
     },
     "video_probe": {
+      "default": null,
       "description": "Parsed `FFprobe` video evidence."
     },
     "width": {

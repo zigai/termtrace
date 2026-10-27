@@ -26,6 +26,12 @@ impl Terminal {
         };
     }
 
+    /// Typed recorder executable selected by this launcher.
+    #[must_use]
+    pub fn binary(&self) -> &Path {
+        return &self.binary;
+    }
+
     /// Caller-owned parent directory used for fresh canonical sessions.
     #[must_use]
     pub fn evidence_root(&self) -> &Path {
@@ -96,6 +102,18 @@ impl Terminal {
 
         if let Some(limit) = spec.output_byte_budget {
             process.arg("--output-byte-budget").arg(limit.to_string());
+        }
+
+        if let Some(limit) = spec.max_duration {
+            process
+                .arg("--max-duration")
+                .arg(format!("{}ms", limit.as_millis()));
+        }
+
+        if let Some(limit) = spec.idle_timeout {
+            process
+                .arg("--idle-timeout")
+                .arg(format!("{}ms", limit.as_millis()));
         }
 
         process

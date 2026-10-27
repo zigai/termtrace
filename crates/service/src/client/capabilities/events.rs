@@ -1,9 +1,12 @@
 use super::super::client_error;
-use super::super::{EventLog, EventProjection, Result, Session};
-use crate::defaults;
+use super::super::{EventProjection, Result, Session};
+use crate::{defaults, events::EventsService};
 use termtrace_control::Reached;
 use termtrace_model::{
-    execution::{layout::SessionLayout, session::SessionCompletion},
+    execution::{
+        paging::{EventFollowPosition, EventPageCursor, ProjectedEventPage},
+        session::SessionCompletion,
+    },
     protocol::control::{ControlCommand, ControlPayload, LiveEventCursor},
 };
 
@@ -27,6 +30,27 @@ pub enum FollowPosition {
     Completed(Box<SessionCompletion>),
 }
 
+impl From<FollowPosition> for EventFollowPosition {
+    fn from(position: FollowPosition) -> Self {
+        return match position {
+            FollowPosition::Live {
+                device,
+                inode,
+                header_hash,
+                start,
+                durable,
+            } => Self::Live {
+                device,
+                inode,
+                header_hash,
+                start,
+                durable,
+            },
+            FollowPosition::Completed(completion) => Self::Completed { completion },
+        };
+    }
+}
+
 /// Bounded typed canonical event reads.
 pub struct Events<'session> {
     pub(in crate::client) session: &'session Session,
@@ -48,22 +72,36 @@ impl Events<'_> {
             return Err(client_error("event limit must be from 1 through 4096"));
         }
 
-        let records = EventLog::read_page(
-            SessionLayout::new(self.session.path()).event_log(),
+        let page = EventsService::scan(
+            self.session.path(),
+            None,
             from_event_seq,
             limit,
+            metadata_only,
+            &[],
         )?;
 
-        let events = records
-            .iter()
-            .map(|record| return EventProjection::from_record(record, metadata_only))
-            .collect::<Vec<_>>();
+        return Ok((page.events, page.cursor.next_event_seq));
+    }
 
-        let next = events
-            .last()
-            .map_or(from_event_seq, |event| return event.seq.saturating_add(1));
-
-        return Ok((events, next));
+    /// Source-bound filtered page with exact snapshot lookahead.
+    ///
+    /// # Errors
+    /// Rejects foreign/modified cursors, invalid limits/filters, and invalid canonical evidence.
+    pub fn read_page(
+        &self,
+        cursor: Option<EventPageCursor>,
+        limit: u16,
+        metadata_only: bool,
+        event_types: &[String],
+    ) -> Result<ProjectedEventPage> {
+        return EventsService::page(
+            self.session.path(),
+            cursor,
+            limit,
+            metadata_only,
+            event_types,
+        );
     }
 
     /// Ask the live actor where its event file stands for following from `next_event_seq`.

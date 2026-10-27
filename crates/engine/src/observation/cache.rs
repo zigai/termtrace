@@ -136,6 +136,17 @@ pub(super) fn load_checkpoint(
                 "replay checkpoint does not match exact canonical source bytes",
             ));
         }
+
+        // Recorder endpoint snapshots can be authenticated yet lack canonical
+        // source positions. A late snapshot must not change completed observation
+        // facts after a concurrent replay/export. Reuse the existing canonical
+        // replay fallback; genuine initial/empty absence is established there,
+        // never filled with invented positions or accepted as cache authority.
+        if checkpoint.event_seq.is_none() || checkpoint.monotonic_ns.is_none() {
+            return Err(observation_error(
+                "replay checkpoint lacks canonical source-position provenance",
+            ));
+        }
         return Ok(CachedSemanticState {
             state_id: checkpoint.state_id,
             event_seq: checkpoint.event_seq,
@@ -496,3 +507,7 @@ fn ensure_private_cache_directory(path: &Path) -> Result<()> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "cache_tests.rs"]
+mod tests;

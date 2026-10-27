@@ -268,6 +268,8 @@ pub struct NativeCorrelation {
     /// Honest evidence level.
     pub level: NativeEvidenceLevel,
     /// Relative native manifest path.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub manifest: PathBuf,
     /// Related semantic state.
     pub state_id: u64,

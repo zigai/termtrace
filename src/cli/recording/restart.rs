@@ -1,97 +1,60 @@
 use super::*;
-use termtrace_model::execution::layout;
+use termtrace_model::{
+    artifact::original::original_capture_status_path,
+    execution::layout,
+    registry::{RestartDurability, RestartProvenance},
+};
 
 pub(in crate::cli) fn run_restart(
     response: &mut ResponseWriter,
     arguments: RestartArgs,
 ) -> Result<ExitCode> {
-    let registry = SessionRegistry::open_default().into_diagnostic()?;
+    let registry = RegistryService::open_default().into_diagnostic()?;
     let overrides = overrides_from_args(&arguments)?;
     let encoded_overrides = serde_json::to_string(&overrides).into_diagnostic()?;
-    let predecessor_entry = registry.resolve(&arguments.name).into_diagnostic()?;
-    let predecessor = predecessor_entry.session_path();
     let timeout = millis_or(arguments.timeout_ms, defaults::STARTUP_TIMEOUT);
-    let StopOutcome::Completed(completion) = attach_session(&predecessor)?
-        .stop(StopRequest::default(), Some(timeout))
-        .into_diagnostic()?
-    else {
-        return Err(miette::miette!(
-            "predecessor stop did not wait for completion"
-        ));
-    };
-
-    let predecessor_manifest_bytes =
-        fs_err::read(SessionLayout::new(&predecessor).manifest()).into_diagnostic()?;
-
-    let expected_lineage = SessionLineage {
-        predecessor_session_id: predecessor_entry.session_id,
-        predecessor_manifest_hash: manifest_hash(&predecessor_manifest_bytes),
-        predecessor_final_event_hash: completion.final_event_hash,
-        reason: "restart".to_owned(),
-    };
-
-    let paths = registry.allocate_detached_paths().into_diagnostic()?;
     let executable = env::current_exe().into_diagnostic()?;
-    let mut recorder = spawn_detached(
-        &executable,
-        record_arguments(
-            &arguments.name,
-            &paths.session,
-            &predecessor,
-            &encoded_overrides,
-            arguments.environment_spec.as_deref(),
-        ),
-        &paths,
-        None,
-    )
-    .into_diagnostic()?;
-
-    let deadline = Instant::now() + timeout;
-
-    match await_ready(&paths.session, &mut recorder, deadline).into_diagnostic()? {
-        Readiness::Live | Readiness::Completed(_) => {}
-        Readiness::Exited(status) => {
+    let predecessor = registry.resolve(&arguments.name).into_diagnostic()?;
+    let report = if original_capture_status_path(&predecessor.session_path()).exists() {
+        if overrides != RestartOverrides::default() {
             return Err(miette::miette!(
-                "restart successor exited before readiness with {status}; alias remains bound to predecessor; recoverable session candidate: {}; stdout log: {}; stderr log: {}",
-                paths.session.display(),
-                paths.stdout_log.display(),
-                paths.stderr_log.display()
+                "an original-capture restart is faithful to its predecessor; restart overrides are not supported"
             ));
         }
-        Readiness::TimedOut => {
-            return Err(miette::miette!(
-                "restart successor did not become ready within {} ms; alias remains bound to predecessor; recoverable orphan: {}; stdout log: {}; stderr log: {}",
-                timeout.as_millis(),
-                paths.session.display(),
-                paths.stdout_log.display(),
-                paths.stderr_log.display()
-            ));
-        }
-    }
 
-    let successor_manifest = read_manifest(&paths.session).into_diagnostic()?;
-    if successor_manifest.lineage.as_ref() != Some(&expected_lineage) {
-        return Err(miette::miette!(
-            "successor lineage does not match the completed predecessor; alias remains unchanged; recoverable orphan: {}",
-            paths.session.display()
-        ));
-    }
+        let environment = arguments
+            .environment_spec
+            .as_deref()
+            .map(read_environment_spec)
+            .transpose()
+            .into_diagnostic()?;
 
-    let successor = registry
-        .retarget(
-            &arguments.name,
-            predecessor_entry.session_id,
-            &paths.session,
-        )
-        .map_err(|error| {
-            return miette::miette!(
-                "successor became ready but alias retargeting failed; alias remains unchanged; recoverable orphan: {}; stdout log: {}; stderr log: {}; {error}",
-                paths.session.display(),
-                paths.stdout_log.display(),
-                paths.stderr_log.display(),
-            );
-        })?;
+        registry
+            .restart_original(&executable, &arguments.name, environment.as_ref(), timeout)
+            .into_diagnostic()?
+    } else {
+        registry
+            .restart_with(
+                &executable,
+                &arguments.name,
+                timeout,
+                None,
+                |predecessor, session| {
+                    return Ok(record_arguments(
+                        &arguments.name,
+                        session,
+                        predecessor,
+                        &encoded_overrides,
+                        arguments.environment_spec.as_deref(),
+                    ));
+                },
+            )
+            .into_diagnostic()?
+    };
 
+    let predecessor_entry = report.predecessor;
+    let successor = report.successor;
+    let predecessor = predecessor_entry.session_path();
     let predecessor_display = predecessor.display().to_string();
     let successor_display = successor.session_path().display().to_string();
 
@@ -109,8 +72,8 @@ pub(in crate::cli) fn run_restart(
             "recorder_pid": successor.recorder_pid,
             "recorder_process_start_ticks": successor.recorder_process_start_ticks,
         },
-        "stdout_log": paths.stdout_log,
-        "stderr_log": paths.stderr_log,
+        "stdout_log": PathBuf::from(OsString::from_vec(report.stdout_log.into_bytes())),
+        "stderr_log": PathBuf::from(OsString::from_vec(report.stderr_log.into_bytes())),
         "ready": true,
     });
 
@@ -348,10 +311,10 @@ pub(super) fn overrides_from_args(arguments: &RestartArgs) -> Result<RestartOver
         cell_width: arguments.cell_width,
         cell_height: arguments.cell_height,
         term: arguments.term.clone(),
-        durability: arguments.durability,
+        durability: arguments.durability.map(Into::into),
         durability_max_interval_ms: arguments.durability_max_interval_ms,
         durability_max_uncommitted_bytes: arguments.durability_max_uncommitted_bytes,
-        provenance: arguments.provenance,
+        provenance: arguments.provenance.map(Into::into),
         provenance_environment: arguments.provenance_environment.clone(),
         output_byte_budget: arguments.output_byte_budget,
         clear_output_byte_budget: arguments.clear_output_byte_budget,
@@ -426,7 +389,7 @@ pub(super) fn apply_restart_overrides(
     }
 
     if let Some(mode) = overrides.durability {
-        if !matches!(mode, DurabilityModeArg::Bounded)
+        if !matches!(mode, RestartDurability::Bounded)
             && (overrides.durability_max_interval_ms.is_some()
                 || overrides.durability_max_uncommitted_bytes.is_some())
         {
@@ -464,7 +427,7 @@ pub(super) fn apply_restart_overrides(
     }
 
     if !overrides.provenance_environment.is_empty()
-        && !matches!(overrides.provenance, Some(ProvenancePolicyArg::Custom))
+        && !matches!(overrides.provenance, Some(RestartProvenance::Custom))
     {
         return Err(miette::miette!(
             "--provenance-env requires --provenance custom"

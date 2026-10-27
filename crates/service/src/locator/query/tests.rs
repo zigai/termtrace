@@ -1,5 +1,9 @@
 use super::*;
-use termtrace_model::{terminal::observation::CaptureQuality, terminal::screen::SpanCell};
+use serde_json::json;
+use termtrace_model::{
+    terminal::observation::CaptureQuality,
+    terminal::screen::{ScreenFrameSource, SpanCell},
+};
 
 fn fixture_frame() -> ScreenFrame {
     let value: serde_json::Value = serde_json::from_str(include_str!(
@@ -420,5 +424,209 @@ fn shared_locator_conformance_corpus_matches_public_contract() {
                 test_case.name
             );
         }
+    }
+}
+
+fn parity_spec(spec: &serde_json::Value) -> Result<LocatorSpec, QueryError> {
+    let mut locator = if let Some(text) = spec.get("text").and_then(serde_json::Value::as_str) {
+        LocatorSpec::text(text)?
+    } else if let Some(text) = spec.get("exact").and_then(serde_json::Value::as_str) {
+        LocatorSpec::exact(text)?
+    } else if let Some(pattern) = spec.get("regex").and_then(serde_json::Value::as_str) {
+        LocatorSpec::native_regex(pattern)?
+    } else {
+        LocatorSpec::default()
+    };
+
+    if let Some(row) = spec.get("row").and_then(serde_json::Value::as_u64) {
+        locator = locator.in_row(u16::try_from(row).expect("fixture row"));
+    }
+
+    if let Some(region) = spec.get("region") {
+        locator = locator.in_region(serde_json::from_value(region.clone()).expect("region"))?;
+    }
+
+    if let Some(style) = spec.get("style") {
+        locator = locator.with_style(serde_json::from_value(style.clone()).expect("style"));
+    }
+
+    if spec
+        .get("cross_soft_wraps")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        locator = locator.across_soft_wraps(true);
+    }
+
+    return Ok(locator);
+}
+
+fn parity_matches(
+    frame: &Arc<ScreenFrame>,
+    case: &serde_json::Value,
+) -> Result<Vec<ScreenMatch>, QueryError> {
+    let result = frame.query(parity_spec(&case["spec"])?)?;
+    let index = case
+        .get("index")
+        .and_then(serde_json::Value::as_u64)
+        .map(|index| return usize::try_from(index).expect("fixture index"));
+
+    return match case.get("operation").and_then(serde_json::Value::as_str) {
+        None | Some("all") => Ok(result.all().to_vec()),
+        Some("single") => Ok(vec![result.single()?.clone()]),
+        Some("first") => Ok(vec![result.first()?.clone()]),
+        Some("nth") => Ok(vec![result.nth(index.expect("nth index"))?.clone()]),
+        Some(other) => Err(QueryError::InvalidQuery {
+            reason: format!("unknown parity operation {other}"),
+        }),
+    };
+}
+
+#[test]
+fn shared_parity_corpus_matches_ranges_widths_and_failure_kinds() {
+    let corpus: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../fixtures/conformance/locators/parity.json"
+    ))
+    .expect("parity corpus");
+
+    let frame: Arc<ScreenFrame> = Arc::new(
+        serde_json::from_str(include_str!(
+            "../../../../../fixtures/conformance/locators/parity-frame.json"
+        ))
+        .expect("parity frame"),
+    );
+
+    let ScreenFrameSource::Actor {
+        observed_monotonic_ns,
+        boundaries,
+        ..
+    } = &frame.source
+    else {
+        panic!("actor source");
+    };
+
+    assert_eq!(*observed_monotonic_ns, u64::MAX);
+    assert_eq!(boundaries.observed.next_event_seq, 9_007_199_254_740_993);
+
+    let cases = corpus["cases"].as_array().expect("cases");
+    assert!(cases.len() >= 12);
+
+    for case in cases {
+        let name = case["name"].as_str().expect("case name");
+        let expect = &case["expect"];
+
+        match parity_matches(&frame, case) {
+            Ok(found) => {
+                let expected = expect["matches"]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("{name}: unexpected success"));
+                assert_eq!(found.len(), expected.len(), "{name}");
+
+                for (actual, expected) in found.iter().zip(expected) {
+                    assert_eq!(actual.text.as_ref(), expected["text"], "{name}");
+                    assert!(
+                        Arc::ptr_eq(&actual.frame, &frame),
+                        "{name}: frame recaptured"
+                    );
+
+                    let ranges: Vec<serde_json::Value> = actual
+                        .ranges
+                        .iter()
+                        .map(|range| {
+                            return serde_json::json!([
+                                range.row,
+                                range.start_column,
+                                range.end_column
+                            ]);
+                        })
+                        .collect();
+                    assert_eq!(
+                        serde_json::Value::Array(ranges),
+                        expected["ranges"],
+                        "{name}"
+                    );
+
+                    let widths: Vec<u8> = actual
+                        .covered_cells
+                        .iter()
+                        .map(|cell| return cell.width)
+                        .collect();
+                    assert_eq!(serde_json::json!(widths), expected["widths"], "{name}");
+                }
+            }
+            Err(error) => {
+                let expected = &expect["error"];
+
+                assert_eq!(error.kind(), expected["kind"], "{name}: {error}");
+
+                let details = serde_json::to_value(&error).expect("details");
+                for field in ["count", "index", "state_hash"] {
+                    if let Some(value) = expected.get(field) {
+                        assert_eq!(&details[field], value, "{name}: {field}");
+                    }
+                }
+
+                if let Some(ranges) = expected.get("ranges") {
+                    let actual: Vec<serde_json::Value> = details["ranges"]
+                        .as_array()
+                        .expect("ranges")
+                        .iter()
+                        .map(|range| {
+                            return serde_json::json!([
+                                range["row"],
+                                range["start_column"],
+                                range["end_column"]
+                            ]);
+                        })
+                        .collect();
+                    assert_eq!(&serde_json::Value::Array(actual), ranges, "{name}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn style_filter_distinguishes_absent_unresolved_and_resolved_colors() {
+    let unconstrained =
+        serde_json::from_value::<StyleFilter>(json!({ "bold": true })).expect("filter");
+    assert_eq!(unconstrained.resolved_foreground, None);
+    assert_eq!(unconstrained.bold, Some(true));
+
+    let unresolved = serde_json::from_value::<StyleFilter>(json!({ "resolved_foreground": null }))
+        .expect("filter");
+    assert_eq!(unresolved.resolved_foreground, Some(None));
+
+    let resolved = serde_json::from_value::<StyleFilter>(
+        json!({ "resolved_background": { "r": 1, "g": 2, "b": 3 } }),
+    )
+    .expect("filter");
+    assert_eq!(
+        resolved.resolved_background,
+        Some(Some(Rgb { r: 1, g: 2, b: 3 }))
+    );
+
+    let palette = serde_json::from_value::<StyleFilter>(
+        json!({ "foreground": { "kind": "palette", "value": 9 }, "wide_kind": "wide" }),
+    )
+    .expect("filter");
+    assert_eq!(palette.foreground, Some(ColorSpec::Palette(9)));
+    assert_eq!(palette.wide_kind, Some(WideKind::Wide));
+}
+
+#[test]
+fn style_filter_rejects_null_unknown_and_mistyped_fields() {
+    for value in [
+        json!({ "bold": null }),
+        json!({ "foreground": null }),
+        json!({ "colour": "red" }),
+        json!({ "bold": 1 }),
+        json!({ "underline": 1.5 }),
+        json!({ "resolved_foreground": { "r": 256, "g": 0, "b": 0 } }),
+    ] {
+        assert!(
+            serde_json::from_value::<StyleFilter>(value.clone()).is_err(),
+            "{value}"
+        );
     }
 }

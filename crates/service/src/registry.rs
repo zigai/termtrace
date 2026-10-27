@@ -1,6 +1,7 @@
 //! Friendly session registry, retention, garbage collection, and restart services.
 
 use crate::error::{Error, Result};
+use std::io::ErrorKind::NotFound as StdNotFound;
 use std::path::{Path, PathBuf};
 use termtrace_engine::registry::SessionRegistry;
 use termtrace_model::registry::{
@@ -8,6 +9,7 @@ use termtrace_model::registry::{
 };
 
 mod detached;
+mod restart;
 
 pub use detached::{spawn_detached, DetachedRecording, DetachedStart};
 
@@ -90,6 +92,28 @@ impl RegistryService {
     /// Returns an error if the alias does not exist or is invalid.
     pub fn resolve(&self, alias: &str) -> Result<RegistryEntry> {
         return self.registry.resolve(alias).map_err(Error::from);
+    }
+
+    /// Resolve a name optionally, distinguishing a missing alias from corrupt/inaccessible evidence.
+    /// # Errors
+    /// Returns every resolution failure except a missing alias record in an intact registry.
+    pub fn resolve_optional(&self, alias: &str) -> Result<Option<RegistryEntry>> {
+        match self.registry.resolve(alias) {
+            Ok(entry) => return Ok(Some(entry)),
+            Err(termtrace_engine::Error::Filesystem { path, source })
+                if source.kind() == StdNotFound
+                    && path
+                        == self
+                            .state_root()
+                            .join("registry")
+                            .join(format!("{alias}.json")) =>
+            {
+                SessionRegistry::validate_owner_directory(&self.state_root().join("registry"))?;
+
+                return Ok(None);
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
 
     /// Query the complete derived lifecycle for an alias.

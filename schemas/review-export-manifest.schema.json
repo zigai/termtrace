@@ -1,12 +1,30 @@
 {
+  "$defs": {
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    }
+  },
   "$id": "https://github.com/zigai/termtrace/schemas/review-export-manifest.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Manifest for one explicit reviewer state export.",
   "properties": {
     "canonical_session": {
-      "description": "Immutable source session.",
-      "type": "string"
+      "$ref": "#/$defs/ExactPath",
+      "description": "Immutable source session."
     },
     "screen_text_blake3": {
       "description": "BLAKE3 of `screen.txt`.",

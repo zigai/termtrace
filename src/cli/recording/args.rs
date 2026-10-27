@@ -2,17 +2,18 @@ use crate::cli::parsers::{
     parse_bounded_screen_regex, parse_capture_target, parse_font_size, parse_idle_interval,
     parse_provenance_rule, parse_rgb_color, parse_wait_deadline_duration,
 };
-use clap::{Args, Parser, ValueEnum};
+use clap::{parser::ValueSource, ArgMatches, Args, ValueEnum};
 use std::{ffi::OsString, path::PathBuf, time::Duration};
 use termtrace_media::helper_protocol;
+use termtrace_model::artifact::original::CellGrid;
 use termtrace_model::execution::session::RecordingFailurePolicy;
 use termtrace_model::{
     execution::environment::ColorPolicy,
     execution::event_log::{DurabilityMode, DurabilityPolicy},
     execution::provenance::{ProvenanceCapture, ProvenancePolicyKind},
     execution::session::CaptureTarget,
+    registry::{RestartConfiguration, RestartDurability, RestartProvenance},
     terminal::state::{MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS},
-    value::ByteString,
 };
 use termtrace_sdk::defaults;
 
@@ -26,8 +27,17 @@ pub(in crate::cli) struct GeometryProbeArgs {
 #[derive(Debug, Args)]
 pub(in crate::cli) struct RecordArgs {
     /// Acquire original command pixels in a private Ghostty display, with video and final PNG.
-    #[arg(long, conflicts_with_all = ["no_input", "restart_source", "environment_spec_stdin", "import_source_kind", "on_recording_error", "detach"])]
+    #[arg(long, conflicts_with_all = ["no_input", "import_source_kind", "on_recording_error"])]
     pub(in crate::cli) original_native: bool,
+    /// Exact original-capture grid as `COLSxROWS`; `--viewport` becomes the solver's first guess.
+    #[arg(long, requires = "original_native", value_parser = parse_cell_grid)]
+    pub(in crate::cli) original_grid: Option<CellGrid>,
+    /// Original-capture display and video size as `WIDTHxHEIGHT`; defaults to the terminal window.
+    #[arg(long, requires = "original_native", value_parser = parse_capture_target)]
+    pub(in crate::cli) original_canvas: Option<CaptureTarget>,
+    /// Geometry options supplied on the command line, which original capture does not use.
+    #[arg(skip)]
+    pub(in crate::cli) explicit_geometry: Vec<&'static str>,
     /// Original capture rate: 24, 30, or 60 frames per second.
     #[arg(long, requires = "original_native")]
     pub(in crate::cli) original_fps: Option<u16>,
@@ -37,6 +47,9 @@ pub(in crate::cli) struct RecordArgs {
     /// Internal commitment for an already-resolved original capture profile.
     #[arg(long, hide = true, requires = "ghostty_config")]
     pub(in crate::cli) resolved_ghostty_profile_provenance: Option<String>,
+    /// Internal supervisor socket that owns resizes of the outer terminal window.
+    #[arg(long, hide = true, conflicts_with = "original_native")]
+    pub(in crate::cli) outer_resize_socket: Option<String>,
     /// Behavior after a recorder error (default: preserve interactive input, stop headless jobs).
     #[arg(long, value_enum)]
     pub(in crate::cli) on_recording_error: Option<RecordingFailurePolicyArg>,
@@ -106,6 +119,39 @@ pub(in crate::cli) struct RecordArgs {
 
     #[command(flatten)]
     pub(in crate::cli) recording: RecordingArgs,
+}
+
+fn parse_cell_grid(value: &str) -> Result<CellGrid, String> {
+    let Some((cols, rows)) = value.split_once(['x', 'X']) else {
+        return Err("grid must use COLSxROWS, for example 100x30".to_owned());
+    };
+    let cols = cols
+        .parse::<u16>()
+        .map_err(|error| return format!("invalid grid columns: {error}"))?;
+
+    let rows = rows
+        .parse::<u16>()
+        .map_err(|error| return format!("invalid grid rows: {error}"))?;
+
+    if cols == 0 || rows == 0 {
+        return Err("grid dimensions must be non-zero".to_owned());
+    }
+    return Ok(CellGrid { cols, rows });
+}
+
+/// Record which recording geometry options were typed explicitly; original capture ignores them.
+pub(in crate::cli) fn note_explicit_geometry(arguments: &mut RecordArgs, matches: &ArgMatches) {
+    arguments.explicit_geometry = [
+        ("geometry", "--geometry"),
+        ("cols", "--cols"),
+        ("rows", "--rows"),
+        ("cell_width", "--cell-width"),
+        ("cell_height", "--cell-height"),
+    ]
+    .into_iter()
+    .filter(|(id, _flag)| return matches.value_source(id) == Some(ValueSource::CommandLine))
+    .map(|(_id, flag)| return flag)
+    .collect();
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -211,33 +257,7 @@ pub(in crate::cli) struct RestartArgs {
     pub(in crate::cli) command: Vec<OsString>,
 }
 
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "Serialized restart overrides preserve independent environment permission and resource-limit clearing options"
-)]
-pub(in crate::cli) struct RestartOverrides {
-    pub(in crate::cli) cwd: Option<ByteString>,
-    pub(in crate::cli) cols: Option<u16>,
-    pub(in crate::cli) rows: Option<u16>,
-    pub(in crate::cli) cell_width: Option<u16>,
-    pub(in crate::cli) cell_height: Option<u16>,
-    pub(in crate::cli) term: Option<String>,
-    pub(in crate::cli) durability: Option<DurabilityModeArg>,
-    pub(in crate::cli) durability_max_interval_ms: Option<u64>,
-    pub(in crate::cli) durability_max_uncommitted_bytes: Option<u64>,
-    pub(in crate::cli) provenance: Option<ProvenancePolicyArg>,
-    pub(in crate::cli) provenance_environment: Vec<(String, ProvenanceCapture)>,
-    pub(in crate::cli) output_byte_budget: Option<u64>,
-    pub(in crate::cli) clear_output_byte_budget: bool,
-    pub(in crate::cli) max_duration_ms: Option<u64>,
-    pub(in crate::cli) clear_max_duration: bool,
-    pub(in crate::cli) idle_timeout_ms: Option<u64>,
-    pub(in crate::cli) clear_idle_timeout: bool,
-    pub(in crate::cli) allow_environment_change: bool,
-    pub(in crate::cli) command: Option<Vec<ByteString>>,
-}
+pub(in crate::cli) type RestartOverrides = RestartConfiguration;
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct RecordingArgs {
@@ -376,23 +396,6 @@ pub(in crate::cli) struct RecordingArgs {
     pub(in crate::cli) command: Vec<OsString>,
 }
 
-impl RecordingArgs {
-    /// Recording settings for `command` exactly as `record` parses them with no options.
-    pub(in crate::cli) fn defaults_for(command: &[OsString]) -> Result<Self, clap::Error> {
-        #[derive(Parser)]
-        struct Defaults {
-            #[command(flatten)]
-            recording: RecordingArgs,
-        }
-
-        let arguments = [OsString::from("termtrace"), OsString::from("--")]
-            .into_iter()
-            .chain(command.iter().cloned());
-
-        return Defaults::try_parse_from(arguments).map(|defaults| return defaults.recording);
-    }
-}
-
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(in crate::cli) enum GeometryMode {
     /// Use manually specified columns, rows, and cell dimensions.
@@ -475,6 +478,26 @@ impl DurabilityModeArg {
                 maximum_interval_ms: None,
                 maximum_uncommitted_bytes: None,
             },
+        };
+    }
+}
+
+impl From<DurabilityModeArg> for RestartDurability {
+    fn from(value: DurabilityModeArg) -> Self {
+        return match value {
+            DurabilityModeArg::Strict => Self::Strict,
+            DurabilityModeArg::Bounded => Self::Bounded,
+            DurabilityModeArg::Throughput => Self::Throughput,
+        };
+    }
+}
+
+impl From<ProvenancePolicyArg> for RestartProvenance {
+    fn from(value: ProvenancePolicyArg) -> Self {
+        return match value {
+            ProvenancePolicyArg::Minimal => Self::Minimal,
+            ProvenancePolicyArg::Reproducible => Self::Reproducible,
+            ProvenancePolicyArg::Custom => Self::Custom,
         };
     }
 }

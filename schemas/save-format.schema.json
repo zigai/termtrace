@@ -1,0 +1,43 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/save-format.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Semantic file recipe supported by `save`.",
+  "oneOf": [
+    {
+      "const": "txt",
+      "description": "Plain viewport text.",
+      "type": "string"
+    },
+    {
+      "const": "json",
+      "description": "Compact truth-labeled observation JSON.",
+      "type": "string"
+    },
+    {
+      "const": "deep-json",
+      "description": "Complete reconstructed semantic-state JSON.",
+      "type": "string"
+    },
+    {
+      "const": "vt",
+      "description": "Pinned Ghostty VT reconstruction.",
+      "type": "string"
+    },
+    {
+      "const": "html",
+      "description": "Pinned Ghostty HTML reconstruction.",
+      "type": "string"
+    },
+    {
+      "const": "svg",
+      "description": "Deterministic semantic-state SVG.",
+      "type": "string"
+    },
+    {
+      "const": "png",
+      "description": "Deterministic semantic-state PNG rasterized from the SVG scene.",
+      "type": "string"
+    }
+  ],
+  "title": "SaveFormat"
+}

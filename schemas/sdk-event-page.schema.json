@@ -1,0 +1,1631 @@
+{
+  "$defs": {
+    "ApplicationEvent": {
+      "additionalProperties": false,
+      "description": "Caller-reported process and clock information, not independently verified identity.\n\nThe enclosing canonical event supplies recorder time and session identity. A process\ninstance UUID distinguishes PID reuse. Span identifiers are scoped to that instance.",
+      "properties": {
+        "attributes": {
+          "additionalProperties": true,
+          "description": "Sensitive application data, excluded from metadata-only exports.",
+          "type": "object"
+        },
+        "kind": {
+          "$ref": "#/$defs/ApplicationEventKind",
+          "description": "Event or span lifecycle transition."
+        },
+        "monotonic_ns": {
+          "description": "Caller-reported monotonic nanoseconds since instrumentation initialization.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "Diagnostic name, from 1 to 256 UTF-8 bytes.",
+          "type": "string"
+        },
+        "parent_span_id": {
+          "description": "Optional parent span in the same process instance.",
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "process_id": {
+          "description": "Caller-reported operating-system PID.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "process_instance_id": {
+          "description": "Stable UUID for the emitting process instance.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "span_id": {
+          "description": "Span identity; required for span lifecycle transitions.",
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "process_instance_id",
+        "process_id",
+        "monotonic_ns",
+        "kind",
+        "name",
+        "attributes"
+      ],
+      "type": "object"
+    },
+    "ApplicationEventKind": {
+      "description": "Application instrumentation lifecycle.",
+      "oneOf": [
+        {
+          "const": "event",
+          "description": "A discrete diagnostic event.",
+          "type": "string"
+        },
+        {
+          "const": "span_start",
+          "description": "Beginning of a caller-owned span.",
+          "type": "string"
+        },
+        {
+          "const": "span_end",
+          "description": "End of a caller-owned span; unmatched starts remain visibly incomplete.",
+          "type": "string"
+        }
+      ]
+    },
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "BytePayloadSummary": {
+      "additionalProperties": false,
+      "description": "Hash-and-length summary for one elided canonical byte field.",
+      "properties": {
+        "blake3": {
+          "description": "BLAKE3 of the exact bytes.",
+          "type": "string"
+        },
+        "byte_count": {
+          "description": "Exact byte count.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "field": {
+          "description": "Event field name (`data`, `query`, or `response`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "byte_count",
+        "blake3"
+      ],
+      "type": "object"
+    },
+    "Event": {
+      "description": "One ordered session event.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Bytes read from the child PTY.",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Exact bytes, including control sequences and invalid UTF-8."
+            },
+            "type": {
+              "const": "output",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Durable intent to send bytes to the child PTY.",
+          "properties": {
+            "caller_intent": {
+              "description": "Optional caller-supplied reason for applying the input.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "data": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Exact emitted bytes."
+            },
+            "descriptor": {
+              "$ref": "#/$defs/InputDescriptor",
+              "description": "Structured semantic source of the exact emitted bytes."
+            },
+            "input_kind": {
+              "$ref": "#/$defs/InputKind",
+              "description": "High-level input category."
+            },
+            "operation_id": {
+              "description": "Identifier paired with the corresponding result.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "semantic_input": {
+              "description": "Canonical symbolic input, such as `ctrl+u` or `paste`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "$ref": "#/$defs/InputSource",
+              "description": "Input origin."
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical terminal modes used to encode this atom, when mode-aware.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "input_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "source",
+            "input_kind",
+            "descriptor",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Result of one input intent.",
+          "properties": {
+            "bytes_written": {
+              "description": "Bytes written before success or failure.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "error_code": {
+              "description": "Stable diagnostic code on failure.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Identifier from the corresponding intent.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/OperationStatus",
+              "description": "Whether the entire byte sequence was applied."
+            },
+            "type": {
+              "const": "input_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "status",
+            "bytes_written"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Durable intent to change terminal geometry.",
+          "properties": {
+            "cols": {
+              "description": "Columns after the resize.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "operation_id": {
+              "description": "Identifier paired with the corresponding result.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "pixel_height": {
+              "description": "Total pixel height reported to the child.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pixel_width": {
+              "description": "Total pixel width reported to the child.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "description": "Rows after the resize.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "resize_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "cols",
+            "rows",
+            "pixel_width",
+            "pixel_height"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Result of one resize intent.",
+          "properties": {
+            "error_code": {
+              "description": "Stable diagnostic code on failure.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Identifier from the corresponding intent.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/OperationStatus",
+              "description": "Whether the new geometry was applied."
+            },
+            "type": {
+              "const": "resize_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Durable intent to signal the child process group.",
+          "properties": {
+            "name": {
+              "description": "Stable display name such as `SIGINT`.",
+              "type": "string"
+            },
+            "number": {
+              "description": "Platform signal number.",
+              "format": "int32",
+              "type": "integer"
+            },
+            "operation_id": {
+              "description": "Identifier paired with the corresponding result.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": {
+              "const": "signal_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "number",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Result of one signal intent.",
+          "properties": {
+            "error_code": {
+              "description": "Stable diagnostic code on failure.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Identifier from the corresponding intent.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/OperationStatus",
+              "description": "Whether the signal syscall succeeded."
+            },
+            "type": {
+              "const": "signal_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A named point in the session timeline.",
+          "properties": {
+            "label": {
+              "description": "User-provided marker label.",
+              "type": "string"
+            },
+            "operation_id": {
+              "description": "Caller-owned operation identifier used for durable deduplication.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": {
+              "const": "marker",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "label"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Structured application instrumentation received over the control socket.",
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ApplicationEvent",
+              "description": "Caller-reported diagnostic payload."
+            },
+            "operation_id": {
+              "description": "Caller-owned request identity for durable deduplication.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": {
+              "const": "application",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A terminal capability query and corresponding response.",
+          "properties": {
+            "query": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Query bytes emitted by the child."
+            },
+            "responder": {
+              "description": "Component that generated the response.",
+              "type": "string"
+            },
+            "response": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Response bytes sent back to the child."
+            },
+            "source_byte_offset": {
+              "description": "Inclusive offset of the query's final byte in that output event.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "source_event_seq": {
+              "description": "Canonical output event containing the end of the query.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "query_response",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "query",
+            "response",
+            "responder"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A process or host lifecycle transition.",
+          "properties": {
+            "lifecycle_kind": {
+              "$ref": "#/$defs/LifecycleKind",
+              "description": "Transition kind."
+            },
+            "pid": {
+              "description": "Child process ID when available.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "lifecycle",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "lifecycle_kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Child process termination.",
+          "properties": {
+            "code": {
+              "description": "Exit status when the process exited normally.",
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "signal": {
+              "description": "Signal number when signal termination occurred.",
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "signal_name": {
+              "description": "Platform signal description when available.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "exit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A host failure retained in the canonical timeline.",
+          "properties": {
+            "code": {
+              "description": "Stable diagnostic code.",
+              "type": "string"
+            },
+            "message": {
+              "description": "Redacted human-readable message.",
+              "type": "string"
+            },
+            "type": {
+              "const": "host_error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "code",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EventMetadata": {
+      "description": "Model-specific byte-elided event metadata; application attributes are deliberately excluded.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Output payload is represented by the projection byte summary.",
+          "properties": {
+            "type": {
+              "const": "output",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `InputIntent` variant.",
+          "properties": {
+            "caller_intent": {
+              "description": "Optional caller-supplied reason for applying the input.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "descriptor": {
+              "$ref": "#/$defs/InputDescriptor",
+              "description": "Structured semantic source of the exact emitted bytes."
+            },
+            "input_kind": {
+              "$ref": "#/$defs/InputKind",
+              "description": "High-level input category."
+            },
+            "operation_id": {
+              "description": "Identifier paired with the corresponding result.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "semantic_input": {
+              "description": "Canonical symbolic input, such as `ctrl+u` or `paste`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "$ref": "#/$defs/InputSource",
+              "description": "Input origin."
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical terminal modes used to encode this atom, when mode-aware.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "input_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "source",
+            "input_kind",
+            "descriptor"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `InputResult` variant.",
+          "properties": {
+            "bytes_written": {
+              "description": "Bytes written before success or failure.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "error_code": {
+              "description": "Stable diagnostic code on failure.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Identifier from the corresponding intent.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/OperationStatus",
+              "description": "Whether the entire byte sequence was applied."
+            },
+            "type": {
+              "const": "input_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "status",
+            "bytes_written"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `ResizeIntent` variant.",
+          "properties": {
+            "cols": {
+              "description": "Columns after the resize.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "operation_id": {
+              "description": "Identifier paired with the corresponding result.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "pixel_height": {
+              "description": "Total pixel height reported to the child.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pixel_width": {
+              "description": "Total pixel width reported to the child.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "description": "Rows after the resize.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "resize_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "cols",
+            "rows",
+            "pixel_width",
+            "pixel_height"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `ResizeResult` variant.",
+          "properties": {
+            "error_code": {
+              "description": "Stable diagnostic code on failure.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Identifier from the corresponding intent.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/OperationStatus",
+              "description": "Whether the new geometry was applied."
+            },
+            "type": {
+              "const": "resize_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `SignalIntent` variant.",
+          "properties": {
+            "name": {
+              "description": "Stable display name such as `SIGINT`.",
+              "type": "string"
+            },
+            "number": {
+              "description": "Platform signal number.",
+              "format": "int32",
+              "type": "integer"
+            },
+            "operation_id": {
+              "description": "Identifier paired with the corresponding result.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": {
+              "const": "signal_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "number",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `SignalResult` variant.",
+          "properties": {
+            "error_code": {
+              "description": "Stable diagnostic code on failure.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operation_id": {
+              "description": "Identifier from the corresponding intent.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/OperationStatus",
+              "description": "Whether the signal syscall succeeded."
+            },
+            "type": {
+              "const": "signal_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical Marker variant.",
+          "properties": {
+            "label": {
+              "description": "User-provided marker label.",
+              "type": "string"
+            },
+            "operation_id": {
+              "description": "Caller-owned operation identifier used for durable deduplication.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": {
+              "const": "marker",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "label"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical Application variant.",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ApplicationEventKind",
+              "description": "Application lifecycle variant."
+            },
+            "operation_id": {
+              "description": "Actor request identity.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "parent_span_id": {
+              "description": "Parent span identity, when applicable.",
+              "format": "uuid",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "process_id": {
+              "description": "Caller-reported process ID.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "process_instance_id": {
+              "description": "Emitting process instance.",
+              "format": "uuid",
+              "type": "string"
+            },
+            "span_id": {
+              "description": "Span identity, when applicable.",
+              "format": "uuid",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "application",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id",
+            "process_instance_id",
+            "process_id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `QueryResponse` variant.",
+          "properties": {
+            "responder": {
+              "description": "Component that generated the elided query response.",
+              "type": "string"
+            },
+            "type": {
+              "const": "query_response",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "responder"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical Lifecycle variant.",
+          "properties": {
+            "lifecycle_kind": {
+              "$ref": "#/$defs/LifecycleKind",
+              "description": "Transition kind."
+            },
+            "pid": {
+              "description": "Child process ID when available.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "lifecycle",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "lifecycle_kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical Exit variant.",
+          "properties": {
+            "code": {
+              "description": "Exit status when the process exited normally.",
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "signal": {
+              "description": "Signal number when signal termination occurred.",
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "signal_name": {
+              "description": "Platform signal description when available.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "exit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Metadata for the canonical `HostError` variant.",
+          "properties": {
+            "code": {
+              "description": "Stable diagnostic code.",
+              "type": "string"
+            },
+            "message": {
+              "description": "Redacted human-readable message.",
+              "type": "string"
+            },
+            "type": {
+              "const": "host_error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "code",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EventPageCursor": {
+      "additionalProperties": false,
+      "description": "A checked chain endpoint, not permission to skip validation of an imported cursor.",
+      "properties": {
+        "event_hash": {
+          "description": "Hash immediately before `next_event_seq`, or header hash at zero.",
+          "type": "string"
+        },
+        "next_event_seq": {
+          "description": "Next scanned event, including events excluded by the filter.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/PageSource",
+          "description": "File and session identity."
+        }
+      },
+      "required": [
+        "source",
+        "next_event_seq",
+        "event_hash"
+      ],
+      "type": "object"
+    },
+    "EventProjection": {
+      "additionalProperties": false,
+      "description": "Stable JSONL projection of one canonical event record.",
+      "properties": {
+        "byte_payloads": {
+          "description": "Hash-and-length summaries when byte fields were elided.",
+          "items": {
+            "$ref": "#/$defs/BytePayloadSummary"
+          },
+          "type": "array"
+        },
+        "event": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Event"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact typed event when byte payloads were retained."
+        },
+        "event_type": {
+          "description": "Stable event variant name.",
+          "type": "string"
+        },
+        "hash": {
+          "description": "Canonical event hash.",
+          "type": "string"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EventMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Non-byte event fields when exact payloads were elided."
+        },
+        "metadata_only": {
+          "description": "Whether exact byte fields were elided.",
+          "type": "boolean"
+        },
+        "monotonic_ns": {
+          "description": "Session-monotonic event timestamp.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed_monotonic_ns": {
+          "description": "Separately observed timestamp, when the recorder retained one.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "prev_hash": {
+          "description": "Hash of the preceding canonical record or header.",
+          "type": "string"
+        },
+        "seq": {
+          "description": "Canonical event sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seq",
+        "monotonic_ns",
+        "prev_hash",
+        "hash",
+        "event_type",
+        "metadata_only",
+        "byte_payloads"
+      ],
+      "type": "object"
+    },
+    "InputDescriptor": {
+      "description": "Structured semantic provenance for exact input bytes.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Uninterpreted caller or host bytes.",
+          "properties": {
+            "kind": {
+              "const": "raw",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "UTF-8 text intentionally entered as textual content.",
+          "properties": {
+            "kind": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One semantic key encoded against a live terminal-mode snapshot.",
+          "properties": {
+            "alt": {
+              "description": "Alt modifier.",
+              "type": "boolean"
+            },
+            "control": {
+              "description": "Control modifier.",
+              "type": "boolean"
+            },
+            "encoder": {
+              "description": "Stable encoder identity.",
+              "type": "string"
+            },
+            "key": {
+              "description": "Stable symbolic key spelling.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "key",
+              "type": "string"
+            },
+            "shift": {
+              "description": "Shift modifier.",
+              "type": "boolean"
+            },
+            "super_key": {
+              "description": "Super modifier.",
+              "type": "boolean"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "key",
+            "shift",
+            "control",
+            "alt",
+            "super_key",
+            "encoder",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Paste content encoded against live bracketed-paste mode.",
+          "properties": {
+            "bracketed": {
+              "description": "Whether the actor applied bracketed-paste wrappers.",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "paste",
+              "type": "string"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "bracketed",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Focus transition encoded while DEC focus reporting was enabled.",
+          "properties": {
+            "encoder": {
+              "description": "Pinned encoder identity.",
+              "type": "string"
+            },
+            "focused": {
+              "description": "Whether the terminal gained (`true`) or lost (`false`) focus.",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "focus",
+              "type": "string"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "focused",
+            "encoder",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Pointer operation encoded against live mouse modes and geometry.",
+          "properties": {
+            "button": {
+              "description": "Button name for clicks, otherwise wheel direction.",
+              "type": "string"
+            },
+            "click_count": {
+              "description": "Complete click count, or zero for non-click operations.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "cols": {
+              "description": "Terminal columns at encoding time.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "column": {
+              "description": "Zero-based viewport column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "encoder": {
+              "description": "Pinned encoder identity.",
+              "type": "string"
+            },
+            "end_column": {
+              "description": "Optional zero-based destination column for a drag.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "end_row": {
+              "description": "Optional zero-based destination row for a drag.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "pointer",
+              "type": "string"
+            },
+            "lines": {
+              "description": "Signed requested wheel lines, or zero for clicks.",
+              "format": "int16",
+              "maximum": 32767,
+              "minimum": -32768,
+              "type": "integer"
+            },
+            "operation": {
+              "description": "`click`, `multi_click`, `drag`, or `scroll`.",
+              "type": "string"
+            },
+            "pixel_height": {
+              "description": "Total terminal surface height in pixels.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pixel_width": {
+              "description": "Total terminal surface width in pixels.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "row": {
+              "description": "Zero-based viewport row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "description": "Terminal rows at encoding time.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "operation",
+            "button",
+            "lines",
+            "column",
+            "row",
+            "click_count",
+            "cols",
+            "rows",
+            "pixel_width",
+            "pixel_height",
+            "encoder",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Semantic visible-text resolution followed by a mode-aware click.",
+          "properties": {
+            "cols": {
+              "description": "Current grid columns.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "encoder": {
+              "description": "Pinned encoder identity.",
+              "type": "string"
+            },
+            "end_column": {
+              "description": "Zero-based exclusive matched column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "activate",
+              "type": "string"
+            },
+            "presented_state_hash": {
+              "description": "Presented-state hash used for resolution and encoding.",
+              "type": "string"
+            },
+            "row": {
+              "description": "Zero-based matched row.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rows": {
+              "description": "Current grid rows.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "start_column": {
+              "description": "Zero-based first matched column.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "target_column": {
+              "description": "Cell chosen for the click.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "terminal_modes_hash": {
+              "description": "BLAKE3 of canonical JSON for the terminal mode snapshot.",
+              "type": "string"
+            },
+            "text": {
+              "description": "Exact matched text.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text",
+            "start_column",
+            "end_column",
+            "row",
+            "target_column",
+            "presented_state_hash",
+            "cols",
+            "rows",
+            "encoder",
+            "terminal_modes_hash"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "InputKind": {
+      "description": "User-facing interpretation of an input byte sequence.",
+      "oneOf": [
+        {
+          "const": "raw",
+          "description": "Uninterpreted bytes.",
+          "type": "string"
+        },
+        {
+          "const": "text",
+          "description": "Typed textual content.",
+          "type": "string"
+        },
+        {
+          "const": "keys",
+          "description": "One or more symbolic keyboard keys.",
+          "type": "string"
+        },
+        {
+          "const": "paste",
+          "description": "Pasted content.",
+          "type": "string"
+        },
+        {
+          "const": "focus",
+          "description": "Terminal-window focus transition.",
+          "type": "string"
+        },
+        {
+          "const": "pointer",
+          "description": "Cell-addressed mouse or wheel operation.",
+          "type": "string"
+        }
+      ]
+    },
+    "InputSource": {
+      "description": "Origin of bytes sent to the child process.",
+      "oneOf": [
+        {
+          "const": "human",
+          "description": "Input received from the attached native terminal.",
+          "type": "string"
+        },
+        {
+          "const": "agent",
+          "description": "Input requested through the agent control protocol.",
+          "type": "string"
+        },
+        {
+          "const": "host",
+          "description": "Automatic terminal-host response or internal control input.",
+          "type": "string"
+        }
+      ]
+    },
+    "LifecycleKind": {
+      "description": "Why a process lifecycle transition occurred.",
+      "oneOf": [
+        {
+          "const": "spawned",
+          "description": "The PTY and child process were created.",
+          "type": "string"
+        },
+        {
+          "const": "output_closed",
+          "description": "The child output stream reached end-of-file.",
+          "type": "string"
+        },
+        {
+          "const": "stopping",
+          "description": "The session host began orderly shutdown.",
+          "type": "string"
+        }
+      ]
+    },
+    "OperationStatus": {
+      "description": "Result of a state-changing operation.",
+      "oneOf": [
+        {
+          "const": "applied",
+          "description": "The complete operation was applied once.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "The operation failed without a complete application.",
+          "type": "string"
+        }
+      ]
+    },
+    "PageSource": {
+      "additionalProperties": false,
+      "description": "Identity of the canonical file opened for a page. Display paths are not authoritative.",
+      "properties": {
+        "device": {
+          "description": "Device of the canonical root descriptor.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "header_hash": {
+          "description": "Hash of the exact canonical header bytes.",
+          "type": "string"
+        },
+        "inode": {
+          "description": "Inode of the canonical root descriptor.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "description": "Immutable canonical session identity.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "session_path": {
+          "$ref": "#/$defs/Base64Bytes",
+          "description": "Exact absolute canonical session directory bytes."
+        },
+        "session_path_display": {
+          "description": "Non-authoritative display only; never used to select or authenticate a source.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_path",
+        "session_path_display",
+        "session_id",
+        "device",
+        "inode",
+        "header_hash"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/sdk-event-page.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Bounded projected canonical events. `has_more` concerns this finite snapshot only.",
+  "properties": {
+    "cursor": {
+      "$ref": "#/$defs/EventPageCursor",
+      "description": "Next scanned position. Filters may advance an empty page."
+    },
+    "events": {
+      "description": "Ordered matching projections with hashes, timestamps, and optional byte summaries.",
+      "items": {
+        "$ref": "#/$defs/EventProjection"
+      },
+      "type": "array"
+    },
+    "has_more": {
+      "description": "A matching complete record remains in the snapshot.",
+      "type": "boolean"
+    },
+    "incomplete_tail": {
+      "description": "An incomplete trailing record was excluded from this live snapshot.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "events",
+    "cursor",
+    "has_more",
+    "incomplete_tail"
+  ],
+  "title": "ProjectedEventPage",
+  "type": "object"
+}

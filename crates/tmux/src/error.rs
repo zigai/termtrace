@@ -1,5 +1,6 @@
 use crate::{artifact::TmuxRecordingLifecycle, lifecycle::LifecycleTrigger};
 use std::{error::Error as StdError, io, path::PathBuf, result::Result as StdResult};
+use termtrace_model::protocol::management::ManagementFailure;
 
 /// Failure of an aggregate tmux recording operation.
 #[derive(Debug, thiserror::Error)]
@@ -70,6 +71,24 @@ pub enum Error {
     /// No recording has this name.
     #[error("tmux recording `{0}` was not found")]
     NotFound(String),
+    /// Non-actor progress receipts, retaining the original failure and source.
+    #[error("{source}")]
+    Management {
+        /// Actual progress, never input-atom counts.
+        facts: Box<ManagementFailure>,
+        /// Underlying failure.
+        #[source]
+        source: Box<Error>,
+    },
+    /// A caller track operation failed, retaining its typed error source.
+    #[error("{operation} failed: {source}")]
+    TrackSource {
+        /// Failed operation.
+        operation: &'static str,
+        /// Original caller failure.
+        #[source]
+        source: Box<dyn StdError + Send + Sync>,
+    },
     /// A track operation supplied by the caller failed.
     #[error("{operation} failed: {message}")]
     Track {
@@ -81,6 +100,14 @@ pub enum Error {
 }
 
 impl Error {
+    /// Non-actor workflow receipts, when the owning operation recorded them.
+    pub fn management_facts(&self) -> Option<&ManagementFailure> {
+        return match self {
+            Self::Management { facts, .. } => Some(facts),
+            _ => None,
+        };
+    }
+
     /// Whether tmux failed because no server listens on the selected socket.
     pub fn is_server_unavailable(&self) -> bool {
         return matches!(

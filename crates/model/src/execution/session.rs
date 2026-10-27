@@ -116,6 +116,8 @@ pub struct VerificationReport {
     /// Report schema version.
     pub version: u32,
     /// Canonical session directory checked by the verifier.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub session: PathBuf,
     /// Requested verification depth.
     pub level: VerificationLevel,
@@ -314,6 +316,31 @@ pub struct SessionCompletion {
     pub resource_limit: Option<ResourceLimitOutcome>,
     /// Fatal recorder failure, absent for normal child completion.
     pub failure: Option<SessionFailure>,
+}
+
+/// Exit status of `termtrace record` for a child outcome, or `None` for an out-of-range code.
+#[must_use]
+pub fn recorder_exit_status(
+    exit_code: Option<i32>,
+    signal_name: Option<&str>,
+    resource_limited: bool,
+) -> Option<u8> {
+    if resource_limited {
+        return Some(1);
+    }
+
+    if let Some(signal) = signal_name {
+        return Some(match signal {
+            "Interrupt" | "SIGINT" | "INT" => 130,
+            "Terminate" | "Terminated" | "SIGTERM" | "TERM" => 143,
+            "Kill" | "Killed" | "SIGKILL" | "KILL" => 137,
+            "Pipe" | "BrokenPipe" | "Broken pipe" | "SIGPIPE" | "PIPE" => 141,
+            "Hangup" | "SIGHUP" | "HUP" => 129,
+            "Quit" | "SIGQUIT" | "QUIT" => 131,
+            _ => 1,
+        });
+    }
+    return exit_code.map_or(Some(1), |code| return u8::try_from(code).ok());
 }
 
 /// Initial PTY geometry.
@@ -526,6 +553,10 @@ pub struct TmuxPaneProvenance {
 mod tests {
     use super::*;
     use crate::execution::layout;
+    use std::{
+        ffi::OsString,
+        os::unix::ffi::{OsStrExt as _, OsStringExt as _},
+    };
 
     #[test]
     fn ghostty_profile_provenance_retains_the_split_hash_contract() {
@@ -600,5 +631,42 @@ mod tests {
 
             assert!(serde_json::from_value::<GeometryProvenance>(obsolete).is_err());
         }
+    }
+
+    #[test]
+    fn verification_utf8_report_preserves_historical_bytes_and_hashes() {
+        let golden =
+            include_bytes!("../../../../fixtures/conformance/sdk/verification-report-utf8.json");
+        let report: VerificationReport = serde_json::from_slice(golden).expect("historical report");
+        assert_eq!(
+            report.session,
+            PathBuf::from("/fixture/é-λ-\"quote\"-\\slash-\nline")
+        );
+
+        let mut actual = serde_json::to_vec_pretty(&report).expect("report serialization");
+        actual.push(b'\n');
+
+        assert_eq!(actual, golden);
+        assert_eq!(blake3::hash(&actual), blake3::hash(golden));
+    }
+
+    #[test]
+    fn verification_nonutf8_path_roundtrips_exact_bytes() {
+        let mut report: VerificationReport = serde_json::from_slice(include_bytes!(
+            "../../../../fixtures/conformance/sdk/verification-report-utf8.json"
+        ))
+        .expect("report");
+
+        let bytes = b"/verification/source-\xff";
+        report.session = PathBuf::from(OsString::from_vec(bytes.to_vec()));
+        report.artifact_roots_verified = u64::MAX;
+        let encoded = serde_json::to_vec(&report).expect("exact nonUTF8 serialization");
+        let decoded: VerificationReport = serde_json::from_slice(&encoded).expect("exact decode");
+        assert_eq!(decoded, report);
+        assert_eq!(decoded.session.as_os_str().as_bytes(), bytes);
+
+        let value: serde_json::Value = serde_json::from_slice(&encoded).expect("metadata");
+        assert_eq!(value["session"], serde_json::json!(bytes.to_vec()));
+        assert!(value["artifact_roots_verified"].is_u64());
     }
 }

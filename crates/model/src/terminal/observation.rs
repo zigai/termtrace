@@ -60,6 +60,8 @@ pub struct ReplayCheckpoint {
 #[serde(deny_unknown_fields)]
 pub struct ReplayCacheStatus {
     /// Cache directory inside the canonical session.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub directory: PathBuf,
     /// Number of checkpoint files currently retained.
     pub entries: u64,
@@ -76,6 +78,8 @@ pub struct ReplayCacheStatus {
 #[serde(deny_unknown_fields)]
 pub struct ReplayCachePruneReport {
     /// Cache directory considered.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub directory: PathBuf,
     /// Files removed.
     pub removed_entries: u64,

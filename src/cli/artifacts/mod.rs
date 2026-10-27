@@ -46,12 +46,12 @@ use termtrace_media::presentation::PreviewOptions;
 use termtrace_media::save::{save, save_screenshot_batch};
 use termtrace_model::{
     artifact::bundle::BundleVerificationPolicy, artifact::save::SaveFormat,
-    execution::event::Event, execution::session::CaptureTarget, execution::session::SessionPhase,
-    protocol::capability::NATIVE_VIDEO_CAPABILITY, terminal::observation::StatePoint,
-    terminal::replay::StateSelection, value::ByteString,
+    artifact::sdk::DecimalU64, execution::event::Event, execution::session::CaptureTarget,
+    execution::session::SessionPhase, protocol::capability::NATIVE_VIDEO_CAPABILITY,
+    terminal::observation::StatePoint, terminal::replay::StateSelection, value::ByteString,
 };
 use termtrace_service::artifacts::{
-    source_name, ArtifactService, VideoMode, VideoOutcome, VideoRequest,
+    source_name, ArtifactService, VideoMode, VideoOutcome, VideoRenderer, VideoRequest,
 };
 
 pub(super) fn run_export_asciicast(
@@ -205,6 +205,22 @@ pub(super) fn run_video_facade(
     response: &mut ResponseWriter,
     arguments: VideoFacadeArgs,
 ) -> Result<ExitCode> {
+    if let Some(fps) = arguments.fps {
+        let extension = arguments
+            .out
+            .as_ref()
+            .and_then(|p| return p.extension())
+            .and_then(|e| return e.to_str());
+
+        if extension == Some("gif") && fps > 100 {
+            return Err(miette::miette!("GIF FPS must be in 1..=100"));
+        }
+
+        if !matches!(extension, Some("gif" | "webm")) && !matches!(fps, 24 | 30 | 60) {
+            return Err(miette::miette!("video FPS must be 24, 30, or 60"));
+        }
+    }
+
     let resolved = resolve_session(arguments.session.clone())?;
     if resolved.phase != SessionPhase::Completed {
         return write_session_lifecycle(response, &resolved, "video", ExitCode::FAILURE);
@@ -239,6 +255,7 @@ pub(super) fn run_video_facade(
         hold_start: arguments.hold_start,
         hold_end: arguments.hold_end,
         cursor_style: arguments.cursor_style.into(),
+        gif_loop: arguments.gif_loop.map(Into::into),
         ..VideoRequest::new(resolved.path, mode)
     };
 
@@ -269,6 +286,24 @@ pub(super) fn render_video(
                 "source": source_name(&plan.source),
             }),
         ),
+        VideoOutcome::Derived {
+            plan,
+            output,
+            artifact,
+        } => write_json_line(
+            response,
+            &serde_json::json!({
+                "kind": "video",
+                "output": ByteString::from(output.as_os_str().as_bytes()),
+                "output_display": output.display().to_string(),
+                "artifact": artifact,
+                "fps": plan.fps,
+                "width": plan.output_width,
+                "height": plan.output_height,
+                "frame_count": DecimalU64(plan.output_frame_count),
+                "edit_plan_hash": plan.edit_plan_hash,
+            }),
+        ),
         VideoOutcome::Rendered {
             plan,
             output,
@@ -282,6 +317,11 @@ pub(super) fn render_video(
                 "manifest": sidecar.join("manifest.json"),
                 "artifact_directory": sidecar,
                 "renderer": source_name(&plan.source),
+                "source_kind": match request.renderer {
+                    VideoRenderer::Semantic => "semantic_rendering",
+                    VideoRenderer::OriginalExecution => "original_execution",
+                    _ => "native_replay",
+                },
                 "fps": plan.fps,
                 "width": plan.output_width,
                 "height": plan.output_height,

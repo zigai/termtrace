@@ -1,5 +1,21 @@
 {
   "$defs": {
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    },
     "ScenarioFailure": {
       "additionalProperties": false,
       "description": "Stable failure context for one scenario step.",
@@ -35,6 +51,30 @@
       ],
       "type": "object"
     },
+    "ScenarioInfrastructureError": {
+      "additionalProperties": false,
+      "description": "Safe structured infrastructure diagnostic. No child output or environment values.",
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable error code.",
+          "type": "string"
+        },
+        "message": {
+          "description": "Safe bounded explanation.",
+          "type": "string"
+        },
+        "phase": {
+          "description": "Lifecycle or reporting phase.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase",
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
     "ScenarioStatus": {
       "description": "Overall scenario disposition.",
       "oneOf": [
@@ -46,6 +86,11 @@
         {
           "const": "failed",
           "description": "One step failed and later steps did not run.",
+          "type": "string"
+        },
+        {
+          "const": "error",
+          "description": "Infrastructure prevented trustworthy completion.",
           "type": "string"
         }
       ]
@@ -93,9 +138,24 @@
   "additionalProperties": false,
   "description": "Machine-readable scenario outcome.",
   "properties": {
+    "artifact_warnings": {
+      "description": "Optional evidence derivations that could not be produced.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "canonical_session": {
-      "description": "Owner-only canonical evidence path.",
-      "type": "string"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExactPath"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owner-only canonical evidence path, absent for prelaunch failures."
     },
     "failure": {
       "anyOf": [
@@ -109,20 +169,35 @@
       "description": "First failure, if any."
     },
     "failure_artifacts": {
-      "description": "Atomic failure evidence directory, if the scenario failed.",
-      "type": [
-        "string",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExactPath"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Atomic failure evidence directory, only after successful publication."
+    },
+    "infrastructure_errors": {
+      "description": "Ordered required infrastructure failures, including secondary cleanup errors.",
+      "items": {
+        "$ref": "#/$defs/ScenarioInfrastructureError"
+      },
+      "type": "array"
     },
     "name": {
       "description": "Scenario name.",
       "type": "string"
     },
     "session_id": {
-      "description": "Immutable canonical session identity.",
+      "description": "Immutable canonical session identity, absent when launch never returned a session.",
       "format": "uuid",
-      "type": "string"
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "status": {
       "$ref": "#/$defs/ScenarioStatus",
@@ -136,9 +211,10 @@
       "type": "array"
     },
     "version": {
-      "description": "Scenario format version.",
+      "description": "Scenario report contract version (independent of documents).",
       "format": "uint32",
-      "minimum": 0,
+      "maximum": 3,
+      "minimum": 3,
       "type": "integer"
     }
   },
@@ -146,9 +222,9 @@
     "version",
     "name",
     "status",
-    "session_id",
-    "canonical_session",
-    "steps"
+    "steps",
+    "infrastructure_errors",
+    "artifact_warnings"
   ],
   "title": "ScenarioReport",
   "type": "object"

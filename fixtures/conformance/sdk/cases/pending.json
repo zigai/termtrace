@@ -1,0 +1,3605 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "session.environment.positive",
+      "row_id": "session.environment",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "LaunchSpec::environment: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "session.environment.negative",
+      "row_id": "session.environment",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "LaunchSpec::environment: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "session.environment.lifecycle",
+      "row_id": "session.environment",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "LaunchSpec::environment: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "session.resource_limits.positive",
+      "row_id": "session.resource_limits",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "LaunchSpec::limits: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "session.resource_limits.negative",
+      "row_id": "session.resource_limits",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "LaunchSpec::limits: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "session.resource_limits.lifecycle",
+      "row_id": "session.resource_limits",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "LaunchSpec::limits: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "session.readiness.positive",
+      "row_id": "session.readiness",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "await_ready: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "session.readiness.negative",
+      "row_id": "session.readiness",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "await_ready: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "session.readiness.lifecycle",
+      "row_id": "session.readiness",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "await_ready: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "session.attach.positive",
+      "row_id": "session.attach",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Terminal::attach: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "session.attach.negative",
+      "row_id": "session.attach",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Terminal::attach: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "session.attach.lifecycle",
+      "row_id": "session.attach",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Terminal::attach: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "session.target.positive",
+      "row_id": "session.target",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Terminal::attach_target: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "session.target.negative",
+      "row_id": "session.target",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Terminal::attach_target: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "session.target.lifecycle",
+      "row_id": "session.target",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Terminal::attach_target: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "session.status.positive",
+      "row_id": "session.status",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::status: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "session.status.negative",
+      "row_id": "session.status",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::status: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "session.status.lifecycle",
+      "row_id": "session.status",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::status: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "screen.observe.positive",
+      "row_id": "screen.observe",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::observe: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "screen.observe.negative",
+      "row_id": "screen.observe",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::observe: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "screen.observe.lifecycle",
+      "row_id": "screen.observe",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::observe: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "screen.resolve.positive",
+      "row_id": "screen.resolve",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::frame_at: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "screen.resolve.negative",
+      "row_id": "screen.resolve",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::frame_at: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "screen.resolve.lifecycle",
+      "row_id": "screen.resolve",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::frame_at: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "screen.provenance.positive",
+      "row_id": "screen.provenance",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenFrameSource: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "screen.provenance.negative",
+      "row_id": "screen.provenance",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenFrameSource: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "screen.provenance.lifecycle",
+      "row_id": "screen.provenance",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenFrameSource: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "screen.hidden.positive",
+      "row_id": "screen.hidden",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::observe: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "screen.hidden.negative",
+      "row_id": "screen.hidden",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::observe: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "screen.hidden.lifecycle",
+      "row_id": "screen.hidden",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::observe: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "screen.presented.positive",
+      "row_id": "screen.presented",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "StatePoint::LatestPresented: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "screen.presented.negative",
+      "row_id": "screen.presented",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "StatePoint::LatestPresented: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "screen.presented.lifecycle",
+      "row_id": "screen.presented",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "StatePoint::LatestPresented: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "screen.spans.positive",
+      "row_id": "screen.spans",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "FrameDetail::Spans: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "screen.spans.negative",
+      "row_id": "screen.spans",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "FrameDetail::Spans: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "screen.spans.lifecycle",
+      "row_id": "screen.spans",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "FrameDetail::Spans: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "screen.cells.positive",
+      "row_id": "screen.cells",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "FrameDetail::Cells: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "screen.cells.negative",
+      "row_id": "screen.cells",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "FrameDetail::Cells: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "screen.cells.lifecycle",
+      "row_id": "screen.cells",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "FrameDetail::Cells: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "screen.bounds.positive",
+      "row_id": "screen.bounds",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenProjectionRequest: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "screen.bounds.negative",
+      "row_id": "screen.bounds",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenProjectionRequest: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "screen.bounds.lifecycle",
+      "row_id": "screen.bounds",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenProjectionRequest: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "screen.cursor.positive",
+      "row_id": "screen.cursor",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenFrame: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "screen.cursor.negative",
+      "row_id": "screen.cursor",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenFrame: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "screen.cursor.lifecycle",
+      "row_id": "screen.cursor",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenFrame: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "screen.modes.positive",
+      "row_id": "screen.modes",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenFrame: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "screen.modes.negative",
+      "row_id": "screen.modes",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenFrame: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "screen.modes.lifecycle",
+      "row_id": "screen.modes",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenFrame: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "screen.colors.positive",
+      "row_id": "screen.colors",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenAppearance: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "screen.colors.negative",
+      "row_id": "screen.colors",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenAppearance: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "screen.colors.lifecycle",
+      "row_id": "screen.colors",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenAppearance: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "screen.wraps.positive",
+      "row_id": "screen.wraps",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenTextRow: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "screen.wraps.negative",
+      "row_id": "screen.wraps",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenTextRow: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "screen.wraps.lifecycle",
+      "row_id": "screen.wraps",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "ScreenTextRow: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "locators.text.positive",
+      "row_id": "locators.text",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "LocatorSpec::text: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "locators.text.negative",
+      "row_id": "locators.text",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "LocatorSpec::text: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "locators.text.lifecycle",
+      "row_id": "locators.text",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "LocatorSpec::text: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "locators.regex.positive",
+      "row_id": "locators.regex",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "LocatorSpec::regex: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "locators.regex.negative",
+      "row_id": "locators.regex",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "LocatorSpec::regex: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "locators.regex.lifecycle",
+      "row_id": "locators.regex",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "LocatorSpec::regex: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "locators.style.positive",
+      "row_id": "locators.style",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "LocatorSpec::with_style: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "locators.style.negative",
+      "row_id": "locators.style",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "LocatorSpec::with_style: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "locators.style.lifecycle",
+      "row_id": "locators.style",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "LocatorSpec::with_style: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "locators.regions.positive",
+      "row_id": "locators.regions",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "LocatorSpec::in_region: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "locators.regions.negative",
+      "row_id": "locators.regions",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "LocatorSpec::in_region: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "locators.regions.lifecycle",
+      "row_id": "locators.regions",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "LocatorSpec::in_region: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "locators.strictness.positive",
+      "row_id": "locators.strictness",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "QueryResult::single: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "locators.strictness.negative",
+      "row_id": "locators.strictness",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "QueryResult::single: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "locators.strictness.lifecycle",
+      "row_id": "locators.strictness",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "QueryResult::single: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "waits.text.positive",
+      "row_id": "waits.text",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::wait_screen: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "waits.text.negative",
+      "row_id": "waits.text",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::wait_screen: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "waits.text.lifecycle",
+      "row_id": "waits.text",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::wait_screen: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "waits.stable.positive",
+      "row_id": "waits.stable",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Locator::wait_stable: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "waits.stable.negative",
+      "row_id": "waits.stable",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Locator::wait_stable: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "waits.stable.lifecycle",
+      "row_id": "waits.stable",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Locator::wait_stable: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "waits.reaction.positive",
+      "row_id": "waits.reaction",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Locator::wait: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "waits.reaction.negative",
+      "row_id": "waits.reaction",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Locator::wait: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "waits.reaction.lifecycle",
+      "row_id": "waits.reaction",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Locator::wait: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "waits.idle.positive",
+      "row_id": "waits.idle",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::capture_stable: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "waits.idle.negative",
+      "row_id": "waits.idle",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::capture_stable: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "waits.idle.lifecycle",
+      "row_id": "waits.idle",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::capture_stable: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "input.text.positive",
+      "row_id": "input.text",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest::text: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "input.text.negative",
+      "row_id": "input.text",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest::text: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "input.text.lifecycle",
+      "row_id": "input.text",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest::text: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "input.key.positive",
+      "row_id": "input.key",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest::key: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "input.key.negative",
+      "row_id": "input.key",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest::key: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "input.key.lifecycle",
+      "row_id": "input.key",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest::key: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "input.bytes.positive",
+      "row_id": "input.bytes",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest::bytes: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "input.bytes.negative",
+      "row_id": "input.bytes",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest::bytes: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "input.bytes.lifecycle",
+      "row_id": "input.bytes",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest::bytes: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "input.paste.positive",
+      "row_id": "input.paste",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest::paste: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "input.paste.negative",
+      "row_id": "input.paste",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest::paste: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "input.paste.lifecycle",
+      "row_id": "input.paste",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest::paste: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "input.pointer.positive",
+      "row_id": "input.pointer",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Pointer::click: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "input.pointer.negative",
+      "row_id": "input.pointer",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Pointer::click: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "input.pointer.lifecycle",
+      "row_id": "input.pointer",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Pointer::click: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "input.focus.positive",
+      "row_id": "input.focus",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Pointer::focus: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "input.focus.negative",
+      "row_id": "input.focus",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Pointer::focus: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "input.focus.lifecycle",
+      "row_id": "input.focus",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Pointer::focus: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "input.pacing.positive",
+      "row_id": "input.pacing",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "input.pacing.negative",
+      "row_id": "input.pacing",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "input.pacing.lifecycle",
+      "row_id": "input.pacing",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActRequest: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "input.resize.positive",
+      "row_id": "input.resize",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "SendStep: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "input.resize.negative",
+      "row_id": "input.resize",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "SendStep: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "input.resize.lifecycle",
+      "row_id": "input.resize",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "SendStep: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "input.signal.positive",
+      "row_id": "input.signal",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "SendStep: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "input.signal.negative",
+      "row_id": "input.signal",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "SendStep: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "input.signal.lifecycle",
+      "row_id": "input.signal",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "SendStep: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "input.markers.positive",
+      "row_id": "input.markers",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "SendStep: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "input.markers.negative",
+      "row_id": "input.markers",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "SendStep: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "input.markers.lifecycle",
+      "row_id": "input.markers",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "SendStep: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "input.ordered_send.positive",
+      "row_id": "input.ordered_send",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::send: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "input.ordered_send.negative",
+      "row_id": "input.ordered_send",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::send: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "input.ordered_send.lifecycle",
+      "row_id": "input.ordered_send",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::send: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "mutation.request_identity.positive",
+      "row_id": "mutation.request_identity",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ControlRequest: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "mutation.request_identity.negative",
+      "row_id": "mutation.request_identity",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ControlRequest: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "mutation.request_identity.lifecycle",
+      "row_id": "mutation.request_identity",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ControlRequest: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "mutation.deduplication.positive",
+      "row_id": "mutation.deduplication",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ControlRequest: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "mutation.deduplication.negative",
+      "row_id": "mutation.deduplication",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ControlRequest: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "mutation.deduplication.lifecycle",
+      "row_id": "mutation.deduplication",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ControlRequest: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "mutation.input_outcome.positive",
+      "row_id": "mutation.input_outcome",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActionInputResult: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "mutation.input_outcome.negative",
+      "row_id": "mutation.input_outcome",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActionInputResult: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "mutation.input_outcome.lifecycle",
+      "row_id": "mutation.input_outcome",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActionInputResult: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "mutation.postcondition.positive",
+      "row_id": "mutation.postcondition",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActionPostconditionResult: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "mutation.postcondition.negative",
+      "row_id": "mutation.postcondition",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActionPostconditionResult: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "mutation.postcondition.lifecycle",
+      "row_id": "mutation.postcondition",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "ActionPostconditionResult: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "mutation.effects.positive",
+      "row_id": "mutation.effects",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "MutationEffect: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "mutation.effects.negative",
+      "row_id": "mutation.effects",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "MutationEffect: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "mutation.effects.lifecycle",
+      "row_id": "mutation.effects",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "MutationEffect: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "mutation.retry.positive",
+      "row_id": "mutation.retry",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Retry: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "mutation.retry.negative",
+      "row_id": "mutation.retry",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Retry: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "mutation.retry.lifecycle",
+      "row_id": "mutation.retry",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Retry: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "lifecycle.detach.positive",
+      "row_id": "lifecycle.detach",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::detach: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "lifecycle.detach.negative",
+      "row_id": "lifecycle.detach",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::detach: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "lifecycle.detach.lifecycle",
+      "row_id": "lifecycle.detach",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::detach: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "lifecycle.force_close.positive",
+      "row_id": "lifecycle.force_close",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::force_close: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "lifecycle.force_close.negative",
+      "row_id": "lifecycle.force_close",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::force_close: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "lifecycle.force_close.lifecycle",
+      "row_id": "lifecycle.force_close",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::force_close: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "lifecycle.cancellation.positive",
+      "row_id": "lifecycle.cancellation",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::act: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "lifecycle.cancellation.negative",
+      "row_id": "lifecycle.cancellation",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::act: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "lifecycle.cancellation.lifecycle",
+      "row_id": "lifecycle.cancellation",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::act: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "testing.assertions.positive",
+      "row_id": "testing.assertions",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_screen_text: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "testing.assertions.negative",
+      "row_id": "testing.assertions",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_screen_text: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "testing.assertions.lifecycle",
+      "row_id": "testing.assertions",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_screen_text: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "testing.snapshots.positive",
+      "row_id": "testing.snapshots",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "SnapshotProfile: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "testing.snapshots.negative",
+      "row_id": "testing.snapshots",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "SnapshotProfile: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "testing.snapshots.lifecycle",
+      "row_id": "testing.snapshots",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "SnapshotProfile: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "testing.update_policy.positive",
+      "row_id": "testing.update_policy",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "SnapshotProfile: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "testing.update_policy.negative",
+      "row_id": "testing.update_policy",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "SnapshotProfile: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "testing.update_policy.lifecycle",
+      "row_id": "testing.update_policy",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "SnapshotProfile: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "testing.rust_helper.positive",
+      "row_id": "testing.rust_helper",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "run_terminal_test: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "testing.rust_helper.negative",
+      "row_id": "testing.rust_helper",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "run_terminal_test: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "testing.rust_helper.lifecycle",
+      "row_id": "testing.rust_helper",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "run_terminal_test: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "testing.pytest.positive",
+      "row_id": "testing.pytest",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "termtrace_session: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "testing.pytest.negative",
+      "row_id": "testing.pytest",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "termtrace_session: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "testing.pytest.lifecycle",
+      "row_id": "testing.pytest",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "termtrace_session: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "testing.node_helper.positive",
+      "row_id": "testing.node_helper",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "withTermtrace: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "testing.node_helper.negative",
+      "row_id": "testing.node_helper",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "withTermtrace: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "testing.node_helper.lifecycle",
+      "row_id": "testing.node_helper",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "withTermtrace: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "testing.cleanup_evidence.positive",
+      "row_id": "testing.cleanup_evidence",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "EvidencePolicy: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "testing.cleanup_evidence.negative",
+      "row_id": "testing.cleanup_evidence",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "EvidencePolicy: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "testing.cleanup_evidence.lifecycle",
+      "row_id": "testing.cleanup_evidence",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "EvidencePolicy: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "output.cursor.positive",
+      "row_id": "output.cursor",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "OutputCursor: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "output.cursor.negative",
+      "row_id": "output.cursor",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "OutputCursor: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "output.cursor.lifecycle",
+      "row_id": "output.cursor",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "OutputCursor: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "output.wait.positive",
+      "row_id": "output.wait",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "OutputService::wait_for: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "output.wait.negative",
+      "row_id": "output.wait",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "OutputService::wait_for: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "output.wait.lifecycle",
+      "row_id": "output.wait",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "OutputService::wait_for: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "events.filtering.positive",
+      "row_id": "events.filtering",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "EventsService::read_filtered_page: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "events.filtering.negative",
+      "row_id": "events.filtering",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "EventsService::read_filtered_page: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "events.filtering.lifecycle",
+      "row_id": "events.filtering",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "EventsService::read_filtered_page: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "events.follow.positive",
+      "row_id": "events.follow",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "Events::follow: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "events.follow.negative",
+      "row_id": "events.follow",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "Events::follow: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "events.follow.lifecycle",
+      "row_id": "events.follow",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "Events::follow: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "events.pagination.positive",
+      "row_id": "events.pagination",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "EventsService::read_page: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "events.pagination.negative",
+      "row_id": "events.pagination",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "EventsService::read_page: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "events.pagination.lifecycle",
+      "row_id": "events.pagination",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "EventsService::read_page: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "analysis.timeline.positive",
+      "row_id": "analysis.timeline",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::timeline_page: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "analysis.timeline.negative",
+      "row_id": "analysis.timeline",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::timeline_page: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "analysis.timeline.lifecycle",
+      "row_id": "analysis.timeline",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::timeline_page: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "analysis.diff.positive",
+      "row_id": "analysis.diff",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::diff: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "analysis.diff.negative",
+      "row_id": "analysis.diff",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::diff: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "analysis.diff.lifecycle",
+      "row_id": "analysis.diff",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::diff: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "analysis.explain.positive",
+      "row_id": "analysis.explain",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::explain: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "analysis.explain.negative",
+      "row_id": "analysis.explain",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::explain: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "analysis.explain.lifecycle",
+      "row_id": "analysis.explain",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::explain: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "analysis.diagnose.positive",
+      "row_id": "analysis.diagnose",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::diagnose: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "analysis.diagnose.negative",
+      "row_id": "analysis.diagnose",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::diagnose: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "analysis.diagnose.lifecycle",
+      "row_id": "analysis.diagnose",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::diagnose: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "analysis.last_action.positive",
+      "row_id": "analysis.last_action",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::last_action: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "analysis.last_action.negative",
+      "row_id": "analysis.last_action",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::last_action: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "analysis.last_action.lifecycle",
+      "row_id": "analysis.last_action",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::last_action: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "instrumentation.events.positive",
+      "row_id": "instrumentation.events",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "emit_event: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "instrumentation.events.negative",
+      "row_id": "instrumentation.events",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "emit_event: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "instrumentation.events.lifecycle",
+      "row_id": "instrumentation.events",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "emit_event: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "instrumentation.spans.positive",
+      "row_id": "instrumentation.spans",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ApplicationSpan: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "instrumentation.spans.negative",
+      "row_id": "instrumentation.spans",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ApplicationSpan: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "instrumentation.spans.lifecycle",
+      "row_id": "instrumentation.spans",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ApplicationSpan: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "integrity.verification.positive",
+      "row_id": "integrity.verification",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "IntegrityService::verify: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "integrity.verification.negative",
+      "row_id": "integrity.verification",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "IntegrityService::verify: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "integrity.verification.lifecycle",
+      "row_id": "integrity.verification",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "IntegrityService::verify: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "integrity.recovery.positive",
+      "row_id": "integrity.recovery",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "IntegrityService::recover_session: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "integrity.recovery.negative",
+      "row_id": "integrity.recovery",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "IntegrityService::recover_session: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "integrity.recovery.lifecycle",
+      "row_id": "integrity.recovery",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "IntegrityService::recover_session: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "integrity.receipts.positive",
+      "row_id": "integrity.receipts",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "IntegrityService::sign: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "integrity.receipts.negative",
+      "row_id": "integrity.receipts",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "IntegrityService::sign: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "integrity.receipts.lifecycle",
+      "row_id": "integrity.receipts",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "IntegrityService::sign: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "integrity.signing.positive",
+      "row_id": "integrity.signing",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "IntegrityService::sign: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "integrity.signing.negative",
+      "row_id": "integrity.signing",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "IntegrityService::sign: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "integrity.signing.lifecycle",
+      "row_id": "integrity.signing",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "IntegrityService::sign: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "integrity.sensitivity.positive",
+      "row_id": "integrity.sensitivity",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactSensitivity: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "integrity.sensitivity.negative",
+      "row_id": "integrity.sensitivity",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactSensitivity: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "integrity.sensitivity.lifecycle",
+      "row_id": "integrity.sensitivity",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactSensitivity: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "bundles.create.positive",
+      "row_id": "bundles.create",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::create_bundle: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "bundles.create.negative",
+      "row_id": "bundles.create",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::create_bundle: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "bundles.create.lifecycle",
+      "row_id": "bundles.create",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::create_bundle: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "bundles.profiles.positive",
+      "row_id": "bundles.profiles",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "BundleProfile: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "bundles.profiles.negative",
+      "row_id": "bundles.profiles",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "BundleProfile: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "bundles.profiles.lifecycle",
+      "row_id": "bundles.profiles",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "BundleProfile: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "bundles.verify.positive",
+      "row_id": "bundles.verify",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::verify_bundle: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "bundles.verify.negative",
+      "row_id": "bundles.verify",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::verify_bundle: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "bundles.verify.lifecycle",
+      "row_id": "bundles.verify",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::verify_bundle: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "registry.discovery.positive",
+      "row_id": "registry.discovery",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::list: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "registry.discovery.negative",
+      "row_id": "registry.discovery",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::list: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "registry.discovery.lifecycle",
+      "row_id": "registry.discovery",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::list: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "registry.register.positive",
+      "row_id": "registry.register",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::register: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "registry.register.negative",
+      "row_id": "registry.register",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::register: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "registry.register.lifecycle",
+      "row_id": "registry.register",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::register: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "registry.remove.positive",
+      "row_id": "registry.remove",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::remove: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "registry.remove.negative",
+      "row_id": "registry.remove",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::remove: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "registry.remove.lifecycle",
+      "row_id": "registry.remove",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::remove: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "registry.restart.positive",
+      "row_id": "registry.restart",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::restart: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "registry.restart.negative",
+      "row_id": "registry.restart",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::restart: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "registry.restart.lifecycle",
+      "row_id": "registry.restart",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::restart: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "registry.gc.positive",
+      "row_id": "registry.gc",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::gc: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "registry.gc.negative",
+      "row_id": "registry.gc",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::gc: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "registry.gc.lifecycle",
+      "row_id": "registry.gc",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::gc: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "tmux.management.positive",
+      "row_id": "tmux.management",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "TmuxService: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "tmux.management.negative",
+      "row_id": "tmux.management",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "TmuxService: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "tmux.management.lifecycle",
+      "row_id": "tmux.management",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "TmuxService: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "tmux.aggregation.positive",
+      "row_id": "tmux.aggregation",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "TmuxService::bundle: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "tmux.aggregation.negative",
+      "row_id": "tmux.aggregation",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "TmuxService::bundle: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "tmux.aggregation.lifecycle",
+      "row_id": "tmux.aggregation",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "TmuxService::bundle: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "tmux.verification.positive",
+      "row_id": "tmux.verification",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "TmuxService::verify_bundle: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "tmux.verification.negative",
+      "row_id": "tmux.verification",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "TmuxService::verify_bundle: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "tmux.verification.lifecycle",
+      "row_id": "tmux.verification",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "TmuxService::verify_bundle: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "system.probes.positive",
+      "row_id": "system.probes",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "SystemService::probe_capabilities: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "system.probes.negative",
+      "row_id": "system.probes",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "SystemService::probe_capabilities: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "system.probes.lifecycle",
+      "row_id": "system.probes",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "SystemService::probe_capabilities: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "system.versions.positive",
+      "row_id": "system.versions",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "CapabilityReport: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "system.versions.negative",
+      "row_id": "system.versions",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "CapabilityReport: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "system.versions.lifecycle",
+      "row_id": "system.versions",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "CapabilityReport: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "system.schemas.positive",
+      "row_id": "system.schemas",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "termtrace_schema::catalog: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "system.schemas.negative",
+      "row_id": "system.schemas",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "termtrace_schema::catalog: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "system.schemas.lifecycle",
+      "row_id": "system.schemas",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "termtrace_schema::catalog: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "system.diagnostics.positive",
+      "row_id": "system.diagnostics",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ErrorKind: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "system.diagnostics.negative",
+      "row_id": "system.diagnostics",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ErrorKind: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "system.diagnostics.lifecycle",
+      "row_id": "system.diagnostics",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ErrorKind: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "artifacts.png.positive",
+      "row_id": "artifacts.png",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "artifacts.png.negative",
+      "row_id": "artifacts.png",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "artifacts.png.lifecycle",
+      "row_id": "artifacts.png",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "artifacts.svg.positive",
+      "row_id": "artifacts.svg",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "artifacts.svg.negative",
+      "row_id": "artifacts.svg",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "artifacts.svg.lifecycle",
+      "row_id": "artifacts.svg",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "artifacts.html.positive",
+      "row_id": "artifacts.html",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "artifacts.html.negative",
+      "row_id": "artifacts.html",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "artifacts.html.lifecycle",
+      "row_id": "artifacts.html",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "artifacts.txt.positive",
+      "row_id": "artifacts.txt",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "artifacts.txt.negative",
+      "row_id": "artifacts.txt",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "artifacts.txt.lifecycle",
+      "row_id": "artifacts.txt",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "artifacts.json.positive",
+      "row_id": "artifacts.json",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "artifacts.json.negative",
+      "row_id": "artifacts.json",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "artifacts.json.lifecycle",
+      "row_id": "artifacts.json",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "artifacts.deep_json.positive",
+      "row_id": "artifacts.deep_json",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "artifacts.deep_json.negative",
+      "row_id": "artifacts.deep_json",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "artifacts.deep_json.lifecycle",
+      "row_id": "artifacts.deep_json",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "artifacts.vt.positive",
+      "row_id": "artifacts.vt",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "artifacts.vt.negative",
+      "row_id": "artifacts.vt",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "artifacts.vt.lifecycle",
+      "row_id": "artifacts.vt",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::save: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "artifacts.asciicast.positive",
+      "row_id": "artifacts.asciicast",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::export_asciicast: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "artifacts.asciicast.negative",
+      "row_id": "artifacts.asciicast",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::export_asciicast: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "artifacts.asciicast.lifecycle",
+      "row_id": "artifacts.asciicast",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "ArtifactService::export_asciicast: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "native.original_recording.positive",
+      "row_id": "native.original_recording",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "Terminal::start_original::capture: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "native.original_recording.negative",
+      "row_id": "native.original_recording",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "Terminal::start_original::capture: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "native.original_recording.lifecycle",
+      "row_id": "native.original_recording",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "Terminal::start_original::capture: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "native.live_control.positive",
+      "row_id": "native.live_control",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "OriginalSession::session resize::act: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "native.live_control.negative",
+      "row_id": "native.live_control",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "OriginalSession::session resize::act: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "native.live_control.lifecycle",
+      "row_id": "native.live_control",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "OriginalSession::session resize::act: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "native.replay_screenshot.positive",
+      "row_id": "native.replay_screenshot",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "Native::replay_worker: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "native.replay_screenshot.negative",
+      "row_id": "native.replay_screenshot",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "Native::replay_worker: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "native.replay_screenshot.lifecycle",
+      "row_id": "native.replay_screenshot",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "Native::replay_worker: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "native.replay_video.positive",
+      "row_id": "native.replay_video",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "Native::capture: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "native.replay_video.negative",
+      "row_id": "native.replay_video",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "Native::capture: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "native.replay_video.lifecycle",
+      "row_id": "native.replay_video",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "Native::capture: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "native.playback.positive",
+      "row_id": "native.playback",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "Native::playback: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "native.playback.negative",
+      "row_id": "native.playback",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "Native::playback: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "native.playback.lifecycle",
+      "row_id": "native.playback",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "07",
+      "expectation": "Native::playback: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "delivery.gif.positive",
+      "row_id": "delivery.gif",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "08",
+      "expectation": "termtrace_media: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "delivery.gif.negative",
+      "row_id": "delivery.gif",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "08",
+      "expectation": "termtrace_media: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "delivery.gif.lifecycle",
+      "row_id": "delivery.gif",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "08",
+      "expectation": "termtrace_media: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "delivery.webm.positive",
+      "row_id": "delivery.webm",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "08",
+      "expectation": "termtrace_media: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "delivery.webm.negative",
+      "row_id": "delivery.webm",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "08",
+      "expectation": "termtrace_media: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "delivery.webm.lifecycle",
+      "row_id": "delivery.webm",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "08",
+      "expectation": "termtrace_media: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "delivery.codec_availability.positive",
+      "row_id": "delivery.codec_availability",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "08",
+      "expectation": "termtrace_media: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "delivery.codec_availability.negative",
+      "row_id": "delivery.codec_availability",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "08",
+      "expectation": "termtrace_media: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "delivery.codec_availability.lifecycle",
+      "row_id": "delivery.codec_availability",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "08",
+      "expectation": "termtrace_media: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "delivery.no_replace.positive",
+      "row_id": "delivery.no_replace",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "08",
+      "expectation": "termtrace_media: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "delivery.no_replace.negative",
+      "row_id": "delivery.no_replace",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "08",
+      "expectation": "termtrace_media: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "delivery.no_replace.lifecycle",
+      "row_id": "delivery.no_replace",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "08",
+      "expectation": "termtrace_media: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "visual.profiles.positive",
+      "row_id": "visual.profiles",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "VisualManifest: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "visual.profiles.negative",
+      "row_id": "visual.profiles",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "VisualManifest: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "visual.profiles.lifecycle",
+      "row_id": "visual.profiles",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "VisualManifest: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "visual.geometry.positive",
+      "row_id": "visual.geometry",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "GeometrySolveReport: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "visual.geometry.negative",
+      "row_id": "visual.geometry",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "GeometrySolveReport: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "visual.geometry.lifecycle",
+      "row_id": "visual.geometry",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "GeometrySolveReport: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "visual.fonts.positive",
+      "row_id": "visual.fonts",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "VisualManifest: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "visual.fonts.negative",
+      "row_id": "visual.fonts",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "VisualManifest: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "visual.fonts.lifecycle",
+      "row_id": "visual.fonts",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "VisualManifest: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "visual.dpi.positive",
+      "row_id": "visual.dpi",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "VisualManifest: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "visual.dpi.negative",
+      "row_id": "visual.dpi",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "VisualManifest: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "visual.dpi.lifecycle",
+      "row_id": "visual.dpi",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "VisualManifest: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "visual.config_identity.positive",
+      "row_id": "visual.config_identity",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "VisualManifest: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "visual.config_identity.negative",
+      "row_id": "visual.config_identity",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "VisualManifest: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "visual.config_identity.lifecycle",
+      "row_id": "visual.config_identity",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "09",
+      "expectation": "VisualManifest: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "presentation.edit_plans.positive",
+      "row_id": "presentation.edit_plans",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "presentation.edit_plans.negative",
+      "row_id": "presentation.edit_plans",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "presentation.edit_plans.lifecycle",
+      "row_id": "presentation.edit_plans",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "presentation.selectors.positive",
+      "row_id": "presentation.selectors",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "presentation.selectors.negative",
+      "row_id": "presentation.selectors",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "presentation.selectors.lifecycle",
+      "row_id": "presentation.selectors",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "presentation.clips.positive",
+      "row_id": "presentation.clips",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "presentation.clips.negative",
+      "row_id": "presentation.clips",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "presentation.clips.lifecycle",
+      "row_id": "presentation.clips",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "presentation.speeds.positive",
+      "row_id": "presentation.speeds",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "presentation.speeds.negative",
+      "row_id": "presentation.speeds",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "presentation.speeds.lifecycle",
+      "row_id": "presentation.speeds",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "presentation.holds.positive",
+      "row_id": "presentation.holds",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "presentation.holds.negative",
+      "row_id": "presentation.holds",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "presentation.holds.lifecycle",
+      "row_id": "presentation.holds",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "presentation.annotations.positive",
+      "row_id": "presentation.annotations",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "presentation.annotations.negative",
+      "row_id": "presentation.annotations",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "presentation.annotations.lifecycle",
+      "row_id": "presentation.annotations",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "presentation.subtitles.positive",
+      "row_id": "presentation.subtitles",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "presentation.subtitles.negative",
+      "row_id": "presentation.subtitles",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "presentation.subtitles.lifecycle",
+      "row_id": "presentation.subtitles",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "presentation.transforms.positive",
+      "row_id": "presentation.transforms",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "presentation.transforms.negative",
+      "row_id": "presentation.transforms",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "presentation.transforms.lifecycle",
+      "row_id": "presentation.transforms",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "EditPlan: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "presentation.dry_run.positive",
+      "row_id": "presentation.dry_run",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationPlan: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "presentation.dry_run.negative",
+      "row_id": "presentation.dry_run",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationPlan: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "presentation.dry_run.lifecycle",
+      "row_id": "presentation.dry_run",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationPlan: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "presentation.mapping.positive",
+      "row_id": "presentation.mapping",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationMapEntry: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "presentation.mapping.negative",
+      "row_id": "presentation.mapping",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationMapEntry: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "presentation.mapping.lifecycle",
+      "row_id": "presentation.mapping",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationMapEntry: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "presentation.preview.positive",
+      "row_id": "presentation.preview",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationPreviewManifest: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "presentation.preview.negative",
+      "row_id": "presentation.preview",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationPreviewManifest: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "presentation.preview.lifecycle",
+      "row_id": "presentation.preview",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationPreviewManifest: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "presentation.export.positive",
+      "row_id": "presentation.export",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationManifest: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "presentation.export.negative",
+      "row_id": "presentation.export",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationManifest: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "presentation.export.lifecycle",
+      "row_id": "presentation.export",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationManifest: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "presentation.verification.positive",
+      "row_id": "presentation.verification",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationManifest: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "presentation.verification.negative",
+      "row_id": "presentation.verification",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationManifest: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "presentation.verification.lifecycle",
+      "row_id": "presentation.verification",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "10",
+      "expectation": "PresentationManifest: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "workflows.parallel.positive",
+      "row_id": "workflows.parallel",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "workflows.parallel.negative",
+      "row_id": "workflows.parallel",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "workflows.parallel.lifecycle",
+      "row_id": "workflows.parallel",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "workflows.sharded.positive",
+      "row_id": "workflows.sharded",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "workflows.sharded.negative",
+      "row_id": "workflows.sharded",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "workflows.sharded.lifecycle",
+      "row_id": "workflows.sharded",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "workflows.matrix.positive",
+      "row_id": "workflows.matrix",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "workflows.matrix.negative",
+      "row_id": "workflows.matrix",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "workflows.matrix.lifecycle",
+      "row_id": "workflows.matrix",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "workflows.snapshots.positive",
+      "row_id": "workflows.snapshots",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioFrameSnapshot: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "workflows.snapshots.negative",
+      "row_id": "workflows.snapshots",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioFrameSnapshot: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "workflows.snapshots.lifecycle",
+      "row_id": "workflows.snapshots",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioFrameSnapshot: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "workflows.aggregate.positive",
+      "row_id": "workflows.aggregate",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "workflows.aggregate.negative",
+      "row_id": "workflows.aggregate",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "workflows.aggregate.lifecycle",
+      "row_id": "workflows.aggregate",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "workflows.junit.positive",
+      "row_id": "workflows.junit",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "workflows.junit.negative",
+      "row_id": "workflows.junit",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "workflows.junit.lifecycle",
+      "row_id": "workflows.junit",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "workflows.ci_verdict.positive",
+      "row_id": "workflows.ci_verdict",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: operation returns its canonical model without information loss"
+    },
+    {
+      "id": "workflows.ci_verdict.negative",
+      "row_id": "workflows.ci_verdict",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: invalid or unavailable request is distinguished from success; no silent fallback"
+    },
+    {
+      "id": "workflows.ci_verdict.lifecycle",
+      "row_id": "workflows.ci_verdict",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "11",
+      "expectation": "ScenarioSuiteReport: source/evidence survives completion; failed work reports cleanup separately"
+    },
+    {
+      "id": "input.scroll.positive",
+      "row_id": "input.scroll",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Pointer::scroll: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "input.scroll.negative",
+      "row_id": "input.scroll",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Pointer::scroll: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "input.scroll.lifecycle",
+      "row_id": "input.scroll",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Pointer::scroll: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "session.working_directory.positive",
+      "row_id": "session.working_directory",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "LaunchSpec::working_directory: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "session.working_directory.negative",
+      "row_id": "session.working_directory",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "LaunchSpec::working_directory: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "session.working_directory.lifecycle",
+      "row_id": "session.working_directory",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "LaunchSpec::working_directory: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "screen.frame.positive",
+      "row_id": "screen.frame",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::frame: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "screen.frame.negative",
+      "row_id": "screen.frame",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::frame: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "screen.frame.lifecycle",
+      "row_id": "screen.frame",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "02",
+      "expectation": "Session::frame: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "testing.cursor.positive",
+      "row_id": "testing.cursor",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_cursor: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "testing.cursor.negative",
+      "row_id": "testing.cursor",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_cursor: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "testing.cursor.lifecycle",
+      "row_id": "testing.cursor",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_cursor: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "testing.exists.positive",
+      "row_id": "testing.exists",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_exists: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "testing.exists.negative",
+      "row_id": "testing.exists",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_exists: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "testing.exists.lifecycle",
+      "row_id": "testing.exists",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_exists: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "testing.not_exists.positive",
+      "row_id": "testing.not_exists",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_not_exists: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "testing.not_exists.negative",
+      "row_id": "testing.not_exists",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_not_exists: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "testing.not_exists.lifecycle",
+      "row_id": "testing.not_exists",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_not_exists: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "testing.count.positive",
+      "row_id": "testing.count",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_count: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "testing.count.negative",
+      "row_id": "testing.count",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_count: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "testing.count.lifecycle",
+      "row_id": "testing.count",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_count: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "testing.match_text.positive",
+      "row_id": "testing.match_text",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_match_text: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "testing.match_text.negative",
+      "row_id": "testing.match_text",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_match_text: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "testing.match_text.lifecycle",
+      "row_id": "testing.match_text",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_match_text: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "testing.style.positive",
+      "row_id": "testing.style",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_match_style: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "testing.style.negative",
+      "row_id": "testing.style",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_match_style: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "testing.style.lifecycle",
+      "row_id": "testing.style",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_match_style: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "testing.wraps.positive",
+      "row_id": "testing.wraps",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_no_wrapped_rows: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "testing.wraps.negative",
+      "row_id": "testing.wraps",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_no_wrapped_rows: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "testing.wraps.lifecycle",
+      "row_id": "testing.wraps",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_no_wrapped_rows: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "testing.neutral_region.positive",
+      "row_id": "testing.neutral_region",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_neutral_region: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "testing.neutral_region.negative",
+      "row_id": "testing.neutral_region",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_neutral_region: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "testing.neutral_region.lifecycle",
+      "row_id": "testing.neutral_region",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_neutral_region: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "testing.presented_transient.positive",
+      "row_id": "testing.presented_transient",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_no_presented_transient: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "testing.presented_transient.negative",
+      "row_id": "testing.presented_transient",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_no_presented_transient: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "testing.presented_transient.lifecycle",
+      "row_id": "testing.presented_transient",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "04",
+      "expectation": "assert_no_presented_transient: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "instrumentation.end_span.positive",
+      "row_id": "instrumentation.end_span",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "Instrumentation::end_span: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "instrumentation.end_span.negative",
+      "row_id": "instrumentation.end_span",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "Instrumentation::end_span: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "instrumentation.end_span.lifecycle",
+      "row_id": "instrumentation.end_span",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "Instrumentation::end_span: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "registry.resolve.positive",
+      "row_id": "registry.resolve",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::resolve: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "registry.resolve.negative",
+      "row_id": "registry.resolve",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::resolve: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "registry.resolve.lifecycle",
+      "row_id": "registry.resolve",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "RegistryService::resolve: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "analysis.cache_status.positive",
+      "row_id": "analysis.cache_status",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::cache_status: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "analysis.cache_status.negative",
+      "row_id": "analysis.cache_status",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::cache_status: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "analysis.cache_status.lifecycle",
+      "row_id": "analysis.cache_status",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::cache_status: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "analysis.cache_prune.positive",
+      "row_id": "analysis.cache_prune",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::cache_prune: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "analysis.cache_prune.negative",
+      "row_id": "analysis.cache_prune",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::cache_prune: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "analysis.cache_prune.lifecycle",
+      "row_id": "analysis.cache_prune",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::cache_prune: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "analysis.markers.positive",
+      "row_id": "analysis.markers",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::markers: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "analysis.markers.negative",
+      "row_id": "analysis.markers",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::markers: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "analysis.markers.lifecycle",
+      "row_id": "analysis.markers",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::markers: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "analysis.review_summary.positive",
+      "row_id": "analysis.review_summary",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::review_summary: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "analysis.review_summary.negative",
+      "row_id": "analysis.review_summary",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::review_summary: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "analysis.review_summary.lifecycle",
+      "row_id": "analysis.review_summary",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::review_summary: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "analysis.review_search.positive",
+      "row_id": "analysis.review_search",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::review_search: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "analysis.review_search.negative",
+      "row_id": "analysis.review_search",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::review_search: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "analysis.review_search.lifecycle",
+      "row_id": "analysis.review_search",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::review_search: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "analysis.review_export.positive",
+      "row_id": "analysis.review_export",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::review_export_state: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "analysis.review_export.negative",
+      "row_id": "analysis.review_export",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::review_export_state: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "analysis.review_export.lifecycle",
+      "row_id": "analysis.review_export",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "AnalysisService::review_export_state: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "lifecycle.discard_completed.positive",
+      "row_id": "lifecycle.discard_completed",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::discard_completed: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "lifecycle.discard_completed.negative",
+      "row_id": "lifecycle.discard_completed",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::discard_completed: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "lifecycle.discard_completed.lifecycle",
+      "row_id": "lifecycle.discard_completed",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "03",
+      "expectation": "Session::discard_completed: completion/cleanup retains canonical source and primary failure"
+    },
+    {
+      "id": "output.pagination.positive",
+      "row_id": "output.pagination",
+      "kind": "positive",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "OutputService::read_page: canonical operation result is preserved through the public facade"
+    },
+    {
+      "id": "output.pagination.negative",
+      "row_id": "output.pagination",
+      "kind": "negative",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "OutputService::read_page: invalid/unavailable operation reports a typed failure, never false success"
+    },
+    {
+      "id": "output.pagination.lifecycle",
+      "row_id": "output.pagination",
+      "kind": "lifecycle",
+      "execution": "pending",
+      "owner": "05",
+      "expectation": "OutputService::read_page: completion/cleanup retains canonical source and primary failure"
+    }
+  ]
+}

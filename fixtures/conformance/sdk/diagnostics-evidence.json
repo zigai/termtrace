@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "save_formats": [
+    "txt",
+    "json",
+    "deep-json",
+    "vt",
+    "html",
+    "svg",
+    "png"
+  ],
+  "profiles": [
+    "screen",
+    "debug",
+    "forensic"
+  ],
+  "selectors": [
+    "latest_presented",
+    "state_id",
+    "state_hash",
+    "event_seq",
+    "monotonic_ns",
+    "marker"
+  ],
+  "u64_max": "18446744073709551615",
+  "u128_max": "340282366920938463463374607431768211455",
+  "application_attributes": {
+    "inode": 7,
+    "observed_monotonic_ns": 9,
+    "payload": "not a byte-field heuristic",
+    "pane_tracks": {
+      "%0": "AP8="
+    },
+    "recorder_process_start_ticks": 7
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "$id": "https://github.com/zigai/termtrace/schemas/tmux-catalog-summary.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Counts committed with the lifecycle journal's indexed inventory.",
+  "properties": {
+    "coverage_gaps": {
+      "description": "All coverage intervals, including resolved intervals.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tracks": {
+      "description": "Recording incarnations retained in complete history.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "unfinished_tracks": {
+      "description": "Linked incarnations without an observed canonical completion.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "tracks",
+    "unfinished_tracks",
+    "coverage_gaps"
+  ],
+  "title": "TmuxCatalogSummary",
+  "type": "object"
+}

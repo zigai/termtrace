@@ -510,7 +510,6 @@ fn row_delta_reports_only_edited_cells_in_column_order() {
     cells[0] = first.clone();
 
     let delta = between(Some(&previous), &current);
-
     assert_eq!(
         delta,
         StateDelta {
@@ -537,9 +536,7 @@ fn row_delta_omits_equal_cells_loaded_from_json() {
     let previous = terminal.snapshot().expect("semantic state");
     let bytes = serde_json::to_vec(&previous).expect("serialize semantic state");
     let restored = serde_json::from_slice(&bytes).expect("deserialize semantic state");
-
     let delta = between(Some(&previous), &restored);
-
     assert!(delta.rows.is_empty());
 }
 

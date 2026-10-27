@@ -325,7 +325,9 @@ fn wire_atom(
 }
 
 /// Complete result of one actor-ordered action.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ActOutcome {
     /// Identity of the action request.
     pub request_id: Uuid,

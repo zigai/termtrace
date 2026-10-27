@@ -1,0 +1,640 @@
+{
+  "$defs": {
+    "ActionModeChange": {
+      "additionalProperties": false,
+      "description": "One changed ANSI or DEC terminal mode.",
+      "properties": {
+        "after": {
+          "description": "Later set/reset value.",
+          "type": "boolean"
+        },
+        "ansi": {
+          "description": "`true` for ANSI and `false` for DEC-private mode.",
+          "type": "boolean"
+        },
+        "before": {
+          "description": "Earlier set/reset value.",
+          "type": "boolean"
+        },
+        "number": {
+          "description": "Numeric terminal mode identifier.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "number",
+        "ansi",
+        "before",
+        "after"
+      ],
+      "type": "object"
+    },
+    "ActionOutputSummary": {
+      "additionalProperties": false,
+      "description": "Aggregate child output attributable to the last action boundary.",
+      "properties": {
+        "byte_count": {
+          "description": "Exact output byte count without the output bytes themselves.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "event_count": {
+          "description": "Canonical output-event count after the input intent.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "event_count",
+        "byte_count"
+      ],
+      "type": "object"
+    },
+    "ActionWarning": {
+      "additionalProperties": false,
+      "description": "One bounded warning derived from canonical action evidence.",
+      "properties": {
+        "code": {
+          "description": "Stable warning code.",
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "#/$defs/FindingConfidence",
+          "description": "Conservative confidence label."
+        },
+        "facts": {
+          "description": "Bounded neutral evidence facts.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "confidence",
+        "facts"
+      ],
+      "type": "object"
+    },
+    "CursorState": {
+      "description": "Cursor state at one semantic boundary.",
+      "properties": {
+        "blinking": {
+          "description": "Blink mode.",
+          "type": "boolean"
+        },
+        "column": {
+          "description": "Viewport column when available.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "in_viewport": {
+          "description": "Whether the cursor lies in the viewport.",
+          "type": "boolean"
+        },
+        "row": {
+          "description": "Viewport row when available.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "style": {
+          "$ref": "#/$defs/CursorStyle",
+          "description": "Visual shape."
+        },
+        "visible": {
+          "description": "Visibility mode.",
+          "type": "boolean"
+        },
+        "wide_tail": {
+          "description": "Whether the cursor is on a wide-character tail.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "visible",
+        "blinking",
+        "in_viewport",
+        "style"
+      ],
+      "type": "object"
+    },
+    "CursorStyle": {
+      "description": "Cursor visual style.",
+      "oneOf": [
+        {
+          "const": "bar",
+          "description": "Vertical bar.",
+          "type": "string"
+        },
+        {
+          "const": "block",
+          "description": "Filled block.",
+          "type": "string"
+        },
+        {
+          "const": "underline",
+          "description": "Underline.",
+          "type": "string"
+        },
+        {
+          "const": "hollow_block",
+          "description": "Hollow block.",
+          "type": "string"
+        }
+      ]
+    },
+    "DiagnosticFinding": {
+      "additionalProperties": false,
+      "description": "One conservative session-wide diagnostic finding.",
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable finding code.",
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "#/$defs/FindingConfidence",
+          "description": "Conservative confidence label."
+        },
+        "facts": {
+          "description": "Exact neutral facts and limitations.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "native_correlations": {
+          "description": "Native relationships, if independently available.",
+          "items": {
+            "$ref": "#/$defs/NativeCorrelation"
+          },
+          "type": "array"
+        },
+        "state_ids": {
+          "description": "Supporting semantic state IDs.",
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "token_ids": {
+          "description": "Supporting VT token IDs.",
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "confidence",
+        "state_ids",
+        "token_ids",
+        "facts",
+        "native_correlations"
+      ],
+      "type": "object"
+    },
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    },
+    "FindingConfidence": {
+      "description": "Conservative confidence label for a derived finding.",
+      "oneOf": [
+        {
+          "const": "high",
+          "description": "Directly encoded control and semantic outcome agree.",
+          "type": "string"
+        },
+        {
+          "const": "medium",
+          "description": "Ordered facts support a candidate but do not prove user perception.",
+          "type": "string"
+        }
+      ]
+    },
+    "LastActionBoundary": {
+      "additionalProperties": false,
+      "description": "Canonical request and intent/result boundaries defining one input action.",
+      "properties": {
+        "atom_count": {
+          "description": "Number of input atoms in the request.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "bytes_written": {
+          "description": "Bytes confirmed written across every atom.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "error_code": {
+          "description": "First stable result error code, when any atom failed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "intended_bytes": {
+          "description": "Intended input byte count without the input bytes themselves.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "intent_event_seq": {
+          "description": "First canonical input-intent event sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "operation_ids": {
+          "description": "Ordered canonical operation identifiers for every input atom.",
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "request_event_end_seq": {
+          "description": "Exclusive canonical event boundary after request execution and postcondition evaluation.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "request_event_start_seq": {
+          "description": "Inclusive canonical event boundary before request execution.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "request_id": {
+          "description": "Caller-owned request identifier when the action was durably journaled.",
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result_event_seq": {
+          "description": "Last canonical input-result event sequence.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/OperationStatus",
+          "description": "Aggregate applied or failed result."
+        }
+      },
+      "required": [
+        "operation_ids",
+        "atom_count",
+        "request_event_start_seq",
+        "request_event_end_seq",
+        "intent_event_seq",
+        "result_event_seq",
+        "intended_bytes",
+        "status",
+        "bytes_written"
+      ],
+      "type": "object"
+    },
+    "LastActionDiagnosticsReport": {
+      "additionalProperties": false,
+      "description": "Diagnostics restricted to the semantic and token range after the last input action.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/LastActionBoundary",
+          "description": "Canonical input action boundary."
+        },
+        "findings": {
+          "description": "Bounded findings supported inside the selected action range.",
+          "items": {
+            "$ref": "#/$defs/DiagnosticFinding"
+          },
+          "type": "array"
+        },
+        "findings_truncated": {
+          "description": "Whether additional findings were omitted.",
+          "type": "boolean"
+        },
+        "format": {
+          "description": "Stable report format.",
+          "type": "string"
+        },
+        "from_state_id": {
+          "description": "Earlier semantic state identifier.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "description": "Canonical session identity.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "source_final_event_hash": {
+          "description": "Final canonical source hash.",
+          "type": "string"
+        },
+        "to_state_id": {
+          "description": "Later semantic state identifier.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "description": "Report schema version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "version",
+        "session_id",
+        "source_final_event_hash",
+        "action",
+        "from_state_id",
+        "to_state_id",
+        "findings",
+        "findings_truncated"
+      ],
+      "type": "object"
+    },
+    "LastActionReport": {
+      "additionalProperties": false,
+      "description": "Compact semantic result of the most recent canonical input action.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/LastActionBoundary",
+          "description": "Canonical input action boundary."
+        },
+        "cells_changed": {
+          "description": "Total changed semantic cells.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cursor_movement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueChange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Complete cursor movement when the cursor changed."
+        },
+        "format": {
+          "description": "Stable report format.",
+          "type": "string"
+        },
+        "from_state_id": {
+          "description": "Earlier semantic state identifier.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode_changes": {
+          "description": "Sorted terminal mode changes.",
+          "items": {
+            "$ref": "#/$defs/ActionModeChange"
+          },
+          "type": "array"
+        },
+        "output_generated": {
+          "$ref": "#/$defs/ActionOutputSummary",
+          "description": "Child output generated after the canonical input intent."
+        },
+        "presentation_eligible": {
+          "description": "Whether the resulting semantic screen was presentation eligible.",
+          "type": "boolean"
+        },
+        "presentation_eligible_states": {
+          "description": "Number of presentation-eligible semantic boundaries after the action.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows_changed": {
+          "description": "Sorted zero-based viewport rows with semantic cell changes.",
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "session_id": {
+          "description": "Canonical session identity.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "source_final_event_hash": {
+          "description": "Final canonical source hash.",
+          "type": "string"
+        },
+        "to_state_id": {
+          "description": "Later semantic state identifier.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "description": "Report schema version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "warnings": {
+          "description": "Bounded conservative warnings.",
+          "items": {
+            "$ref": "#/$defs/ActionWarning"
+          },
+          "type": "array"
+        },
+        "warnings_truncated": {
+          "description": "Whether additional warnings were omitted.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "format",
+        "version",
+        "session_id",
+        "source_final_event_hash",
+        "action",
+        "from_state_id",
+        "to_state_id",
+        "rows_changed",
+        "cells_changed",
+        "mode_changes",
+        "output_generated",
+        "presentation_eligible",
+        "presentation_eligible_states",
+        "warnings",
+        "warnings_truncated"
+      ],
+      "type": "object"
+    },
+    "NativeCorrelation": {
+      "additionalProperties": false,
+      "description": "One source-bound relationship to a native artifact.",
+      "properties": {
+        "frame": {
+          "description": "Nominal encoded frame when clock mapping supplied one.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "level": {
+          "$ref": "#/$defs/NativeEvidenceLevel",
+          "description": "Honest evidence level."
+        },
+        "limitation": {
+          "description": "Exact limitation on the relationship.",
+          "type": "string"
+        },
+        "manifest": {
+          "$ref": "#/$defs/ExactPath",
+          "description": "Relative native manifest path."
+        },
+        "state_id": {
+          "description": "Related semantic state.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "level",
+        "manifest",
+        "state_id",
+        "limitation"
+      ],
+      "type": "object"
+    },
+    "NativeEvidenceLevel": {
+      "description": "Strength of evidence relating a semantic finding to native presentation.",
+      "oneOf": [
+        {
+          "const": "presentation_eligible",
+          "description": "The semantic state was eligible for terminal presentation.",
+          "type": "string"
+        },
+        {
+          "const": "scheduled_for_frame",
+          "description": "Clock-map arithmetic assigned the state a nominal video frame.",
+          "type": "string"
+        },
+        {
+          "const": "post_endpoint_stable_capture",
+          "description": "A stable native frame was captured after replay reached this endpoint.",
+          "type": "string"
+        },
+        {
+          "const": "frame_observed",
+          "description": "A causal presentation mechanism verified actual captured output.",
+          "type": "string"
+        }
+      ]
+    },
+    "OperationStatus": {
+      "description": "Result of a state-changing operation.",
+      "oneOf": [
+        {
+          "const": "applied",
+          "description": "The complete operation was applied once.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "The operation failed without a complete application.",
+          "type": "string"
+        }
+      ]
+    },
+    "ValueChange": {
+      "additionalProperties": false,
+      "description": "Before/after values for one changed semantic property.",
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/CursorState",
+          "description": "Value at the later endpoint."
+        },
+        "before": {
+          "$ref": "#/$defs/CursorState",
+          "description": "Value at the earlier endpoint."
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/last-action-analysis.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Both task-level reports derived in one canonical replay/diagnostic pass.",
+  "properties": {
+    "diagnostics": {
+      "$ref": "#/$defs/LastActionDiagnosticsReport",
+      "description": "Range-restricted diagnostics."
+    },
+    "inspection": {
+      "$ref": "#/$defs/LastActionReport",
+      "description": "Compact action diff and warnings."
+    }
+  },
+  "required": [
+    "inspection",
+    "diagnostics"
+  ],
+  "title": "LastActionAnalysis",
+  "type": "object"
+}

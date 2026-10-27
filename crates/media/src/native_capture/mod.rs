@@ -10,17 +10,22 @@ mod original;
 mod portal;
 pub(crate) mod process;
 mod profile;
+mod resize_server;
 mod resources;
 #[cfg(test)]
 mod tests;
 mod validation;
+pub(crate) mod window;
 mod worker;
 
 pub use crate::{Error, Result};
 pub use capability::native_capabilities;
 pub use capture::{capture, resolve_display_scaling, DisplayScaling};
 pub use geometry::{native_capture_target, probe_ghostty_geometry, solve_ghostty_geometry};
-pub use original::{capture_original, capture_original_with_backend, OriginalCaptureBackend};
+pub use original::{
+    capture_original, verify_original_capture, OriginalCapture, OriginalCaptureBackend,
+    OriginalCaptureRequest, OriginalGrid, OriginalRecorderPaths, CAPTURE_ENVIRONMENT,
+};
 pub use termtrace_model::artifact::visual::{
     visual_directory_name_for, CaptureKind, CaptureOptions, CaptureOutcome, GeometryProbeAttempt,
     GeometrySolveReport, NativeFrameSample, VideoMapEntry, VisualManifest,

@@ -382,6 +382,22 @@
       },
       "type": "object"
     },
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    },
     "PixelTransform": {
       "description": "Explicit presentation-only pixel transform.",
       "oneOf": [
@@ -641,8 +657,8 @@
       "description": "Caller-authored ASS resource copied and hash-manifested before rendering.",
       "properties": {
         "ass": {
-          "description": "ASS subtitle document.",
-          "type": "string"
+          "$ref": "#/$defs/ExactPath",
+          "description": "ASS subtitle document."
         }
       },
       "required": [

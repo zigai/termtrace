@@ -3,9 +3,13 @@ use super::{
     evidence::{bounded_secondary, capture_failure_artifacts, write_evidence_manifest},
     snapshot::{bounded_text, path_for},
 };
+use crate::locator::WaitCancellation;
 
 /// Evidence retention requested for an owned terminal test.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum EvidencePolicy {
     /// Discard evidence only after the body and finalization both succeed.
     #[default]
@@ -17,7 +21,7 @@ pub enum EvidencePolicy {
 }
 
 /// Classification recorded when an owned test is finalized.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TestOutcome {
     /// The body returned successfully.
@@ -33,7 +37,7 @@ pub enum TestOutcome {
 }
 
 /// One bounded failure that could not replace the body's primary failure.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct SecondaryFailure {
     /// Stable finalization phase.
     pub phase: &'static str,
@@ -44,7 +48,7 @@ pub struct SecondaryFailure {
 }
 
 /// Result of exactly-once test finalization.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct FinalizationReport {
     /// Outcome supplied by the wrapper or advanced caller.
     pub outcome: TestOutcome,
@@ -54,8 +58,19 @@ pub struct FinalizationReport {
     pub verified_artifacts: Vec<PathBuf>,
     /// Non-primary bounded cleanup failures.
     pub secondary_failures: Vec<SecondaryFailure>,
-    /// Whether retention was requested or forced by a failure.
+    /// Whether evidence actually survives (policy, failure, or unowned canonical data).
     pub retained: bool,
+}
+
+/// Cache metadata for layered native adapters, independent of the runner's exception objects.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CachedFinalization {
+    /// Exact caller-owned attempt root.
+    pub root: PathBuf,
+    /// Policy committed by this finalization operation.
+    pub policy: EvidencePolicy,
+    /// Original immutable report.
+    pub report: FinalizationReport,
 }
 
 /// Configuration for one fresh, attempt-owned terminal session.
@@ -110,6 +125,7 @@ enum LifecycleState {
 pub struct TerminalTest {
     state: LifecycleState,
     attempt_directory: PathBuf,
+    artifact_directory: PathBuf,
     snapshot_root: PathBuf,
     update_snapshots: bool,
     finalization_timeout: Duration,
@@ -140,11 +156,66 @@ impl TerminalTest {
 
         return Ok(Self {
             state: LifecycleState::Open(session),
+            artifact_directory: attempt_directory.clone(),
             attempt_directory,
             snapshot_root: config.snapshot_root,
             update_snapshots: config.update_snapshots,
             finalization_timeout: config.finalization_timeout,
             evidence_policy: config.evidence_policy,
+        });
+    }
+
+    /// Adopt one already launched owned session, without launching a second process.
+    ///
+    /// # Errors
+    /// Rejects an evidence root that does not contain the session. The caller must own the root.
+    pub fn from_owned_session(
+        session: Session,
+        attempt_directory: PathBuf,
+        evidence_policy: EvidencePolicy,
+        finalization_timeout: Duration,
+    ) -> Result<Self> {
+        if !session.path().starts_with(&attempt_directory) || session.path() == attempt_directory {
+            // Never drop a consumed launched Session on argument validation: Session is an
+            // explicit owner, not a kill-on-drop guard. Reuse this same engine conservatively.
+            let actual_root = session
+                .path()
+                .parent()
+                .unwrap_or_else(|| return Path::new("."))
+                .to_path_buf();
+            let artifact_directory =
+                actual_root.join(format!(".test-artifacts-{}", session.session_id()));
+
+            let mut fallback = Self {
+                state: LifecycleState::Open(session),
+                snapshot_root: actual_root.join("snapshots"),
+                attempt_directory: actual_root.clone(),
+                artifact_directory,
+                update_snapshots: false,
+                finalization_timeout,
+                evidence_policy: EvidencePolicy::Always,
+            };
+            let report = fallback.finalize(TestOutcome::Error);
+
+            return Err(super::snapshot::testing_error(format!(
+                "owned session is outside the test root; finalized at {}; secondary failures: {:?}",
+                actual_root.display(),
+                report.secondary_failures
+            )));
+        }
+
+        let artifact_directory =
+            attempt_directory.join(format!(".test-artifacts-{}", session.session_id()));
+
+        // Artifact preparation must not prevent stop/completion/force-close of this owner.
+        return Ok(Self {
+            state: LifecycleState::Open(session),
+            artifact_directory,
+            snapshot_root: attempt_directory.join("snapshots"),
+            attempt_directory,
+            update_snapshots: false,
+            finalization_timeout,
+            evidence_policy,
         });
     }
 
@@ -207,8 +278,7 @@ impl TerminalTest {
             .ok_or(TerminalAssertionError::SessionUnavailable)?;
 
         let frame = session.frame(Default::default())?;
-        assert_screen_text(&frame, expected)
-            .map_err(|error| return AssertionError::Mismatch(error))?;
+        assert_screen_text(&frame, expected)?;
 
         return Ok(frame);
     }
@@ -236,7 +306,7 @@ impl TerminalTest {
     /// Compare one already captured exact frame with a reviewed deterministic snapshot.
     ///
     /// # Errors
-    /// Returns a mismatch when `name` is not 1-128 ASCII letters, digits, `.`, `_`, or `-`, and the
+    /// Returns a validation error when `name` is not 1-128 ASCII letters, digits, `.`, `_`, or `-`, and the
     /// errors of [`assert_snapshot_file`].
     pub fn assert_snapshot(
         &self,
@@ -278,14 +348,11 @@ impl TerminalTest {
         let mut secondary_failures: Vec<SecondaryFailure> = Vec::new();
         let mut verified_artifacts: Vec<PathBuf> = Vec::new();
         let finalization_started = Instant::now();
-        let completed = match session.stop(
+        let completion = match session.stop_bounded(
             StopRequest::default(),
-            Some(remaining_timeout(
-                finalization_started,
-                self.finalization_timeout,
-            )),
+            remaining_timeout(finalization_started, self.finalization_timeout),
         ) {
-            Ok(_) => true,
+            Ok(completion) => Some(completion),
             Err(stop_error) => {
                 secondary_failures.push(bounded_secondary("session_stop", &stop_error.to_string()));
 
@@ -293,30 +360,60 @@ impl TerminalTest {
                     finalization_started,
                     self.finalization_timeout,
                 )) {
-                    Ok(_) => true,
+                    Ok(completion) => Some(completion),
                     Err(error) => {
                         secondary_failures
                             .push(bounded_secondary("session_completion", &error.to_string()));
 
-                        if let Err(close_error) = session.force_close() {
+                        if let Err(close_error) = session.force_close_for_finalization() {
                             secondary_failures.push(bounded_secondary(
                                 "session_force_close",
                                 &close_error.to_string(),
                             ));
                         }
 
-                        false
+                        None
                     }
+                }
+            }
+        };
+        session.seal_lifecycle_observers();
+
+        if let Err(error) = session.drain_lifecycle_observers(Session::OBSERVER_DRAIN_TIMEOUT) {
+            secondary_failures.push(bounded_secondary("lifecycle_observers", &error.to_string()));
+        }
+
+        let completed = completion.is_some();
+
+        if let Some(failure) = completion
+            .as_ref()
+            .and_then(|completion| return completion.failure.as_ref())
+        {
+            secondary_failures.push(bounded_secondary(
+                "session_failure",
+                &format!("{}: {}", failure.code, failure.message),
+            ));
+        }
+
+        let artifact_directory_ready = if self.artifact_directory == self.attempt_directory {
+            true
+        } else {
+            match create_private_directory(&self.artifact_directory) {
+                Ok(()) => true,
+                Err(error) => {
+                    secondary_failures
+                        .push(bounded_secondary("artifact_directory", &error.to_string()));
+                    false
                 }
             }
         };
 
         let mut failure_artifacts_captured = false;
 
-        if completed && !body_passed {
+        if completed && !body_passed && artifact_directory_ready {
             capture_failure_artifacts(
                 &session,
-                &self.attempt_directory,
+                &self.artifact_directory,
                 &mut verified_artifacts,
                 &mut secondary_failures,
             );
@@ -339,16 +436,20 @@ impl TerminalTest {
             }
         }
 
-        if completed && !failure_artifacts_captured && !secondary_failures.is_empty() {
+        if completed
+            && artifact_directory_ready
+            && !failure_artifacts_captured
+            && !secondary_failures.is_empty()
+        {
             capture_failure_artifacts(
                 &session,
-                &self.attempt_directory,
+                &self.artifact_directory,
                 &mut verified_artifacts,
                 &mut secondary_failures,
             );
         }
 
-        let retained = match self.evidence_policy {
+        let mut retained = match self.evidence_policy {
             EvidencePolicy::Always | EvidencePolicy::Manual => true,
             EvidencePolicy::OnFailure => !body_passed || !secondary_failures.is_empty(),
         };
@@ -377,6 +478,7 @@ impl TerminalTest {
 
             if let Some(error) = discard_failure {
                 secondary_failures.push(bounded_secondary("evidence_discard", &error.to_string()));
+                retained = self.attempt_directory.exists();
             }
         }
 
@@ -387,10 +489,14 @@ impl TerminalTest {
             secondary_failures,
             retained,
         };
+        report
+            .verified_artifacts
+            .retain(|path| return path.exists());
 
-        if retained {
+        if retained && canonical_session.exists() && artifact_directory_ready {
             match write_evidence_manifest(
                 &self.attempt_directory,
+                &self.artifact_directory,
                 session_id,
                 &canonical_session,
                 &report,
@@ -402,10 +508,202 @@ impl TerminalTest {
             }
         }
 
+        report
+            .verified_artifacts
+            .retain(|path| return path.exists());
+
+        report.retained = self.attempt_directory.exists();
+        report.evidence_directory = report
+            .retained
+            .then(|| return self.attempt_directory.clone());
         self.state = LifecycleState::Finalized(report.clone());
 
         return report;
     }
+}
+
+/// An owned session or its already-recorded finalization, for layered runner adapters.
+pub enum OwnedSessionFinalization {
+    /// Transfer a fresh session, or retain an attachment error while continuing siblings.
+    Open(Result<Session>),
+    /// Reuse an earlier exactly-once report without repeating stop, capture or verification.
+    Finalized {
+        /// The original report.
+        report: FinalizationReport,
+        /// Canonical session path for eventual successful disposal.
+        path: PathBuf,
+    },
+}
+
+/// Finalize a collection of already launched, exclusively owned sessions through the same
+/// lifecycle engine as [`TerminalTest`]. Every sibling is attempted, even after a failure.
+///
+/// The caller owns `root` and must prevent further launches before calling. Session attachment
+/// failures are passed as errors so that they retain evidence and cannot hide successful siblings.
+#[must_use]
+pub fn finalize_owned_sessions(
+    sessions: Vec<OwnedSessionFinalization>,
+    root: &Path,
+    outcome: TestOutcome,
+    policy: EvidencePolicy,
+    timeout: Duration,
+    retain_request: Option<&WaitCancellation>,
+) -> FinalizationReport {
+    let mut report = FinalizationReport {
+        outcome,
+        evidence_directory: None,
+        verified_artifacts: Vec::new(),
+        secondary_failures: Vec::new(),
+        retained: false,
+    };
+
+    let mut completed_paths = Vec::new();
+    for session in sessions {
+        let session = match session {
+            OwnedSessionFinalization::Open(session) => session,
+            OwnedSessionFinalization::Finalized {
+                report: previous,
+                path,
+            } => {
+                completed_paths.push((PathBuf::new(), path));
+                report
+                    .verified_artifacts
+                    .extend(previous.verified_artifacts);
+
+                report
+                    .secondary_failures
+                    .extend(previous.secondary_failures);
+                continue;
+            }
+        };
+
+        let session = session.and_then(|session| {
+            return TerminalTest::from_owned_session(
+                session,
+                root.to_path_buf(),
+                EvidencePolicy::Always,
+                timeout,
+            );
+        });
+        match session {
+            Ok(mut test) => {
+                if let Some(session) = test.session() {
+                    completed_paths
+                        .push((session.helper().to_path_buf(), session.path().to_path_buf()));
+                }
+
+                let finalized = test.finalize(outcome);
+                report
+                    .verified_artifacts
+                    .extend(finalized.verified_artifacts);
+
+                report
+                    .secondary_failures
+                    .extend(finalized.secondary_failures);
+            }
+            Err(error) => report
+                .secondary_failures
+                .push(bounded_secondary("session_adopt", &error.to_string())),
+        }
+    }
+
+    if retain_request.is_some_and(WaitCancellation::is_cancelled) {
+        report.secondary_failures.push(bounded_secondary(
+            "cancellation",
+            "retention requested during finalization; input is not rolled back",
+        ));
+    }
+
+    // A client exposed alongside the owned launch callable may also create caller-owned
+    // recordings in this root. Never recursively discard those canonical directories.
+    let foreign_session = match fs_err::read_dir(root) {
+        Ok(entries) => entries
+            .map(|entry| {
+                return entry.map_err(|source| {
+                    return Error::Filesystem {
+                        path: root.to_path_buf(),
+                        source,
+                    };
+                });
+            })
+            .try_fold(false, |found, entry| {
+                let entry = entry?;
+                let path = entry.path();
+                let known = completed_paths
+                    .iter()
+                    .any(|(_, owned)| return *owned == path);
+
+                let canonical_name = path
+                    .extension()
+                    .is_some_and(|extension| return extension == "tt");
+
+                return Ok::<bool, Error>(
+                    found || (!known && (canonical_name || path.join("session.json").is_file())),
+                );
+            }),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(Error::Filesystem {
+            path: root.to_path_buf(),
+            source,
+        }),
+    };
+
+    let foreign_session = match foreign_session {
+        Ok(found) => found,
+        Err(error) => {
+            report
+                .secondary_failures
+                .push(bounded_secondary("evidence_ownership", &error.to_string()));
+            true
+        }
+    };
+
+    let retain = foreign_session
+        || policy != EvidencePolicy::OnFailure
+        || outcome != TestOutcome::Passed
+        || !report.secondary_failures.is_empty();
+
+    if !retain {
+        for (helper, path) in completed_paths {
+            if let Err(error) = Session::attach(path, helper)
+                .and_then(|mut session| return session.discard_completed())
+            {
+                report
+                    .secondary_failures
+                    .push(bounded_secondary("evidence_discard", &error.to_string()));
+            }
+        }
+
+        if report.secondary_failures.is_empty()
+            && let Err(error) = fs_err::remove_dir_all(root)
+                .map_err(|source| {
+                    return Error::Filesystem {
+                        path: root.to_path_buf(),
+                        source,
+                    };
+                })
+                .and_then(|()| {
+                    if let Some(parent) = root.parent() {
+                        sync_directory(parent)?;
+                    }
+
+                    return Ok(());
+                })
+        {
+            report
+                .secondary_failures
+                .push(bounded_secondary("evidence_discard", &error.to_string()));
+        }
+    }
+
+    report
+        .verified_artifacts
+        .retain(|path| return path.exists());
+
+    report.retained = root.exists();
+    report.evidence_directory = report.retained.then(|| return root.to_path_buf());
+
+    return report;
 }
 
 impl Drop for TerminalTest {
@@ -528,5 +826,6 @@ mod tests {
         let error =
             path_for(Path::new("snapshots"), "../escape").expect_err("path traversal must fail");
         assert!(error.to_string().contains("terminal_snapshot_name"));
+        assert!(matches!(error, TerminalAssertionError::Validation(_)));
     }
 }

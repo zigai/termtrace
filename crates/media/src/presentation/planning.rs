@@ -239,7 +239,7 @@ pub fn markers(session: impl AsRef<Path>, fps: u16) -> Result<Vec<MarkerRecord>>
     return marker_records(session.as_ref(), fps, 0);
 }
 
-fn marker_records(session: &Path, fps: u16, capture_start_ns: u64) -> Result<Vec<MarkerRecord>> {
+fn marker_records(session: &Path, fps: u16, capture_start_ns: i128) -> Result<Vec<MarkerRecord>> {
     validate_completed_session(session)?;
 
     let mut occurrence_counts = HashMap::<String, u64>::new();
@@ -254,8 +254,8 @@ fn marker_records(session: &Path, fps: u16, capture_start_ns: u64) -> Result<Vec
                 label,
                 event_seq: record.seq,
                 monotonic_ns: record.monotonic_ns,
-                nominal_frame: frame_floor(
-                    record.monotonic_ns.saturating_sub(capture_start_ns),
+                nominal_frame: frame_floor_ns(
+                    source_elapsed_ns(record.monotonic_ns, capture_start_ns),
                     fps,
                 ),
                 occurrence_count: 0,
@@ -326,9 +326,27 @@ pub fn plan_with_source(
     edit: &EditPlan,
     source_request: PresentationSourceRequest,
 ) -> Result<PresentationPlan> {
+    return plan_with_capture_directory(session.as_ref(), edit, source_request, None);
+}
+
+/// Normalize the same edit pipeline against an explicitly selected verified capture directory.
+///
+/// Native frame ordinals are raw capture ordinals, but this presentation timeline
+/// only admits their canonical timestamps at or after time zero. A pre-roll ordinal
+/// is rejected, never clamped or rewritten. Native correlation remains nominal CFR /
+/// acquisition-clock approximate, not frame-exact original/semantic correlation.
+///
+/// # Errors
+/// Rejects invalid evidence, capture members, selectors (including pre-zero native
+/// ordinals), geometry, or variable-rate pixels.
+pub fn plan_with_capture_directory(
+    session: &Path,
+    edit: &EditPlan,
+    source_request: PresentationSourceRequest,
+    capture_directory: Option<&Path>,
+) -> Result<PresentationPlan> {
     validate_edit_plan(edit)?;
 
-    let session = session.as_ref();
     let completion = validate_completed_session(session)?;
     let session_manifest = read_manifest(session)?;
     let ResolvedSource {
@@ -340,7 +358,20 @@ pub fn plan_with_source(
         capture_start_ns: capture_start,
         capture_range,
         semantic_final_frame,
-    } = resolve_source(session, edit, source_request, &session_manifest)?;
+        native_frame_count,
+    } = resolve_source(
+        session,
+        edit,
+        source_request,
+        &session_manifest,
+        capture_directory,
+    )?;
+
+    if fps == 0 {
+        return Err(plan_error(
+            "variable-rate original pixels are unsupported; a verified CFR capture is required",
+        ));
+    }
 
     let edit_plan_hash = hash_edit_identity(edit)?;
     let NormalizedClips {
@@ -353,6 +384,7 @@ pub fn plan_with_source(
         fps,
         capture_range,
         semantic_final_frame,
+        native_frame_count,
     )?;
 
     let annotations = normalize_annotations(
@@ -448,9 +480,10 @@ struct ResolvedSource {
     source_width: u16,
     source_height: u16,
     source_geometry: TerminalGeometryReport,
-    capture_start_ns: u64,
+    capture_start_ns: i128,
     capture_range: Option<SourceRange>,
     semantic_final_frame: Option<(u64, u64)>,
+    native_frame_count: Option<u64>,
 }
 
 struct NormalizedClips {
@@ -463,13 +496,20 @@ fn resolve_source(
     edit: &EditPlan,
     source_request: PresentationSourceRequest,
     session_manifest: &SessionManifest,
+    capture_directory: Option<&Path>,
 ) -> Result<ResolvedSource> {
     let cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     let header = cursor.header();
 
     return match source_request {
         PresentationSourceRequest::Native => {
-            let visual = session.join(visual_directory_name_for(None, StateSelection::All));
+            let visual = capture_directory.map_or_else(
+                || {
+                    return session.join(visual_directory_name_for(None, StateSelection::All));
+                },
+                Path::to_path_buf,
+            );
+
             let manifest_path = visual.join("manifest.json");
             let manifest_bytes = fs_err::read(&manifest_path).map_err(|source| {
                 if source.kind() == ErrorKind::NotFound {
@@ -507,6 +547,24 @@ fn resolve_source(
                 ));
             }
 
+            let completion = validate_completed_session(session)?;
+            if manifest.source_event_hash.as_deref() != Some(completion.final_event_hash.as_str()) {
+                return Err(plan_error(
+                    "capture canonical boundary does not match completed source",
+                ));
+            }
+
+            if manifest.fps == 0 {
+                return Err(plan_error("variable-rate original pixels are unsupported; a verified CFR capture is required"));
+            }
+
+            if !matches!(
+                manifest.capture_kind.as_str(),
+                "video" | "original_execution"
+            ) {
+                return Err(plan_error("capture is not a supported video source"));
+            }
+
             let source_video = visual.join("session.mkv");
             let source_video_hash = manifest
                 .members
@@ -515,9 +573,10 @@ fn resolve_source(
                 .map(|member| return member.blake3.clone())
                 .ok_or_else(|| return plan_error("native capture manifest has no session video"))?;
 
-            let capture_start_ns = manifest
-                .source_range
-                .map_or(0, |capture| return capture.start_monotonic_ns);
+            let capture_start_ns =
+                native_capture_clock_origin(&manifest, session_manifest, &visual)?;
+
+            let native_frame_count = native_cfr_frame_count(&manifest)?;
 
             Ok(ResolvedSource {
                 source: PresentationSource::Native {
@@ -531,6 +590,7 @@ fn resolve_source(
                 capture_start_ns,
                 capture_range: manifest.source_range,
                 semantic_final_frame: None,
+                native_frame_count: Some(native_frame_count),
             })
         }
         PresentationSourceRequest::Semantic {
@@ -576,12 +636,125 @@ fn resolve_source(
                 source_width: semantic.canvas.width,
                 source_height: semantic.canvas.height,
                 source_geometry: geometry,
-                capture_start_ns: semantic.start_monotonic_ns,
+                capture_start_ns: i128::from(semantic.start_monotonic_ns),
                 capture_range: None,
                 semantic_final_frame: Some(final_frame),
+                native_frame_count: None,
             })
         }
     };
+}
+
+/// Native acquisition starts before Ghostty replay/application release. Preserve that
+/// signed clock offset instead of treating pre-roll pixels as canonical time zero.
+pub(super) fn native_capture_clock_origin(
+    manifest: &VisualManifest,
+    session: &SessionManifest,
+    directory: &Path,
+) -> Result<i128> {
+    let (origin, range_start) = if manifest.capture_kind == "original_execution" {
+        if manifest.replay_origin_unix_ns != 0
+            || !manifest
+                .members
+                .iter()
+                .any(|m| return m.path == "acquisition-map.jsonl")
+            || !manifest
+                .members
+                .iter()
+                .any(|m| return m.path == "execution-timing.json")
+        {
+            return Err(plan_error(
+                "original execution capture lacks verified acquisition timing",
+            ));
+        }
+
+        #[derive(serde::Deserialize)]
+        struct Timing {
+            execution_origin_unix_ns: u128,
+            correlation: String,
+        }
+
+        let path = directory.join("execution-timing.json");
+        let bytes = fs_err::read(&path).map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+
+        let timing: Timing = serde_json::from_slice(&bytes).map_err(|source| {
+            return Error::InvalidJson {
+                path,
+                json_path: "$".into(),
+                source,
+            };
+        })?;
+
+        if timing.execution_origin_unix_ns != session.started_unix_ns
+            || timing.correlation != "acquisition_clock_only_no_presentation_claim"
+        {
+            return Err(plan_error(
+                "original execution clock is not bound to canonical execution",
+            ));
+        }
+
+        (session.started_unix_ns, 0)
+    } else {
+        if manifest.replay_origin_unix_ns == 0 {
+            return Err(plan_error("native replay has no playback clock origin"));
+        }
+
+        (
+            manifest.replay_origin_unix_ns,
+            manifest
+                .source_range
+                .map_or(0, |r| return r.start_monotonic_ns),
+        )
+    };
+
+    if manifest.capture_started_unix_ns > origin
+        || origin - manifest.capture_started_unix_ns > 86_400_000_000_000
+    {
+        return Err(plan_error(
+            "capture clock must begin before execution/replay, with at most 24 hours pre-roll",
+        ));
+    }
+
+    let acquired = i128::try_from(manifest.capture_started_unix_ns)
+        .map_err(|_error| return plan_error("capture clock exceeds signed time range"))?;
+
+    let origin = i128::try_from(origin)
+        .map_err(|_error| return plan_error("execution clock exceeds signed time range"))?;
+
+    return Ok(i128::from(range_start) + acquired - origin);
+}
+
+pub(super) fn native_cfr_frame_count(manifest: &VisualManifest) -> Result<u64> {
+    let stream = manifest
+        .video_probe
+        .as_ref()
+        .and_then(|p| return p.get("streams"))
+        .and_then(|v| return v.get(0))
+        .ok_or_else(|| return plan_error("native CFR video probe missing"))?;
+
+    let fps = format!("{}/1", manifest.fps);
+    if stream["r_frame_rate"].as_str() != Some(fps.as_str())
+        || stream["avg_frame_rate"].as_str() != Some(fps.as_str())
+        || stream["codec_name"] != "h264"
+        || !matches!(stream["pix_fmt"].as_str(), Some("gbrp" | "rgb24" | "bgr0"))
+        || stream["has_b_frames"].as_u64() != Some(0)
+    {
+        return Err(plan_error("native adapter requires verified CFR H.264 RGB capture; VFR/unknown adapters unsupported"));
+    }
+    return stream["nb_read_packets"]
+        .as_str()
+        .and_then(|v| return v.parse::<u64>().ok())
+        .filter(|n| return *n > 0)
+        .ok_or_else(|| return plan_error("native CFR probe has no verified packet/frame count"));
+}
+
+fn source_elapsed_ns(monotonic_ns: u64, capture_start_ns: i128) -> u128 {
+    return u128::try_from((i128::from(monotonic_ns) - capture_start_ns).max(0)).unwrap_or(0);
 }
 
 fn hash_edit_identity(edit: &EditPlan) -> Result<String> {
@@ -614,10 +787,11 @@ fn hash_edit_identity(edit: &EditPlan) -> Result<String> {
 fn normalize_clips(
     session: &Path,
     edit: &EditPlan,
-    capture_start_ns: u64,
+    capture_start_ns: i128,
     fps: u16,
     capture_range: Option<SourceRange>,
     semantic_final_frame: Option<(u64, u64)>,
+    native_frame_count: Option<u64>,
 ) -> Result<NormalizedClips> {
     let mut output_start_frame = 0_u64;
     let mut clips = Vec::new();
@@ -640,27 +814,55 @@ fn normalize_clips(
             ));
         }
 
-        let source_start_frame = frame_floor(range.start_monotonic_ns - capture_start_ns, fps);
-        let source_end_frame = semantic_final_frame.map_or_else(
-            || return frame_ceil(range.end_monotonic_ns - capture_start_ns, fps),
-            |(semantic_end, final_frame)| {
-                return if range.end_monotonic_ns == semantic_end {
-                    final_frame
-                } else {
-                    frame_ceil(range.end_monotonic_ns - capture_start_ns, fps)
-                };
-            },
-        );
+        let source_start_frame = clip.from.native_frame.unwrap_or_else(|| {
+            return frame_floor_ns(
+                source_elapsed_ns(range.start_monotonic_ns, capture_start_ns),
+                fps,
+            );
+        });
+
+        let source_end_frame = clip.to.native_frame.unwrap_or_else(|| {
+            return semantic_final_frame.map_or_else(
+                || {
+                    return frame_ceil_ns(
+                        source_elapsed_ns(range.end_monotonic_ns, capture_start_ns),
+                        fps,
+                    );
+                },
+                |(semantic_end, final_frame)| {
+                    return if range.end_monotonic_ns == semantic_end {
+                        final_frame
+                    } else {
+                        frame_ceil_ns(
+                            source_elapsed_ns(range.end_monotonic_ns, capture_start_ns),
+                            fps,
+                        )
+                    };
+                },
+            );
+        });
+
+        if native_frame_count.is_some_and(|count| return source_end_frame > count) {
+            return Err(plan_error(
+                "native clip exceeds verified CFR source frame count",
+            ));
+        }
 
         let source_frames = source_end_frame.saturating_sub(source_start_frame);
-        let retimed_frame_count = source_frames
-            .saturating_mul(u64::from(clip.speed.denominator))
-            .div_ceil(u64::from(clip.speed.numerator));
+        let retimed_frame_count = u64::try_from(
+            (u128::from(source_frames) * u128::from(clip.speed.denominator))
+                .div_ceil(u128::from(clip.speed.numerator)),
+        )
+        .map_err(|_error| return plan_error("retimed frame count overflow"))?;
 
-        let hold_frame_count = clip.hold_ms.saturating_mul(u64::from(fps)).div_ceil(1000);
+        let hold_frame_count =
+            u64::try_from((u128::from(clip.hold_ms) * u128::from(fps)).div_ceil(1000))
+                .map_err(|_error| return plan_error("hold frame count overflow"))?;
+
         let output_end_frame = output_start_frame
-            .saturating_add(retimed_frame_count)
-            .saturating_add(hold_frame_count);
+            .checked_add(retimed_frame_count)
+            .and_then(|n| return n.checked_add(hold_frame_count))
+            .ok_or_else(|| return plan_error("output frame count overflow"))?;
         clips.push(NormalizedClip {
             source_range: range,
             source_start_frame,
@@ -743,7 +945,7 @@ fn normalize_annotations(
     edit: &EditPlan,
     clips: &[NormalizedClip],
     output_frame_count: u64,
-    capture_start_ns: u64,
+    capture_start_ns: i128,
     fps: u16,
 ) -> Result<Vec<NormalizedAnnotation>> {
     let mut normalized = Vec::new();
@@ -774,8 +976,8 @@ fn normalize_annotations(
                     return Err(plan_error("annotation source range is empty or reversed"));
                 }
 
-                let start_frame = frame_floor(start.saturating_sub(capture_start_ns), fps);
-                let end_frame = frame_ceil(end.saturating_sub(capture_start_ns), fps);
+                let start_frame = frame_floor_ns(source_elapsed_ns(start, capture_start_ns), fps);
+                let end_frame = frame_ceil_ns(source_elapsed_ns(end, capture_start_ns), fps);
 
                 output_spans_for_source_frames(clips, start_frame, end_frame)
             }
@@ -849,7 +1051,7 @@ fn normalize_semantic_changes(
     session: &Path,
     visualization: Option<&ChangeVisualization>,
     clips: &[NormalizedClip],
-    capture_start_ns: u64,
+    capture_start_ns: i128,
     fps: u16,
     source_width: u16,
     source_height: u16,
@@ -880,7 +1082,9 @@ fn normalize_semantic_changes(
             return Ok(true);
         }
 
-        let source_frame = frame_floor(state.monotonic_ns.saturating_sub(capture_start_ns), fps);
+        let source_frame =
+            frame_floor_ns(source_elapsed_ns(state.monotonic_ns, capture_start_ns), fps);
+
         let output_frames = output_frames_by_source
             .get(&source_frame)
             .cloned()
@@ -934,7 +1138,7 @@ fn normalize_cursor_masks(
     session: &Path,
     transforms: &[PixelTransform],
     clips: &[NormalizedClip],
-    capture_start_ns: u64,
+    capture_start_ns: i128,
     fps: u16,
     source_width: u16,
     source_height: u16,
@@ -966,7 +1170,7 @@ fn normalize_cursor_masks(
 
         if state.presented {
             let source_frame =
-                frame_floor(state.monotonic_ns.saturating_sub(capture_start_ns), fps);
+                frame_floor_ns(source_elapsed_ns(state.monotonic_ns, capture_start_ns), fps);
 
             while pending
                 .peek()
@@ -1153,7 +1357,7 @@ fn scaled_even_dimension(value: u16, numerator: u16, denominator: u16) -> Result
 fn resolve_clip(
     session: &Path,
     clip: &EditClip,
-    capture_start_ns: u64,
+    capture_start_ns: i128,
     fps: u16,
 ) -> Result<SourceRange> {
     let from = resolve_edit_selector(session, &clip.from, capture_start_ns, fps)?;
@@ -1171,7 +1375,7 @@ pub(super) fn ranges_overlap(left: SourceRange, right: SourceRange) -> bool {
 fn resolve_edit_selector(
     session: &Path,
     selector: &EditSelector,
-    capture_start_ns: u64,
+    capture_start_ns: i128,
     fps: u16,
 ) -> Result<u64> {
     if let Some(monotonic_ns) = selector.monotonic_ns {
@@ -1201,8 +1405,26 @@ fn resolve_edit_selector(
         if fps == 0 {
             return Err(plan_error("native frame selector requires nonzero FPS"));
         }
-        return Ok(capture_start_ns
-            .saturating_add(native_frame.saturating_mul(NANOS_PER_SECOND) / u64::from(fps)));
+
+        let offset = (i128::from(native_frame) * i128::from(NANOS_PER_SECOND) + i128::from(fps)
+            - 1)
+            / i128::from(fps);
+
+        let canonical_ns = capture_start_ns + offset;
+        if canonical_ns < 0 {
+            return Err(plan_error(format!(
+                "nativeFrame {native_frame} maps to canonical {canonical_ns} ns before time zero \
+                 (capture origin {capture_start_ns} ns, {fps} FPS); pre-roll raw-frame selection \
+                 is unsupported by presentation edits. Select a nativeFrame at or after canonical \
+                 time zero, or use a nonnegative monotonicNs or marker selector; the ordinal is not clamped or rewritten"
+            )));
+        }
+        return u64::try_from(canonical_ns).map_err(|_error| {
+            return plan_error(format!(
+                "nativeFrame {native_frame} maps to canonical {canonical_ns} ns outside the u64 \
+                 timestamp range; select a lower nativeFrame ordinal"
+            ));
+        });
     }
 
     let marker = selector
@@ -1224,14 +1446,25 @@ fn resolve_edit_selector(
     return found.ok_or_else(|| return plan_error(format!("marker `{marker}` is absent")));
 }
 
+#[cfg(test)]
 pub(super) fn frame_floor(monotonic_ns: u64, fps: u16) -> u64 {
-    return monotonic_ns.saturating_mul(u64::from(fps)) / NANOS_PER_SECOND;
+    return frame_floor_ns(u128::from(monotonic_ns), fps);
 }
 
+fn frame_floor_ns(monotonic_ns: u128, fps: u16) -> u64 {
+    // Supported clock offsets are bounded to 24h; u64 canonical ns * u16 FPS fits u128.
+    return u64::try_from(monotonic_ns * u128::from(fps) / u128::from(NANOS_PER_SECOND))
+        .unwrap_or(u64::MAX);
+}
+
+#[cfg(test)]
 pub(super) fn frame_ceil(monotonic_ns: u64, fps: u16) -> u64 {
-    return monotonic_ns
-        .saturating_mul(u64::from(fps))
-        .div_ceil(NANOS_PER_SECOND);
+    return frame_ceil_ns(u128::from(monotonic_ns), fps);
+}
+
+fn frame_ceil_ns(monotonic_ns: u128, fps: u16) -> u64 {
+    return u64::try_from((monotonic_ns * u128::from(fps)).div_ceil(u128::from(NANOS_PER_SECOND)))
+        .unwrap_or(u64::MAX);
 }
 
 pub(super) fn hash_file(path: &Path) -> Result<String> {
@@ -1244,4 +1477,140 @@ pub(super) fn missing_native_capture_error(session: &Path, manifest: &Path) -> E
         manifest.display(),
         session.display(),
     ));
+}
+
+#[cfg(test)]
+mod capture_clock_tests {
+    use super::super::EDIT_PLAN_VERSION;
+    use super::*;
+
+    #[test]
+    fn cfr_native_clock_accounts_for_pre_roll_without_float_rounding() {
+        // First acquisition was 950ms before application/replay release.
+        let origin = -950_000_000i128;
+
+        assert_eq!(frame_floor_ns(source_elapsed_ns(0, origin), 30), 28);
+        assert_eq!(
+            frame_ceil_ns(source_elapsed_ns(200_000_000, origin), 30),
+            35
+        );
+
+        // Raw pre-roll frame selectors cannot be disguised as canonical time zero.
+        let selector = EditSelector {
+            native_frame: Some(0),
+            ..Default::default()
+        };
+
+        assert!(resolve_edit_selector(Path::new("unused"), &selector, origin, 30).is_err());
+
+        let selector = EditSelector {
+            native_frame: Some(30),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            resolve_edit_selector(Path::new("unused"), &selector, origin, 30).unwrap(),
+            50_000_000
+        );
+
+        // Large event timestamps do not saturate during ns*FPS arithmetic.
+        let t = u64::MAX - 1_000_000;
+
+        assert_eq!(
+            u128::from(frame_floor_ns(source_elapsed_ns(t, origin), 60)),
+            (u128::from(t) + 950_000_000) * 60 / 1_000_000_000
+        );
+    }
+
+    #[test]
+    fn pre_zero_native_ordinals_fail_actionably_without_rewriting_authored_edit() {
+        let edit = EditPlan {
+            version: EDIT_PLAN_VERSION,
+            clips: vec![EditClip {
+                from: EditSelector {
+                    native_frame: Some(0),
+                    ..Default::default()
+                },
+                to: EditSelector {
+                    native_frame: Some(30),
+                    ..Default::default()
+                },
+                speed: RationalSpeed::default(),
+                hold_ms: 0,
+                caption: None,
+            }],
+            ..Default::default()
+        };
+        let authored_bytes = serde_json::to_vec(&edit).unwrap();
+        let authored_hash = hash_edit_identity(&edit).unwrap();
+        let from = &edit.clips.first().unwrap().from;
+        let error = resolve_edit_selector(Path::new("unused"), from, -950_000_000, 30)
+            .expect_err("capture pre-roll must not be fabricated into canonical time zero");
+        let message = error.to_string();
+
+        for fact in [
+            "nativeFrame 0",
+            "canonical -950000000 ns",
+            "before time zero",
+            "pre-roll raw-frame selection",
+            "monotonicNs",
+            "marker",
+            "not clamped or rewritten",
+        ] {
+            assert!(
+                message.contains(fact),
+                "missing actionable fact {fact}: {message}"
+            );
+        }
+
+        assert_eq!(serde_json::to_vec(&edit).unwrap(), authored_bytes);
+        assert_eq!(hash_edit_identity(&edit).unwrap(), authored_hash);
+
+        let before_zero = EditSelector {
+            native_frame: Some(28),
+            ..Default::default()
+        };
+
+        assert!(
+            resolve_edit_selector(Path::new("unused"), &before_zero, -950_000_000, 30).is_err()
+        );
+
+        let after_zero = EditSelector {
+            native_frame: Some(29),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            resolve_edit_selector(Path::new("unused"), &after_zero, -950_000_000, 30).unwrap(),
+            16_666_667
+        );
+    }
+
+    #[test]
+    fn existing_native_ordinal_ceil_rounding_admits_the_exact_zero_boundary() {
+        let zero = EditSelector {
+            native_frame: Some(0),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            resolve_edit_selector(Path::new("unused"), &zero, 0, 60).unwrap(),
+            0
+        );
+
+        let selector = EditSelector {
+            native_frame: Some(1),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            resolve_edit_selector(Path::new("unused"), &selector, 0, 60).unwrap(),
+            16_666_667
+        );
+        assert_eq!(
+            resolve_edit_selector(Path::new("unused"), &selector, -16_666_667, 60).unwrap(),
+            0
+        );
+        assert_eq!(selector.native_frame, Some(1));
+    }
 }

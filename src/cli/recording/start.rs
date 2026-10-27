@@ -90,11 +90,11 @@ pub(super) fn run_detached_record(
 }
 
 #[derive(Debug)]
-struct StartSynchronization {
-    until_idle: Option<Duration>,
-    until_screen: Option<String>,
-    until_screen_regex: Option<String>,
-    timeout: Duration,
+pub(super) struct StartSynchronization {
+    pub(super) until_idle: Option<Duration>,
+    pub(super) until_screen: Option<String>,
+    pub(super) until_screen_regex: Option<String>,
+    pub(super) timeout: Duration,
 }
 
 impl StartSynchronization {
@@ -105,7 +105,7 @@ impl StartSynchronization {
     }
 }
 
-fn report_start_outcome(
+pub(super) fn report_start_outcome(
     response: &mut ResponseWriter,
     entry: &RegistryEntry,
     paths: &DetachedSessionPaths,

@@ -62,3 +62,57 @@ fn acceptance_benchmark_instance_matches_schema() {
             .expect("acceptance benchmark json");
     assert!(validator.is_valid(&instance));
 }
+
+#[test]
+fn sdk_artifact_contract_vector_matches_schema() {
+    let entry = catalog()
+        .unwrap()
+        .iter()
+        .find(|e| return e.filename == "sdk-media-artifact-result.schema.json")
+        .unwrap();
+
+    let schema: serde_json::Value =
+        serde_json::from_slice(&entry.generate().unwrap().json).unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let mut value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../fixtures/conformance/sdk/cases/portable.json"
+    ))
+    .unwrap();
+    assert!(validator.is_valid(&value));
+
+    value["members"][0]["byte_length"] = serde_json::json!(9_007_199_254_740_993_u64);
+
+    assert!(!validator.is_valid(&value));
+}
+
+#[test]
+fn sdk_schema_rejects_overflow_and_requires_nullable_member_key() {
+    let entry = catalog()
+        .unwrap()
+        .iter()
+        .find(|e| return e.filename == "sdk-media-artifact-result.schema.json")
+        .unwrap();
+
+    let schema: serde_json::Value =
+        serde_json::from_slice(&entry.generate().unwrap().json).unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let original: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../fixtures/conformance/sdk/cases/portable.json"
+    ))
+    .unwrap();
+
+    for bad in ["18446744073709551616", "01", "-1", "1.5"] {
+        let mut value = original.clone();
+        value["members"][0]["byte_length"] = bad.into();
+
+        assert!(!validator.is_valid(&value), "schema accepted {bad}");
+    }
+
+    let mut value = original;
+    value["members"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("schema_type");
+
+    assert!(!validator.is_valid(&value));
+}

@@ -1,8 +1,8 @@
 use crate::cli::{
     analysis::args::{ShowRenderer, TimeRangeArgs},
     parsers::{
-        parse_capture_target, parse_media_hold_duration, parse_state_hash, parse_video_fps,
-        parse_video_output_path,
+        parse_capture_target, parse_derivative_video_fps, parse_media_hold_duration,
+        parse_state_hash, parse_video_fps, parse_video_output_path,
     },
 };
 use clap::{ArgGroup, Args, Subcommand, ValueEnum};
@@ -11,6 +11,7 @@ use termtrace_engine::timeline::parse_time_offset_ns;
 use termtrace_model::{
     artifact::{
         bundle::BundleProfile,
+        derivative::GifLoop,
         save::{SaveFormat, SemanticRasterProfile},
     },
     execution::session::CaptureTarget,
@@ -265,6 +266,10 @@ pub(in crate::cli) enum VideoSourceArg {
     Native,
     /// Deterministic pixels generated from canonical semantic replay.
     Semantic,
+    /// Explicit native replay; never original or semantic substitution.
+    ReplayNative,
+    /// Verified original-execution CFR pixels only; no replay when absent.
+    OriginalExecution,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -318,6 +323,8 @@ impl From<VideoSourceArg> for VideoRenderer {
         return match value {
             VideoSourceArg::Native => Self::Native,
             VideoSourceArg::Semantic => Self::Semantic,
+            VideoSourceArg::ReplayNative => Self::ReplayNative,
+            VideoSourceArg::OriginalExecution => Self::OriginalExecution,
         };
     }
 }
@@ -342,7 +349,7 @@ impl From<VideoCursorStyleArg> for CursorStyle {
 pub(in crate::cli) struct VideoFacadeArgs {
     /// Completed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
-    /// MP4 output file; a manifested `.termtrace` sidecar is retained.
+    /// MP4 (legacy replace), GIF or VP9 `WebM` (no-replace); retain a `.termtrace` sidecar.
     #[arg(short, long, value_parser = parse_video_output_path)]
     pub(in crate::cli) out: Option<PathBuf>,
     /// Resolve and print the presentation plan without rendering.
@@ -371,7 +378,7 @@ pub(in crate::cli) struct VideoFacadeArgs {
     #[arg(long, value_enum, default_value_t = VideoPresetArg::Docs)]
     pub(in crate::cli) preset: VideoPresetArg,
     /// Exact output frame rate; native capture must match.
-    #[arg(long, value_parser = parse_video_fps)]
+    #[arg(long, value_parser = parse_derivative_video_fps)]
     pub(in crate::cli) fps: Option<u16>,
     /// Semantic replay or verified native pixels; native never falls back.
     #[arg(long, value_enum, default_value_t = VideoSourceArg::Native)]
@@ -418,7 +425,27 @@ pub(in crate::cli) struct VideoFacadeArgs {
     /// Low-resolution preview width.
     #[arg(long, default_value_t = 640, requires = "preview_out")]
     pub(in crate::cli) preview_width: u16,
+    /// GIF loop policy (infinite by default); invalid for WebM/MP4.
+    #[arg(long, value_enum, requires = "out")]
+    pub(in crate::cli) gif_loop: Option<GifLoopArg>,
     /// Emit stable structured output as JSON.
     #[arg(long)]
     pub(in crate::cli) json: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(in crate::cli) enum GifLoopArg {
+    /// Repeat forever (viewers may clamp short frame delays).
+    Infinite,
+    /// Play once, without a loop extension.
+    Once,
+}
+
+impl From<GifLoopArg> for GifLoop {
+    fn from(value: GifLoopArg) -> Self {
+        match value {
+            GifLoopArg::Infinite => return Self::Infinite,
+            GifLoopArg::Once => return Self::Once,
+        }
+    }
 }

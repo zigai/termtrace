@@ -158,8 +158,17 @@ fn top_level_video_auto_captures_native_and_overwrites_output() {
         .success();
 
     assert!(
-        session.join("visual/manifest.json").exists(),
-        "termtrace video should automatically capture native visual manifest"
+        fs_err::read_dir(temporary.path())
+            .expect("capture siblings")
+            .any(|entry| {
+                let entry = entry.expect("capture entry");
+                return entry
+                    .file_name()
+                    .as_encoded_bytes()
+                    .starts_with(b"native-replay-")
+                    && entry.path().join("manifest.json").is_file();
+            }),
+        "termtrace video should retain fresh replay pixels without altering existing captures"
     );
     assert!(output.is_file(), "output video should be published");
     assert!(
@@ -927,5 +936,205 @@ fn readme_command_references_name_real_commands() {
                 "README references `termtrace {command} {next}`, but `{command}` has only {subcommands:?}"
             );
         }
+    }
+}
+
+#[test]
+fn top_level_video_derivatives_use_explicit_sources_and_never_replace() {
+    use std::{
+        fs::Permissions,
+        os::unix::fs::{symlink, PermissionsExt},
+    };
+    use termtrace_model::artifact::sdk::{
+        ArtifactProvenance, ArtifactSourceKind, MediaArtifactResult,
+    };
+    let temp = TempDir::new().unwrap();
+    let session = temp.path().join("session");
+    let sentinel = temp.path().join("runs");
+    Command::cargo_bin("termtrace")
+        .unwrap()
+        .args([
+            "record",
+            "--no-input",
+            "--cols",
+            "12",
+            "--rows",
+            "3",
+            "--out",
+        ])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c"])
+        .arg(format!(
+            "echo once >> '{}'; printf READY; sleep 0.15",
+            sentinel.display()
+        ))
+        .assert()
+        .success();
+
+    let canonical: Vec<_> = ["session.json", "events.jsonl", "completion.json"]
+        .map(|p| return fs_err::read(session.join(p)).unwrap())
+        .into();
+
+    for extension in ["mp4", "gif", "webm"] {
+        let unavailable = temp.path().join(format!("original.{extension}"));
+        Command::cargo_bin("termtrace")
+            .unwrap()
+            .arg("video")
+            .arg(&session)
+            .args(["--renderer", "original-execution", "--out"])
+            .arg(&unavailable)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "original_execution_source_unavailable",
+            ));
+
+        assert!(!unavailable.exists());
+
+        let blocked = temp.path().join(format!("blocked.{extension}"));
+        Command::cargo_bin("termtrace")
+            .unwrap()
+            .env("PATH", "")
+            .arg("video")
+            .arg(&session)
+            .args(["--renderer", "replay-native", "--out"])
+            .arg(&blocked)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("native-video"));
+
+        assert!(!blocked.exists());
+    }
+
+    for extension in ["gif", "webm"] {
+        let out = temp.path().join(format!("semantic.{extension}"));
+        let result = Command::cargo_bin("termtrace")
+            .unwrap()
+            .arg("video")
+            .arg(&session)
+            .args([
+                "--renderer",
+                "semantic",
+                "--fps",
+                "30",
+                "--hold-start",
+                "0ms",
+                "--hold-end",
+                "100ms",
+                "--out",
+            ])
+            .arg(&out)
+            .arg("--json")
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let report: serde_json::Value = serde_json::from_slice(&result).unwrap();
+        let artifact: MediaArtifactResult =
+            serde_json::from_value(report["artifact"].clone()).unwrap();
+        assert_eq!(
+            artifact.provenance,
+            ArtifactProvenance::PresentationOutput {
+                source_kind: ArtifactSourceKind::SemanticRendering
+            }
+        );
+
+        let bytes = fs_err::read(&out).unwrap();
+        Command::cargo_bin("termtrace")
+            .unwrap()
+            .arg("video")
+            .arg(&session)
+            .args(["--renderer", "semantic", "--out"])
+            .arg(&out)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("already exists"));
+
+        assert_eq!(fs_err::read(out).unwrap(), bytes);
+    }
+
+    assert_eq!(fs_err::read_to_string(sentinel).unwrap(), "once\n");
+
+    let after: Vec<_> = ["session.json", "events.jsonl", "completion.json"]
+        .map(|p| return fs_err::read(session.join(p)).unwrap())
+        .into();
+    assert_eq!(canonical, after);
+
+    let at_25 = temp.path().join("semantic-25.gif");
+    Command::cargo_bin("termtrace")
+        .unwrap()
+        .arg("video")
+        .arg(&session)
+        .args([
+            "--renderer",
+            "semantic",
+            "--fps",
+            "25",
+            "--hold-start",
+            "0ms",
+            "--hold-end",
+            "0ms",
+            "--out",
+        ])
+        .arg(&at_25)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"fps\":25"));
+
+    Command::cargo_bin("termtrace")
+        .unwrap()
+        .args(["video", "missing-session", "--fps", "101", "--out"])
+        .arg(temp.path().join("bad-rate.gif"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("GIF FPS must be in 1..=100"));
+    // An actual failed bounded encode probe is unavailable, never a semantic/codec fallback.
+    let tools = temp.path().join("limited-tools");
+    fs_err::create_dir(&tools).unwrap();
+    symlink(
+        termtrace_process::find_executable("ffprobe").unwrap(),
+        tools.join("ffprobe"),
+    )
+    .unwrap();
+    let ffmpeg = tools.join("ffmpeg");
+    let real_ffmpeg = termtrace_process::find_executable("ffmpeg").unwrap();
+    fs_err::write(&ffmpeg,format!("#!/bin/sh\ncase \" $* \" in *libvpx-vp9*|*palettegen*) echo 'encoder or palette filter unavailable' >&2; exit 1;; esac\nexec '{}' \"$@\"\n",real_ffmpeg.display())).unwrap();
+    {
+        fs_err::set_permissions(&ffmpeg, Permissions::from_mode(0o700)).unwrap();
+    }
+
+    for extension in ["gif", "webm"] {
+        let out = temp.path().join(format!("unsupported.{extension}"));
+        Command::cargo_bin("termtrace")
+            .unwrap()
+            .env("PATH", &tools)
+            .arg("video")
+            .arg(&session)
+            .args(["--renderer", "semantic", "--out"])
+            .arg(&out)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("derivative_encoder_unavailable"));
+
+        assert!(!out.exists());
+    }
+
+    for (extension, flag, value) in [
+        ("webm", "--gif-loop", "once"),
+        ("gif", "--preset", "lossless"),
+    ] {
+        let out = temp.path().join(format!("invalid.{extension}"));
+        Command::cargo_bin("termtrace")
+            .unwrap()
+            .arg("video")
+            .arg(&session)
+            .args(["--renderer", "semantic", flag, value, "--out"])
+            .arg(&out)
+            .assert()
+            .failure();
+
+        assert!(!out.exists());
     }
 }

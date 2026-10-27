@@ -36,6 +36,11 @@ pub struct LaunchSpec {
     pub environment: EnvironmentSpec,
     /// Terminate runaway work after this many output bytes without truncating evidence.
     pub output_byte_budget: Option<u64>,
+    /// Terminate the child after this wall-clock duration, in whole milliseconds.
+    pub max_duration: Option<Duration>,
+    /// Terminate the child after this long without input, output, or control activity, in
+    /// whole milliseconds.
+    pub idle_timeout: Option<Duration>,
 }
 
 impl LaunchSpec {
@@ -49,6 +54,8 @@ impl LaunchSpec {
             startup_timeout: defaults::STARTUP_TIMEOUT,
             environment: EnvironmentSpec::default(),
             output_byte_budget: None,
+            max_duration: None,
+            idle_timeout: None,
         };
     }
 
@@ -139,7 +146,25 @@ impl LaunchSpec {
         return self;
     }
 
-    pub(super) fn validate(&self) -> Result<()> {
+    /// Terminate the child after this wall-clock duration, a nonzero whole number of
+    /// milliseconds; completion reports the `max_duration` resource limit.
+    #[must_use]
+    pub const fn max_duration(mut self, duration: Duration) -> Self {
+        self.max_duration = Some(duration);
+
+        return self;
+    }
+
+    /// Terminate the child after this long without activity, a nonzero whole number of
+    /// milliseconds; completion reports the `idle_timeout` resource limit.
+    #[must_use]
+    pub const fn idle_timeout(mut self, duration: Duration) -> Self {
+        self.idle_timeout = Some(duration);
+
+        return self;
+    }
+
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.command.is_empty() {
             return Err(client_error("launch command is empty"));
         }
@@ -147,6 +172,20 @@ impl LaunchSpec {
         if self.cols == 0 || self.rows == 0 {
             return Err(client_error("launch geometry must be nonzero"));
         }
+
+        for (name, limit) in [
+            ("max duration", self.max_duration),
+            ("idle timeout", self.idle_timeout),
+        ] {
+            if limit.is_some_and(|limit| {
+                return limit.is_zero() || limit.subsec_nanos() % 1_000_000 != 0;
+            }) {
+                return Err(client_error(format!(
+                    "launch {name} must be a nonzero whole number of milliseconds"
+                )));
+            }
+        }
+
         return self
             .environment
             .validate()

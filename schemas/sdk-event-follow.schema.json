@@ -1,0 +1,384 @@
+{
+  "$defs": {
+    "DurabilityMode": {
+      "description": "Output persistence behavior selected for one canonical recording.",
+      "oneOf": [
+        {
+          "const": "strict",
+          "description": "Synchronize every PTY output event before processing continues.",
+          "type": "string"
+        },
+        {
+          "const": "bounded",
+          "description": "Synchronize after a configured output-byte or elapsed-time threshold.",
+          "type": "string"
+        },
+        {
+          "const": "throughput",
+          "description": "Buffer PTY output until a mutation, lifecycle, or completion boundary.",
+          "type": "string"
+        }
+      ]
+    },
+    "DurabilityPolicy": {
+      "additionalProperties": false,
+      "description": "Chain-bound configuration for canonical output persistence.",
+      "properties": {
+        "maximum_interval_ms": {
+          "description": "Maximum uncommitted interval for bounded mode.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maximum_uncommitted_bytes": {
+          "description": "Maximum uncommitted PTY bytes for bounded mode.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mode": {
+          "$ref": "#/$defs/DurabilityMode",
+          "description": "Selected persistence behavior."
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "DurabilityRecord": {
+      "additionalProperties": false,
+      "description": "Recorder-observed durability outcomes bound into completion evidence.",
+      "properties": {
+        "final_sync_completed": {
+          "description": "Whether the final event boundary completed file synchronization.",
+          "type": "boolean"
+        },
+        "maximum_observed_uncommitted_bytes": {
+          "description": "Largest PTY byte count pending synchronization.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maximum_observed_uncommitted_ns": {
+          "description": "Largest measured interval with output pending synchronization.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "policy": {
+          "$ref": "#/$defs/DurabilityPolicy",
+          "description": "Chain-bound configured policy."
+        },
+        "sync_count": {
+          "description": "Number of successful event-log data synchronizations after header creation.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "policy",
+        "maximum_observed_uncommitted_bytes",
+        "maximum_observed_uncommitted_ns",
+        "sync_count",
+        "final_sync_completed"
+      ],
+      "type": "object"
+    },
+    "LiveEventCursor": {
+      "additionalProperties": false,
+      "description": "An actor-owned position immediately after a canonical record (or the header).",
+      "properties": {
+        "event_hash": {
+          "description": "Hash of the preceding record or header.",
+          "type": "string"
+        },
+        "file_offset": {
+          "description": "Byte offset of the next record.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "monotonic_ns": {
+          "description": "Timestamp of the preceding record, or zero at the header.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_event_seq": {
+          "description": "Sequence of the next record.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "next_event_seq",
+        "file_offset",
+        "event_hash",
+        "monotonic_ns"
+      ],
+      "type": "object"
+    },
+    "ResourceLimitKind": {
+      "description": "Canonical resource-limit kinds with implemented completion semantics.",
+      "oneOf": [
+        {
+          "const": "output_bytes",
+          "description": "Observed PTY output byte count.",
+          "type": "string"
+        },
+        {
+          "const": "max_duration",
+          "description": "Wall-clock session duration limit.",
+          "type": "string"
+        },
+        {
+          "const": "idle_timeout",
+          "description": "Inactivity idle timeout.",
+          "type": "string"
+        }
+      ]
+    },
+    "ResourceLimitOutcome": {
+      "additionalProperties": false,
+      "description": "Resource-limit trigger retained in immutable completion evidence.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ResourceLimitKind",
+          "description": "Stable limit kind."
+        },
+        "limit": {
+          "description": "Configured trigger threshold.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed": {
+          "description": "Exact observed count when the host triggered termination.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "limit",
+        "observed"
+      ],
+      "type": "object"
+    },
+    "SessionCompletion": {
+      "additionalProperties": false,
+      "description": "Immutable completion facts written after the final event is durable.",
+      "properties": {
+        "durability": {
+          "$ref": "#/$defs/DurabilityRecord",
+          "description": "Recorder-observed persistence behavior and final sync result."
+        },
+        "event_count": {
+          "description": "Number of canonical events.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "event_header_hash": {
+          "description": "BLAKE3 of the exact event-log header bytes.",
+          "type": "string"
+        },
+        "exit_code": {
+          "description": "Normal exit code when available.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionFailure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Fatal recorder failure, absent for normal child completion."
+        },
+        "final_event_hash": {
+          "description": "Hash of the final canonical event.",
+          "type": "string"
+        },
+        "format": {
+          "description": "Stable format identifier.",
+          "type": "string"
+        },
+        "output_bytes": {
+          "description": "Total raw output bytes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resource_limit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceLimitOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Resource limit that caused host termination, when one was reached."
+        },
+        "session_id": {
+          "description": "Session identifier.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "session_manifest_hash": {
+          "description": "BLAKE3 of the exact immutable session manifest bytes.",
+          "type": "string"
+        },
+        "signal_name": {
+          "description": "Signal name when available.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminal_event_seq": {
+          "description": "Sequence number of the required terminal `Exit` event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "validation_version": {
+          "description": "Validation contract applied before publication.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "description": "Completion schema version.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "version",
+        "validation_version",
+        "session_id",
+        "session_manifest_hash",
+        "event_header_hash",
+        "output_bytes",
+        "final_event_hash",
+        "event_count",
+        "terminal_event_seq",
+        "durability"
+      ],
+      "type": "object"
+    },
+    "SessionFailure": {
+      "additionalProperties": false,
+      "description": "Recorder failure retained when the child could not complete normally.",
+      "properties": {
+        "code": {
+          "description": "Stable failure category.",
+          "type": "string"
+        },
+        "message": {
+          "description": "Human-readable failure context.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/sdk-event-follow.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Actor-owned durable follow position or independently validated completion.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "Position authenticated by the live actor, not imported file metadata.",
+      "properties": {
+        "device": {
+          "description": "Writer descriptor device.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "durable": {
+          "$ref": "#/$defs/LiveEventCursor",
+          "description": "Latest synchronized position."
+        },
+        "header_hash": {
+          "description": "Exact canonical header hash.",
+          "type": "string"
+        },
+        "inode": {
+          "description": "Writer descriptor inode.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "live",
+          "type": "string"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LiveEventCursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Requested position, when retained and durable."
+        }
+      },
+      "required": [
+        "kind",
+        "device",
+        "inode",
+        "header_hash",
+        "durable"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Validated terminal completion, including its source-bound final event hash.",
+      "properties": {
+        "completion": {
+          "$ref": "#/$defs/SessionCompletion",
+          "description": "Full completion; this is not a live-prefix claim."
+        },
+        "kind": {
+          "const": "completed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "completion"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "EventFollowPosition"
+}

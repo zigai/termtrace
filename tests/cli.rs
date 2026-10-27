@@ -30,6 +30,8 @@ mod replay_index_and_playback;
 mod response_contract;
 #[path = "cli/integration/scenario_and_reviewer_workflows.rs"]
 mod scenario_and_reviewer_workflows;
+#[path = "cli/contracts/sdk_contract.rs"]
+mod sdk_contract;
 #[path = "cli/integration/semantic_input.rs"]
 mod semantic_input;
 #[path = "cli/integration/session_registry_and_lifecycle/mod.rs"]

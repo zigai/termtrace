@@ -40,6 +40,22 @@
         }
       ]
     },
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    },
     "NamedKey": {
       "description": "Layout-independent key accepted by the terminal key encoder adapter.",
       "oneOf": [
@@ -311,11 +327,16 @@
           "type": "integer"
         },
         "workingDirectory": {
-          "description": "Optional child working directory.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExactPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional child working directory."
         }
       },
       "required": [

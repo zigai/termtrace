@@ -13,14 +13,7 @@ use super::{
     raw_terminal::RawTerminalGuard,
     support::{finish_with_cleanup, terminal_error},
 };
-use crate::{
-    observation::publish_endpoint_checkpoint,
-    replay::{
-        trust::{SourceIdentity, ValidatedSession},
-        EndpointInspection,
-    },
-    Error, Result,
-};
+use crate::{Error, Result};
 use portable_pty::PtySize;
 #[cfg(test)]
 use std::cell::Cell;
@@ -47,12 +40,11 @@ use termtrace_model::{
         COMPLETION_VALIDATION_VERSION, SESSION_COMPLETION_FORMAT, SESSION_COMPLETION_VERSION,
         SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
     },
-    terminal::observation::StatePoint,
     terminal::replay::GHOSTTY_REVISION,
     terminal::state::supported_geometry_cell_count,
     value::ByteString,
 };
-use termtrace_terminal::{semantic_state_hash, GhosttyVt, PresentationTracker, QueryTracker};
+use termtrace_terminal::{GhosttyVt, PresentationTracker, QueryTracker};
 use uuid::Uuid;
 
 const MUTATION_CACHE_CAPACITY: usize = 256;
@@ -64,6 +56,7 @@ thread_local! {
     static POISON_FATAL_APPEND: Cell<bool> = const { Cell::new(false) };
 }
 
+use super::outer_resize::ResizeAuthority;
 use super::runtime::run;
 
 #[derive(serde::Serialize)]
@@ -113,13 +106,33 @@ pub fn record_with_output(
     options: &RecordOptions,
     output: &mut impl Write,
 ) -> Result<RecordOutcome> {
+    return record_with_resize_authority(options, output, &ResizeAuthority::ChildPty);
+}
+
+/// Record a command whose terminal grid is owned by `resize_authority`.
+///
+/// With [`ResizeAuthority::OuterTerminal`], control resizes are forwarded to the supervisor
+/// and canonical resize events follow the grid observed on the recorder's own terminal.
+///
+/// # Errors
+///
+/// Returns the same errors as [`record`], including failures from `output`.
+pub fn record_with_resize_authority(
+    options: &RecordOptions,
+    output: &mut impl Write,
+    resize_authority: &ResizeAuthority,
+) -> Result<RecordOutcome> {
     let mut terminal_mode = RawTerminalGuard::enter(options.forward_stdin)?;
-    let result = record_to(options, output);
+    let result = record_to(options, output, resize_authority);
 
     return finish_with_cleanup(result, terminal_mode.restore());
 }
 
-fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordOutcome> {
+fn record_to(
+    options: &RecordOptions,
+    output: &mut impl Write,
+    resize_authority: &ResizeAuthority,
+) -> Result<RecordOutcome> {
     let pty_size = validate_options(options)?;
     let mut effective_environment =
         EffectiveEnvironment::resolve_validated(&options.environment, &options.term)?;
@@ -266,6 +279,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         &control_socket,
         host_signals,
         startup_error,
+        resize_authority,
     ) {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -336,31 +350,7 @@ fn record_to(options: &RecordOptions, output: &mut impl Write) -> Result<RecordO
         failure: None,
     };
 
-    let source = SourceIdentity::capture_candidate(&options.output_directory)?;
     publish_session_completion(options, &completion)?;
-    let validated = ValidatedSession::published(&options.output_directory, source, completion)?;
-
-    match semantic_state_hash(&runtime.final_presented) {
-        Ok(final_state_hash) => {
-            let endpoint = EndpointInspection {
-                state: runtime.final_presented,
-                state_hash: final_state_hash,
-                event_seq: None,
-                event_byte_offset: None,
-                monotonic_ns: None,
-                presented: true,
-            };
-
-            if let Err(error) =
-                publish_endpoint_checkpoint(&validated, &StatePoint::LatestPresented, &endpoint)
-            {
-                tracing::warn!(%error, "could not publish completion endpoint checkpoint");
-            }
-        }
-        Err(error) => {
-            tracing::warn!(%error, "could not hash completion endpoint checkpoint");
-        }
-    }
 
     return Ok(RecordOutcome {
         exit_code,

@@ -1,0 +1,170 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "TmuxCoverage": {
+      "description": "Existing uncovered-pane policies.",
+      "oneOf": [
+        {
+          "const": "warn",
+          "description": "Record gaps without terminating uncovered panes.",
+          "type": "string"
+        },
+        {
+          "const": "strict",
+          "description": "Permit the existing integration to terminate uncovered panes after its grace period.",
+          "type": "string"
+        }
+      ]
+    },
+    "TmuxGhosttyProfile": {
+      "description": "Existing Ghostty pane capture policies.",
+      "oneOf": [
+        {
+          "const": "auto",
+          "description": "Capture when available.",
+          "type": "string"
+        },
+        {
+          "const": "required",
+          "description": "Fail unless capture is available.",
+          "type": "string"
+        },
+        {
+          "const": "off",
+          "description": "Semantic evidence only.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/tmux-record-configuration.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Aggregate start settings. Exact bytes identify command arguments, targets, and paths.",
+  "properties": {
+    "cell_height": {
+      "default": 24,
+      "description": "Fallback cell height, matching CLI defaults.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "cell_width": {
+      "default": 12,
+      "description": "Fallback cell width, matching CLI defaults.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "command": {
+      "default": [],
+      "description": "Full recorded tmux client command; its executable must match the selected namespace client.",
+      "items": {
+        "$ref": "#/$defs/Base64Bytes"
+      },
+      "type": "array"
+    },
+    "coverage": {
+      "$ref": "#/$defs/TmuxCoverage",
+      "default": "warn",
+      "description": "Existing integration's uncovered-pane policy."
+    },
+    "explicit_only": {
+      "default": false,
+      "description": "Record only explicitly launched panes.",
+      "type": "boolean"
+    },
+    "ghostty_config": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Base64Bytes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Explicit Ghostty configuration path, if needed."
+    },
+    "ghostty_profile": {
+      "$ref": "#/$defs/TmuxGhosttyProfile",
+      "default": "auto",
+      "description": "Existing integration's Ghostty capture policy."
+    },
+    "launch_hook": {
+      "default": false,
+      "description": "Use the existing patched pane-launch hook.",
+      "type": "boolean"
+    },
+    "name": {
+      "default": "",
+      "description": "Unique aggregate name, validated by the existing tmux store.",
+      "type": "string"
+    },
+    "new_server": {
+      "default": false,
+      "description": "Start a new isolated server; false enables an existing selected server.",
+      "type": "boolean"
+    },
+    "panes": {
+      "default": [],
+      "description": "Initial stable pane scope targets.",
+      "items": {
+        "$ref": "#/$defs/Base64Bytes"
+      },
+      "type": "array"
+    },
+    "retain_bytes": {
+      "default": null,
+      "description": "Opt-in completed-pane retention budget; absent means no budget-based deletion.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "retain_days": {
+      "default": null,
+      "description": "Opt-in completed-pane retention age; absent means no age-based deletion.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "sessions": {
+      "default": [],
+      "description": "Initial session scope targets, resolved by the existing tmux service.",
+      "items": {
+        "$ref": "#/$defs/Base64Bytes"
+      },
+      "type": "array"
+    },
+    "term": {
+      "default": null,
+      "description": "Optional terminal identity override.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "windows": {
+      "default": [],
+      "description": "Initial window scope targets.",
+      "items": {
+        "$ref": "#/$defs/Base64Bytes"
+      },
+      "type": "array"
+    }
+  },
+  "title": "TmuxRecordConfiguration",
+  "type": "object"
+}

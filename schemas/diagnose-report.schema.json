@@ -95,6 +95,22 @@
       ],
       "type": "object"
     },
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    },
     "FindingConfidence": {
       "description": "Conservative confidence label for a derived finding.",
       "oneOf": [
@@ -132,8 +148,8 @@
           "type": "string"
         },
         "manifest": {
-          "description": "Relative native manifest path.",
-          "type": "string"
+          "$ref": "#/$defs/ExactPath",
+          "description": "Relative native manifest path."
         },
         "state_id": {
           "description": "Related semantic state.",

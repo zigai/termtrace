@@ -1,0 +1,269 @@
+{
+  "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "ProvenanceCapture": {
+      "description": "How one selected provenance value is represented.",
+      "oneOf": [
+        {
+          "const": "value",
+          "description": "Retain the exact value and its hash.",
+          "type": "string"
+        },
+        {
+          "const": "hash",
+          "description": "Retain only a value hash for later equality checks.",
+          "type": "string"
+        },
+        {
+          "const": "name",
+          "description": "Retain only the variable name and whether it was set.",
+          "type": "string"
+        },
+        {
+          "const": "not_captured",
+          "description": "Explicitly document that the selected value was not captured.",
+          "type": "string"
+        }
+      ]
+    },
+    "RestartDurability": {
+      "description": "Recorder restart durability override. Pascal-case wire names preserve the existing CLI handoff.",
+      "oneOf": [
+        {
+          "const": "Strict",
+          "description": "Synchronize each event.",
+          "type": "string"
+        },
+        {
+          "const": "Bounded",
+          "description": "Bound pending time and bytes.",
+          "type": "string"
+        },
+        {
+          "const": "Throughput",
+          "description": "Synchronize mutation/lifecycle boundaries.",
+          "type": "string"
+        }
+      ]
+    },
+    "RestartProvenance": {
+      "description": "Recorder restart provenance override, preserving existing internal wire names.",
+      "oneOf": [
+        {
+          "const": "Minimal",
+          "description": "Minimal provenance.",
+          "type": "string"
+        },
+        {
+          "const": "Reproducible",
+          "description": "Reproducible provenance.",
+          "type": "string"
+        },
+        {
+          "const": "Custom",
+          "description": "Explicit environment rules.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/restart-configuration.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Typed successor configuration. Absent fields keep predecessor values; clear flags explicitly\nremove optional limits. This is a recorder-launch DTO, not a persisted evidence format.",
+  "properties": {
+    "allow_environment_change": {
+      "default": false,
+      "description": "Explicitly permit an intentionally changed environment.",
+      "type": "boolean"
+    },
+    "cell_height": {
+      "default": null,
+      "description": "New cell height, absent to keep.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "cell_width": {
+      "default": null,
+      "description": "New cell width, absent to keep.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "clear_idle_timeout": {
+      "default": false,
+      "description": "Clear the inactivity limit.",
+      "type": "boolean"
+    },
+    "clear_max_duration": {
+      "default": false,
+      "description": "Clear the wall-clock limit.",
+      "type": "boolean"
+    },
+    "clear_output_byte_budget": {
+      "default": false,
+      "description": "Clear the output budget rather than keeping it.",
+      "type": "boolean"
+    },
+    "cols": {
+      "default": null,
+      "description": "New columns, absent to keep.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "command": {
+      "default": null,
+      "description": "New exact executable/arguments; absent to keep.",
+      "items": {
+        "$ref": "#/$defs/Base64Bytes"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "cwd": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Base64Bytes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "New exact working directory, absent to keep."
+    },
+    "durability": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RestartDurability"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "New durability mode, absent to keep."
+    },
+    "durability_max_interval_ms": {
+      "default": null,
+      "description": "Bounded durability interval override.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "durability_max_uncommitted_bytes": {
+      "default": null,
+      "description": "Bounded durability byte override.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "idle_timeout_ms": {
+      "default": null,
+      "description": "New inactivity limit.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "max_duration_ms": {
+      "default": null,
+      "description": "New wall-clock duration limit.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "output_byte_budget": {
+      "default": null,
+      "description": "New output budget.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "provenance": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RestartProvenance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "New provenance collection mode."
+    },
+    "provenance_environment": {
+      "default": [],
+      "description": "Explicit provenance environment rules.",
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/$defs/ProvenanceCapture"
+          }
+        ],
+        "type": "array"
+      },
+      "type": "array"
+    },
+    "rows": {
+      "default": null,
+      "description": "New rows, absent to keep.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "term": {
+      "default": null,
+      "description": "New TERM, absent to keep.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "RestartConfiguration",
+  "type": "object"
+}

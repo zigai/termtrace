@@ -1,0 +1,15 @@
+{
+  "id": "foundation",
+  "command": [
+    "/bin/sh",
+    "-c",
+    "printf '%s' $$ > \"$1\"; printf '%s' \"$PPID\" > \"$1.recorder\"; trap 'exit 0' TERM; printf 'READY\\000\\377'; while IFS= read -r line; do printf 'INPUT:<%s>' \"$line\"; done",
+    "sdk-conformance"
+  ],
+  "rows": 30,
+  "cols": 96,
+  "text": "READY",
+  "output_hex": "524541445900ff",
+  "timeout_ms": 5000,
+  "guard": "0000000000000000000000000000000000000000000000000000000000000000"
+}

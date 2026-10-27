@@ -40,7 +40,7 @@ pub struct RecordingStore {
 }
 
 /// A bounded page of lifecycle history.
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct EventPage {
     /// Events in sequence order.
     pub events: Vec<TmuxEventRecord>,

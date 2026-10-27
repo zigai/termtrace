@@ -43,7 +43,8 @@ mod lifecycle;
 mod snapshot;
 
 pub use lifecycle::{
-    run_terminal_test, EvidencePolicy, FinalizationReport, SecondaryFailure, TerminalTest,
+    finalize_owned_sessions, run_terminal_test, CachedFinalization, EvidencePolicy,
+    FinalizationReport, OwnedSessionFinalization, SecondaryFailure, TerminalTest,
     TerminalTestConfig, TestFailure, TestOutcome,
 };
-pub use snapshot::{assert_snapshot_file, TerminalAssertionError};
+pub use snapshot::{assert_masked_snapshot_file, assert_snapshot_file, TerminalAssertionError};

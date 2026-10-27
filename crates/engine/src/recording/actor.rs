@@ -3,6 +3,7 @@
 use super::{
     control::{MutationHistory, PendingInputSequence, ScreenWaiter},
     model::SpawnedCommand,
+    outer_resize::OuterResize,
     presentation::LiveTerminal,
     termination::Termination,
 };
@@ -39,6 +40,7 @@ pub(super) struct SessionActor<'runtime> {
     pub(super) termination: Termination,
     pub(super) resource_limits: ResourceLimits,
     pub(super) failure_policy: RecordingFailurePolicy,
+    pub(super) outer_resize: Option<OuterResize>,
 }
 
 impl<'runtime> SessionActor<'runtime> {
@@ -72,6 +74,7 @@ impl<'runtime> SessionActor<'runtime> {
             termination: Termination::new(),
             resource_limits,
             failure_policy: RecordingFailurePolicy::Stop,
+            outer_resize: None,
         };
     }
 }

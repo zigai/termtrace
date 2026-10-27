@@ -1,6 +1,8 @@
 //! Pure immutable rich-frame query model and evaluator.
 
 use regex::Regex;
+use schemars::JsonSchema;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{error::Error as StdError, fmt, ops::RangeInclusive, sync::Arc};
 use termtrace_model::{
     terminal::screen::{
@@ -80,39 +82,70 @@ impl fmt::Debug for TextMatcher {
 }
 
 /// Complete optional appearance constraints applied to every covered logical cell.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
 pub struct StyleFilter {
     /// Source foreground constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "ColorSpec")]
     pub foreground: Option<ColorSpec>,
     /// Source background constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "ColorSpec")]
     pub background: Option<ColorSpec>,
     /// Source underline color constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "ColorSpec")]
     pub underline_color: Option<ColorSpec>,
     /// Resolved foreground constraint, including an explicit unresolved value.
+    #[serde(deserialize_with = "present")]
     pub resolved_foreground: Option<Option<Rgb>>,
     /// Resolved background constraint, including an explicit unresolved value.
+    #[serde(deserialize_with = "present")]
     pub resolved_background: Option<Option<Rgb>>,
     /// Bold constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "bool")]
     pub bold: Option<bool>,
     /// Italic constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "bool")]
     pub italic: Option<bool>,
     /// Faint constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "bool")]
     pub faint: Option<bool>,
     /// Blink constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "bool")]
     pub blink: Option<bool>,
     /// Inverse constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "bool")]
     pub inverse: Option<bool>,
     /// Invisible constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "bool")]
     pub invisible: Option<bool>,
     /// Strikethrough constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "bool")]
     pub strikethrough: Option<bool>,
     /// Overline constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "bool")]
     pub overline: Option<bool>,
     /// Native underline variant constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "i32")]
     pub underline: Option<i32>,
     /// Selection constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "bool")]
     pub selected: Option<bool>,
     /// Authoritative terminal width-role constraint.
+    #[serde(deserialize_with = "present")]
+    #[schemars(with = "WideKind")]
     pub wide_kind: Option<WideKind>,
 }
 
@@ -137,6 +170,12 @@ impl StyleFilter {
             && option_matches(&self.selected, &appearance.selected)
             && option_matches(&self.wide_kind, &wide_kind);
     }
+}
+
+fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    return T::deserialize(deserializer).map(Some);
 }
 
 fn option_matches<T: PartialEq>(expected: &Option<T>, actual: &T) -> bool {
@@ -371,7 +410,7 @@ fn regex_can_match_zero_width(regex: &Regex) -> bool {
 }
 
 /// Bounded normalized query evidence.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct QueryDescription {
     /// Human-readable canonical query.
     pub text: String,
@@ -380,7 +419,7 @@ pub struct QueryDescription {
 }
 
 /// One absolute half-open range covered by a match.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, JsonSchema)]
 pub struct MatchRange {
     /// Absolute row.
     pub row: u16,
@@ -391,12 +430,14 @@ pub struct MatchRange {
 }
 
 /// Bounded cell evidence retained by a match.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct MatchedCell {
     /// Absolute row.
     pub row: u16,
     /// Absolute terminal column of the authoritative head cell.
     pub column: u16,
+    /// Terminal columns covered: 2 for a wide head, otherwise 1.
+    pub width: u8,
     /// Complete grapheme cluster.
     pub grapheme: String,
     /// Authoritative native width role.
@@ -423,7 +464,8 @@ pub struct ScreenMatch {
 }
 
 /// Pure query and strict-result failures.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum QueryError {
     /// Empty, zero-width, conflicting, or otherwise ambiguous query input.
     InvalidQuery {
@@ -468,6 +510,7 @@ pub enum QueryError {
         frame_hash: String,
     },
     /// A bounded query result exceeded its public resource ceiling.
+    #[serde(rename = "query_resource_limit")]
     ResourceLimit {
         /// Exact number that would have been returned.
         requested: usize,
@@ -479,6 +522,21 @@ pub enum QueryError {
         /// Bounded reason.
         reason: String,
     },
+}
+
+impl QueryError {
+    /// Stable machine-readable failure kind shared by every SDK.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        return match self {
+            Self::InvalidQuery { .. } => "invalid_query",
+            Self::NoMatch { .. } => "no_match",
+            Self::MultipleMatches { .. } => "multiple_matches",
+            Self::IndexOutOfBounds { .. } => "index_out_of_bounds",
+            Self::ResourceLimit { .. } => "query_resource_limit",
+            Self::InsufficientFrameDetail { .. } => "insufficient_frame_detail",
+        };
+    }
 }
 
 impl fmt::Display for QueryError {
@@ -708,6 +766,12 @@ pub trait ScreenFrameQuery {
 impl ScreenFrameQuery for ScreenFrame {
     fn query(&self, spec: LocatorSpec) -> Result<QueryResult, QueryError> {
         return evaluate(Arc::new(self.clone()), spec);
+    }
+}
+
+impl ScreenFrameQuery for Arc<ScreenFrame> {
+    fn query(&self, spec: LocatorSpec) -> Result<QueryResult, QueryError> {
+        return evaluate(Arc::clone(self), spec);
     }
 }
 
@@ -1132,6 +1196,7 @@ fn make_match(frame: &Arc<ScreenFrame>, spec: &LocatorSpec, cells: &[&LogicalCel
             return MatchedCell {
                 row: cell.row,
                 column: cell.column,
+                width: if cell.wide_kind == WideKind::Wide { 2 } else { 1 },
                 grapheme: cell.grapheme.clone(),
                 wide_kind: cell.wide_kind,
                 appearance: cell.appearance.clone(),

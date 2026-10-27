@@ -39,11 +39,11 @@ use termtrace_engine::{
     analysis::profile::{builtin_terminal_colors, terminal_colors},
     inspection::wait_for_completion,
     recording::{
-        inherited_geometry, parse_environment_spec, read_environment_spec, record_with_output,
-        resolve_ghostty_profile, restore_ghostty_profile, EffectiveEnvironment, RecordOptions,
-        RecordOutcome, ResolvedGhosttyProfile,
+        inherited_geometry, parse_environment_spec, read_environment_spec,
+        record_with_resize_authority, resolve_ghostty_profile, restore_ghostty_profile,
+        EffectiveEnvironment, RecordOptions, RecordOutcome, ResizeAuthority,
+        ResolvedGhosttyProfile,
     },
-    registry::SessionRegistry,
 };
 use termtrace_evidence::{
     event_log::{DurabilityPolicy, EventLogSummary},
@@ -66,13 +66,8 @@ use termtrace_model::{
     value::geometry::TerminalGeometryReport,
     value::ByteString,
 };
-use termtrace_sdk::{
-    defaults,
-    screen::frame_text,
-    session::{await_ready, Readiness, StopOutcome, StopRequest},
-    StableCaptureOptions,
-};
-use termtrace_service::registry::{spawn_detached, DetachedStart, RegistryService};
+use termtrace_sdk::{defaults, screen::frame_text, StableCaptureOptions};
+use termtrace_service::registry::{DetachedStart, RegistryService};
 
 const DEFAULT_DURABILITY_MAX_INTERVAL_MS: u64 = 50;
 const DEFAULT_DURABILITY_MAX_UNCOMMITTED_BYTES: u64 = 65_536;
@@ -90,4 +85,3 @@ use record::durability_policy_for;
 pub(super) use record::run_record;
 use restart::restarted_record_options;
 pub(super) use restart::run_restart;
-pub(in crate::cli) use start::detached_record_arguments;

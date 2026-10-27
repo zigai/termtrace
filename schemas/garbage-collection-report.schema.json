@@ -1,0 +1,176 @@
+{
+  "$defs": {
+    "ExactPath": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      ],
+      "x-termtrace-path": true
+    },
+    "GarbageCollectionCandidate": {
+      "additionalProperties": false,
+      "description": "One completed, unregistered state-root recording eligible for explicit deletion.",
+      "properties": {
+        "bytes": {
+          "description": "Complete bytes below the session directory.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "completed_unix_ns": {
+          "description": "Completion-file modification timestamp used for retention ordering.",
+          "format": "uint128",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session": {
+          "$ref": "#/$defs/ExactPath",
+          "description": "Canonical managed session directory."
+        },
+        "session_id": {
+          "description": "Immutable session identity.",
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session",
+        "session_id",
+        "completed_unix_ns",
+        "bytes"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/zigai/termtrace/schemas/garbage-collection-report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Safe state-root retention plan or applied deletion report.",
+  "properties": {
+    "candidates": {
+      "description": "Exact eligible recordings, retained in the report even after deletion.",
+      "items": {
+        "$ref": "#/$defs/GarbageCollectionCandidate"
+      },
+      "type": "array"
+    },
+    "changes_applied": {
+      "description": "Whether eligible candidates were actually deleted.",
+      "type": "boolean"
+    },
+    "completed_bytes_after_plan": {
+      "default": 0,
+      "description": "Completed bytes remaining if the reported candidates are deleted.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "completed_bytes_before": {
+      "default": 0,
+      "description": "Bytes in validated completed managed sessions at scan time, including named evidence.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "keep_latest": {
+      "description": "Newest completed, unregistered recordings protected regardless of age.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "max_completed_bytes": {
+      "default": null,
+      "description": "Optional target for total completed managed-session bytes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "older_than_days": {
+      "description": "Minimum completed-recording age in whole days.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "protected_registered": {
+      "description": "Completed managed recordings protected by a registry alias.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "quota_excess_bytes": {
+      "default": 0,
+      "description": "Bytes exceeding the target after planning because protected evidence is retained.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "reclaimed_bytes": {
+      "description": "Bytes reclaimed from canonical managed session directories.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "removed_sessions": {
+      "description": "Session directories removed when `changes_applied` is true.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "removed_stale_aliases": {
+      "default": 0,
+      "description": "Stale alias registry bindings removed during collection.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "removed_supervisor_files": {
+      "description": "Detached supervisor log files removed with deleted sessions.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "skipped_corrupt_registry_entries": {
+      "description": "Malformed or insecure registry records isolated from this scan.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "skipped_non_completed": {
+      "description": "Live, incomplete, malformed, or non-directory entries never considered.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "state_root": {
+      "$ref": "#/$defs/ExactPath",
+      "description": "Owner-only Termtrace state root considered."
+    }
+  },
+  "required": [
+    "state_root",
+    "changes_applied",
+    "older_than_days",
+    "keep_latest",
+    "protected_registered",
+    "skipped_non_completed",
+    "skipped_corrupt_registry_entries",
+    "candidates",
+    "removed_sessions",
+    "removed_supervisor_files",
+    "reclaimed_bytes"
+  ],
+  "title": "GarbageCollectionReport",
+  "type": "object"
+}

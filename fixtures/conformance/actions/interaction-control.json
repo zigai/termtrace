@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "echo_command": [
+    "/bin/sh",
+    "-c",
+    "trap 'printf \"\\r\\nSIGNAL:INT\"' INT; printf READY; while :; do if IFS= read -r line; then printf '\\r\\nGOT:%s' \"$line\"; fi; done"
+  ],
+  "raw_command": [
+    "/bin/sh",
+    "-c",
+    "printf READY; stty raw -echo; head -c 4 | od -An -tx1; sleep 30"
+  ],
+  "mouse_command": [
+    "/bin/sh",
+    "-c",
+    "printf '\\033[?1000h\\033[?1002h\\033[?1006h[OK] READY'; stty raw -echo; sleep 30"
+  ],
+  "environment_command": [
+    "/bin/sh",
+    "-c",
+    "printf 'SET='; printf '%s' \"$TT_SET\" | od -An -tx1; printf 'COPY=%s\\r\\nSECRET=%s\\r\\nTERM=%s\\r\\nDONE' \"$TT_COPY\" \"${TT_SECRET:-absent}\" \"$TERM\"; sleep 30"
+  ],
+  "ready_text": "READY",
+  "raw_bytes_hex": "00ff1b80",
+  "raw_bytes_echo": "00 ff 1b 80",
+  "raw_bytes_base64": "AP8bgA==",
+  "set_bytes_hex": "01ff",
+  "set_bytes_echo": "01 ff",
+  "copy_value": "copied-value",
+  "secret_value": "ambient-secret-sentinel-5f0c",
+  "activation_text": "[OK]",
+  "wide_decimal": "9007199254740993",
+  "malformed_decimals": ["09", "-1", "1e3", "18446744073709551616"],
+  "u64_max": "18446744073709551615",
+  "nested_malformed_decimals": ["09", "-1", "1.5", "1e3", "18446744073709551616"],
+  "nested_numeric_tokens": ["7", "1.5", "9007199254740993", "18446744073709551615"],
+  "send_step_namespace": "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+  "send_step_name": "termtrace/send-step/v1/{send}/{index}",
+  "errors": {
+    "stale": { "kind": "stale_state", "code": "stale_observation", "effect": { "kind": "not_applied" }, "retry": "new_request" },
+    "collision": { "kind": "control_rejected", "code": "request_id_collision", "effect": { "kind": "not_applied" }, "retry": "new_request" },
+    "strict_pointer": { "kind": "control_rejected", "code": "pointer_reporting_disabled", "effect": { "kind": "not_applied" }, "retry": "new_request" },
+    "incomplete": { "kind": "postcondition_incomplete", "code": "postcondition_incomplete", "effect": { "kind": "applied" }, "retry": "do_not_retry" },
+    "sealed": { "kind": "invalid_operation", "code": "invalid_operation", "effect": { "kind": "not_applied" }, "retry": "new_request" }
+  }
+}
