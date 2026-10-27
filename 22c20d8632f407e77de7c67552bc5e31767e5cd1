@@ -1,0 +1,4 @@
+- Runs the Python consumer suite against the rebuilt extension: 171 passed
+- Passes a self-referencing dict as event data: raises ValueError instead of crashing the interpreter
+- Passes None, 1 and "yes" as a bold style filter: each raises ValueError; True is accepted
+- Cancels an awaited legacy execute() call: the mutation stays tracked and wait_pending() joins it
