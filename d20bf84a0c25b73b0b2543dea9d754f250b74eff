@@ -1,0 +1,2 @@
+- Runs just generate twice: the second run leaves no changes in generated files
+- Runs the SDK conformance script unit tests: pass
