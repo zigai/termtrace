@@ -1,0 +1,2 @@
+- Runs the Node consumer suite against the rebuilt addon: 81 passed
+- Type-checks the generated index.d.ts and the consumer type tests with strict tsc: no errors
