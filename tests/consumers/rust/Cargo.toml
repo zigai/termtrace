@@ -9,6 +9,7 @@ default = []
 local = ["termtrace-sdk/in-process"]
 
 [dependencies]
+serde_json = "1.0.145"
 termtrace-sdk = { path = "../../../crates/sdk", default-features = false }
 
 [[bin]]
@@ -18,4 +19,24 @@ path = "src/main.rs"
 [[bin]]
 name = "local"
 path = "src/bin/local.rs"
+required-features = ["local"]
+
+[[bin]]
+name = "conformance"
+path = "src/bin/conformance.rs"
+required-features = ["local"]
+
+[[bin]]
+name = "testing_helpers"
+path = "src/bin/testing_helpers.rs"
+required-features = ["local"]
+
+[[bin]]
+name = "diagnostics_evidence"
+path = "src/bin/diagnostics_evidence.rs"
+required-features = ["local"]
+
+[[bin]]
+name = "original"
+path = "src/bin/original.rs"
 required-features = ["local"]

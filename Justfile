@@ -13,9 +13,14 @@ build: setup
 install: setup
   cargo install --locked --path . --force
 
-# Regenerate public schemas
+# Regenerate public schemas and the generated Python and TypeScript SDK sources
 generate:
   cargo run --locked --quiet -- schema --out schemas
+  cargo run --locked --quiet -p termtrace-python --bin stub_gen
+  python3 scripts/sdk-types.py
+  python3 scripts/sdk-aio.py
+  uv run --project crates/bindings-python ruff check --fix --quiet crates/bindings-python/python/termtrace/types.py crates/bindings-python/python/termtrace/aio.py crates/bindings-python/python/termtrace/_termtrace.pyi
+  uv run --project crates/bindings-python ruff format crates/bindings-python/python/termtrace/types.py crates/bindings-python/python/termtrace/aio.py crates/bindings-python/python/termtrace/_termtrace.pyi
 
 # Enforce the complete allowlist of direct internal Cargo dependencies
 architecture:

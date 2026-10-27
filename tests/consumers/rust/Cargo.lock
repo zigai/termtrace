@@ -1247,6 +1247,7 @@ dependencies = [
  "blake3",
  "fs-err",
  "nix 0.30.1",
+ "rustix",
  "serde",
  "serde_json",
  "termtrace-control",
@@ -1300,7 +1301,20 @@ dependencies = [
 name = "termtrace-rust-consumer"
 version = "0.0.0"
 dependencies = [
+ "serde_json",
  "termtrace-sdk",
+]
+
+[[package]]
+name = "termtrace-schema"
+version = "0.1.0"
+dependencies = [
+ "fs-err",
+ "schemars",
+ "serde_json",
+ "termtrace-model",
+ "termtrace-tmux",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -1322,6 +1336,7 @@ dependencies = [
  "fs-err",
  "nix 0.30.1",
  "regex",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",
@@ -1332,6 +1347,7 @@ dependencies = [
  "termtrace-media",
  "termtrace-model",
  "termtrace-process",
+ "termtrace-schema",
  "termtrace-tmux",
  "thiserror 2.0.20",
  "tracing",
@@ -1360,6 +1376,7 @@ dependencies = [
  "nix 0.30.1",
  "percent-encoding",
  "rusqlite",
+ "rustix",
  "schemars",
  "serde",
  "serde_json",
