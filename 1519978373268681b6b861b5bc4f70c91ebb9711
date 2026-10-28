@@ -1,0 +1,5 @@
+- Rendering an MP4 from a real original-capture session (termtrace record --original-native) writes source_truth_layer original_execution; the binary before the change wrote native_encoded_evidence
+- The same session rendered with --renderer replay-native writes native_replay, and with --renderer semantic writes semantic_rendering
+- A --preview-out preview of the original session carries original_execution in its source-presentation-manifest.json
+- The native service render test (real Ghostty replay) now expects native_replay and passes
+- just lint validate test integration bindings-test native-test passes
