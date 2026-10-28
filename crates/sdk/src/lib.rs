@@ -115,8 +115,23 @@ pub mod artifacts {
     pub use termtrace_model::artifact::bundle::{
         BundleManifest, BundleProfile, BundleVerificationPolicy,
     };
-    pub use termtrace_model::artifact::save::{SaveFormat, SaveManifest, SaveOutcome};
-    pub use termtrace_service::artifacts::ArtifactService;
+    pub use termtrace_model::artifact::derivative::{DerivativeFormat, GifLoop};
+    pub use termtrace_model::artifact::presentation::{
+        AnnotationAnchor, AnnotationPosition, AnnotationScope, AnnotationStyle, CaptionLayout,
+        ChangeMode, ChangeSource, ChangeVisualization, EditClip, EditFailure, EditFailureCode,
+        EditPlan, EditSelector, NormalizedEdit, OutputFrameSource, PixelTransform,
+        PresentationDelivery, PresentationLayout, PresentationManifest, PresentationMapEntry,
+        PresentationPlan, PresentationPreviewManifest, PresentationSource, PreviewOptions,
+        RationalSpeed, SubtitleTrack, TextAnnotation, EDIT_PLAN_VERSION,
+    };
+    pub use termtrace_model::artifact::save::{
+        SaveFormat, SaveManifest, SaveOutcome, SemanticRasterProfile,
+    };
+    pub use termtrace_service::artifacts::{
+        output_frames_for_source_frame, source_for_output_frame, ArtifactService, CursorStyle,
+        EditSource, VideoMode, VideoOptions, VideoOutcome, VideoPreset, VideoPreview, VideoRender,
+        VideoRenderer, VideoRequest,
+    };
     pub use termtrace_service::client::{Evidence, Native};
 }
 

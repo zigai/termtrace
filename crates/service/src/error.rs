@@ -7,7 +7,7 @@ use std::{
 pub use termtrace_control::Error as ControlError;
 use termtrace_model::protocol::management::{FailureContext, ManagementFailure, TmuxFailureFacts};
 use termtrace_model::{
-    artifact::original::OriginalCaptureFacts,
+    artifact::{original::OriginalCaptureFacts, presentation::EditFailure},
     execution::visual_profile::VisualProfileFailure,
     protocol::{
         control::{CommandError, ControlErrorDetails},
@@ -217,6 +217,7 @@ impl Error {
             }) => ErrorKind::InvalidOperation,
             Self::Engine(_) => ErrorKind::Engine,
             Self::Export(_) => ErrorKind::Export,
+            Self::Media(termtrace_media::Error::Edit(_)) => ErrorKind::InvalidOperation,
             Self::Media(_) => ErrorKind::Media,
             Self::Tmux(_) => ErrorKind::Tmux,
             Self::Filesystem { .. } => ErrorKind::Filesystem,
@@ -263,7 +264,20 @@ impl Error {
         if let Self::Engine(termtrace_engine::Error::VisualProfile { failure, .. }) = self {
             return failure.code();
         }
+
+        if let Some(failure) = self.edit_failure() {
+            return failure.code.code();
+        }
         return self.kind().as_str();
+    }
+
+    /// Code, location, clip, and marker of a rejected edit plan.
+    #[must_use]
+    pub fn edit_failure(&self) -> Option<&EditFailure> {
+        if let Self::Media(termtrace_media::Error::Edit(failure)) = self {
+            return Some(failure);
+        }
+        return None;
     }
 
     /// Actor-consistent context attached to a rejection.

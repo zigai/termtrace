@@ -35,6 +35,8 @@
     "termtrace.node",
     "contracts.js",
     "contracts.d.ts",
+    "edit.js",
+    "edit.d.ts",
     "locator.js",
     "original.js",
     "testing.js",

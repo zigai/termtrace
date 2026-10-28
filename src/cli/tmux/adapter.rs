@@ -31,6 +31,7 @@ pub(super) fn video_request(tracks: &CliTracks, arguments: TmuxVideoArgs) -> Res
         preset: arguments.preset.into(),
         fps: arguments.fps,
         renderer: arguments.renderer.into(),
+        overwrite: true,
         ..VideoRequest::new(session, VideoMode::Render { out: arguments.out })
     });
 }

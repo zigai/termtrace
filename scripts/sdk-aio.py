@@ -251,6 +251,8 @@ def generate(stub: ast.Module) -> str:
         "if TYPE_CHECKING:",
         "    from typing_extensions import Self",
         "",
+        "    from termtrace import editing",
+        "",
         "__all__ = [" + ", ".join(f'"Async{name}"' for name in WRAPPED) + "]",
     ]
     for cls in WRAPPED:

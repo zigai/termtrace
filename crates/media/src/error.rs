@@ -5,7 +5,10 @@ use std::{
 };
 use termtrace_engine::Error as EngineError;
 use termtrace_evidence::Error as EvidenceError;
-use termtrace_model::{artifact::original::OriginalCaptureFailure, error::ThreadPanicError};
+use termtrace_model::{
+    artifact::{original::OriginalCaptureFailure, presentation::EditFailure},
+    error::ThreadPanicError,
+};
 use termtrace_render::Error as RenderError;
 use termtrace_terminal::Error as TerminalError;
 
@@ -38,6 +41,9 @@ pub enum Error {
         /// Lower-level failure that exposed the violation, when one exists.
         source: Option<Box<dyn StdError + Send + Sync>>,
     },
+    /// An edit plan was rejected; the failure carries a stable code and its location.
+    #[error("{0}")]
+    Edit(EditFailure),
     /// A media operation requires a completed recording.
     #[error("session `{}` is incomplete", session.display())]
     SessionIncomplete {

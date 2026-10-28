@@ -114,6 +114,64 @@ export interface ActorBoundaries {
   observed: CanonicalBoundary
 }
 
+/** Stable annotation anchor vocabulary. */
+export type AnnotationAnchor = "top_left" | "top_right" | "bottom_left" | "bottom_right" | "center"
+
+/** Named anchor plus signed pixel offset. */
+export interface AnnotationPosition {
+  /** Named canvas anchor. */
+  anchor: AnnotationAnchor
+  /** Signed horizontal offset from the anchor. */
+  x: number
+  /** Signed vertical offset from the anchor. */
+  y: number
+}
+
+/** Annotation lifetime on the normalized presentation timeline. */
+export type AnnotationScope = AnnotationScopeWholeVideo | AnnotationScopeClip | AnnotationScopeOutputFrame | AnnotationScopeRange
+
+/** One normalized clip. */
+export interface AnnotationScopeClip {
+  /** Zero-based caller clip index. */
+  clip_index: bigint
+  scope: "clip"
+}
+
+/** One exact output frame. */
+export interface AnnotationScopeOutputFrame {
+  /** Zero-based presentation frame. */
+  output_frame: bigint
+  scope: "output_frame"
+}
+
+/** A source-selector-bounded half-open interval. */
+export interface AnnotationScopeRange {
+  /** Inclusive source endpoint. */
+  from: EditSelector
+  scope: "range"
+  /** Exclusive source endpoint. */
+  to: EditSelector
+}
+
+/** Every output frame. */
+export interface AnnotationScopeWholeVideo {
+  scope: "whole_video"
+}
+
+/** Deterministic visible text style compiled to ASS. */
+export interface AnnotationStyle {
+  /** `#RRGGBB` background. */
+  background: string
+  /** Background opacity from zero through 255. */
+  background_opacity: number
+  /** Border width in pixels. */
+  border: number
+  /** Font size in pixels. */
+  font_size: number
+  /** `#RRGGBB` foreground. */
+  foreground: string
+}
+
 export type AnyValue = JsonValue
 
 /** Successful acknowledged SDK instrumentation emission. This is not a persisted event envelope. */
@@ -346,6 +404,9 @@ export interface CapabilityReport {
 /** Stable capability readiness. */
 export type CapabilityStatus = "ready" | "blocked"
 
+/** Placement of the per-clip caption preset. */
+export type CaptionLayout = "footer" | "overlay" | "none"
+
 /** How settled the observed state is. */
 export type CaptureQuality = "live" | "stable" | "completed" | "incomplete"
 
@@ -421,6 +482,36 @@ export interface CellStyle {
   underline: number
   /** Underline color source. */
   underline_color: ColorSpec
+}
+
+/** Visible change-overlay mode. */
+export type ChangeMode = "outline" | "dirty_rows" | "bounding_box" | "heatmap" | "trail" | "side_diff"
+
+/** One nominal semantic-change region in source pixels. */
+export interface ChangeRegion {
+  /** Region height. */
+  height: number
+  /** Region width. */
+  width: number
+  /** Left source pixel. */
+  x: number
+  /** Top source pixel. */
+  y: number
+}
+
+/** Truth source used by a change overlay. */
+export type ChangeSource = "semantic_cells" | "encoded_pixels"
+
+/** Explicit source and shape for per-frame change overlays. */
+export interface ChangeVisualization {
+  /** Number of output frames to retain a fading/held overlay. */
+  hold_frames?: number
+  /** Visible overlay form. */
+  mode: ChangeMode
+  /** Pixel-difference threshold for encoded input, ignored for semantic input. */
+  pixel_threshold?: number | null
+  /** Semantic scheduling or actual decoded adjacent pixels. */
+  source: ChangeSource
 }
 
 /** A system monotonic clock bracket around a session-relative clock sample. */
@@ -532,6 +623,22 @@ export interface ControlOutcomeAcknowledged {
 /** The actor recorded a marker. */
 export interface ControlOutcomeMarked {
   kind: "marked"
+}
+
+/** One semantic cursor region masked on a mapped presentation frame. */
+export interface CursorMaskFrame {
+  /** Honest semantic-to-native correlation level. */
+  evidence_level: string
+  /** Presentation frame receiving the mask. */
+  output_frame: bigint
+  /** Nominal cursor pixel region. */
+  region: ChangeRegion
+  /** Native source frame selected by presentation mapping. */
+  source_frame: bigint
+  /** Complete source semantic state hash. */
+  state_hash: string
+  /** Latest presentation-eligible semantic state used for cursor geometry. */
+  state_id: bigint
 }
 
 /** Cursor state at one semantic boundary. */
@@ -646,6 +753,92 @@ export interface DurabilityRecord {
   policy: DurabilityPolicy
   /** Number of successful event-log data synchronizations after header creation. */
   sync_count: bigint
+}
+
+/** One source interval with rational speed and a generated final hold. */
+export interface EditClip {
+  /** Optional human presentation caption. */
+  caption?: string | null
+  /** Inclusive source selector. */
+  from: EditSelector
+  /** Generated hold duration after the final retimed source frame. */
+  hold_ms?: bigint
+  /** Playback speed as an exact rational. */
+  speed?: RationalSpeed
+  /** Exclusive source selector. */
+  to: EditSelector
+}
+
+/** Typed edit-plan failure with the location it was found at. */
+export interface EditFailure {
+  /** Caller clip index, when the failure belongs to one clip. */
+  clip_index?: bigint | null
+  /** Stable category. */
+  code: EditFailureCode
+  /** Path of the rejected value inside the edit, such as `clips[1].from`. */
+  field: string
+  /** Marker label, when the failure concerns a marker. */
+  marker?: string | null
+  /** Human-readable reason. */
+  reason: string
+}
+
+/** Stable category of an edit-plan failure, shared by every SDK. */
+export type EditFailureCode = "invalid_edit_plan" | "invalid_selector" | "marker_not_found" | "marker_not_unique" | "selector_out_of_range" | "invalid_speed" | "invalid_caption" | "overlapping_clips" | "clip_out_of_range" | "invalid_annotation" | "invalid_subtitle" | "relative_resource_without_base" | "invalid_transform" | "invalid_change_visualization"
+
+/** One immutable presentation edit plan. */
+export interface EditPlan {
+  /** Arbitrary normalized text annotation tracks. */
+  annotations?: Array<TextAnnotation>
+  /** Optional per-frame change overlay policy. */
+  change_visualization?: ChangeVisualization | null
+  /** Caller-ordered source clips. */
+  clips: Array<EditClip>
+  /** Delivery encoding contract. */
+  delivery?: PresentationDelivery
+  /** Presentation canvas and caption policy. */
+  layout?: PresentationLayout
+  /** User-facing video facade settings retained in the final manifest. */
+  render_config?: VideoRenderConfig | null
+  /** Caller-authored ASS subtitle resources. */
+  subtitles?: Array<SubtitleTrack>
+  /** Explicit visibly labeled pixel transforms. */
+  transforms?: Array<PixelTransform>
+  /** Edit-plan format version. */
+  version: number
+}
+
+/** Unique marker or exact canonical monotonic timestamp. */
+export interface EditSelector {
+  /** Latest semantic state at or before this canonical event. */
+  eventSeq?: bigint | null
+  /** Unique canonical marker label. */
+  marker?: string | null
+  /** Exact canonical session offset in nanoseconds. */
+  monotonicNs?: bigint | null
+  /** Exact native source frame. */
+  nativeFrame?: bigint | null
+  /** Exact semantic state identifier. */
+  stateId?: bigint | null
+}
+
+/** Where an edit plan comes from. */
+export type EditSource = EditSourceFile | EditSourcePlan
+
+/** JSON edit file; relative subtitle paths resolve beside it. */
+export interface EditSourceFile {
+  kind: "file"
+  /** Edit-plan JSON file. */
+  path: ExactPath
+}
+
+/** In-memory edit; relative subtitle paths need `resource_base`. */
+export interface EditSourcePlan {
+  /** Edit plan. */
+  edit: EditPlan
+  kind: "plan"
+  /** Directory that relative subtitle paths are joined to. */
+  resource_base?: ExactPath | null
 }
 
 /** Source environment used before explicit child overrides are applied. */
@@ -1205,6 +1398,9 @@ export interface GeometrySolveReport {
   selected: CaptureTarget
 }
 
+/** A GIF loop is either infinite or absent (play once). */
+export type GifLoop = "infinite" | "once"
+
 /** Structured semantic provenance for exact input bytes. */
 export type InputDescriptor = InputDescriptorRaw | InputDescriptorText | InputDescriptorKey | InputDescriptorPaste | InputDescriptorFocus | InputDescriptorPointer | InputDescriptorActivate
 
@@ -1740,6 +1936,82 @@ export interface NativeVisualProfile {
   padding_points?: PaddingPoints | null
 }
 
+/** One annotation resolved to a half-open output-frame interval. */
+export interface NormalizedAnnotation {
+  /** Stable caller annotation index. */
+  annotation_index: bigint
+  /** Exclusive presentation frame. */
+  output_end_frame: bigint
+  /** Inclusive presentation frame. */
+  output_start_frame: bigint
+  /** Exact anchored placement. */
+  position: AnnotationPosition
+  /** Visible text/background style. */
+  style: AnnotationStyle
+  /** Per-frame dynamic text template. */
+  template?: string | null
+  /** Literal text, when the track is static. */
+  text?: string | null
+  /** Stable overlay ordering. */
+  z_order: number
+}
+
+/** Semantic delta nominally scheduled onto presentation frames. */
+export interface NormalizedChangeFrame {
+  /** Nominal changed-cell pixel regions. */
+  changed_regions: Array<ChangeRegion>
+  /** Rows reported dirty by the semantic engine. */
+  dirty_rows: Array<number>
+  /** Honest correlation level for this overlay input. */
+  evidence_level: string
+  /** Output frames mapped to this source frame. */
+  output_frames: Array<bigint>
+  /** Nominal native frame selected by clock arithmetic. */
+  source_frame: bigint
+  /** Complete semantic state hash. */
+  state_hash: string
+  /** Semantic state that introduced the delta. */
+  state_id: bigint
+}
+
+/** Resolved clip and exact source/output frame decisions. */
+export interface NormalizedClip {
+  /** Optional caption retained as presentation content. */
+  caption?: string | null
+  /** Generated hold frame count. */
+  hold_frame_count: bigint
+  /** Exclusive output frame after retiming and hold. */
+  output_end_frame: bigint
+  /** First output frame for this clip. */
+  output_start_frame: bigint
+  /** Retimed source-derived frame count. */
+  retimed_frame_count: bigint
+  /** Exclusive source video frame. */
+  source_end_frame: bigint
+  /** Canonical half-open source interval. */
+  source_range: SourceRange
+  /** Inclusive source video frame. */
+  source_start_frame: bigint
+  /** Exact playback speed. */
+  speed: RationalSpeed
+}
+
+/** Edit plan with resolved resource paths and its path-independent identity. */
+export interface NormalizedEdit {
+  /** Validated edit; relative subtitle paths are joined to the resource base. */
+  edit: EditPlan
+  /** BLAKE3 of the edit with subtitle paths replaced by their content hashes. */
+  edit_plan_hash: string
+}
+
+/** Validated subtitle input with stable content identity. */
+export interface NormalizedSubtitle {
+  /** BLAKE3 of the exact imported ASS bytes. */
+  resource_hash: string
+  /** Resolved caller resource path used for this export. */
+  source_path: ExactPath
+}
+
 export type NullableString = string | null
 
 /** Truth-labeled observation of one terminal state. */
@@ -1924,6 +2196,16 @@ export interface OriginalRecording {
   completion: SessionCompletion
 }
 
+/** Source of one presentation output frame. */
+export interface OutputFrameSource {
+  /** Caller-ordered clip index. */
+  clip_index: bigint
+  /** `source` for retimed frames or `hold` for generated duplicates. */
+  operation: string
+  /** Source frame shown on the output frame. */
+  source_frame: bigint
+}
+
 /** Deterministic page coordinates for one ordered collection. */
 export interface OutputPage {
   /** Requested maximum, or none when every remaining item was requested. */
@@ -1990,6 +2272,60 @@ export interface PixelCanvas {
   height: number
   /** Width in pixels. */
   width: number
+}
+
+/** Explicit presentation-only pixel transform. */
+export type PixelTransform = PixelTransformCursorMask | PixelTransformCrop | PixelTransformZoom | PixelTransformResize | PixelTransformCallout
+
+/** Draw a visibly labeled rectangular callout. */
+export interface PixelTransformCallout {
+  /** Callout height. */
+  height: number
+  /** Optional visible label. */
+  label?: string | null
+  transform: "callout"
+  /** Callout width. */
+  width: number
+  /** Left callout pixel. */
+  x: number
+  /** Top callout pixel. */
+  y: number
+}
+
+/** Crop to an exact source rectangle. */
+export interface PixelTransformCrop {
+  /** Rectangle height. */
+  height: number
+  transform: "crop"
+  /** Rectangle width. */
+  width: number
+  /** Left source pixel. */
+  x: number
+  /** Top source pixel. */
+  y: number
+}
+
+/** Replace cursor pixels during presentation composition. */
+export interface PixelTransformCursorMask {
+  transform: "cursor_mask"
+}
+
+/** Resize to an exact presentation canvas. */
+export interface PixelTransformResize {
+  /** Output height in pixels. */
+  height: number
+  transform: "resize"
+  /** Output width in pixels. */
+  width: number
+}
+
+/** Scale by one exact rational factor. */
+export interface PixelTransformZoom {
+  /** Scale denominator. */
+  denominator: number
+  /** Scale numerator. */
+  numerator: number
+  transform: "zoom"
 }
 
 /** One high-level cell-addressed pointer operation. */
@@ -2131,6 +2467,107 @@ export interface PostconditionSummaryScreen {
   state_hash?: string | null
 }
 
+/** Delivery codec and pixel-format contract. */
+export interface PresentationDelivery {
+  /** Stable delivery codec name. */
+  codec: string
+  /** libx264 constant-rate-factor quality. */
+  crf?: number
+  /** libx264 speed/compression preset. */
+  encoder_preset?: string
+  /** Stable output pixel format. */
+  pixel_format: string
+}
+
+/** Canvas layout for caption presets. */
+export interface PresentationLayout {
+  /** Optional caller-owned branding label. */
+  branding?: string | null
+  /** Caption placement, with footer preserving terminal pixels. */
+  caption: CaptionLayout
+}
+
+/** Dry-run output binding a normalized edit to immutable visual evidence. */
+export interface PresentationPlan {
+  /** Annotation tracks normalized onto the output frame timeline. */
+  annotations: Array<NormalizedAnnotation>
+  /** Stable change-overlay implementation and truth description. */
+  change_algorithm?: string | null
+  /** Semantic deltas scheduled onto mapped presentation frames. */
+  change_frames: Array<NormalizedChangeFrame>
+  /** Explicit per-frame change overlay policy. */
+  change_visualization?: ChangeVisualization | null
+  /** Caller-ordered resolved clips. */
+  clips: Array<NormalizedClip>
+  /** Cursor regions nominally masked from presentation pixels. */
+  cursor_masks: Array<CursorMaskFrame>
+  /** Delivery encoding contract. */
+  delivery: PresentationDelivery
+  /** BLAKE3 of canonical input edit-plan JSON. */
+  edit_plan_hash: string
+  /** Native capture or generated semantic source frame rate. */
+  fps: number
+  /** Presentation canvas and caption policy. */
+  layout: PresentationLayout
+  /** Canonical markers mapped onto native source frames. */
+  markers: Array<MarkerRecord>
+  /** Total output frames after retiming and holds. */
+  output_frame_count: bigint
+  /** Final presentation canvas height after footer and transforms. */
+  output_height: number
+  /** Final presentation canvas width after side panels and transforms. */
+  output_width: number
+  /** Effective user-facing render settings retained from the facade. */
+  render_config?: VideoRenderConfig | null
+  /** Explicit immutable visual source; native remains the default request. */
+  source: PresentationSource
+  /** Measured native or deterministic semantic grid and cell geometry. */
+  source_geometry: TerminalGeometryReport
+  /** Visual source height in pixels. */
+  source_height: number
+  /** Visual source width in pixels. */
+  source_width: number
+  /** Validated caller-authored subtitle resources. */
+  subtitles: Array<NormalizedSubtitle>
+  /** Ordered visibly labeled pixel transforms. */
+  transforms: Array<PixelTransform>
+  /** Presentation format version. */
+  version: number
+}
+
+/** Immutable visual source selected for one presentation plan. */
+export type PresentationSource = PresentationSourceNative | PresentationSourceSemantic
+
+/** Actual pixels from a verified native Ghostty capture. */
+export interface PresentationSourceNative {
+  kind: "native"
+  /** Lossless native source video. */
+  video: string
+  /** BLAKE3 of the native source video. */
+  video_hash: string
+}
+
+/** Deterministic generated pixels from canonical semantic replay. */
+export interface PresentationSourceSemantic {
+  kind: "semantic"
+  /** Complete semantic source plan. */
+  plan: SemanticVideoSourcePlan
+}
+
+/** Bounded storyboard and low-resolution preview policy. */
+export interface PreviewOptions {
+  /** Select only frames carrying the configured change visualization. */
+  change_only: boolean
+  /** Storyboard tile columns. */
+  columns: number
+  /** Maximum selected storyboard frames. */
+  max_frames: number
+  /** Low-resolution preview width. */
+  preview_width: number
+  /** Width of each storyboard tile. */
+  tile_width: number
+}
+
 /** Safely supported process-group signals. */
 export type ProcessSignal = "interrupt" | "terminate" | "hangup" | "user1" | "user2"
 
@@ -2232,6 +2669,14 @@ export interface QueryErrorQueryResourceLimit {
   maximum: bigint
   /** Exact number that would have been returned. */
   requested: bigint
+}
+
+/** Exact positive playback speed numerator/denominator. */
+export interface RationalSpeed {
+  /** Source-time multiplier denominator. */
+  denominator: number
+  /** Source-time multiplier numerator. */
+  numerator: number
 }
 
 /** Reaction required before an idle interval, in host millisecond units. */
@@ -3155,6 +3600,56 @@ export type SemanticPreset = "bundled-v1"
 /** Deterministic semantic rasterization quality profile. */
 export type SemanticRasterProfile = "direct" | "supersampled-2x"
 
+/** Fixed canvas used for every frame of one semantic video source. */
+export interface SemanticVideoCanvas {
+  /** Deterministic semantic cell height. */
+  cell_height: number
+  /** Deterministic semantic cell width. */
+  cell_width: number
+  /** Largest terminal column count in the source execution. */
+  cols: number
+  /** Encoded source height. */
+  height: number
+  /** Stable resize/canvas policy identifier. */
+  policy: string
+  /** Largest terminal row count in the source execution. */
+  rows: number
+  /** Encoded source width. */
+  width: number
+}
+
+/** Immutable semantic source description resolved during presentation planning. */
+export interface SemanticVideoSourcePlan {
+  /** Fixed source canvas. */
+  canvas: SemanticVideoCanvas
+  /** Inclusive completed-session endpoint used for the final frame hold. */
+  end_monotonic_ns: bigint
+  /** Aggregate BLAKE3 identity of all decompressed bundled faces. */
+  font_set_blake3: string
+  /** Ordered bundled font resources in serialized role order. */
+  fonts: Array<SemanticFontResource>
+  /** Constant semantic source frame rate. */
+  fps: number
+  /** Exact source frame count, including one final semantic-state frame. */
+  frame_count: bigint
+  /** Deterministic rasterization quality profile. */
+  raster_profile: SemanticRasterProfile
+  /** Semantic renderer identity. */
+  renderer: string
+  /** Stable state-to-frame scheduling policy. */
+  scheduling_policy: string
+  /** Canonical session path. */
+  session: ExactPath
+  /** Canonical session identity. */
+  session_id: string
+  /** Terminal canonical event hash. */
+  source_event_hash: string
+  /** Inclusive source-time origin. */
+  start_monotonic_ns: bigint
+  /** Source-plan schema version. */
+  version: number
+}
+
 /** Semantic renderer selection. */
 export interface SemanticVisualProfile {
   /** Bundled semantic resource preset. */
@@ -3330,6 +3825,14 @@ export interface SessionStatusLive {
 /** Deterministic reviewed representation of an already captured exact frame. */
 export type SnapshotProfile = "text" | "spans" | "cells"
 
+/** A non-empty half-open interval on the canonical monotonic timeline. */
+export interface SourceRange {
+  /** Exclusive source timestamp in nanoseconds. */
+  end_monotonic_ns: bigint
+  /** Inclusive source timestamp in nanoseconds. */
+  start_monotonic_ns: bigint
+}
+
 /** Per-column content retained inside an appearance span. */
 export interface SpanCell {
   /** Complete grapheme cluster. */
@@ -3499,6 +4002,12 @@ export interface StyleFilter {
   wide_kind?: WideKind
 }
 
+/** Caller-authored ASS resource copied and hash-manifested before rendering. */
+export interface SubtitleTrack {
+  /** ASS subtitle document. */
+  ass: ExactPath
+}
+
 /** Result of observing a spawned successor. */
 export type SuccessorReadiness = "live" | "completed" | "exited" | "timed_out" | "failed"
 
@@ -3549,6 +4058,22 @@ export interface TerminalMode {
 
 /** Classification recorded when an owned test is finalized. */
 export type TestOutcome = "passed" | "assertion_failed" | "error" | "panic" | "timed_out"
+
+/** One text annotation with an exact scope, position, and visible style. */
+export interface TextAnnotation {
+  /** Exact anchored placement. */
+  position?: AnnotationPosition
+  /** Output/source selection scope. */
+  scope: AnnotationScope
+  /** Visible text/background style. */
+  style?: AnnotationStyle
+  /** Dynamic template expanded per output frame. */
+  template?: string | null
+  /** Literal text; mutually exclusive with `template`. */
+  text?: string | null
+  /** Stable overlay ordering. */
+  z_order?: number
+}
 
 /** One ordered, source-bound timeline item. */
 export interface TimelineEntry {
@@ -4393,6 +4918,77 @@ export interface Versions {
   /** Termtrace package version. */
   termtrace: string
 }
+
+/** SDK options for a video of an explicit edit. */
+export interface VideoOptions {
+  /** Exact output frame rate; a native capture must match. Defaults to 30. */
+  fps?: number | null
+  /** GIF loop policy; GIF render only. */
+  gif_loop?: GifLoop | null
+  /** Let an MP4 render replace an existing file; render only. */
+  overwrite?: boolean
+  /** Storyboard and review-video settings; preview only. */
+  preview?: PreviewOptions | null
+  /** Pixel source; native never falls back to semantic. */
+  renderer: VideoRenderer
+  /** Semantic rasterization quality; semantic renderer only. */
+  semantic_raster_profile?: SemanticRasterProfile | null
+}
+
+/** A rendered preview and its plan. */
+export interface VideoPreview {
+  /** Contact-sheet PNG. */
+  contact_sheet: ExactPath
+  /** No-replace preview directory. */
+  directory: ExactPath
+  /** Rendered plan. */
+  plan: PresentationPlan
+  /** Low-resolution H.264 MP4. */
+  video: ExactPath
+}
+
+/** A published video, its plan, and its manifested sidecar. */
+export interface VideoRender {
+  /** Shared artifact envelope of the sidecar; present for GIF and `WebM`. */
+  artifact?: MediaArtifactResult | null
+  /** Published MP4, GIF, or `WebM`. */
+  output: ExactPath
+  /** Rendered plan. */
+  plan: PresentationPlan
+  /** Manifested render directory kept next to the output. */
+  sidecar: ExactPath
+}
+
+/** Effective user-facing video facade settings. */
+export interface VideoRenderConfig {
+  /** Effective cursor presentation style. */
+  cursor_style: string
+  /** Optional exclusive marker. */
+  end_marker?: string | null
+  /** Effective output frame rate. */
+  fps: number
+  /** Generated closing hold. */
+  hold_end_ms: bigint
+  /** Generated opening hold. */
+  hold_start_ms: bigint
+  /** Idle gap threshold used by trimming. */
+  idle_threshold_ms?: bigint | null
+  /** Named delivery preset. */
+  preset: string
+  /** Requested renderer without fallback. */
+  renderer: string
+  /** Exact requested output resolution. */
+  resolution?: Array<number> | null
+  /** Requested integer scale factor. */
+  scale?: number | null
+  /** Optional inclusive marker. */
+  start_marker?: string | null
+  /** Whether long gaps without child output were removed. */
+  trim_idle: boolean
+}
+
+/** Where a video's pixels come from. */
+export type VideoRenderer = "native" | "semantic" | "native_replay" | "original_execution"
 
 /** Immutable visual configuration selected for one launch. The native section configures Ghostty for native pixels. The semantic section selects the bundled semantic renderer and never changes native configuration. */
 export interface VisualProfile {

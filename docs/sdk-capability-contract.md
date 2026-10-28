@@ -299,19 +299,19 @@ canonical evidence, or mark reserved rows verified from foundation results.
 | visual.fonts | missing | missing | missing | 09 |
 | visual.dpi | missing | missing | missing | 09 |
 | visual.config_identity | missing | missing | missing | 09 |
-| presentation.edit_plans | missing | missing | missing | 10 |
-| presentation.selectors | missing | missing | missing | 10 |
-| presentation.clips | missing | missing | missing | 10 |
-| presentation.speeds | missing | missing | missing | 10 |
-| presentation.holds | missing | missing | missing | 10 |
-| presentation.annotations | missing | missing | missing | 10 |
-| presentation.subtitles | missing | missing | missing | 10 |
-| presentation.transforms | missing | missing | missing | 10 |
-| presentation.dry_run | missing | missing | missing | 10 |
-| presentation.mapping | missing | missing | missing | 10 |
-| presentation.preview | missing | missing | missing | 10 |
-| presentation.export | missing | missing | missing | 10 |
-| presentation.verification | missing | missing | missing | 10 |
+| presentation.edit_plans | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
+| presentation.selectors | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
+| presentation.clips | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
+| presentation.speeds | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
+| presentation.holds | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
+| presentation.annotations | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
+| presentation.subtitles | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
+| presentation.transforms | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
+| presentation.dry_run | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
+| presentation.mapping | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
+| presentation.preview | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
+| presentation.export | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
+| presentation.verification | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
 | workflows.parallel | exposed_unverified | missing | missing | 11 |
 | workflows.sharded | exposed_unverified | missing | missing | 11 |
 | workflows.matrix | exposed_unverified | missing | missing | 11 |
@@ -453,3 +453,19 @@ version 13; sessions without one keep version 12 and are legacy launches using a
 defaults. Every native probe, original capture and replay of a profiled session uses the
 profile's DPI. Installed families do not prove which font renders each glyph, and native
 pixels are not expected to match semantic pixels or other hosts.
+
+## Task10 editing
+
+Edits are built with typed constructors (Rust `EditSelector::marker`/`RationalSpeed::new`/
+`EditClip::new`/`EditPlan::new`, Python `Edit`/`Select`/`Scope`, TypeScript `Edit`/`select`/
+`scope`) and reach Rust as `EditSource` (`{"kind":"plan","edit":…,"resource_base":…}` or
+`{"kind":"file","path":…}`). One normalizer, `normalize_edit`, resolves subtitle paths (a
+relative path without `resource_base` fails with `relative_resource_without_base`; file plans
+use the file's directory), validates, and computes the path-independent `edit_plan_hash`.
+Builders only reject wrong host types: selector values must be exact u64 (Python `int`, not
+`bool`/`float`; TypeScript `bigint` or a safe-integer `number`). Edit failures have kind
+`invalid_operation`, an `EditFailureCode` code and `details` (`field`, `clip_index`, `marker`).
+`video_plan`/`videoPlan`, `video_preview`/`videoPreview` and `video_render`/`videoRender` take
+`renderer`, `fps`, `semantic_raster_profile`, `preview`, `gif_loop` and `overwrite`; the
+output extension selects MP4, GIF or WebM. SDK renders refuse an existing output unless
+`overwrite` is set for an MP4. Shared vectors are in `fixtures/conformance/sdk/editing.json`.

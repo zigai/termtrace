@@ -1035,3 +1035,232 @@ test('native visual profile failures stop before the application starts', async 
   assert.strictEqual(fs.existsSync(marker), false);
   assert.ok(!fs.existsSync(root) || fs.readdirSync(root).length === 0);
 });
+
+const { Edit, normalizeEdit, outputFramesForSourceFrame, scope, select, sourceForOutputFrame } =
+  require('@termtrace/core');
+const { execFileSync } = require('node:child_process');
+
+const SDK_FIXTURES = fs.realpathSync(path.resolve(__dirname, '../../../../fixtures/conformance/sdk'));
+const EDITING = JSON.parse(fs.readFileSync(path.join(SDK_FIXTURES, 'editing.json'), 'utf8'));
+const EDIT_ROOT = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'node-editing-')));
+const EDIT_TERMTRACE = new Termtrace(TERMTRACE_BIN, path.join(EDIT_ROOT, 'evidence'));
+const U64_MAX = (1n << 64n) - 1n;
+test.after(() => fs.rmSync(EDIT_ROOT, { recursive: true, force: true }));
+
+function fixtureEdit(options = {}) {
+  const { resource_base: base = SDK_FIXTURES, subtitle = 'editing-captions.ass' } = options;
+  const defaultStyle = { font_size: 20, foreground: '#ffffff', background: '#000000', background_opacity: 160, border: 1 };
+  return new Edit({ resource_base: base })
+    .clip(select.marker('intro'), select.marker('middle'), {
+      speed: { numerator: 2, denominator: 3 },
+      hold_ms: 500,
+      caption: 'First part',
+    })
+    .clip(select.marker('middle'), select.marker('outro'), { speed: { numerator: 3, denominator: 2 } })
+    .annotate({ text: 'Example', scope: scope.wholeVideo() })
+    .annotate({
+      template: 'frame {output_frame}',
+      scope: scope.clip(1),
+      position: { anchor: 'bottom_right', x: 8, y: 8 },
+      style: { font_size: 16, foreground: '#ffff00', background: '#202020', background_opacity: 200, border: 0 },
+      z_order: 1,
+    })
+    .annotate({
+      text: 'Range',
+      scope: scope.range(select.marker('intro'), select.marker('middle')),
+      position: { anchor: 'center', x: 0, y: 0 },
+      style: defaultStyle,
+      z_order: 2,
+    })
+    .annotate({
+      text: 'Start',
+      scope: scope.outputFrame(0),
+      position: { anchor: 'top_right', x: 16, y: 16 },
+      z_order: 3,
+    })
+    .subtitles(subtitle)
+    .changes('semantic_cells', 'bounding_box', { hold_frames: 2 })
+    .captionLayout('footer')
+    .branding('Example')
+    .delivery({ codec: 'h264', pixel_format: 'yuv420p', crf: 20, encoder_preset: 'slow' })
+    .cursorMask()
+    .crop(0, 0, 480, 240)
+    .zoom(2, 1)
+    .callout(16, 16, 200, 100, { label: 'note' });
+}
+
+let editSession;
+function recordEditSession() {
+  editSession ??= (async () => {
+    const { grid } = EDITING.session;
+    const rec = await EDIT_TERMTRACE.launch(
+      ['/bin/sh', '-c', "trap 'exit 0' TERM; i=0; while :; do i=$((i+1)); printf 'line %s\\n' $i; sleep 0.4; done"],
+      { rows: grid.rows, cols: grid.cols, visual_profile: SEMANTIC_PROFILE },
+    );
+    assert.ok(await rec.waitForOutput('line 1', 5000));
+    for (const [delay, label] of [[300, 'intro'], [600, 'middle'], [100, 'repeat'], [100, 'repeat'], [500, 'outro']]) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      await rec.mark(label);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await rec.stop();
+    return rec.path;
+  })();
+  return editSession;
+}
+
+function planSemantic(session, edit) {
+  return EDIT_TERMTRACE.videoPlan(session, edit, { renderer: 'semantic', fps: EDITING.fps });
+}
+
+function withoutSubtitlePaths(plan) {
+  return { ...plan, subtitles: plan.subtitles.map((subtitle) => ({ ...subtitle, source_path: null })) };
+}
+
+function editFile(directory, edit, files = {}) {
+  fs.mkdirSync(directory, { recursive: true });
+  for (const [name, contents] of Object.entries(files)) {
+    fs.writeFileSync(path.join(directory, name), contents);
+  }
+  const file = path.join(directory, 'edit.json');
+  fs.writeFileSync(file, JSON.stringify(edit));
+  return file;
+}
+
+function assertEditFailure(error, code, facts, name) {
+  assert.strictEqual(error.kind, 'invalid_operation', name);
+  assert.strictEqual(error.code, code, name);
+  for (const [key, value] of Object.entries(facts)) {
+    const actual = error.details[key];
+    assert.deepStrictEqual(typeof actual === 'bigint' ? Number(actual) : actual, value, `${name} ${key}`);
+  }
+  return true;
+}
+
+test('fixture edit built in TypeScript matches the Rust normalization and file plan', async () => {
+  const session = await recordEditSession();
+  const edit = fixtureEdit();
+  const normalized = await edit.normalize();
+  assert.strictEqual(normalized.edit_plan_hash, EDITING.edit_plan_hash);
+
+  const copy = path.join(EDIT_ROOT, 'fixture-file');
+  fs.mkdirSync(copy);
+  fs.copyFileSync(path.join(SDK_FIXTURES, 'editing-captions.ass'), path.join(copy, 'editing-captions.ass'));
+  const fromFile = await planSemantic(session, editFile(copy, EDITING.edit));
+  const fromBuilder = await planSemantic(session, edit);
+  assert.strictEqual(fromBuilder.edit_plan_hash, EDITING.edit_plan_hash);
+  assert.deepStrictEqual(withoutSubtitlePaths(fromBuilder), withoutSubtitlePaths(fromFile));
+
+  for (let frame = 0n; frame < fromBuilder.output_frame_count; frame += 1n) {
+    const found = sourceForOutputFrame(fromBuilder, frame);
+    const spans = outputFramesForSourceFrame(fromBuilder, found.source_frame);
+    assert.ok(spans.some(([start, end]) => start <= frame && frame < end), `frame ${frame}`);
+  }
+  assert.strictEqual(sourceForOutputFrame(fromBuilder, fromBuilder.output_frame_count), null);
+
+  // Sections the builder never set take the Rust defaults.
+  const defaults = await new Edit().clip(select.atNs(0), select.atNs(1)).normalize();
+  assert.deepStrictEqual(defaults.edit.layout, { caption: 'footer', branding: null });
+  assert.deepStrictEqual(defaults.edit.clips[0].speed, { numerator: 1, denominator: 1 });
+});
+
+test('relative subtitles need an explicit resource base', async () => {
+  const { code, facts } = EDITING.relative_without_base;
+  await assert.rejects(fixtureEdit({ resource_base: null }).normalize(), (error) =>
+    assertEditFailure(error, code, facts, 'relative'));
+
+  const absolute = fixtureEdit({ resource_base: null, subtitle: path.join(SDK_FIXTURES, 'editing-captions.ass') });
+  assert.strictEqual((await absolute.normalize()).edit_plan_hash, EDITING.edit_plan_hash);
+
+  const elsewhere = path.join(EDIT_ROOT, 'elsewhere');
+  const file = editFile(elsewhere, EDITING.edit);
+  fs.copyFileSync(path.join(SDK_FIXTURES, 'editing-captions.ass'), path.join(elsewhere, 'editing-captions.ass'));
+  assert.strictEqual((await normalizeEdit(file)).edit_plan_hash, EDITING.edit_plan_hash);
+});
+
+test('edit files accept byte paths', async () => {
+  const file = editFile(path.join(EDIT_ROOT, 'bytes'), EDITING.edit);
+  fs.copyFileSync(path.join(SDK_FIXTURES, 'editing-captions.ass'), path.join(EDIT_ROOT, 'bytes', 'editing-captions.ass'));
+  const bytes = new TextEncoder().encode(file);
+  assert.ok(!Buffer.isBuffer(bytes));
+  assert.strictEqual((await normalizeEdit(bytes)).edit_plan_hash, EDITING.edit_plan_hash);
+});
+
+test('selectors keep exact 64-bit values and reject inexact numbers', async () => {
+  const wide = 2n ** 63n + 1n;
+  const normalized = await new Edit().clip(select.event(wide), select.state(U64_MAX)).normalize();
+  assert.strictEqual(normalized.edit.clips[0].from.eventSeq, wide);
+  assert.strictEqual(normalized.edit.clips[0].to.stateId, U64_MAX);
+
+  assert.throws(() => select.event(2 ** 60), TypeError);
+  assert.throws(() => select.event(1.5), TypeError);
+  assert.throws(() => select.event('1'), TypeError);
+  assert.throws(() => select.event(-1n), RangeError);
+  assert.throws(() => select.event(U64_MAX + 1n), RangeError);
+  assert.strictEqual(select.event(7).toWire().eventSeq, 7n);
+  assert.throws(
+    () => new Edit().clip(select.marker('a'), select.marker('b'), { speed: { numerator: 0.5, denominator: 1 } }),
+    TypeError,
+  );
+});
+
+test('speeds produce the documented frame counts', async () => {
+  const session = await recordEditSession();
+  const { speeds } = EDITING;
+  const edit = ([numerator, denominator]) => new Edit()
+    .clip(select.atNs(speeds.from_ns), select.atNs(speeds.to_ns), { speed: { numerator, denominator } })
+    .clip(select.atNs(speeds.to_ns), select.atNs(speeds.tail_to_ns));
+
+  for (const { speed, retimed_frame_count: count } of speeds.cases) {
+    const [clip] = (await planSemantic(session, edit(speed))).clips;
+    assert.strictEqual(clip.source_end_frame - clip.source_start_frame, BigInt(speeds.source_frames));
+    assert.strictEqual(clip.retimed_frame_count, BigInt(count), String(speed));
+  }
+
+  for (const speed of speeds.invalid) {
+    await assert.rejects(edit(speed).normalize(), (error) =>
+      assertEditFailure(error, 'invalid_speed', { field: 'clips[0].speed', clip_index: 0 }, String(speed)));
+  }
+});
+
+test('shared negative edits fail with the same codes and facts', async () => {
+  const session = await recordEditSession();
+  for (const { name, edit, files, code, facts } of EDITING.negative) {
+    const file = editFile(path.join(EDIT_ROOT, 'negative', name), edit, files);
+    await assert.rejects(planSemantic(session, file), (error) => assertEditFailure(error, code, facts, name));
+  }
+});
+
+test('semantic preview and every format render from TypeScript', async () => {
+  const session = await recordEditSession();
+  const edit = fixtureEdit();
+  const output = path.join(EDIT_ROOT, 'renders');
+  fs.mkdirSync(output);
+  const options = { renderer: 'semantic', fps: EDITING.fps };
+
+  const preview = await EDIT_TERMTRACE.videoPreview(session, edit, path.join(output, 'preview'), options);
+  assert.ok(fs.statSync(preview.contact_sheet).isFile());
+  assert.strictEqual(preview.plan.edit_plan_hash, EDITING.edit_plan_hash);
+
+  const completion = JSON.parse(fs.readFileSync(path.join(session, 'completion.json'), 'utf8'));
+  for (const [extension, codec] of [['mp4', 'h264'], ['gif', 'gif'], ['webm', 'vp9']]) {
+    const out = path.join(output, `edited.${extension}`);
+    const render = await EDIT_TERMTRACE.videoRender(session, edit, out, options);
+    assert.strictEqual(render.output, out);
+    const probed = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', out], { encoding: 'utf8' });
+    assert.strictEqual(probed.trim(), codec);
+    const manifest = JSON.parse(fs.readFileSync(path.join(render.sidecar, 'manifest.json'), 'utf8'));
+    if (extension === 'mp4') {
+      assert.strictEqual(render.artifact, null);
+      assert.strictEqual(manifest.source_truth_layer, 'semantic_rendering');
+    } else {
+      assert.strictEqual(render.artifact.provenance.source_kind, 'semantic_rendering');
+      assert.strictEqual(render.artifact.source.session_manifest_hash, completion.session_manifest_hash);
+    }
+  }
+
+  const existing = path.join(output, 'edited.mp4');
+  const before = fs.readFileSync(existing);
+  await assert.rejects(EDIT_TERMTRACE.videoRender(session, edit, existing, options), /already exists/);
+  assert.deepStrictEqual(fs.readFileSync(existing), before);
+});

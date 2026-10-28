@@ -10,7 +10,7 @@ use crate::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{error::Error, fmt, path::PathBuf};
 
 /// Current edit-plan format version.
 pub const EDIT_PLAN_VERSION: u32 = 1;
@@ -47,6 +47,28 @@ pub struct EditPlan {
     pub render_config: Option<VideoRenderConfig>,
 }
 
+impl EditPlan {
+    /// Current-version plan with `clips` and every other section at its default.
+    #[must_use]
+    pub fn new(clips: Vec<EditClip>) -> Self {
+        return Self {
+            version: EDIT_PLAN_VERSION,
+            clips,
+            ..Self::default()
+        };
+    }
+}
+
+/// Edit plan with resolved resource paths and its path-independent identity.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NormalizedEdit {
+    /// Validated edit; relative subtitle paths are joined to the resource base.
+    pub edit: EditPlan,
+    /// BLAKE3 of the edit with subtitle paths replaced by their content hashes.
+    pub edit_plan_hash: String,
+}
+
 /// One source interval with rational speed and a generated final hold.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -63,6 +85,20 @@ pub struct EditClip {
     pub hold_ms: u64,
     /// Optional human presentation caption.
     pub caption: Option<String>,
+}
+
+impl EditClip {
+    /// Clip from `from` to `to` at 1/1 speed with no hold or caption.
+    #[must_use]
+    pub fn new(from: EditSelector, to: EditSelector) -> Self {
+        return Self {
+            from,
+            to,
+            speed: RationalSpeed::default(),
+            hold_ms: 0,
+            caption: None,
+        };
+    }
 }
 
 /// Effective user-facing video facade settings.
@@ -109,6 +145,54 @@ pub struct EditSelector {
     pub state_id: Option<u64>,
     /// Exact native source frame.
     pub native_frame: Option<u64>,
+}
+
+impl EditSelector {
+    /// Select the unique marker `label`.
+    #[must_use]
+    pub fn marker(label: impl Into<String>) -> Self {
+        return Self {
+            marker: Some(label.into()),
+            ..Self::default()
+        };
+    }
+
+    /// Select an exact canonical session offset in nanoseconds.
+    #[must_use]
+    pub fn monotonic_ns(offset: u64) -> Self {
+        return Self {
+            monotonic_ns: Some(offset),
+            ..Self::default()
+        };
+    }
+
+    /// Select the time of canonical event `seq`.
+    #[must_use]
+    pub fn event_seq(seq: u64) -> Self {
+        return Self {
+            event_seq: Some(seq),
+            ..Self::default()
+        };
+    }
+
+    /// Select the time of semantic state `id`.
+    #[must_use]
+    pub fn state_id(id: u64) -> Self {
+        return Self {
+            state_id: Some(id),
+            ..Self::default()
+        };
+    }
+
+    /// Select native source frame `frame`; it maps to `ceil(frame * 1e9 / fps)` ns after the
+    /// capture origin, so the frame floor of that time is `frame` again.
+    #[must_use]
+    pub fn native_frame(frame: u64) -> Self {
+        return Self {
+            native_frame: Some(frame),
+            ..Self::default()
+        };
+    }
 }
 
 /// One text annotation with an exact scope, position, and visible style.
@@ -464,6 +548,19 @@ pub struct RationalSpeed {
     pub denominator: u32,
 }
 
+impl RationalSpeed {
+    /// Exact speed `numerator / denominator`; validation accepts 1/64 through 64. A clip's
+    /// source frames (start floored, end ceiled) become
+    /// `ceil(frames * denominator / numerator)` output frames.
+    #[must_use]
+    pub const fn new(numerator: u32, denominator: u32) -> Self {
+        return Self {
+            numerator,
+            denominator,
+        };
+    }
+}
+
 impl Default for RationalSpeed {
     fn default() -> Self {
         return Self {
@@ -647,6 +744,134 @@ pub struct PresentationMapEntry {
     /// Semantic state used when a cursor mask affected this frame.
     pub cursor_mask_state_id: Option<u64>,
 }
+
+/// Source of one presentation output frame.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OutputFrameSource {
+    /// Caller-ordered clip index.
+    pub clip_index: usize,
+    /// Source frame shown on the output frame.
+    pub source_frame: u64,
+    /// `source` for retimed frames or `hold` for generated duplicates.
+    pub operation: String,
+}
+
+/// Stable category of an edit-plan failure, shared by every SDK.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EditFailureCode {
+    /// Version, clip list, delivery, branding, or another plan-level value is invalid.
+    InvalidEditPlan,
+    /// A selector does not set exactly one coordinate.
+    InvalidSelector,
+    /// A selected marker does not exist.
+    MarkerNotFound,
+    /// A selected marker occurs more than once.
+    MarkerNotUnique,
+    /// A selector names an event, state, frame, or time outside the source.
+    SelectorOutOfRange,
+    /// A clip speed is zero or outside 1/64 through 64.
+    InvalidSpeed,
+    /// A clip caption is empty, too long, or contains NUL.
+    InvalidCaption,
+    /// Two clips overlap in source time.
+    OverlappingClips,
+    /// A clip lies outside the visual source or produces no frames.
+    ClipOutOfRange,
+    /// An annotation's text, template, scope, position, or style is invalid.
+    InvalidAnnotation,
+    /// A subtitle resource is missing or not a valid ASS document.
+    InvalidSubtitle,
+    /// A relative subtitle path was given without a resource base directory.
+    RelativeResourceWithoutBase,
+    /// A pixel transform is invalid or does not fit the canvas.
+    InvalidTransform,
+    /// The change-visualization settings are inconsistent.
+    InvalidChangeVisualization,
+}
+
+impl EditFailureCode {
+    /// Stable code.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        return match self {
+            Self::InvalidEditPlan => "invalid_edit_plan",
+            Self::InvalidSelector => "invalid_selector",
+            Self::MarkerNotFound => "marker_not_found",
+            Self::MarkerNotUnique => "marker_not_unique",
+            Self::SelectorOutOfRange => "selector_out_of_range",
+            Self::InvalidSpeed => "invalid_speed",
+            Self::InvalidCaption => "invalid_caption",
+            Self::OverlappingClips => "overlapping_clips",
+            Self::ClipOutOfRange => "clip_out_of_range",
+            Self::InvalidAnnotation => "invalid_annotation",
+            Self::InvalidSubtitle => "invalid_subtitle",
+            Self::RelativeResourceWithoutBase => "relative_resource_without_base",
+            Self::InvalidTransform => "invalid_transform",
+            Self::InvalidChangeVisualization => "invalid_change_visualization",
+        };
+    }
+}
+
+/// Typed edit-plan failure with the location it was found at.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditFailure {
+    /// Stable category.
+    pub code: EditFailureCode,
+    /// Path of the rejected value inside the edit, such as `clips[1].from`.
+    pub field: String,
+    /// Caller clip index, when the failure belongs to one clip.
+    pub clip_index: Option<usize>,
+    /// Marker label, when the failure concerns a marker.
+    pub marker: Option<String>,
+    /// Human-readable reason.
+    pub reason: String,
+}
+
+impl EditFailure {
+    /// Failure `code` at `field` with no clip or marker facts.
+    pub fn new(code: EditFailureCode, field: impl Into<String>, reason: impl Into<String>) -> Self {
+        return Self {
+            code,
+            field: field.into(),
+            clip_index: None,
+            marker: None,
+            reason: reason.into(),
+        };
+    }
+
+    /// Attach the caller clip index.
+    #[must_use]
+    pub const fn clip(mut self, clip_index: usize) -> Self {
+        self.clip_index = Some(clip_index);
+
+        return self;
+    }
+
+    /// Attach the marker label.
+    #[must_use]
+    pub fn marker(mut self, label: impl Into<String>) -> Self {
+        self.marker = Some(label.into());
+
+        return self;
+    }
+}
+
+impl fmt::Display for EditFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        return write!(
+            f,
+            "invalid edit plan ({}) at `{}`: {}",
+            self.code.code(),
+            self.field,
+            self.reason
+        );
+    }
+}
+
+impl Error for EditFailure {}
 
 /// Integrity and tool provenance for an edited presentation.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

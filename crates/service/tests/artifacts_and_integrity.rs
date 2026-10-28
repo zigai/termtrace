@@ -2,17 +2,26 @@
 
 mod support;
 
+use assert_cmd::cargo::cargo_bin;
+use std::sync::atomic::AtomicBool;
 use support::record_session;
 use tempfile::TempDir;
 use termtrace_model::{
     artifact::{
         bundle::{BundleProfile, BundleVerificationPolicy},
+        presentation::{EditClip, EditPlan, EditSelector, PresentationSource},
         save::SaveFormat,
     },
     execution::session::VerificationLevel,
     terminal::observation::StatePoint,
 };
-use termtrace_service::{artifacts::ArtifactService, integrity::IntegrityService};
+use termtrace_service::{
+    artifacts::{
+        ArtifactService, EditSource, VideoMode, VideoOptions, VideoOutcome, VideoRenderer,
+    },
+    integrity::IntegrityService,
+    system::SystemService,
+};
 
 #[test]
 fn test_artifact_save_bundle_and_verify() {
@@ -67,4 +76,64 @@ fn test_integrity_verify_and_recover() {
     let recover_report =
         IntegrityService::recover_session(&session_path, &recovered_dir).expect("recover");
     assert!(recover_report.valid_events > 0);
+}
+
+#[test]
+#[ignore = "requires Ghostty, Xvfb, dbus-run-session and FFmpeg"]
+fn native_edit_render_captures_native_pixels_without_a_semantic_fallback() {
+    let temp = TempDir::new().expect("tempdir");
+    let session = temp.path().join("native-edit.termtrace");
+    record_session(&session, "printf 'NATIVE-EDIT\n'; sleep 1");
+
+    assert!(
+        !session.join("visual").exists(),
+        "no native capture before the render"
+    );
+
+    let edit = EditPlan::new(vec![EditClip::new(
+        EditSelector::monotonic_ns(0),
+        EditSelector::monotonic_ns(500_000_000),
+    )]);
+
+    let options = VideoOptions {
+        renderer: VideoRenderer::Native,
+        fps: Some(30),
+        ..VideoOptions::default()
+    };
+    let request = options
+        .request(
+            session,
+            EditSource::Plan {
+                edit: Box::new(edit),
+                resource_base: None,
+            },
+            VideoMode::Render {
+                out: temp.path().join("native.mp4"),
+            },
+        )
+        .expect("request");
+
+    let cancelled = AtomicBool::new(false);
+    let outcome = ArtifactService::video(
+        &request,
+        &cargo_bin("termtrace"),
+        &mut |id| return SystemService::require(id, &cancelled),
+        &mut |_| {},
+    )
+    .expect("native render");
+    let VideoOutcome::Rendered(render) = outcome else {
+        panic!("render returned another outcome");
+    };
+
+    assert!(matches!(
+        render.plan.source,
+        PresentationSource::Native { .. }
+    ));
+
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs_err::read(render.sidecar.join("manifest.json")).expect("sidecar manifest"),
+    )
+    .expect("manifest JSON");
+    assert_eq!(manifest["truth_layer"], "presentation_output");
+    assert_eq!(manifest["source_truth_layer"], "native_encoded_evidence");
 }

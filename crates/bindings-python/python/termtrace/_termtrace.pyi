@@ -5,7 +5,7 @@ import builtins
 import os
 import typing
 
-from termtrace import types
+from termtrace import editing, types
 
 __all__ = [
     "ActionBuilder",
@@ -58,7 +58,10 @@ __all__ = [
     "fail_negation",
     "finalize_recordings",
     "masked_snapshot",
+    "normalize_edit",
     "normalized_snapshot",
+    "output_frames_for_source_frame",
+    "source_for_output_frame",
     "version",
 ]
 
@@ -2327,6 +2330,65 @@ class Termtrace:
         Raises `ValueError` for a malformed profile, and `TermtraceError` or a subclass with the
         visual-profile failure code when it is invalid or does not resolve.
         """
+    def video_plan(
+        self,
+        session: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        edit: editing.Edit | types.EditSourceInput | str | os.PathLike[str],
+        *,
+        renderer: types.VideoRenderer,
+        fps: builtins.int | None = None,
+        semantic_raster_profile: types.SemanticRasterProfile | None = None,
+    ) -> types.PresentationPlan:
+        r"""
+        Resolve the presentation plan of `edit` over a completed `session` without rendering.
+        `renderer` is `native` (verified Ghostty pixels, captured first when missing; never
+        semantic) or `semantic`; `fps` defaults to 30.
+
+        # Errors
+
+        Raises `TermtraceError` with an edit failure `code` and `details` for a rejected edit,
+        and for blocked capabilities, invalid evidence, or capture failures.
+        """
+    def video_preview(
+        self,
+        session: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        edit: editing.Edit | types.EditSourceInput | str | os.PathLike[str],
+        directory: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        *,
+        renderer: types.VideoRenderer,
+        fps: builtins.int | None = None,
+        semantic_raster_profile: types.SemanticRasterProfile | None = None,
+        preview: types.PreviewOptions | None = None,
+    ) -> types.VideoPreview:
+        r"""
+        Render a contact sheet and low-resolution review video of `edit` into the new
+        `directory`. Options are those of `video_plan`, plus `preview` storyboard settings.
+
+        # Errors
+
+        Raises like `video_plan`, and when the directory exists or rendering fails.
+        """
+    def video_render(
+        self,
+        session: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        edit: editing.Edit | types.EditSourceInput | str | os.PathLike[str],
+        out: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        *,
+        renderer: types.VideoRenderer,
+        fps: builtins.int | None = None,
+        semantic_raster_profile: types.SemanticRasterProfile | None = None,
+        gif_loop: types.GifLoop | None = None,
+        overwrite: builtins.bool = False,
+    ) -> types.VideoRender:
+        r"""
+        Render `edit` to `out`, whose lowercase `.mp4`, `.gif`, or `.webm` extension selects
+        the format, keeping a manifested `.termtrace` sidecar beside it. An existing output
+        fails unless `overwrite` is set for an MP4; GIF and WebM are never replaced.
+
+        # Errors
+
+        Raises like `video_plan`, and when the output exists or rendering fails.
+        """
     def launch(
         self,
         command: typing.Sequence[builtins.str],
@@ -2775,6 +2837,18 @@ def masked_snapshot(
     Rejects invalid/split-wide masks and incomplete cell maps.
     """
 
+def normalize_edit(
+    edit: editing.Edit | types.EditSourceInput | str | os.PathLike[str],
+) -> types.NormalizedEdit:
+    r"""
+    Resolve an edit's subtitle paths, validate it, and return it with its `edit_plan_hash`.
+
+    # Errors
+
+    Raises `TermtraceError` whose `code` names the edit failure (for example `invalid_speed` or
+    `relative_resource_without_base`) and whose `details` hold `field`, `clip_index`, and `marker`.
+    """
+
 def normalized_snapshot(
     frame: ScreenFrame,
     profile_name: builtins.str = "text",
@@ -2786,6 +2860,21 @@ def normalized_snapshot(
 
     # Errors
     Rejects invalid options and insufficient frame detail.
+    """
+
+def output_frames_for_source_frame(
+    plan: types.PresentationPlanInput, source_frame: builtins.int
+) -> builtins.list[tuple[builtins.int, builtins.int]]:
+    r"""
+    Half-open `(start, end)` output-frame spans that show `source_frame`, in output order.
+    """
+
+def source_for_output_frame(
+    plan: types.PresentationPlanInput, output_frame: builtins.int
+) -> types.OutputFrameSource | None:
+    r"""
+    Clip, source frame, and operation (`source` or `hold`) shown on `output_frame`, or `None`
+    past the end.
     """
 
 def version() -> builtins.str:

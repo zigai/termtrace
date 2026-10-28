@@ -1138,3 +1138,202 @@ fn top_level_video_derivatives_use_explicit_sources_and_never_replace() {
         assert!(!out.exists());
     }
 }
+
+#[allow(clippy::expect_used, reason = "test setup")]
+fn record_marked_edit_session(session: &Path) {
+    let recorder = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
+        .args(["record", "--no-input", "--out"])
+        .arg(session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; printf 'alpha\\n'; sleep 0.3; printf 'beta\\n'; sleep 0.3; printf 'gamma\\n'; while :; do sleep 0.1; done",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn recorder");
+
+    wait_for_control(session);
+
+    // The edit below selects up to 6.7 s, so the markers follow at about 5.5 s.
+    thread::sleep(Duration::from_millis(5_500));
+
+    for label in ["first", "second", "third"] {
+        Command::cargo_bin("termtrace")
+            .expect("binary should build")
+            .arg("send")
+            .arg(session)
+            .arg(format!("mark:{label}"))
+            .assert()
+            .success();
+
+        thread::sleep(Duration::from_millis(400));
+    }
+
+    Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .arg("stop")
+        .arg(session)
+        .assert()
+        .success();
+
+    let recorded = recorder.wait_with_output().expect("recorder exit");
+    assert!(recorded.status.success(), "{recorded:?}");
+}
+
+#[allow(clippy::expect_used, reason = "test setup")]
+fn edit_plan_json(session: &Path, edit: &Path, renderer: &str) -> serde_json::Value {
+    let output = Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .current_dir(env::temp_dir())
+        .args(["video"])
+        .arg(session)
+        .args(["--renderer", renderer, "--fps", "30", "--edit"])
+        .arg(edit)
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    return serde_json::from_slice(&output).expect("plan JSON");
+}
+
+#[test]
+fn edit_files_keep_their_identity_and_resolve_subtitles_beside_the_file() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("edit-session");
+    let edits = temporary.path().join("edits");
+    fs_err::create_dir(&edits).expect("edit directory");
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/conformance/sdk/editing-captions.ass"),
+        edits.join("captions.ass"),
+    )
+    .expect("subtitle resource");
+
+    record_marked_edit_session(&session);
+
+    // Marker, monotonicNs, eventSeq, and stateId selectors with a relative subtitle path.
+    let edit = edits.join("edit.json");
+    fs::write(
+        &edit,
+        serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "clips": [
+                { "from": { "stateId": 1 }, "to": { "stateId": 14 }, "caption": null },
+                {
+                    "from": { "marker": "first" },
+                    "to": { "marker": "second" },
+                    "speed": { "numerator": 2, "denominator": 3 },
+                    "hold_ms": 250,
+                    "caption": "Middle"
+                },
+                { "from": { "eventSeq": 6 }, "to": { "monotonicNs": 6_700_000_000_u64 }, "caption": null }
+            ],
+            "subtitles": [{ "ass": "captions.ass" }],
+            "change_visualization": null
+        }))
+        .expect("edit JSON"),
+    )
+    .expect("write edit");
+
+    let plan = edit_plan_json(&session, &edit, "semantic");
+
+    // Recorded from this edit before the editing-API change; the identity must not move.
+    assert_eq!(
+        plan["edit_plan_hash"],
+        "e2baeb6d6ef1685f79ccadc8e0663532017a62734df8030aecf4a874e8391450"
+    );
+    assert_eq!(
+        plan["subtitles"][0]["source_path"],
+        edits.join("captions.ass").to_str().expect("UTF-8 path")
+    );
+    assert_eq!(plan["clips"].as_array().map(Vec::len), Some(3));
+}
+
+#[test]
+#[ignore = "requires native Ghostty capture tools and FFmpeg with libx264"]
+fn native_frame_edits_start_at_the_frame_they_name() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("native-frame-session");
+    record_marked_edit_session(&session);
+
+    Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .args(["analyze", "index"])
+        .arg(&session)
+        .assert()
+        .success();
+
+    Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .args(["artifact", "capture"])
+        .arg(&session)
+        .args(["--fps", "30"])
+        .assert()
+        .success();
+
+    let markers = temporary.path().join("markers.json");
+    fs::write(
+        &markers,
+        br#"{"version":1,"clips":[{"from":{"marker":"first"},"to":{"marker":"third"},"caption":null}],"change_visualization":null}"#,
+    )
+    .expect("marker edit");
+
+    let marker_plan = edit_plan_json(&session, &markers, "native");
+    let first = marker_plan["markers"]
+        .as_array()
+        .and_then(|markers| {
+            return markers
+                .iter()
+                .find(|marker| return marker["label"] == "first");
+        })
+        .and_then(|marker| return marker["nominal_frame"].as_u64())
+        .expect("nominal frame of the first marker");
+
+    // Offsets with n % 3 == 1 rounded down to the previous frame before the fix.
+    let frames = [first + 1, first + 3, first + 9];
+    let edit = temporary.path().join("frames.json");
+    fs::write(
+        &edit,
+        serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "clips": [
+                { "from": { "nativeFrame": frames[0] }, "to": { "nativeFrame": frames[1] }, "caption": null },
+                { "from": { "nativeFrame": frames[1] }, "to": { "nativeFrame": frames[2] }, "caption": null }
+            ],
+            "change_visualization": null
+        }))
+        .expect("edit JSON"),
+    )
+    .expect("frame edit");
+
+    let plan = edit_plan_json(&session, &edit, "native");
+    assert_eq!(plan["source"], marker_plan["source"]);
+
+    let start_ns = |frame: u64| return (u128::from(frame) * 1_000_000_000).div_ceil(30);
+
+    for (index, (from, to)) in [(frames[0], frames[1]), (frames[1], frames[2])]
+        .into_iter()
+        .enumerate()
+    {
+        let clip = &plan["clips"][index];
+
+        assert_eq!(clip["source_start_frame"], from);
+        assert_eq!(clip["source_end_frame"], to);
+
+        let range = &clip["source_range"];
+        let span = range["end_monotonic_ns"].as_u64().expect("end")
+            - range["start_monotonic_ns"].as_u64().expect("start");
+
+        assert_eq!(
+            u128::from(span),
+            start_ns(to) - start_ns(from),
+            "clip {index}"
+        );
+    }
+}

@@ -1,5 +1,8 @@
 use super::{
-    mapping::mapped_source_frame, plan_error, validation::validate_edit_plan, NANOS_PER_SECOND,
+    mapping::{mapped_source_frame, output_spans_for_source_frames},
+    plan_error,
+    validation::{edit_error, validate_edit_plan},
+    NANOS_PER_SECOND,
 };
 use crate::{
     native_capture::validate_visual_manifest_binding,
@@ -15,10 +18,8 @@ use std::{
     sync::atomic::AtomicBool,
 };
 use termtrace_engine::{
-    replay::{
-        inspect_completed_session, visit_session_states_while, StateSelection, StateSelector,
-    },
-    timeline::resolve_session_source_selection,
+    replay::{visit_session_states_while, StateSelection},
+    timeline::resolve_source_range,
 };
 use termtrace_evidence::{
     artifact::{hash_regular_file, verify_artifact_members},
@@ -29,10 +30,10 @@ use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::{
     artifact::presentation::{
         AnnotationScope, CaptionLayout, ChangeMode, ChangeRegion, ChangeSource,
-        ChangeVisualization, CursorMaskFrame, EditClip, EditPlan, EditSelector, MarkerRecord,
-        NormalizedAnnotation, NormalizedChangeFrame, NormalizedClip, NormalizedSubtitle,
-        PixelTransform, PresentationPlan, PresentationSource, PresentationSourceRequest,
-        RationalSpeed, PRESENTATION_FORMAT_VERSION,
+        ChangeVisualization, CursorMaskFrame, EditClip, EditFailure, EditFailureCode, EditPlan,
+        EditSelector, MarkerRecord, NormalizedAnnotation, NormalizedChangeFrame, NormalizedClip,
+        NormalizedSubtitle, PixelTransform, PresentationPlan, PresentationSource,
+        PresentationSourceRequest, RationalSpeed, PRESENTATION_FORMAT_VERSION,
     },
     artifact::visual::{visual_directory_name_for, VisualManifest},
     execution::{event::Event, session::SessionManifest},
@@ -597,19 +598,24 @@ fn resolve_source(
             fps,
             raster_profile,
         } => {
-            if edit.clips.iter().any(|clip| {
+            if let Some(index) = edit.clips.iter().position(|clip| {
                 return clip.from.native_frame.is_some() || clip.to.native_frame.is_some();
             }) {
-                return Err(plan_error(
-                    "nativeFrame edit selectors are invalid for a semantic video source",
+                return Err(Error::Edit(
+                    EditFailure::new(
+                        EditFailureCode::InvalidSelector,
+                        format!("clips[{index}]"),
+                        "nativeFrame edit selectors are invalid for a semantic video source",
+                    )
+                    .clip(index),
                 ));
             }
 
             let mut semantic_start = u64::MAX;
 
             let mut semantic_end = 0_u64;
-            for clip in &edit.clips {
-                let range = resolve_clip(session, clip, 0, fps)?;
+            for (index, clip) in edit.clips.iter().enumerate() {
+                let range = resolve_clip(session, clip, index, 0, fps)?;
                 semantic_start = semantic_start.min(range.start_monotonic_ns);
                 semantic_end = semantic_end.max(range.end_monotonic_ns);
             }
@@ -757,7 +763,7 @@ fn source_elapsed_ns(monotonic_ns: u64, capture_start_ns: i128) -> u128 {
     return u128::try_from((i128::from(monotonic_ns) - capture_start_ns).max(0)).unwrap_or(0);
 }
 
-fn hash_edit_identity(edit: &EditPlan) -> Result<String> {
+pub(super) fn hash_edit_identity(edit: &EditPlan) -> Result<String> {
     let mut hashed_edit = edit.clone();
     let mut subtitle_hashes = Vec::new();
 
@@ -796,20 +802,29 @@ fn normalize_clips(
     let mut output_start_frame = 0_u64;
     let mut clips = Vec::new();
 
-    for clip in &edit.clips {
-        let range = resolve_clip(session, clip, capture_start_ns, fps)?;
+    for (index, clip) in edit.clips.iter().enumerate() {
+        let range = resolve_clip(session, clip, index, capture_start_ns, fps)?;
+        let clip_failure = |code, reason: &str| {
+            return Error::Edit(
+                EditFailure::new(code, format!("clips[{index}]"), reason).clip(index),
+            );
+        };
 
         if clips.iter().any(|existing: &NormalizedClip| {
             return ranges_overlap(range, existing.source_range);
         }) {
-            return Err(plan_error("edit clips must not overlap in source time"));
+            return Err(clip_failure(
+                EditFailureCode::OverlappingClips,
+                "edit clips must not overlap in source time",
+            ));
         }
 
         if capture_range.is_some_and(|capture| {
             return range.start_monotonic_ns < capture.start_monotonic_ns
                 || range.end_monotonic_ns > capture.end_monotonic_ns;
         }) {
-            return Err(plan_error(
+            return Err(clip_failure(
+                EditFailureCode::ClipOutOfRange,
                 "edit clip lies outside the native capture range",
             ));
         }
@@ -843,7 +858,8 @@ fn normalize_clips(
         });
 
         if native_frame_count.is_some_and(|count| return source_end_frame > count) {
-            return Err(plan_error(
+            return Err(clip_failure(
+                EditFailureCode::ClipOutOfRange,
                 "native clip exceeds verified CFR source frame count",
             ));
         }
@@ -879,7 +895,9 @@ fn normalize_clips(
     }
 
     if output_start_frame == 0 || output_start_frame > u64::from(fps) * 60 * 60 * 24 {
-        return Err(plan_error(
+        return Err(edit_error(
+            EditFailureCode::ClipOutOfRange,
+            "clips",
             "presentation duration must contain between one frame and 24 hours",
         ));
     }
@@ -950,18 +968,22 @@ fn normalize_annotations(
 ) -> Result<Vec<NormalizedAnnotation>> {
     let mut normalized = Vec::new();
     for (annotation_index, annotation) in edit.annotations.iter().enumerate() {
+        let field = format!("annotations[{annotation_index}].scope");
+        let invalid = |reason: String| {
+            return edit_error(EditFailureCode::InvalidAnnotation, field.clone(), reason);
+        };
         let spans = match &annotation.scope {
             AnnotationScope::WholeVideo => vec![(0, output_frame_count)],
             AnnotationScope::Clip { clip_index } => {
-                let clip = clips
-                    .get(*clip_index)
-                    .ok_or_else(|| return plan_error("annotation clip index is out of bounds"))?;
+                let clip = clips.get(*clip_index).ok_or_else(|| {
+                    return invalid("annotation clip index is out of bounds".to_owned());
+                })?;
 
                 vec![(clip.output_start_frame, clip.output_end_frame)]
             }
             AnnotationScope::OutputFrame { output_frame } => {
                 if *output_frame >= output_frame_count {
-                    return Err(plan_error(format!(
+                    return Err(invalid(format!(
                         "annotation output frame {output_frame} is out of bounds"
                     )));
                 }
@@ -969,21 +991,39 @@ fn normalize_annotations(
                 vec![(*output_frame, output_frame + 1)]
             }
             AnnotationScope::Range { from, to } => {
-                let start = resolve_edit_selector(session, from, capture_start_ns, fps)?;
-                let end = resolve_edit_selector(session, to, capture_start_ns, fps)?;
+                let start = resolve_edit_selector(
+                    session,
+                    from,
+                    &format!("{field}.from"),
+                    capture_start_ns,
+                    fps,
+                )?;
+
+                let end = resolve_edit_selector(
+                    session,
+                    to,
+                    &format!("{field}.to"),
+                    capture_start_ns,
+                    fps,
+                )?;
 
                 if start >= end {
-                    return Err(plan_error("annotation source range is empty or reversed"));
+                    return Err(invalid(
+                        "annotation source range is empty or reversed".to_owned(),
+                    ));
                 }
 
                 let start_frame = frame_floor_ns(source_elapsed_ns(start, capture_start_ns), fps);
                 let end_frame = frame_ceil_ns(source_elapsed_ns(end, capture_start_ns), fps);
 
                 output_spans_for_source_frames(clips, start_frame, end_frame)
+                    .into_iter()
+                    .map(|span| return (span.start, span.end))
+                    .collect()
             }
         };
         if spans.is_empty() {
-            return Err(plan_error(format!(
+            return Err(invalid(format!(
                 "annotation {annotation_index} does not intersect an output clip"
             )));
         }
@@ -1011,36 +1051,6 @@ fn normalize_annotations(
     });
 
     return Ok(normalized);
-}
-
-fn output_spans_for_source_frames(
-    clips: &[NormalizedClip],
-    source_start_frame: u64,
-    source_end_frame: u64,
-) -> Vec<(u64, u64)> {
-    let mut spans = Vec::new();
-    for clip in clips {
-        let mut open = None;
-        for output_frame in clip.output_start_frame..clip.output_end_frame {
-            let (source_frame, _) = mapped_source_frame(clip, output_frame);
-            let selected = source_start_frame <= source_frame && source_frame < source_end_frame;
-
-            match (open, selected) {
-                (None, true) => open = Some(output_frame),
-                (Some(start), false) => {
-                    spans.push((start, output_frame));
-                    open = None;
-                }
-                _ => {}
-            }
-        }
-
-        if let Some(start) = open {
-            spans.push((start, clip.output_end_frame));
-        }
-    }
-
-    return spans;
 }
 
 #[allow(
@@ -1272,10 +1282,17 @@ pub(super) fn validate_transform_geometry(
     );
 
     let mut spatial_transform_seen = false;
-    for transform in &edit.transforms {
+    for (index, transform) in edit.transforms.iter().enumerate() {
+        let invalid = |reason: &str| {
+            return edit_error(
+                EditFailureCode::InvalidTransform,
+                format!("transforms[{index}]"),
+                reason,
+            );
+        };
         match transform {
             PixelTransform::CursorMask if spatial_transform_seen => {
-                return Err(plan_error(
+                return Err(invalid(
                     "cursor_mask must precede crop, zoom, and resize transforms",
                 ));
             }
@@ -1290,7 +1307,7 @@ pub(super) fn validate_transform_geometry(
 
                 if x.saturating_add(*crop_width) > width || y.saturating_add(*crop_height) > height
                 {
-                    return Err(plan_error("crop rectangle exceeds the current canvas"));
+                    return Err(invalid("crop rectangle exceeds the current canvas"));
                 }
 
                 width = *crop_width;
@@ -1301,8 +1318,11 @@ pub(super) fn validate_transform_geometry(
                 denominator,
             } => {
                 spatial_transform_seen = true;
-                width = scaled_even_dimension(width, *numerator, *denominator)?;
-                height = scaled_even_dimension(height, *numerator, *denominator)?;
+                width = scaled_even_dimension(width, *numerator, *denominator)
+                    .map_err(|reason| return invalid(reason))?;
+
+                height = scaled_even_dimension(height, *numerator, *denominator)
+                    .map_err(|reason| return invalid(reason))?;
             }
             PixelTransform::Resize {
                 width: resize_width,
@@ -1322,7 +1342,7 @@ pub(super) fn validate_transform_geometry(
                 if x.saturating_add(*callout_width) > width
                     || y.saturating_add(*callout_height) > height
                 {
-                    return Err(plan_error("callout rectangle exceeds the current canvas"));
+                    return Err(invalid("callout rectangle exceeds the current canvas"));
                 }
             }
         }
@@ -1341,30 +1361,101 @@ fn even_canvas_dimension(value: u16) -> Result<u16> {
         .ok_or_else(|| return plan_error("presentation canvas dimension overflowed"));
 }
 
-fn scaled_even_dimension(value: u16, numerator: u16, denominator: u16) -> Result<u16> {
+fn scaled_even_dimension(
+    value: u16,
+    numerator: u16,
+    denominator: u16,
+) -> Result<u16, &'static str> {
     let scaled = u32::from(value).saturating_mul(u32::from(numerator)) / u32::from(denominator);
     let even = scaled / 2 * 2;
 
     if even == 0 || even > 8192 {
-        return Err(plan_error(
-            "zoomed presentation dimension must be an even value from 2 through 8192",
-        ));
+        return Err("zoomed presentation dimension must be an even value from 2 through 8192");
     }
-    return u16::try_from(even)
-        .map_err(|_error| return plan_error("zoomed presentation dimension overflowed"));
+    return u16::try_from(even).map_err(|_error| return "zoomed presentation dimension overflowed");
 }
 
 fn resolve_clip(
     session: &Path,
     clip: &EditClip,
+    index: usize,
     capture_start_ns: i128,
     fps: u16,
 ) -> Result<SourceRange> {
-    let from = resolve_edit_selector(session, &clip.from, capture_start_ns, fps)?;
-    let to = resolve_edit_selector(session, &clip.to, capture_start_ns, fps)?;
+    let with_clip = |error| {
+        return match error {
+            Error::Edit(failure) => Error::Edit(failure.clip(index)),
+            other => other,
+        };
+    };
+    let from = resolve_edit_selector(
+        session,
+        &clip.from,
+        &format!("clips[{index}].from"),
+        capture_start_ns,
+        fps,
+    )
+    .map_err(with_clip)?;
+    let to = resolve_edit_selector(
+        session,
+        &clip.to,
+        &format!("clips[{index}].to"),
+        capture_start_ns,
+        fps,
+    )
+    .map_err(with_clip)?;
 
-    return resolve_session_source_selection(session, Some(from), Some(to), None, None)?
+    if from >= to {
+        return Err(Error::Edit(
+            EditFailure::new(
+                EditFailureCode::ClipOutOfRange,
+                format!("clips[{index}]"),
+                format!("edit clip must end after it starts, got {from}..{to} ns"),
+            )
+            .clip(index),
+        ));
+    }
+
+    let final_ns = session_final_ns(session)?;
+    let selector_out_of_range = |endpoint: &str, reason: String| {
+        return Error::Edit(
+            EditFailure::new(
+                EditFailureCode::SelectorOutOfRange,
+                format!("clips[{index}].{endpoint}"),
+                reason,
+            )
+            .clip(index),
+        );
+    };
+
+    if from > final_ns {
+        return Err(selector_out_of_range(
+            "from",
+            format!("clip starts at {from} ns after the final event at {final_ns} ns"),
+        ));
+    }
+
+    if to.saturating_sub(1) > final_ns {
+        return Err(selector_out_of_range(
+            "to",
+            format!("clip ends at {to} ns, past the end of the session at {final_ns} ns"),
+        ));
+    }
+    return resolve_source_range(Some(from), Some(to), final_ns)?
         .ok_or_else(|| return plan_error("edit clip must have explicit endpoints"));
+}
+
+fn session_final_ns(session: &Path) -> Result<u64> {
+    let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
+
+    let mut final_ns = 0;
+    while let Some(record) = cursor.next_record()? {
+        final_ns = record.monotonic_ns;
+    }
+
+    let _pending = cursor.finish()?;
+
+    return Ok(final_ns);
 }
 
 pub(super) fn ranges_overlap(left: SourceRange, right: SourceRange) -> bool {
@@ -1372,12 +1463,23 @@ pub(super) fn ranges_overlap(left: SourceRange, right: SourceRange) -> bool {
         && right.start_monotonic_ns < left.end_monotonic_ns;
 }
 
+/// Nanoseconds after the capture origin at which native frame `frame` starts at `fps`:
+/// `ceil(frame * 1e9 / fps)`, so that the frame floor of the result is `frame` again.
+pub(super) fn native_frame_ns(frame: u64, fps: u16) -> i128 {
+    return (i128::from(frame) * i128::from(NANOS_PER_SECOND) + i128::from(fps) - 1)
+        / i128::from(fps);
+}
+
 fn resolve_edit_selector(
     session: &Path,
     selector: &EditSelector,
+    field: &str,
     capture_start_ns: i128,
     fps: u16,
 ) -> Result<u64> {
+    let out_of_range =
+        |reason: String| return edit_error(EditFailureCode::SelectorOutOfRange, field, reason);
+
     if let Some(monotonic_ns) = selector.monotonic_ns {
         return Ok(monotonic_ns);
     }
@@ -1390,15 +1492,24 @@ fn resolve_edit_selector(
             }
         }
 
-        return Err(plan_error(format!("event sequence {event_seq} is absent")));
+        return Err(out_of_range(format!(
+            "event sequence {event_seq} is absent"
+        )));
     }
 
     if let Some(state_id) = selector.state_id {
-        return Ok(
-            inspect_completed_session(session, StateSelector::StateId(state_id))?
-                .record
-                .monotonic_ns,
-        );
+        let mut selected = None;
+        visit_session_states_while(session, &AtomicBool::new(false), |state, _| {
+            if state.state_id == state_id {
+                selected = Some(state.monotonic_ns);
+            }
+
+            return Ok(state.state_id < state_id);
+        })?;
+
+        return selected.ok_or_else(|| {
+            return out_of_range(format!("state {state_id} is absent"));
+        });
     }
 
     if let Some(native_frame) = selector.native_frame {
@@ -1406,13 +1517,9 @@ fn resolve_edit_selector(
             return Err(plan_error("native frame selector requires nonzero FPS"));
         }
 
-        let offset = (i128::from(native_frame) * i128::from(NANOS_PER_SECOND) + i128::from(fps)
-            - 1)
-            / i128::from(fps);
-
-        let canonical_ns = capture_start_ns + offset;
+        let canonical_ns = capture_start_ns + native_frame_ns(native_frame, fps);
         if canonical_ns < 0 {
-            return Err(plan_error(format!(
+            return Err(out_of_range(format!(
                 "nativeFrame {native_frame} maps to canonical {canonical_ns} ns before time zero \
                  (capture origin {capture_start_ns} ns, {fps} FPS); pre-roll raw-frame selection \
                  is unsupported by presentation edits. Select a nativeFrame at or after canonical \
@@ -1420,7 +1527,7 @@ fn resolve_edit_selector(
             )));
         }
         return u64::try_from(canonical_ns).map_err(|_error| {
-            return plan_error(format!(
+            return out_of_range(format!(
                 "nativeFrame {native_frame} maps to canonical {canonical_ns} ns outside the u64 \
                  timestamp range; select a lower nativeFrame ordinal"
             ));
@@ -1439,11 +1546,27 @@ fn resolve_edit_selector(
         if matches!(&record.event, Event::Marker { label, .. } if label == marker)
             && found.replace(record.monotonic_ns).is_some()
         {
-            return Err(plan_error(format!("marker `{marker}` is not unique")));
+            return Err(Error::Edit(
+                EditFailure::new(
+                    EditFailureCode::MarkerNotUnique,
+                    field,
+                    format!("marker `{marker}` is not unique"),
+                )
+                .marker(marker),
+            ));
         }
     }
 
-    return found.ok_or_else(|| return plan_error(format!("marker `{marker}` is absent")));
+    return found.ok_or_else(|| {
+        return Error::Edit(
+            EditFailure::new(
+                EditFailureCode::MarkerNotFound,
+                field,
+                format!("marker `{marker}` is absent"),
+            )
+            .marker(marker),
+        );
+    });
 }
 
 #[cfg(test)]
@@ -1501,7 +1624,10 @@ mod capture_clock_tests {
             ..Default::default()
         };
 
-        assert!(resolve_edit_selector(Path::new("unused"), &selector, origin, 30).is_err());
+        assert!(
+            resolve_edit_selector(Path::new("unused"), &selector, "clips[0].from", origin, 30)
+                .is_err()
+        );
 
         let selector = EditSelector {
             native_frame: Some(30),
@@ -1509,7 +1635,8 @@ mod capture_clock_tests {
         };
 
         assert_eq!(
-            resolve_edit_selector(Path::new("unused"), &selector, origin, 30).unwrap(),
+            resolve_edit_selector(Path::new("unused"), &selector, "clips[0].from", origin, 30)
+                .unwrap(),
             50_000_000
         );
 
@@ -1544,8 +1671,10 @@ mod capture_clock_tests {
         let authored_bytes = serde_json::to_vec(&edit).unwrap();
         let authored_hash = hash_edit_identity(&edit).unwrap();
         let from = &edit.clips.first().unwrap().from;
-        let error = resolve_edit_selector(Path::new("unused"), from, -950_000_000, 30)
-            .expect_err("capture pre-roll must not be fabricated into canonical time zero");
+        let error =
+            resolve_edit_selector(Path::new("unused"), from, "clips[0].from", -950_000_000, 30)
+                .expect_err("capture pre-roll must not be fabricated into canonical time zero");
+
         let message = error.to_string();
 
         for fact in [
@@ -1571,9 +1700,14 @@ mod capture_clock_tests {
             ..Default::default()
         };
 
-        assert!(
-            resolve_edit_selector(Path::new("unused"), &before_zero, -950_000_000, 30).is_err()
-        );
+        assert!(resolve_edit_selector(
+            Path::new("unused"),
+            &before_zero,
+            "clips[0].from",
+            -950_000_000,
+            30
+        )
+        .is_err());
 
         let after_zero = EditSelector {
             native_frame: Some(29),
@@ -1581,7 +1715,14 @@ mod capture_clock_tests {
         };
 
         assert_eq!(
-            resolve_edit_selector(Path::new("unused"), &after_zero, -950_000_000, 30).unwrap(),
+            resolve_edit_selector(
+                Path::new("unused"),
+                &after_zero,
+                "clips[0].from",
+                -950_000_000,
+                30
+            )
+            .unwrap(),
             16_666_667
         );
     }
@@ -1594,7 +1735,7 @@ mod capture_clock_tests {
         };
 
         assert_eq!(
-            resolve_edit_selector(Path::new("unused"), &zero, 0, 60).unwrap(),
+            resolve_edit_selector(Path::new("unused"), &zero, "clips[0].from", 0, 60).unwrap(),
             0
         );
 
@@ -1604,11 +1745,18 @@ mod capture_clock_tests {
         };
 
         assert_eq!(
-            resolve_edit_selector(Path::new("unused"), &selector, 0, 60).unwrap(),
+            resolve_edit_selector(Path::new("unused"), &selector, "clips[0].from", 0, 60).unwrap(),
             16_666_667
         );
         assert_eq!(
-            resolve_edit_selector(Path::new("unused"), &selector, -16_666_667, 60).unwrap(),
+            resolve_edit_selector(
+                Path::new("unused"),
+                &selector,
+                "clips[0].from",
+                -16_666_667,
+                60
+            )
+            .unwrap(),
             0
         );
         assert_eq!(selector.native_frame, Some(1));
