@@ -1,0 +1,4 @@
+- SIGINT at 0.3 s, 0.8 s and 1.2 s into `termtrace video vsess --renderer native --out v.mp4` exits within 0.26 s with "video was cancelled", leaving no Xvfb, Ghostty or /tmp/termtrace-capability-* staging dir; the main build leaves all three behind
+- SIGINT at 4 s and 6 s (after the probe, during capture) still terminates at once by signal, as on main
+- Native mp4, semantic mp4 and semantic gif renders of vsess complete and publish
+- `just lint validate test integration bindings-test native-test` passes
