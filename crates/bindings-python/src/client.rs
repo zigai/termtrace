@@ -5,6 +5,8 @@ use crate::errors::to_py_err;
 use crate::host::{Arg, Model, PathArg};
 use crate::recording::PyRecording;
 use crate::session::PySession;
+use crate::video::{video, EditArg};
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 use std::collections::HashMap;
@@ -16,7 +18,10 @@ use termtrace_model::execution::event_log::RecoveryReport;
 use termtrace_model::execution::session::{VerificationLevel, VerificationReport};
 use termtrace_model::protocol::capability::CapabilityReport;
 use termtrace_model::registry::{GarbageCollectionReport, RegistryEntry, RegistryListEntry};
-use termtrace_sdk::artifacts::ArtifactService;
+use termtrace_sdk::artifacts::{
+    ArtifactService, GifLoop, PresentationPlan, PreviewOptions, SemanticRasterProfile, VideoMode,
+    VideoOptions, VideoOutcome, VideoPreview, VideoRender, VideoRenderer,
+};
 use termtrace_sdk::client::Terminal;
 use termtrace_sdk::contracts::LaunchOptions;
 use termtrace_sdk::defaults;
@@ -207,6 +212,131 @@ impl PyTermtrace {
                 )
                 .map(Model)
                 .map_err(to_py_err);
+        })
+    }
+
+    /// Resolve the presentation plan of `edit` over a completed `session` without rendering.
+    /// `renderer` is `native` (verified Ghostty pixels, captured first when missing; never
+    /// semantic) or `semantic`; `fps` defaults to 30.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` with an edit failure `code` and `details` for a rejected edit,
+    /// and for blocked capabilities, invalid evidence, or capture failures.
+    #[pyo3(signature = (session, edit, *, renderer, fps = None, semantic_raster_profile = None))]
+    pub fn video_plan(
+        &self,
+        py: Python<'_>,
+        session: PathArg,
+        edit: EditArg,
+        renderer: Arg<VideoRenderer>,
+        fps: Option<u16>,
+        semantic_raster_profile: Option<Arg<SemanticRasterProfile>>,
+    ) -> PyResult<Model<PresentationPlan>> {
+        let binary = self.terminal.binary().to_path_buf();
+        let options = VideoOptions {
+            renderer: renderer.0,
+            fps,
+            semantic_raster_profile: semantic_raster_profile.map(|profile| return profile.0),
+            ..VideoOptions::default()
+        };
+
+        py.detach(move || {
+            let outcome = video(&binary, session.0, edit.0, VideoMode::Plan, &options)?;
+            let VideoOutcome::Planned(plan) = outcome else {
+                return Err(PyRuntimeError::new_err("plan returned another outcome"));
+            };
+
+            return Ok(Model(*plan));
+        })
+    }
+
+    /// Render a contact sheet and low-resolution review video of `edit` into the new
+    /// `directory`. Options are those of `video_plan`, plus `preview` storyboard settings.
+    ///
+    /// # Errors
+    ///
+    /// Raises like `video_plan`, and when the directory exists or rendering fails.
+    #[pyo3(signature = (session, edit, directory, *, renderer, fps = None, semantic_raster_profile = None, preview = None))]
+    #[expect(clippy::too_many_arguments, reason = "Python keyword arguments")]
+    pub fn video_preview(
+        &self,
+        py: Python<'_>,
+        session: PathArg,
+        edit: EditArg,
+        directory: PathArg,
+        renderer: Arg<VideoRenderer>,
+        fps: Option<u16>,
+        semantic_raster_profile: Option<Arg<SemanticRasterProfile>>,
+        preview: Option<Arg<PreviewOptions>>,
+    ) -> PyResult<Model<VideoPreview>> {
+        let binary = self.terminal.binary().to_path_buf();
+        let options = VideoOptions {
+            renderer: renderer.0,
+            fps,
+            semantic_raster_profile: semantic_raster_profile.map(|profile| return profile.0),
+            preview: preview.map(|preview| return preview.0),
+            ..VideoOptions::default()
+        };
+        let mode = VideoMode::Preview {
+            directory: directory.0,
+            options: PreviewOptions::default(),
+        };
+
+        py.detach(move || {
+            let outcome = video(&binary, session.0, edit.0, mode, &options)?;
+            let VideoOutcome::Previewed(preview) = outcome else {
+                return Err(PyRuntimeError::new_err("preview returned another outcome"));
+            };
+
+            return Ok(Model(*preview));
+        })
+    }
+
+    /// Render `edit` to `out`, whose lowercase `.mp4`, `.gif`, or `.webm` extension selects
+    /// the format, keeping a manifested `.termtrace` sidecar beside it. An existing output
+    /// fails unless `overwrite` is set for an MP4; GIF and `WebM` are never replaced.
+    ///
+    /// # Errors
+    ///
+    /// Raises like `video_plan`, and when the output exists or rendering fails.
+    #[pyo3(signature = (session, edit, out, *, renderer, fps = None, semantic_raster_profile = None, gif_loop = None, overwrite = false))]
+    #[expect(clippy::too_many_arguments, reason = "Python keyword arguments")]
+    pub fn video_render(
+        &self,
+        py: Python<'_>,
+        session: PathArg,
+        edit: EditArg,
+        out: PathArg,
+        renderer: Arg<VideoRenderer>,
+        fps: Option<u16>,
+        semantic_raster_profile: Option<Arg<SemanticRasterProfile>>,
+        gif_loop: Option<Arg<GifLoop>>,
+        overwrite: bool,
+    ) -> PyResult<Model<VideoRender>> {
+        let binary = self.terminal.binary().to_path_buf();
+        let options = VideoOptions {
+            renderer: renderer.0,
+            fps,
+            semantic_raster_profile: semantic_raster_profile.map(|profile| return profile.0),
+            gif_loop: gif_loop.map(|policy| return policy.0),
+            overwrite,
+            ..VideoOptions::default()
+        };
+
+        py.detach(move || {
+            let outcome = video(
+                &binary,
+                session.0,
+                edit.0,
+                VideoMode::Render { out: out.0 },
+                &options,
+            )?;
+            let VideoOutcome::Rendered(render) = outcome else {
+                return Err(PyRuntimeError::new_err("render returned another outcome"));
+            };
+
+            return Ok(Model(*render));
         })
     }
 

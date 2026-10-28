@@ -23,6 +23,7 @@ pub mod recording;
 pub mod screen;
 pub mod session;
 pub mod testing;
+pub mod video;
 
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::gen_stub_pyfunction;
@@ -91,6 +92,7 @@ fn _termtrace(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(version, m)?)?;
 
     testing::register(m)?;
+    video::register(m)?;
     m.add(
         "ExpectationMismatchError",
         m.py().get_type::<errors::ExpectationMismatchError>(),

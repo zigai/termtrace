@@ -98,6 +98,91 @@ class ActorBoundaries(TypedDict):
     observed: CanonicalBoundary
 
 
+AnnotationAnchor: TypeAlias = (
+    "Literal['top_left', 'top_right', 'bottom_left', 'bottom_right', 'center']"
+)
+
+
+class AnnotationPosition(TypedDict):
+    "Named anchor plus signed pixel offset."
+
+    anchor: AnnotationAnchor
+    x: int
+    y: int
+
+
+AnnotationScope: TypeAlias = "AnnotationScopeWholeVideo | AnnotationScopeClip | AnnotationScopeOutputFrame | AnnotationScopeRange"
+
+
+class AnnotationScopeClip(TypedDict):
+    "One normalized clip."
+
+    clip_index: int
+    scope: Literal["clip"]
+
+
+AnnotationScopeInput: TypeAlias = "AnnotationScopeInputWholeVideo | AnnotationScopeInputClip | AnnotationScopeInputOutputFrame | AnnotationScopeInputRange"
+
+
+class AnnotationScopeInputClip(TypedDict):
+    "One normalized clip."
+
+    clip_index: int
+    scope: Literal["clip"]
+
+
+class AnnotationScopeInputOutputFrame(TypedDict):
+    "One exact output frame."
+
+    output_frame: int
+    scope: Literal["output_frame"]
+
+
+AnnotationScopeInputRange = TypedDict(
+    "AnnotationScopeInputRange",
+    {
+        "from": "EditSelectorInput",
+        "scope": "Literal['range']",
+        "to": "EditSelectorInput",
+    },
+)
+
+
+class AnnotationScopeInputWholeVideo(TypedDict):
+    "Every output frame."
+
+    scope: Literal["whole_video"]
+
+
+class AnnotationScopeOutputFrame(TypedDict):
+    "One exact output frame."
+
+    output_frame: int
+    scope: Literal["output_frame"]
+
+
+AnnotationScopeRange = TypedDict(
+    "AnnotationScopeRange",
+    {"from": "EditSelector", "scope": "Literal['range']", "to": "EditSelector"},
+)
+
+
+class AnnotationScopeWholeVideo(TypedDict):
+    "Every output frame."
+
+    scope: Literal["whole_video"]
+
+
+class AnnotationStyle(TypedDict):
+    "Deterministic visible text style compiled to ASS."
+
+    background: str
+    background_opacity: int
+    border: int
+    font_size: int
+    foreground: str
+
+
 AnyValue: TypeAlias = "JsonValue"
 
 
@@ -302,6 +387,9 @@ class CapabilityReport(TypedDict):
 CapabilityStatus: TypeAlias = "Literal['ready', 'blocked']"
 
 
+CaptionLayout: TypeAlias = "Literal['footer', 'overlay', 'none']"
+
+
 CaptureQuality: TypeAlias = "Literal['live', 'stable', 'completed', 'incomplete']"
 
 
@@ -355,6 +443,41 @@ class CellStyle(TypedDict):
     strikethrough: bool
     underline: int
     underline_color: ColorSpec
+
+
+ChangeMode: TypeAlias = (
+    "Literal['outline', 'dirty_rows', 'bounding_box', 'heatmap', 'trail', 'side_diff']"
+)
+
+
+class ChangeRegion(TypedDict):
+    "One nominal semantic-change region in source pixels."
+
+    height: int
+    width: int
+    x: int
+    y: int
+
+
+ChangeSource: TypeAlias = "Literal['semantic_cells', 'encoded_pixels']"
+
+
+class ChangeVisualization(TypedDict):
+    "Explicit source and shape for per-frame change overlays."
+
+    hold_frames: int
+    mode: ChangeMode
+    pixel_threshold: int | None
+    source: ChangeSource
+
+
+class ChangeVisualizationInput(TypedDict):
+    "Explicit source and shape for per-frame change overlays."
+
+    hold_frames: NotRequired[int]
+    mode: ChangeMode
+    pixel_threshold: NotRequired[int | None]
+    source: ChangeSource
 
 
 class ClockSample(TypedDict):
@@ -489,6 +612,17 @@ class ControlOutcomeMarked(TypedDict):
     kind: Literal["marked"]
 
 
+class CursorMaskFrame(TypedDict):
+    "One semantic cursor region masked on a mapped presentation frame."
+
+    evidence_level: str
+    output_frame: int
+    region: ChangeRegion
+    source_frame: int
+    state_hash: str
+    state_id: int
+
+
 class CursorState(TypedDict):
     "Cursor state at one semantic boundary."
 
@@ -582,6 +716,127 @@ class DurabilityRecord(TypedDict):
     maximum_observed_uncommitted_ns: int
     policy: DurabilityPolicy
     sync_count: int
+
+
+EditClip = TypedDict(
+    "EditClip",
+    {
+        "caption": "str | None",
+        "from": "EditSelector",
+        "hold_ms": "int",
+        "speed": "RationalSpeed",
+        "to": "EditSelector",
+    },
+)
+
+
+EditClipInput = TypedDict(
+    "EditClipInput",
+    {
+        "caption": "NotRequired[str | None]",
+        "from": "EditSelectorInput",
+        "hold_ms": "NotRequired[int]",
+        "speed": "NotRequired[RationalSpeed]",
+        "to": "EditSelectorInput",
+    },
+)
+
+
+class EditFailure(TypedDict):
+    "Typed edit-plan failure with the location it was found at."
+
+    clip_index: int | None
+    code: EditFailureCode
+    field: str
+    marker: str | None
+    reason: str
+
+
+EditFailureCode: TypeAlias = "Literal['invalid_edit_plan', 'invalid_selector', 'marker_not_found', 'marker_not_unique', 'selector_out_of_range', 'invalid_speed', 'invalid_caption', 'overlapping_clips', 'clip_out_of_range', 'invalid_annotation', 'invalid_subtitle', 'relative_resource_without_base', 'invalid_transform', 'invalid_change_visualization']"
+
+
+class EditPlan(TypedDict):
+    "One immutable presentation edit plan."
+
+    annotations: list[TextAnnotation]
+    change_visualization: ChangeVisualization | None
+    clips: list[EditClip]
+    delivery: PresentationDelivery
+    layout: PresentationLayout
+    render_config: VideoRenderConfig | None
+    subtitles: list[SubtitleTrack]
+    transforms: list[PixelTransform]
+    version: int
+
+
+class EditPlanInput(TypedDict):
+    "One immutable presentation edit plan."
+
+    annotations: NotRequired[list[TextAnnotationInput]]
+    change_visualization: NotRequired[ChangeVisualizationInput | None]
+    clips: list[EditClipInput]
+    delivery: NotRequired[PresentationDeliveryInput]
+    layout: NotRequired[PresentationLayoutInput]
+    render_config: NotRequired[VideoRenderConfigInput | None]
+    subtitles: NotRequired[list[SubtitleTrack]]
+    transforms: NotRequired[list[PixelTransformInput]]
+    version: int
+
+
+class EditSelector(TypedDict):
+    "Unique marker or exact canonical monotonic timestamp."
+
+    eventSeq: int | None
+    marker: str | None
+    monotonicNs: int | None
+    nativeFrame: int | None
+    stateId: int | None
+
+
+class EditSelectorInput(TypedDict):
+    "Unique marker or exact canonical monotonic timestamp."
+
+    eventSeq: NotRequired[int | None]
+    marker: NotRequired[str | None]
+    monotonicNs: NotRequired[int | None]
+    nativeFrame: NotRequired[int | None]
+    stateId: NotRequired[int | None]
+
+
+EditSource: TypeAlias = "EditSourceFile | EditSourcePlan"
+
+
+class EditSourceFile(TypedDict):
+    "JSON edit file; relative subtitle paths resolve beside it."
+
+    kind: Literal["file"]
+    path: ExactPath
+
+
+EditSourceInput: TypeAlias = "EditSourceInputFile | EditSourceInputPlan"
+
+
+class EditSourceInputFile(TypedDict):
+    "JSON edit file; relative subtitle paths resolve beside it."
+
+    kind: Literal["file"]
+    path: ExactPath
+
+
+class EditSourceInputPlan(TypedDict):
+    "In-memory edit; relative subtitle paths need `resource_base`."
+
+    edit: EditPlanInput
+    kind: Literal["plan"]
+    resource_base: NotRequired[ExactPath | None]
+
+
+class EditSourcePlan(TypedDict):
+    "In-memory edit; relative subtitle paths need `resource_base`."
+
+    edit: EditPlan
+    kind: Literal["plan"]
+    resource_base: ExactPath | None
 
 
 EnvironmentBase: TypeAlias = "Literal['inherit', 'clear']"
@@ -1027,6 +1282,9 @@ class GeometrySolveReport(TypedDict):
     selected: CaptureTarget
 
 
+GifLoop: TypeAlias = "Literal['infinite', 'once']"
+
+
 InputDescriptor: TypeAlias = "InputDescriptorRaw | InputDescriptorText | InputDescriptorKey | InputDescriptorPaste | InputDescriptorFocus | InputDescriptorPointer | InputDescriptorActivate"
 
 
@@ -1325,6 +1583,21 @@ class MarkerRecord(TypedDict):
     semantic_state_id: int | None
 
 
+class MarkerRecordInput(TypedDict):
+    "Canonical marker with duplicate and nominal-frame context."
+
+    event_seq: int
+    label: str
+    monotonic_ns: int
+    native_evidence_level: str
+    nominal_frame: int
+    occurrence_count: int
+    occurrence_index: int
+    presentation_eligible: bool
+    semantic_state_hash: NotRequired[str | None]
+    semantic_state_id: NotRequired[int | None]
+
+
 class MaskedSnapshotOptions(TypedDict):
     "Options for the separate version-one cells comparison format.\n\nMasks exclude unstable comparison cells. They do not redact canonical evidence."
 
@@ -1454,6 +1727,86 @@ class NativeVisualProfile(TypedDict):
     font_size_points: NotRequired[str | None]
     foreground: NotRequired[str | None]
     padding_points: NotRequired[PaddingPoints | None]
+
+
+class NormalizedAnnotation(TypedDict):
+    "One annotation resolved to a half-open output-frame interval."
+
+    annotation_index: int
+    output_end_frame: int
+    output_start_frame: int
+    position: AnnotationPosition
+    style: AnnotationStyle
+    template: str | None
+    text: str | None
+    z_order: int
+
+
+class NormalizedAnnotationInput(TypedDict):
+    "One annotation resolved to a half-open output-frame interval."
+
+    annotation_index: int
+    output_end_frame: int
+    output_start_frame: int
+    position: AnnotationPosition
+    style: AnnotationStyle
+    template: NotRequired[str | None]
+    text: NotRequired[str | None]
+    z_order: int
+
+
+class NormalizedChangeFrame(TypedDict):
+    "Semantic delta nominally scheduled onto presentation frames."
+
+    changed_regions: list[ChangeRegion]
+    dirty_rows: list[int]
+    evidence_level: str
+    output_frames: list[int]
+    source_frame: int
+    state_hash: str
+    state_id: int
+
+
+class NormalizedClip(TypedDict):
+    "Resolved clip and exact source/output frame decisions."
+
+    caption: str | None
+    hold_frame_count: int
+    output_end_frame: int
+    output_start_frame: int
+    retimed_frame_count: int
+    source_end_frame: int
+    source_range: SourceRange
+    source_start_frame: int
+    speed: RationalSpeed
+
+
+class NormalizedClipInput(TypedDict):
+    "Resolved clip and exact source/output frame decisions."
+
+    caption: NotRequired[str | None]
+    hold_frame_count: int
+    output_end_frame: int
+    output_start_frame: int
+    retimed_frame_count: int
+    source_end_frame: int
+    source_range: SourceRange
+    source_start_frame: int
+    speed: RationalSpeed
+
+
+class NormalizedEdit(TypedDict):
+    "Edit plan with resolved resource paths and its path-independent identity."
+
+    edit: EditPlan
+    edit_plan_hash: str
+
+
+class NormalizedSubtitle(TypedDict):
+    "Validated subtitle input with stable content identity."
+
+    resource_hash: str
+    source_path: ExactPath
 
 
 NullableString: TypeAlias = "str | None"
@@ -1602,6 +1955,14 @@ class OriginalRecording(TypedDict):
     completion: SessionCompletion
 
 
+class OutputFrameSource(TypedDict):
+    "Source of one presentation output frame."
+
+    clip_index: int
+    operation: str
+    source_frame: int
+
+
 class OutputPage(TypedDict):
     "Deterministic page coordinates for one ordered collection."
 
@@ -1652,6 +2013,98 @@ class PixelCanvas(TypedDict):
 
     height: int
     width: int
+
+
+PixelTransform: TypeAlias = "PixelTransformCursorMask | PixelTransformCrop | PixelTransformZoom | PixelTransformResize | PixelTransformCallout"
+
+
+class PixelTransformCallout(TypedDict):
+    "Draw a visibly labeled rectangular callout."
+
+    height: int
+    label: str | None
+    transform: Literal["callout"]
+    width: int
+    x: int
+    y: int
+
+
+class PixelTransformCrop(TypedDict):
+    "Crop to an exact source rectangle."
+
+    height: int
+    transform: Literal["crop"]
+    width: int
+    x: int
+    y: int
+
+
+class PixelTransformCursorMask(TypedDict):
+    "Replace cursor pixels during presentation composition."
+
+    transform: Literal["cursor_mask"]
+
+
+PixelTransformInput: TypeAlias = "PixelTransformInputCursorMask | PixelTransformInputCrop | PixelTransformInputZoom | PixelTransformInputResize | PixelTransformInputCallout"
+
+
+class PixelTransformInputCallout(TypedDict):
+    "Draw a visibly labeled rectangular callout."
+
+    height: int
+    label: NotRequired[str | None]
+    transform: Literal["callout"]
+    width: int
+    x: int
+    y: int
+
+
+class PixelTransformInputCrop(TypedDict):
+    "Crop to an exact source rectangle."
+
+    height: int
+    transform: Literal["crop"]
+    width: int
+    x: int
+    y: int
+
+
+class PixelTransformInputCursorMask(TypedDict):
+    "Replace cursor pixels during presentation composition."
+
+    transform: Literal["cursor_mask"]
+
+
+class PixelTransformInputResize(TypedDict):
+    "Resize to an exact presentation canvas."
+
+    height: int
+    transform: Literal["resize"]
+    width: int
+
+
+class PixelTransformInputZoom(TypedDict):
+    "Scale by one exact rational factor."
+
+    denominator: int
+    numerator: int
+    transform: Literal["zoom"]
+
+
+class PixelTransformResize(TypedDict):
+    "Resize to an exact presentation canvas."
+
+    height: int
+    transform: Literal["resize"]
+    width: int
+
+
+class PixelTransformZoom(TypedDict):
+    "Scale by one exact rational factor."
+
+    denominator: int
+    numerator: int
+    transform: Literal["zoom"]
 
 
 PointerOperation: TypeAlias = "PointerOperationClick | PointerOperationMultiClick | PointerOperationDrag | PointerOperationScroll"
@@ -1767,6 +2220,120 @@ class PostconditionSummaryScreen(TypedDict):
     state_hash: str | None
 
 
+class PresentationDelivery(TypedDict):
+    "Delivery codec and pixel-format contract."
+
+    codec: str
+    crf: int
+    encoder_preset: str
+    pixel_format: str
+
+
+class PresentationDeliveryInput(TypedDict):
+    "Delivery codec and pixel-format contract."
+
+    codec: str
+    crf: NotRequired[int]
+    encoder_preset: NotRequired[str]
+    pixel_format: str
+
+
+class PresentationLayout(TypedDict):
+    "Canvas layout for caption presets."
+
+    branding: str | None
+    caption: CaptionLayout
+
+
+class PresentationLayoutInput(TypedDict):
+    "Canvas layout for caption presets."
+
+    branding: NotRequired[str | None]
+    caption: CaptionLayout
+
+
+class PresentationPlan(TypedDict):
+    "Dry-run output binding a normalized edit to immutable visual evidence."
+
+    annotations: list[NormalizedAnnotation]
+    change_algorithm: str | None
+    change_frames: list[NormalizedChangeFrame]
+    change_visualization: ChangeVisualization | None
+    clips: list[NormalizedClip]
+    cursor_masks: list[CursorMaskFrame]
+    delivery: PresentationDelivery
+    edit_plan_hash: str
+    fps: int
+    layout: PresentationLayout
+    markers: list[MarkerRecord]
+    output_frame_count: int
+    output_height: int
+    output_width: int
+    render_config: VideoRenderConfig | None
+    source: PresentationSource
+    source_geometry: TerminalGeometryReport
+    source_height: int
+    source_width: int
+    subtitles: list[NormalizedSubtitle]
+    transforms: list[PixelTransform]
+    version: int
+
+
+class PresentationPlanInput(TypedDict):
+    "Dry-run output binding a normalized edit to immutable visual evidence."
+
+    annotations: list[NormalizedAnnotationInput]
+    change_algorithm: NotRequired[str | None]
+    change_frames: list[NormalizedChangeFrame]
+    change_visualization: NotRequired[ChangeVisualizationInput | None]
+    clips: list[NormalizedClipInput]
+    cursor_masks: list[CursorMaskFrame]
+    delivery: PresentationDeliveryInput
+    edit_plan_hash: str
+    fps: int
+    layout: PresentationLayoutInput
+    markers: list[MarkerRecordInput]
+    output_frame_count: int
+    output_height: int
+    output_width: int
+    render_config: NotRequired[VideoRenderConfigInput | None]
+    source: PresentationSource
+    source_geometry: TerminalGeometryReport
+    source_height: int
+    source_width: int
+    subtitles: list[NormalizedSubtitle]
+    transforms: list[PixelTransformInput]
+    version: int
+
+
+PresentationSource: TypeAlias = "PresentationSourceNative | PresentationSourceSemantic"
+
+
+class PresentationSourceNative(TypedDict):
+    "Actual pixels from a verified native Ghostty capture."
+
+    kind: Literal["native"]
+    video: str
+    video_hash: str
+
+
+class PresentationSourceSemantic(TypedDict):
+    "Deterministic generated pixels from canonical semantic replay."
+
+    kind: Literal["semantic"]
+    plan: SemanticVideoSourcePlan
+
+
+class PreviewOptions(TypedDict):
+    "Bounded storyboard and low-resolution preview policy."
+
+    change_only: bool
+    columns: int
+    max_frames: int
+    preview_width: int
+    tile_width: int
+
+
 ProcessSignal: TypeAlias = (
     "Literal['interrupt', 'terminate', 'hangup', 'user1', 'user2']"
 )
@@ -1853,6 +2420,13 @@ class QueryErrorQueryResourceLimit(TypedDict):
     kind: Literal["query_resource_limit"]
     maximum: int
     requested: int
+
+
+class RationalSpeed(TypedDict):
+    "Exact positive playback speed numerator/denominator."
+
+    denominator: int
+    numerator: int
 
 
 class ReactionSpec(TypedDict):
@@ -2697,6 +3271,37 @@ SemanticPreset: TypeAlias = "Literal['bundled-v1']"
 SemanticRasterProfile: TypeAlias = "Literal['direct', 'supersampled-2x']"
 
 
+class SemanticVideoCanvas(TypedDict):
+    "Fixed canvas used for every frame of one semantic video source."
+
+    cell_height: int
+    cell_width: int
+    cols: int
+    height: int
+    policy: str
+    rows: int
+    width: int
+
+
+class SemanticVideoSourcePlan(TypedDict):
+    "Immutable semantic source description resolved during presentation planning."
+
+    canvas: SemanticVideoCanvas
+    end_monotonic_ns: int
+    font_set_blake3: str
+    fonts: list[SemanticFontResource]
+    fps: int
+    frame_count: int
+    raster_profile: SemanticRasterProfile
+    renderer: str
+    scheduling_policy: str
+    session: ExactPath
+    session_id: str
+    source_event_hash: str
+    start_monotonic_ns: int
+    version: int
+
+
 class SemanticVisualProfile(TypedDict):
     "Semantic renderer selection."
 
@@ -2889,6 +3494,13 @@ class SessionStatusLive(TypedDict):
 SnapshotProfile: TypeAlias = "Literal['text', 'spans', 'cells']"
 
 
+class SourceRange(TypedDict):
+    "A non-empty half-open interval on the canonical monotonic timeline."
+
+    end_monotonic_ns: int
+    start_monotonic_ns: int
+
+
 class SpanCell(TypedDict):
     "Per-column content retained inside an appearance span."
 
@@ -3044,6 +3656,12 @@ class StyleFilterInput(TypedDict):
     wide_kind: NotRequired[WideKind]
 
 
+class SubtitleTrack(TypedDict):
+    "Caller-authored ASS resource copied and hash-manifested before rendering."
+
+    ass: ExactPath
+
+
 SuccessorReadiness: TypeAlias = (
     "Literal['live', 'completed', 'exited', 'timed_out', 'failed']"
 )
@@ -3090,6 +3708,28 @@ class TerminalMode(TypedDict):
 TestOutcome: TypeAlias = (
     "Literal['passed', 'assertion_failed', 'error', 'panic', 'timed_out']"
 )
+
+
+class TextAnnotation(TypedDict):
+    "One text annotation with an exact scope, position, and visible style."
+
+    position: AnnotationPosition
+    scope: AnnotationScope
+    style: AnnotationStyle
+    template: str | None
+    text: str | None
+    z_order: int
+
+
+class TextAnnotationInput(TypedDict):
+    "One text annotation with an exact scope, position, and visible style."
+
+    position: NotRequired[AnnotationPosition]
+    scope: AnnotationScopeInput
+    style: NotRequired[AnnotationStyle]
+    template: NotRequired[str | None]
+    text: NotRequired[str | None]
+    z_order: NotRequired[int]
 
 
 class TimelineEntry(TypedDict):
@@ -3759,6 +4399,74 @@ class Versions(TypedDict):
     target_arch: str
     target_os: str
     termtrace: str
+
+
+class VideoOptions(TypedDict):
+    "SDK options for a video of an explicit edit."
+
+    fps: int | None
+    gif_loop: GifLoop | None
+    overwrite: bool
+    preview: PreviewOptions | None
+    renderer: VideoRenderer
+    semantic_raster_profile: SemanticRasterProfile | None
+
+
+class VideoPreview(TypedDict):
+    "A rendered preview and its plan."
+
+    contact_sheet: ExactPath
+    directory: ExactPath
+    plan: PresentationPlan
+    video: ExactPath
+
+
+class VideoRender(TypedDict):
+    "A published video, its plan, and its manifested sidecar."
+
+    artifact: MediaArtifactResult | None
+    output: ExactPath
+    plan: PresentationPlan
+    sidecar: ExactPath
+
+
+class VideoRenderConfig(TypedDict):
+    "Effective user-facing video facade settings."
+
+    cursor_style: str
+    end_marker: str | None
+    fps: int
+    hold_end_ms: int
+    hold_start_ms: int
+    idle_threshold_ms: int | None
+    preset: str
+    renderer: str
+    resolution: list[int] | None
+    scale: int | None
+    start_marker: str | None
+    trim_idle: bool
+
+
+class VideoRenderConfigInput(TypedDict):
+    "Effective user-facing video facade settings."
+
+    cursor_style: str
+    end_marker: NotRequired[str | None]
+    fps: int
+    hold_end_ms: int
+    hold_start_ms: int
+    idle_threshold_ms: NotRequired[int | None]
+    preset: str
+    renderer: str
+    resolution: NotRequired[list[int] | None]
+    scale: NotRequired[int | None]
+    start_marker: NotRequired[str | None]
+    trim_idle: bool
+
+
+VideoRenderer: TypeAlias = (
+    "Literal['native', 'semantic', 'native_replay', 'original_execution']"
+)
 
 
 class VisualProfile(TypedDict):

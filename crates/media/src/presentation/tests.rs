@@ -3,8 +3,8 @@ use super::{
     mapping::{semantic_change_states_at, write_presentation_map},
     pipeline::select_preview_frames,
     planning::{
-        frame_ceil, frame_floor, hash_file, missing_native_capture_error, ranges_overlap,
-        validate_transform_geometry,
+        frame_ceil, frame_floor, hash_file, missing_native_capture_error, native_frame_ns,
+        ranges_overlap, validate_transform_geometry,
     },
     validation::{validate_ass_resource, validate_edit_plan, validate_edit_selector},
     *,
@@ -12,6 +12,7 @@ use super::{
 use crate::semantic_video;
 use std::{
     io,
+    ops::Range,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -50,7 +51,152 @@ fn edit_selectors_require_one_source_coordinate() {
         monotonic_ns: Some(10),
         ..EditSelector::default()
     };
-    assert!(validate_edit_selector(&selector).is_err());
+    let error = validate_edit_selector(&selector, "clips[0].from").expect_err("two coordinates");
+    assert!(
+        matches!(&error, Error::Edit(failure) if failure.code == EditFailureCode::InvalidSelector
+            && failure.field == "clips[0].from"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn native_frame_start_floors_back_to_the_same_frame() {
+    for fps in [24, 30, 60] {
+        for frame in 0..=10_000 {
+            let ns = u64::try_from(native_frame_ns(frame, fps)).expect("nonnegative");
+            assert_eq!(frame_floor(ns, fps), frame, "frame {frame} at {fps} FPS");
+        }
+    }
+
+    // Math-only sweep over other rates; not a public frame rate.
+    for fps in [1, 7, 25, 29, 50, 120, 1000] {
+        for frame in 0..=2_000 {
+            let ns = u64::try_from(native_frame_ns(frame, fps)).expect("nonnegative");
+            assert_eq!(frame_floor(ns, fps), frame, "frame {frame} at {fps} FPS");
+        }
+    }
+}
+
+#[test]
+fn relative_subtitles_resolve_only_against_an_explicit_base() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let resources = temporary.path().join("resources");
+    let elsewhere = temporary.path().join("elsewhere");
+    fs_err::create_dir(&resources).expect("resource directory");
+
+    fs_err::create_dir(&elsewhere).expect("other directory");
+    fs_err::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/conformance/sdk/editing-captions.ass"),
+        resources.join("captions.ass"),
+    )
+    .expect("copy subtitles");
+
+    let relative = EditPlan {
+        subtitles: vec![SubtitleTrack {
+            ass: PathBuf::from("captions.ass"),
+        }],
+        ..EditPlan::new(vec![EditClip::new(
+            EditSelector::monotonic_ns(0),
+            EditSelector::monotonic_ns(1_000_000_000),
+        )])
+    };
+    let error = normalize_edit(&relative, None).expect_err("relative path without a base");
+    assert!(
+        matches!(&error, Error::Edit(failure)
+            if failure.code == EditFailureCode::RelativeResourceWithoutBase
+                && failure.field == "subtitles[0].ass"),
+        "{error:?}"
+    );
+    let based = normalize_edit(&relative, Some(&resources)).expect("explicit base");
+    assert_eq!(
+        based
+            .edit
+            .subtitles
+            .first()
+            .map(|track| return track.ass.clone()),
+        Some(resources.join("captions.ass"))
+    );
+
+    let absolute = EditPlan {
+        subtitles: vec![SubtitleTrack {
+            ass: resources.join("captions.ass"),
+        }],
+        ..relative.clone()
+    };
+    let absolute = normalize_edit(&absolute, None).expect("absolute path");
+
+    fs_err::copy(
+        resources.join("captions.ass"),
+        elsewhere.join("captions.ass"),
+    )
+    .expect("copy subtitles elsewhere");
+    let file = elsewhere.join("edit.json");
+    fs_err::write(&file, serde_json::to_vec(&relative).expect("edit JSON")).expect("edit file");
+    let from_file = read_edit_plan(&file).expect("file plan");
+
+    assert_eq!(absolute.edit_plan_hash, based.edit_plan_hash);
+    assert_eq!(from_file.edit_plan_hash, based.edit_plan_hash);
+    assert_eq!(
+        from_file
+            .edit
+            .subtitles
+            .first()
+            .map(|track| return track.ass.clone()),
+        Some(elsewhere.join("captions.ass"))
+    );
+}
+
+#[test]
+fn output_frames_map_back_to_retimed_and_held_source_frames() {
+    let clip = |source: (u64, u64), output: (u64, u64), retimed, speed: (u32, u32)| {
+        return NormalizedClip {
+            source_range: SourceRange {
+                start_monotonic_ns: 0,
+                end_monotonic_ns: 1,
+            },
+            source_start_frame: source.0,
+            source_end_frame: source.1,
+            output_start_frame: output.0,
+            output_end_frame: output.1,
+            retimed_frame_count: retimed,
+            hold_frame_count: output.1 - output.0 - retimed,
+            speed: RationalSpeed::new(speed.0, speed.1),
+            caption: None,
+        };
+    };
+    // Clip 0 plays source 10..14 at 1/2 speed (8 frames) and holds 2; clip 1 plays 12..18 at 3/1.
+    let plan = PresentationPlan {
+        clips: vec![
+            clip((10, 14), (0, 10), 8, (1, 2)),
+            clip((12, 18), (10, 12), 2, (3, 1)),
+        ],
+        output_frame_count: 12,
+        ..PresentationPlan::default()
+    };
+
+    let source = |frame| {
+        return source_for_output_frame(&plan, frame)
+            .map(|found| return (found.clip_index, found.source_frame, found.operation));
+    };
+
+    assert_eq!(source(0), Some((0, 10, "source".to_owned())));
+    assert_eq!(source(3), Some((0, 11, "source".to_owned())));
+    assert_eq!(source(7), Some((0, 13, "source".to_owned())));
+    assert_eq!(source(8), Some((0, 13, "hold".to_owned())));
+    assert_eq!(source(9), Some((0, 13, "hold".to_owned())));
+    assert_eq!(source(10), Some((1, 12, "source".to_owned())));
+    assert_eq!(source(11), Some((1, 15, "source".to_owned())));
+    assert_eq!(source(12), None);
+    assert_eq!(
+        output_frames_for_source_frame(&plan, 12),
+        vec![4..6, 10..11]
+    );
+    assert_eq!(output_frames_for_source_frame(&plan, 13), vec![6..10]);
+    assert_eq!(
+        output_frames_for_source_frame(&plan, 14),
+        Vec::<Range<u64>>::new()
+    );
 }
 
 #[test]

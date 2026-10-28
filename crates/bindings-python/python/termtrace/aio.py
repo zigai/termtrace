@@ -25,6 +25,8 @@ from termtrace._termtrace import CancelToken
 if TYPE_CHECKING:
     from typing_extensions import Self
 
+    from termtrace import editing
+
 __all__ = [
     "AsyncActionBuilder",
     "AsyncDiagnostics",
@@ -2194,6 +2196,97 @@ class AsyncTermtrace(Wrapper):
         """
         return await asyncio.to_thread(
             lambda: self._sync.preflight_visual_profile(profile, cols, rows)
+        )
+
+    async def video_plan(
+        self,
+        session: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        edit: editing.Edit | types.EditSourceInput | str | os.PathLike[str],
+        *,
+        renderer: types.VideoRenderer,
+        fps: builtins.int | None = None,
+        semantic_raster_profile: types.SemanticRasterProfile | None = None,
+    ) -> types.PresentationPlan:
+        r"""Resolve the presentation plan of `edit` over a completed `session` without rendering.
+        `renderer` is `native` (verified Ghostty pixels, captured first when missing; never
+        semantic) or `semantic`; `fps` defaults to 30.
+
+        # Errors
+
+        Raises `TermtraceError` with an edit failure `code` and `details` for a rejected edit,
+        and for blocked capabilities, invalid evidence, or capture failures.
+        """
+        return await asyncio.to_thread(
+            lambda: self._sync.video_plan(
+                session,
+                edit,
+                renderer=renderer,
+                fps=fps,
+                semantic_raster_profile=semantic_raster_profile,
+            )
+        )
+
+    async def video_preview(
+        self,
+        session: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        edit: editing.Edit | types.EditSourceInput | str | os.PathLike[str],
+        directory: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        *,
+        renderer: types.VideoRenderer,
+        fps: builtins.int | None = None,
+        semantic_raster_profile: types.SemanticRasterProfile | None = None,
+        preview: types.PreviewOptions | None = None,
+    ) -> types.VideoPreview:
+        r"""Render a contact sheet and low-resolution review video of `edit` into the new
+        `directory`. Options are those of `video_plan`, plus `preview` storyboard settings.
+
+        # Errors
+
+        Raises like `video_plan`, and when the directory exists or rendering fails.
+        """
+        return await asyncio.to_thread(
+            lambda: self._sync.video_preview(
+                session,
+                edit,
+                directory,
+                renderer=renderer,
+                fps=fps,
+                semantic_raster_profile=semantic_raster_profile,
+                preview=preview,
+            )
+        )
+
+    async def video_render(
+        self,
+        session: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        edit: editing.Edit | types.EditSourceInput | str | os.PathLike[str],
+        out: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        *,
+        renderer: types.VideoRenderer,
+        fps: builtins.int | None = None,
+        semantic_raster_profile: types.SemanticRasterProfile | None = None,
+        gif_loop: types.GifLoop | None = None,
+        overwrite: builtins.bool = False,
+    ) -> types.VideoRender:
+        r"""Render `edit` to `out`, whose lowercase `.mp4`, `.gif`, or `.webm` extension selects
+        the format, keeping a manifested `.termtrace` sidecar beside it. An existing output
+        fails unless `overwrite` is set for an MP4; GIF and WebM are never replaced.
+
+        # Errors
+
+        Raises like `video_plan`, and when the output exists or rendering fails.
+        """
+        return await asyncio.to_thread(
+            lambda: self._sync.video_render(
+                session,
+                edit,
+                out,
+                renderer=renderer,
+                fps=fps,
+                semantic_raster_profile=semantic_raster_profile,
+                gif_loop=gif_loop,
+                overwrite=overwrite,
+            )
         )
 
     async def launch(

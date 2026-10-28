@@ -20,6 +20,7 @@ mod host;
 mod locator;
 mod original;
 pub mod testing;
+pub mod video;
 
 use actions::{mutation_err, JsActionBuilder};
 use control::{JsFocusOptions, JsMutationOptions, JsPointer, JsPointerOptions, JsScrollOptions};
@@ -74,8 +75,22 @@ struct Empty {}
 /// Translate a Termtrace error; `index.js` lifts the typed `cause` into `kind`, `code`,
 /// `effect`, and `retry` properties on the thrown error.
 fn to_napi_err(err: termtrace_sdk::Error) -> napi::Error {
+    #[derive(serde::Serialize)]
+    struct EditDetails<'a> {
+        details: &'a termtrace_sdk::artifacts::EditFailure,
+    }
+
     let report = termtrace_sdk::contracts::ErrorReport::from(&err);
 
+    if let Some(details) = err.edit_failure() {
+        return typed_error_context(
+            err.to_string(),
+            &report.kind,
+            &report.code,
+            err.failure_context(),
+            EditDetails { details },
+        );
+    }
     return typed_error_context(
         err.to_string(),
         &report.kind,

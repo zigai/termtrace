@@ -16,6 +16,7 @@ mod tests;
 mod validation;
 
 use crate::{Error, Result};
+pub use mapping::{output_frames_for_source_frame, source_for_output_frame};
 pub use pipeline::{export, preview};
 pub use planning::{
     markers, plan, plan_with_capture_directory, plan_with_source, video_clip_ranges,
@@ -25,14 +26,15 @@ use std::path::Path;
 pub use termtrace_model::artifact::presentation::{
     AnnotationAnchor, AnnotationPosition, AnnotationScope, AnnotationStyle, CaptionLayout,
     ChangeMode, ChangeRegion, ChangeSource, ChangeVisualization, CursorMaskFrame, EditClip,
-    EditPlan, EditSelector, MarkerRecord, NormalizedAnnotation, NormalizedChangeFrame,
-    NormalizedClip, NormalizedSubtitle, PixelTransform, PresentationDelivery, PresentationLayout,
-    PresentationManifest, PresentationMapEntry, PresentationOutcome, PresentationPlan,
-    PresentationPreviewManifest, PresentationPreviewOutcome, PresentationSource,
-    PresentationSourceRequest, PreviewOptions, RationalSpeed, SubtitleTrack, TextAnnotation,
-    VideoRenderConfig, EDIT_PLAN_VERSION, PRESENTATION_FORMAT_VERSION,
+    EditFailure, EditFailureCode, EditPlan, EditSelector, MarkerRecord, NormalizedAnnotation,
+    NormalizedChangeFrame, NormalizedClip, NormalizedEdit, NormalizedSubtitle, OutputFrameSource,
+    PixelTransform, PresentationDelivery, PresentationLayout, PresentationManifest,
+    PresentationMapEntry, PresentationOutcome, PresentationPlan, PresentationPreviewManifest,
+    PresentationPreviewOutcome, PresentationSource, PresentationSourceRequest, PreviewOptions,
+    RationalSpeed, SubtitleTrack, TextAnnotation, VideoRenderConfig, EDIT_PLAN_VERSION,
+    PRESENTATION_FORMAT_VERSION,
 };
-pub use validation::read_edit_plan;
+pub use validation::{normalize_edit, read_edit_plan};
 
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 

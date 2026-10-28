@@ -65,6 +65,7 @@ const LOCATOR_DETAILS: [&str; 10] = [
 pub fn to_py_err(err: termtrace_sdk::Error) -> PyErr {
     let msg = err.to_string();
     let kind = err.kind();
+    let edit = err.edit_failure().cloned();
     let error = match kind {
         ErrorKind::StaleState => StateGuardFailedError::new_err(msg),
         ErrorKind::ControlTimeout => TimeoutError::new_err(msg),
@@ -81,6 +82,12 @@ pub fn to_py_err(err: termtrace_sdk::Error) -> PyErr {
     );
 
     let error = typed_context(error, kind.as_str(), err.code(), err.failure_context());
+
+    if let Some(failure) = edit {
+        return attach(error, |py, value| {
+            return value.setattr("details", to_python(py, &failure)?);
+        });
+    }
 
     if !original {
         return error;

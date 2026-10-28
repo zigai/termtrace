@@ -40,3 +40,8 @@ required-features = ["local"]
 name = "original"
 path = "src/bin/original.rs"
 required-features = ["local"]
+
+[[bin]]
+name = "editing"
+path = "src/bin/editing.rs"
+required-features = ["local"]

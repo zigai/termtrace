@@ -4840,18 +4840,18 @@
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "EditPlan / EditSource / ArtifactService::normalize_edit"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
+          "status": "exposed_unverified",
+          "name": "Edit / normalize_edit",
+          "sync_name": "Edit / normalize_edit",
           "async_name": null
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "Edit / normalizeEdit"
         }
       },
       "python_async": null,
@@ -4870,7 +4870,7 @@
       "foundation_required": false,
       "reserved": true,
       "core_status": "implemented",
-      "notes": "Existing presentation core/model, not missing implementation. Typed SDK closure and certification remain 10/11; manifests retain authoritative mappings."
+      "notes": "Shared vectors: fixtures/conformance/sdk/editing.json. Validation, normalization and the edit_plan_hash are the one Rust normalizer; builders only reject wrong host types."
     },
     {
       "id": "presentation.selectors",
@@ -4883,18 +4883,18 @@
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "EditSelector::{marker, monotonic_ns, event_seq, state_id, native_frame}"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
+          "status": "exposed_unverified",
+          "name": "Select",
+          "sync_name": "Select",
           "async_name": null
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "select"
         }
       },
       "python_async": null,
@@ -4913,7 +4913,7 @@
       "foundation_required": false,
       "reserved": true,
       "core_status": "implemented",
-      "notes": "Existing presentation core/model, not missing implementation. Typed SDK closure and certification remain 10/11; manifests retain authoritative mappings."
+      "notes": "Shared vectors: fixtures/conformance/sdk/editing.json. Validation, normalization and the edit_plan_hash are the one Rust normalizer; builders only reject wrong host types."
     },
     {
       "id": "presentation.clips",
@@ -4926,18 +4926,18 @@
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "EditClip::new"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
+          "status": "exposed_unverified",
+          "name": "Edit.clip",
+          "sync_name": "Edit.clip",
           "async_name": null
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "Edit.clip"
         }
       },
       "python_async": null,
@@ -4956,7 +4956,7 @@
       "foundation_required": false,
       "reserved": true,
       "core_status": "implemented",
-      "notes": "Existing presentation core/model, not missing implementation. Typed SDK closure and certification remain 10/11; manifests retain authoritative mappings."
+      "notes": "Shared vectors: fixtures/conformance/sdk/editing.json. Validation, normalization and the edit_plan_hash are the one Rust normalizer; builders only reject wrong host types."
     },
     {
       "id": "presentation.speeds",
@@ -4969,18 +4969,18 @@
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "RationalSpeed::new"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
+          "status": "exposed_unverified",
+          "name": "Edit.clip(speed=)",
+          "sync_name": "Edit.clip(speed=)",
           "async_name": null
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "Edit.clip({speed})"
         }
       },
       "python_async": null,
@@ -4999,7 +4999,7 @@
       "foundation_required": false,
       "reserved": true,
       "core_status": "implemented",
-      "notes": "Existing presentation core/model, not missing implementation. Typed SDK closure and certification remain 10/11; manifests retain authoritative mappings."
+      "notes": "Shared vectors: fixtures/conformance/sdk/editing.json. Validation, normalization and the edit_plan_hash are the one Rust normalizer; builders only reject wrong host types."
     },
     {
       "id": "presentation.holds",
@@ -5012,18 +5012,18 @@
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "EditClip.hold_ms"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
+          "status": "exposed_unverified",
+          "name": "Edit.clip(hold_ms=)",
+          "sync_name": "Edit.clip(hold_ms=)",
           "async_name": null
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "Edit.clip({hold_ms})"
         }
       },
       "python_async": null,
@@ -5042,7 +5042,7 @@
       "foundation_required": false,
       "reserved": true,
       "core_status": "implemented",
-      "notes": "Existing presentation core/model, not missing implementation. Typed SDK closure and certification remain 10/11; manifests retain authoritative mappings."
+      "notes": "Shared vectors: fixtures/conformance/sdk/editing.json. Validation, normalization and the edit_plan_hash are the one Rust normalizer; builders only reject wrong host types."
     },
     {
       "id": "presentation.annotations",
@@ -5055,18 +5055,18 @@
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "TextAnnotation / AnnotationScope"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
+          "status": "exposed_unverified",
+          "name": "Edit.annotate / Scope",
+          "sync_name": "Edit.annotate / Scope",
           "async_name": null
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "Edit.annotate / scope"
         }
       },
       "python_async": null,
@@ -5085,7 +5085,7 @@
       "foundation_required": false,
       "reserved": true,
       "core_status": "implemented",
-      "notes": "Existing presentation core/model, not missing implementation. Typed SDK closure and certification remain 10/11; manifests retain authoritative mappings."
+      "notes": "Shared vectors: fixtures/conformance/sdk/editing.json. Validation, normalization and the edit_plan_hash are the one Rust normalizer; builders only reject wrong host types."
     },
     {
       "id": "presentation.subtitles",
@@ -5098,18 +5098,18 @@
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "SubtitleTrack / EditSource::Plan.resource_base"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
+          "status": "exposed_unverified",
+          "name": "Edit.subtitles / Edit(resource_base=)",
+          "sync_name": "Edit.subtitles / Edit(resource_base=)",
           "async_name": null
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "Edit.subtitles / new Edit({resource_base})"
         }
       },
       "python_async": null,
@@ -5128,7 +5128,7 @@
       "foundation_required": false,
       "reserved": true,
       "core_status": "implemented",
-      "notes": "Existing presentation core/model, not missing implementation. Typed SDK closure and certification remain 10/11; manifests retain authoritative mappings."
+      "notes": "Shared vectors: fixtures/conformance/sdk/editing.json. Validation, normalization and the edit_plan_hash are the one Rust normalizer; builders only reject wrong host types."
     },
     {
       "id": "presentation.transforms",
@@ -5141,18 +5141,18 @@
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "PixelTransform"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
+          "status": "exposed_unverified",
+          "name": "Edit.crop/zoom/resize/callout/cursor_mask",
+          "sync_name": "Edit.crop/zoom/resize/callout/cursor_mask",
           "async_name": null
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "Edit.crop/zoom/resize/callout/cursorMask"
         }
       },
       "python_async": null,
@@ -5171,7 +5171,7 @@
       "foundation_required": false,
       "reserved": true,
       "core_status": "implemented",
-      "notes": "Existing presentation core/model, not missing implementation. Typed SDK closure and certification remain 10/11; manifests retain authoritative mappings."
+      "notes": "Shared vectors: fixtures/conformance/sdk/editing.json. Validation, normalization and the edit_plan_hash are the one Rust normalizer; builders only reject wrong host types."
     },
     {
       "id": "presentation.dry_run",
@@ -5184,21 +5184,21 @@
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "ArtifactService::video(VideoMode::Plan)"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
-          "async_name": null
+          "status": "exposed_unverified",
+          "name": "Termtrace.video_plan",
+          "sync_name": "Termtrace.video_plan",
+          "async_name": "aio.AsyncTermtrace.video_plan"
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "Termtrace.videoPlan"
         }
       },
-      "python_async": null,
+      "python_async": "aio.AsyncTermtrace.video_plan",
       "units": "selectors: owning EditPlan units; output/source time mapping remains in manifest, not envelope",
       "availability": [
         "Linux",
@@ -5214,7 +5214,7 @@
       "foundation_required": false,
       "reserved": true,
       "core_status": "implemented",
-      "notes": "Existing presentation core/model, not missing implementation. Typed SDK closure and certification remain 10/11; manifests retain authoritative mappings."
+      "notes": "Shared vectors: fixtures/conformance/sdk/editing.json. Validation, normalization and the edit_plan_hash are the one Rust normalizer; builders only reject wrong host types."
     },
     {
       "id": "presentation.mapping",
@@ -5227,18 +5227,18 @@
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "source_for_output_frame / output_frames_for_source_frame"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
+          "status": "exposed_unverified",
+          "name": "source_for_output_frame / output_frames_for_source_frame",
+          "sync_name": "source_for_output_frame / output_frames_for_source_frame",
           "async_name": null
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "sourceForOutputFrame / outputFramesForSourceFrame"
         }
       },
       "python_async": null,
@@ -5257,7 +5257,7 @@
       "foundation_required": false,
       "reserved": true,
       "core_status": "implemented",
-      "notes": "Existing presentation core/model, not missing implementation. Typed SDK closure and certification remain 10/11; manifests retain authoritative mappings."
+      "notes": "Shared vectors: fixtures/conformance/sdk/editing.json. Validation, normalization and the edit_plan_hash are the one Rust normalizer; builders only reject wrong host types."
     },
     {
       "id": "presentation.preview",
@@ -5270,21 +5270,21 @@
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "ArtifactService::video(VideoMode::Preview)"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
-          "async_name": null
+          "status": "exposed_unverified",
+          "name": "Termtrace.video_preview",
+          "sync_name": "Termtrace.video_preview",
+          "async_name": "aio.AsyncTermtrace.video_preview"
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "Termtrace.videoPreview"
         }
       },
-      "python_async": null,
+      "python_async": "aio.AsyncTermtrace.video_preview",
       "units": "selectors: owning EditPlan units; output/source time mapping remains in manifest, not envelope",
       "availability": [
         "Linux",
@@ -5300,7 +5300,7 @@
       "foundation_required": false,
       "reserved": true,
       "core_status": "implemented",
-      "notes": "Existing presentation core/model, not missing implementation. Typed SDK closure and certification remain 10/11; manifests retain authoritative mappings."
+      "notes": "Shared vectors: fixtures/conformance/sdk/editing.json. Validation, normalization and the edit_plan_hash are the one Rust normalizer; builders only reject wrong host types."
     },
     {
       "id": "presentation.export",
@@ -5313,21 +5313,21 @@
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "ArtifactService::video(VideoMode::Render)"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
-          "async_name": null
+          "status": "exposed_unverified",
+          "name": "Termtrace.video_render",
+          "sync_name": "Termtrace.video_render",
+          "async_name": "aio.AsyncTermtrace.video_render"
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "Termtrace.videoRender"
         }
       },
-      "python_async": null,
+      "python_async": "aio.AsyncTermtrace.video_render",
       "units": "selectors: owning EditPlan units; output/source time mapping remains in manifest, not envelope",
       "availability": [
         "Linux",
@@ -5343,7 +5343,7 @@
       "foundation_required": false,
       "reserved": true,
       "core_status": "implemented",
-      "notes": "Existing presentation core/model, not missing implementation. Typed SDK closure and certification remain 10/11; manifests retain authoritative mappings."
+      "notes": "Shared vectors: fixtures/conformance/sdk/editing.json. Validation, normalization and the edit_plan_hash are the one Rust normalizer; builders only reject wrong host types."
     },
     {
       "id": "presentation.verification",
@@ -5356,21 +5356,21 @@
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "VideoRender.sidecar / VideoRender.artifact"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
-          "async_name": null
+          "status": "exposed_unverified",
+          "name": "video_render()['sidecar'] / ['artifact']",
+          "sync_name": "video_render()['sidecar'] / ['artifact']",
+          "async_name": "aio.AsyncTermtrace.video_render"
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "videoRender().sidecar / .artifact"
         }
       },
-      "python_async": null,
+      "python_async": "aio.AsyncTermtrace.video_render",
       "units": "selectors: owning EditPlan units; output/source time mapping remains in manifest, not envelope",
       "availability": [
         "Linux",
@@ -5386,7 +5386,7 @@
       "foundation_required": false,
       "reserved": true,
       "core_status": "implemented",
-      "notes": "Existing presentation core/model, not missing implementation. Typed SDK closure and certification remain 10/11; manifests retain authoritative mappings."
+      "notes": "Shared vectors: fixtures/conformance/sdk/editing.json. Validation, normalization and the edit_plan_hash are the one Rust normalizer; builders only reject wrong host types."
     },
     {
       "id": "workflows.parallel",

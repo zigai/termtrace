@@ -143,6 +143,7 @@ for (const name of [
   'assertScreenText', 'assertCursor', 'assertNoWrappedRows', 'assertNeutralRegion',
   'assertNoPresentedTransient', 'assertExists', 'assertNotExists', 'assertCount',
   'assertMatchText', 'assertMatchStyle', 'finalizeRecordings',
+  'normalizeEdit', 'sourceForOutputFrame', 'outputFramesForSourceFrame',
 ]) {
   const method = nativeBinding[name];
   nativeBinding[name] = function (...args) {
@@ -156,6 +157,7 @@ for (const name of [
 nativeBinding.ExpectationMismatchError = ExpectationMismatchError;
 require('./locator.js').install(nativeBinding);
 require('./original.js').install(nativeBinding);
+require('./edit.js').install(nativeBinding);
 
 // Wire Symbol.asyncDispose to asyncDispose for 'await using' support
 if (typeof Symbol.asyncDispose !== 'undefined' && nativeBinding.Recording) {
@@ -178,3 +180,11 @@ module.exports.Registry = nativeBinding.Registry;
 module.exports.Tmux = nativeBinding.Tmux;
 module.exports.System = nativeBinding.System;
 module.exports.Instrumentation = nativeBinding.Instrumentation;
+
+module.exports.Edit = nativeBinding.Edit;
+module.exports.Selector = nativeBinding.Selector;
+module.exports.select = nativeBinding.select;
+module.exports.scope = nativeBinding.scope;
+module.exports.normalizeEdit = nativeBinding.normalizeEdit;
+module.exports.sourceForOutputFrame = nativeBinding.sourceForOutputFrame;
+module.exports.outputFramesForSourceFrame = nativeBinding.outputFramesForSourceFrame;

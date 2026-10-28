@@ -59,7 +59,8 @@ use termtrace_model::{
 };
 use termtrace_service::{
     artifacts::{
-        source_name, ArtifactService, VideoMode, VideoOutcome, VideoRenderer, VideoRequest,
+        source_name, ArtifactService, EditSource, VideoMode, VideoOutcome, VideoRender,
+        VideoRenderer, VideoRequest,
     },
     system::SystemService,
 };
@@ -252,7 +253,7 @@ pub(super) fn run_video_facade(
     };
 
     let request = VideoRequest {
-        edit: arguments.edit,
+        edit: arguments.edit.map(|path| return EditSource::File { path }),
         preset: arguments.preset.into(),
         fps: arguments.fps,
         renderer: arguments.renderer.into(),
@@ -266,6 +267,7 @@ pub(super) fn run_video_facade(
         hold_end: arguments.hold_end,
         cursor_style: arguments.cursor_style.into(),
         gif_loop: arguments.gif_loop.map(Into::into),
+        overwrite: true,
         ..VideoRequest::new(resolved.path, mode)
     };
 
@@ -306,22 +308,35 @@ pub(super) fn render_video(
 
     return match outcome {
         VideoOutcome::Planned(plan) => write_json_line(response, &plan),
-        VideoOutcome::Previewed { plan, preview } => write_json_line(
+        VideoOutcome::Previewed(preview) => write_json_line(
             response,
             &serde_json::json!({
                 "kind": "presentation_preview",
                 "directory": preview.directory,
                 "contact_sheet": preview.contact_sheet,
                 "video": preview.video,
-                "edit_plan_hash": plan.edit_plan_hash,
-                "source": source_name(&plan.source),
+                "edit_plan_hash": preview.plan.edit_plan_hash,
+                "source": source_name(&preview.plan.source),
             }),
         ),
-        VideoOutcome::Derived {
-            plan,
-            output,
-            artifact,
-        } => write_json_line(
+        VideoOutcome::Rendered(render) => write_render(response, request, &render),
+    };
+}
+
+fn write_render(
+    response: &mut ResponseWriter,
+    request: &VideoRequest,
+    render: &VideoRender,
+) -> Result<ExitCode> {
+    let VideoRender {
+        plan,
+        output,
+        sidecar,
+        artifact,
+    } = render;
+
+    return match artifact {
+        Some(artifact) => write_json_line(
             response,
             &serde_json::json!({
                 "kind": "video",
@@ -335,11 +350,7 @@ pub(super) fn render_video(
                 "edit_plan_hash": plan.edit_plan_hash,
             }),
         ),
-        VideoOutcome::Rendered {
-            plan,
-            output,
-            sidecar,
-        } => write_json_line(
+        None => write_json_line(
             response,
             &serde_json::json!({
                 "kind": "video",

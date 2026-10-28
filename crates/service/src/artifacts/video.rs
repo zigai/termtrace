@@ -2,6 +2,8 @@
 
 use super::ArtifactService;
 use crate::{error::Error, Result};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     io::{self, ErrorKind as IoErrorKind},
@@ -22,10 +24,10 @@ use termtrace_media::{
         capture, native_capture_target, CaptureKind, CaptureOptions, VISUAL_DIRECTORY,
     },
     presentation::{
-        export as export_presentation, export_derivatives, plan_with_capture_directory,
-        preview as preview_presentation, read_edit_plan, verify_source_selection,
-        video_clip_ranges_session, video_clips, EditPlan, PixelTransform, PresentationDelivery,
-        PresentationPlan, PresentationPreviewOutcome, PresentationSource,
+        export as export_presentation, export_derivatives, normalize_edit,
+        plan_with_capture_directory, preview as preview_presentation, read_edit_plan,
+        verify_source_selection, video_clip_ranges_session, video_clips, EditPlan, NormalizedEdit,
+        PixelTransform, PresentationDelivery, PresentationPlan, PresentationSource,
         PresentationSourceRequest, PreviewOptions, VideoIdlePolicy, VideoRenderConfig,
         EDIT_PLAN_VERSION,
     },
@@ -65,7 +67,8 @@ pub enum VideoPreset {
 }
 
 /// Where a video's pixels come from.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum VideoRenderer {
     /// Verified pixels captured from the real Ghostty renderer; never falls back.
     #[default]
@@ -73,6 +76,7 @@ pub enum VideoRenderer {
     /// Deterministic pixels generated from canonical semantic replay.
     Semantic,
     /// Explicit native replay pixels; never original execution or semantic substitution.
+    #[serde(rename = "native_replay")]
     ReplayNative,
     /// Reuse verified original-execution CFR pixels only; never replay the application.
     OriginalExecution,
@@ -111,10 +115,33 @@ pub enum VideoMode {
         /// Storyboard and review-video settings.
         options: PreviewOptions,
     },
-    /// Render MP4 (legacy replacement) or GIF/VP9 `WebM` (no-replace), retaining a `.termtrace` sidecar.
+    /// Render MP4, GIF, or VP9 `WebM`, retaining a `.termtrace` sidecar. Only an MP4 with
+    /// [`VideoRequest::overwrite`] may replace an existing file.
     Render {
         /// Lowercase `.mp4`, `.gif`, or `.webm` output path.
         out: PathBuf,
+    },
+}
+
+/// Where an edit plan comes from.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EditSource {
+    /// JSON edit file; relative subtitle paths resolve beside it.
+    File {
+        /// Edit-plan JSON file.
+        #[serde(with = "termtrace_model::value::exact_path")]
+        #[schemars(with = "termtrace_model::value::ExactPath")]
+        path: PathBuf,
+    },
+    /// In-memory edit; relative subtitle paths need `resource_base`.
+    Plan {
+        /// Edit plan.
+        edit: Box<EditPlan>,
+        /// Directory that relative subtitle paths are joined to.
+        #[serde(default, with = "termtrace_model::value::exact_path::option")]
+        #[schemars(with = "Option<termtrace_model::value::ExactPath>")]
+        resource_base: Option<PathBuf>,
     },
 }
 
@@ -126,7 +153,7 @@ pub struct VideoRequest {
     /// Plan, preview, or render.
     pub mode: VideoMode,
     /// Strict versioned edit plan; the facade options below are ignored when set.
-    pub edit: Option<PathBuf>,
+    pub edit: Option<EditSource>,
     /// Delivery quality and default timing policy.
     pub preset: VideoPreset,
     /// Exact output frame rate; a native capture must match.
@@ -153,6 +180,8 @@ pub struct VideoRequest {
     pub cursor_style: CursorStyle,
     /// GIF loop policy; None defaults to infinite. Invalid for other outputs.
     pub gif_loop: Option<GifLoop>,
+    /// Let an MP4 render replace an existing file; GIF and `WebM` are never replaced.
+    pub overwrite: bool,
 }
 
 impl VideoRequest {
@@ -175,8 +204,108 @@ impl VideoRequest {
             hold_end: None,
             cursor_style: CursorStyle::default(),
             gif_loop: None,
+            overwrite: false,
         };
     }
+}
+
+/// SDK options for a video of an explicit edit.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VideoOptions {
+    /// Pixel source; native never falls back to semantic.
+    pub renderer: VideoRenderer,
+    /// Exact output frame rate; a native capture must match. Defaults to 30.
+    #[serde(default)]
+    pub fps: Option<u16>,
+    /// Semantic rasterization quality; semantic renderer only.
+    #[serde(default)]
+    pub semantic_raster_profile: Option<SemanticRasterProfile>,
+    /// Storyboard and review-video settings; preview only.
+    #[serde(default)]
+    pub preview: Option<PreviewOptions>,
+    /// GIF loop policy; GIF render only.
+    #[serde(default)]
+    pub gif_loop: Option<GifLoop>,
+    /// Let an MP4 render replace an existing file; render only.
+    #[serde(default)]
+    pub overwrite: bool,
+}
+
+impl VideoOptions {
+    /// Request `mode` of `session` with `edit`; preview options are the default unless set.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidOperation`] when an option does not apply to `mode`.
+    pub fn request(
+        &self,
+        session: PathBuf,
+        edit: EditSource,
+        mode: VideoMode,
+    ) -> Result<VideoRequest> {
+        let mode = match mode {
+            VideoMode::Preview { directory, options } => VideoMode::Preview {
+                directory,
+                options: self.preview.unwrap_or(options),
+            },
+            VideoMode::Plan | VideoMode::Render { .. } if self.preview.is_some() => {
+                return Err(invalid("preview options apply only to a preview"));
+            }
+            other => other,
+        };
+
+        if !matches!(mode, VideoMode::Render { .. }) && (self.gif_loop.is_some() || self.overwrite)
+        {
+            return Err(invalid("gif_loop and overwrite apply only to a render"));
+        }
+        return Ok(VideoRequest {
+            edit: Some(edit),
+            fps: self.fps,
+            renderer: self.renderer,
+            semantic_raster_profile: self.semantic_raster_profile,
+            gif_loop: self.gif_loop,
+            overwrite: self.overwrite,
+            ..VideoRequest::new(session, mode)
+        });
+    }
+}
+
+/// A rendered preview and its plan.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VideoPreview {
+    /// Rendered plan.
+    pub plan: PresentationPlan,
+    /// No-replace preview directory.
+    #[serde(with = "termtrace_model::value::exact_path")]
+    #[schemars(with = "termtrace_model::value::ExactPath")]
+    pub directory: PathBuf,
+    /// Contact-sheet PNG.
+    #[serde(with = "termtrace_model::value::exact_path")]
+    #[schemars(with = "termtrace_model::value::ExactPath")]
+    pub contact_sheet: PathBuf,
+    /// Low-resolution H.264 MP4.
+    #[serde(with = "termtrace_model::value::exact_path")]
+    #[schemars(with = "termtrace_model::value::ExactPath")]
+    pub video: PathBuf,
+}
+
+/// A published video, its plan, and its manifested sidecar.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VideoRender {
+    /// Rendered plan.
+    pub plan: PresentationPlan,
+    /// Published MP4, GIF, or `WebM`.
+    #[serde(with = "termtrace_model::value::exact_path")]
+    #[schemars(with = "termtrace_model::value::ExactPath")]
+    pub output: PathBuf,
+    /// Manifested render directory kept next to the output.
+    #[serde(with = "termtrace_model::value::exact_path")]
+    #[schemars(with = "termtrace_model::value::ExactPath")]
+    pub sidecar: PathBuf,
+    /// Shared artifact envelope of the sidecar; present for GIF and `WebM`.
+    pub artifact: Option<MediaArtifactResult>,
 }
 
 /// What a video request produced.
@@ -185,30 +314,9 @@ pub enum VideoOutcome {
     /// The resolved presentation plan.
     Planned(Box<PresentationPlan>),
     /// A rendered preview of the plan.
-    Previewed {
-        /// Rendered plan.
-        plan: Box<PresentationPlan>,
-        /// Preview directory contents.
-        preview: PresentationPreviewOutcome,
-    },
-    /// A no-replace GIF/VP9 `WebM` with the shared artifact envelope.
-    Derived {
-        /// Normalized common plan.
-        plan: Box<PresentationPlan>,
-        /// External no-replace delivery path.
-        output: PathBuf,
-        /// Shared lossless SDK result envelope for the retained sidecar.
-        artifact: MediaArtifactResult,
-    },
-    /// A published legacy MP4 and its manifested sidecar (overwrite-compatible).
-    Rendered {
-        /// Rendered plan.
-        plan: Box<PresentationPlan>,
-        /// Published MP4.
-        output: PathBuf,
-        /// Manifested render directory kept next to the MP4.
-        sidecar: PathBuf,
-    },
+    Previewed(Box<VideoPreview>),
+    /// A published video.
+    Rendered(Box<VideoRender>),
 }
 
 impl ArtifactService {
@@ -277,6 +385,11 @@ impl ArtifactService {
                             )));
                         }
                     }
+                } else if !request.overwrite && fs_err::symlink_metadata(out).is_ok() {
+                    return Err(invalid(format!(
+                        "video output already exists: {}; pass overwrite to replace it",
+                        out.display()
+                    )));
                 }
 
                 Some(sidecar)
@@ -360,10 +473,12 @@ impl ArtifactService {
 
                 let preview = preview_presentation(&plan, directory, *options)?;
 
-                return Ok(VideoOutcome::Previewed {
-                    plan: Box::new(plan),
-                    preview,
-                });
+                return Ok(VideoOutcome::Previewed(Box::new(VideoPreview {
+                    plan,
+                    directory: preview.directory,
+                    contact_sheet: preview.contact_sheet,
+                    video: preview.video,
+                })));
             }
             (VideoMode::Render { out }, Some(sidecar)) => (out, sidecar),
             (VideoMode::Render { .. }, None) => {
@@ -401,25 +516,52 @@ impl ArtifactService {
                 ));
             })?;
 
-            return Ok(VideoOutcome::Derived {
-                plan: Box::new(plan),
+            return Ok(VideoOutcome::Rendered(Box::new(VideoRender {
+                plan,
                 output: out.clone(),
-                artifact,
-            });
+                sidecar,
+                artifact: Some(artifact),
+            })));
         }
 
         let outcome = export_presentation(&plan, &sidecar)?;
-        publish(&outcome.video, out)?;
+        if request.overwrite {
+            publish(&outcome.video, out)?;
+        } else {
+            publish_no_replace(&outcome.video, out)?;
+        }
+
         progress(format_args!(
             "Published video and manifested render configuration."
         ));
 
-        return Ok(VideoOutcome::Rendered {
-            plan: Box::new(plan),
+        return Ok(VideoOutcome::Rendered(Box::new(VideoRender {
+            plan,
             output: out.clone(),
             sidecar,
-        });
+            artifact: None,
+        })));
     }
+}
+
+impl ArtifactService {
+    /// Resolve an edit's resource paths, validate it, and compute its `edit_plan_hash`.
+    ///
+    /// # Errors
+    /// Returns typed edit failures (see [`Error::edit_failure`]) and read or decode errors.
+    pub fn normalize_edit(edit: &EditSource) -> Result<NormalizedEdit> {
+        return normalize_edit_source(edit);
+    }
+}
+
+fn normalize_edit_source(edit: &EditSource) -> Result<NormalizedEdit> {
+    return Ok(match edit {
+        EditSource::File { path } => read_edit_plan(path)?,
+        EditSource::Plan {
+            edit,
+            resource_base,
+        } => normalize_edit(edit, resource_base.as_deref())?,
+    });
 }
 
 /// Stable name of a plan's pixel source.
@@ -511,12 +653,12 @@ fn plan_video(
     source: PresentationSourceRequest,
     capture_directory: Option<&Path>,
 ) -> Result<PresentationPlan> {
-    if let Some(edit_path) = &request.edit {
-        let edit = read_edit_plan(edit_path)?;
+    if let Some(edit) = &request.edit {
+        let normalized = normalize_edit_source(edit)?;
 
         return Ok(plan_with_capture_directory(
             session,
-            &edit,
+            &normalized.edit,
             source,
             capture_directory,
         )?);

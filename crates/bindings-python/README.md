@@ -285,3 +285,28 @@ else:
 The application outcome and the capture are separate. `canonical_success` is false when the application failed, but its capture can still be published. A capture that does not publish raises `OriginalCaptureFailedError` even when the application completed; `completion` then holds the canonical completion. `OriginalFinalizationTimeoutError` keeps the recording owned, so call `wait_finished` again or `force_close()`. `capture_status()` reads the supervisor status and reports `abandoned` when the supervisor is gone. Cancelling startup tears the capture down before raising. `AsyncTermtrace.record_original` has the same behavior.
 
 `attach_original_target(target, state_root=None)` attaches to a running original recording by path or alias, such as `"name:demo"`. Aliases resolve in the registry under `state_root`. `str` and `bytes` follow the `path:`/`name:` rules, and an `os.PathLike` is an exact path. `path_bytes` is the exact session directory. `session()` gives live control for any path, including one that is not UTF-8; `Session.path` is then a display string and `Session.path_bytes` is exact.
+
+## Editing presentation videos
+
+```python
+from fractions import Fraction
+from termtrace import Edit, Scope, Select, Termtrace
+
+edit = (
+    Edit(resource_base="assets")  # relative subtitle paths need an explicit base
+    .clip(Select.marker("start"), Select.marker("done"), speed=Fraction(3, 2), hold_ms=500)
+    .annotate("Demo", scope=Scope.whole_video())
+    .subtitles("captions.ass")
+)
+tt = Termtrace()
+plan = tt.video_plan(session, edit, renderer="semantic", fps=30)
+tt.video_render(session, edit, "demo.gif", renderer="semantic")
+```
+
+`renderer="native"` never falls back to semantic pixels. Renders refuse an existing output;
+`overwrite=True` replaces only an MP4. `edit.normalize()` returns the canonical edit and its
+`edit_plan_hash`. Rejected edits raise `TermtraceError` with an edit `code` and `details`
+(`field`, `clip_index`, `marker`). Frame rounding: clip start floors and end ceils to frames,
+the retimed count is `ceil(frames * denominator / numerator)`, holds are
+`ceil(hold_ms * fps / 1000)` frames, output frames map back with a floor, and
+`Select.native_frame(n)` selects frame `n` exactly.

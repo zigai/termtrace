@@ -167,3 +167,20 @@ __all__ += [
     "System",
     "Tmux",
 ]
+
+from termtrace._termtrace import (
+    normalize_edit,
+    output_frames_for_source_frame,
+    source_for_output_frame,
+)
+from termtrace.editing import Edit, Scope, Select, Selector
+
+__all__ += [
+    "Edit",
+    "Scope",
+    "Select",
+    "Selector",
+    "normalize_edit",
+    "output_frames_for_source_frame",
+    "source_for_output_frame",
+]

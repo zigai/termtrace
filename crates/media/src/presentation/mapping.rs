@@ -1,9 +1,10 @@
 use crate::{Error, Result};
-use std::{io::Write as _, path::Path};
+use std::{io::Write as _, ops::Range, path::Path};
 use termtrace_evidence::artifact::{finish_writer, secure_writer};
 use termtrace_model::{
     artifact::presentation::{
-        ChangeSource, NormalizedClip, PixelTransform, PresentationMapEntry, PresentationPlan,
+        ChangeSource, NormalizedClip, OutputFrameSource, PixelTransform, PresentationMapEntry,
+        PresentationPlan,
     },
     artifact::semantic_video::SemanticFrameSpan,
 };
@@ -136,6 +137,70 @@ pub(super) fn semantic_change_states_at(plan: &PresentationPlan, output_frame: u
         })
         .map(|change| return change.state_id)
         .collect();
+}
+
+/// Clip, source frame, and operation behind output frame `output_frame`, or `None` past the
+/// end. Retimed frames map back with `floor(offset * numerator / denominator)`; hold frames
+/// repeat the clip's last source frame.
+#[must_use]
+pub fn source_for_output_frame(
+    plan: &PresentationPlan,
+    output_frame: u64,
+) -> Option<OutputFrameSource> {
+    let clip_index = plan.clips.iter().position(|clip| {
+        return clip.output_start_frame <= output_frame && output_frame < clip.output_end_frame;
+    })?;
+    let clip = plan.clips.get(clip_index)?;
+    let (source_frame, operation) = mapped_source_frame(clip, output_frame);
+
+    return Some(OutputFrameSource {
+        clip_index,
+        source_frame,
+        operation: operation.to_owned(),
+    });
+}
+
+/// Half-open output-frame spans, in output order, that show source frame `source_frame`.
+#[must_use]
+pub fn output_frames_for_source_frame(
+    plan: &PresentationPlan,
+    source_frame: u64,
+) -> Vec<Range<u64>> {
+    return output_spans_for_source_frames(
+        &plan.clips,
+        source_frame,
+        source_frame.saturating_add(1),
+    );
+}
+
+pub(super) fn output_spans_for_source_frames(
+    clips: &[NormalizedClip],
+    source_start_frame: u64,
+    source_end_frame: u64,
+) -> Vec<Range<u64>> {
+    let mut spans = Vec::new();
+    for clip in clips {
+        let mut open = None;
+        for output_frame in clip.output_start_frame..clip.output_end_frame {
+            let (source_frame, _) = mapped_source_frame(clip, output_frame);
+            let selected = source_start_frame <= source_frame && source_frame < source_end_frame;
+
+            match (open, selected) {
+                (None, true) => open = Some(output_frame),
+                (Some(start), false) => {
+                    spans.push(start..output_frame);
+                    open = None;
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(start) = open {
+            spans.push(start..clip.output_end_frame);
+        }
+    }
+
+    return spans;
 }
 
 pub(super) fn mapped_source_frame(clip: &NormalizedClip, output_frame: u64) -> (u64, &'static str) {

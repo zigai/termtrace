@@ -15,8 +15,10 @@ use termtrace_model::{
 
 mod video;
 
+pub use termtrace_media::presentation::{output_frames_for_source_frame, source_for_output_frame};
 pub use video::{
-    source_name, CursorStyle, VideoMode, VideoOutcome, VideoPreset, VideoRenderer, VideoRequest,
+    source_name, CursorStyle, EditSource, VideoMode, VideoOptions, VideoOutcome, VideoPreset,
+    VideoPreview, VideoRender, VideoRenderer, VideoRequest,
 };
 
 /// High-level service orchestrating artifact export, bundles, and save formats.

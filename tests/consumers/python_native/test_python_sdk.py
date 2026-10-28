@@ -8,11 +8,14 @@ import logging
 import math
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 import threading
 import time
 import uuid
 from pathlib import Path
+from fractions import Fraction
 from typing import Any
 from unittest.mock import Mock
 
@@ -21,16 +24,23 @@ from termtrace import (
     ActionResult,
     CancelledError,
     CancelToken,
+    Edit,
     LocatorSpec,
     LocatorTimeoutError,
     QueryError,
     Recording,
+    Scope,
     ScreenFrame,
+    Select,
     StateGuardFailedError,
     Termtrace,
     TermtraceError,
     TimeoutError,
     aio,
+    normalize_edit,
+    output_frames_for_source_frame,
+    source_for_output_frame,
+    types,
 )
 from termtrace import _async
 from termtrace.aio import AsyncTermtrace
@@ -42,6 +52,7 @@ LOCATOR_FIXTURES = Path(__file__).resolve().parents[3] / "fixtures/conformance/l
 PARITY = json.loads((LOCATOR_FIXTURES / "parity.json").read_text(encoding="utf-8"))
 PARITY_FRAME_JSON = (LOCATOR_FIXTURES / PARITY["frame"]).read_text(encoding="utf-8")
 CAPTURE_QUANTUM_SECS = 0.25
+_U64_MAX = 2**64 - 1
 
 
 def test_sync_recording_lifecycle() -> None:
@@ -1172,3 +1183,243 @@ def test_native_visual_profile_failures_stop_before_the_application_starts() -> 
         assert invalid.value.code == "invalid_visual_profile"
         assert not marker.exists()
         assert not root.exists() or not any(root.iterdir())
+
+
+SDK_FIXTURES = (Path(__file__).resolve().parents[3] / "fixtures/conformance/sdk").resolve()
+EDITING = json.loads((SDK_FIXTURES / "editing.json").read_text(encoding="utf-8"))
+EDIT_SESSION_SCRIPT = (
+    "trap 'exit 0' TERM; i=0; while :; do i=$((i+1)); printf 'line %s\\n' $i; sleep 0.4; done"
+)
+
+
+def fixture_edit(resource_base: Path | None, subtitle: Path | str = "editing-captions.ass") -> Edit:
+    default_style: types.AnnotationStyle = {
+        "font_size": 20,
+        "foreground": "#ffffff",
+        "background": "#000000",
+        "background_opacity": 160,
+        "border": 1,
+    }
+    return (
+        Edit(resource_base=resource_base)
+        .clip(
+            Select.marker("intro"),
+            Select.marker("middle"),
+            speed=Fraction(2, 3),
+            hold_ms=500,
+            caption="First part",
+        )
+        .clip(Select.marker("middle"), Select.marker("outro"), speed=(3, 2))
+        .annotate("Example", scope=Scope.whole_video())
+        .annotate(
+            template="frame {output_frame}",
+            scope=Scope.clip(1),
+            position={"anchor": "bottom_right", "x": 8, "y": 8},
+            style={
+                "font_size": 16,
+                "foreground": "#ffff00",
+                "background": "#202020",
+                "background_opacity": 200,
+                "border": 0,
+            },
+            z_order=1,
+        )
+        .annotate(
+            "Range",
+            scope=Scope.range(Select.marker("intro"), Select.marker("middle")),
+            position={"anchor": "center", "x": 0, "y": 0},
+            style=default_style,
+            z_order=2,
+        )
+        .annotate(
+            "Start",
+            scope=Scope.output_frame(0),
+            position={"anchor": "top_right", "x": 16, "y": 16},
+            z_order=3,
+        )
+        .subtitles(subtitle)
+        .changes("semantic_cells", "bounding_box", hold_frames=2)
+        .caption_layout("footer")
+        .branding("Example")
+        .delivery(codec="h264", pixel_format="yuv420p", crf=20, encoder_preset="slow")
+        .cursor_mask()
+        .crop(0, 0, 480, 240)
+        .zoom(2, 1)
+        .callout(16, 16, 200, 100, label="note")
+    )
+
+
+@pytest.fixture(scope="module")
+def edit_workspace(tmp_path_factory: pytest.TempPathFactory) -> tuple[Termtrace, Path, Path]:
+    root = tmp_path_factory.mktemp("editing").resolve()
+    tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(root / "evidence"))
+    grid = EDITING["session"]["grid"]
+    with tt.record(
+        ["/bin/sh", "-c", EDIT_SESSION_SCRIPT],
+        rows=grid["rows"],
+        cols=grid["cols"],
+        visual_profile=SEMANTIC_PROFILE,
+    ) as rec:
+        rec.screen().wait_for_text("line 1", timeout_secs=5.0)
+        for delay, label in [(0.3, "intro"), (0.6, "middle"), (0.1, "repeat"), (0.1, "repeat"), (0.5, "outro")]:
+            time.sleep(delay)
+            rec.mark(label)
+        time.sleep(0.3)
+        rec.stop()
+    return tt, Path(rec.path), root
+
+
+def plan_semantic(tt: Termtrace, session: Path, edit: Any) -> types.PresentationPlan:
+    return tt.video_plan(session, edit, renderer="semantic", fps=EDITING["fps"])
+
+
+def without_subtitle_paths(plan: types.PresentationPlan) -> types.PresentationPlan:
+    copy = json.loads(json.dumps(plan))
+    for subtitle in copy["subtitles"]:
+        subtitle["source_path"] = None
+    return copy  # type: ignore[no-any-return]
+
+
+def edit_file(directory: Path, edit: Any, files: dict[str, str] | None = None) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    for name, contents in (files or {}).items():
+        (directory / name).write_text(contents, encoding="utf-8")
+    path = directory / "edit.json"
+    path.write_text(json.dumps(edit), encoding="utf-8")
+    return path
+
+
+def test_fixture_edit_built_in_python_matches_the_rust_normalization_and_file_plan(
+    edit_workspace: tuple[Termtrace, Path, Path],
+) -> None:
+    tt, session, root = edit_workspace
+    edit = fixture_edit(SDK_FIXTURES)
+    normalized = edit.normalize()
+    assert normalized["edit_plan_hash"] == EDITING["edit_plan_hash"]
+
+    copy = root / "fixture-file"
+    copy.mkdir()
+    shutil.copy(SDK_FIXTURES / "editing-captions.ass", copy / "editing-captions.ass")
+    from_file = plan_semantic(tt, session, edit_file(copy, EDITING["edit"]))
+    from_builder = plan_semantic(tt, session, edit)
+    assert from_builder["edit_plan_hash"] == EDITING["edit_plan_hash"]
+    assert without_subtitle_paths(from_builder) == without_subtitle_paths(from_file)
+
+    for frame in range(from_builder["output_frame_count"]):
+        found = source_for_output_frame(from_builder, frame)
+        assert found is not None
+        spans = output_frames_for_source_frame(from_builder, found["source_frame"])
+        assert any(start <= frame < end for start, end in spans)
+    assert source_for_output_frame(from_builder, from_builder["output_frame_count"]) is None
+
+
+def test_relative_subtitles_need_an_explicit_resource_base() -> None:
+    expected = EDITING["relative_without_base"]
+    with pytest.raises(TermtraceError) as caught:
+        fixture_edit(None).normalize()
+    assert caught.value.code == expected["code"]
+    assert {key: caught.value.details[key] for key in expected["facts"]} == expected["facts"]
+
+    absolute = fixture_edit(None, SDK_FIXTURES / "editing-captions.ass")
+    assert absolute.normalize()["edit_plan_hash"] == EDITING["edit_plan_hash"]
+
+    with tempfile.TemporaryDirectory() as elsewhere:
+        as_file = edit_file(Path(elsewhere), EDITING["edit"])
+        shutil.copy(SDK_FIXTURES / "editing-captions.ass", Path(elsewhere) / "editing-captions.ass")
+        assert normalize_edit(as_file)["edit_plan_hash"] == EDITING["edit_plan_hash"]
+
+
+def test_selectors_keep_exact_64_bit_values_and_reject_inexact_host_types() -> None:
+    wide = 2**63 + 1
+    normalized = Edit().clip(Select.event(wide), Select.state(_U64_MAX)).normalize()
+    clip = normalized["edit"]["clips"][0]
+    assert clip["from"]["eventSeq"] == wide
+    assert clip["to"]["stateId"] == _U64_MAX
+
+    for value, error in [(1.0, TypeError), (True, TypeError), (-1, ValueError), (2**64, ValueError)]:
+        with pytest.raises(error):
+            Select.event(value)  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        Edit().clip(Select.marker("a"), Select.marker("b"), speed=0.5)  # type: ignore[arg-type]
+
+
+def test_speeds_produce_the_documented_frame_counts(
+    edit_workspace: tuple[Termtrace, Path, Path],
+) -> None:
+    tt, session, _ = edit_workspace
+    speeds = EDITING["speeds"]
+
+    def edit(speed: tuple[int, int]) -> Edit:
+        return (
+            Edit()
+            .clip(Select.at_ns(speeds["from_ns"]), Select.at_ns(speeds["to_ns"]), speed=speed)
+            .clip(Select.at_ns(speeds["to_ns"]), Select.at_ns(speeds["tail_to_ns"]))
+        )
+
+    for case in speeds["cases"]:
+        clip = plan_semantic(tt, session, edit(tuple(case["speed"])))["clips"][0]
+        assert clip["source_end_frame"] - clip["source_start_frame"] == speeds["source_frames"]
+        assert clip["retimed_frame_count"] == case["retimed_frame_count"], case
+
+    for speed in speeds["invalid"]:
+        with pytest.raises(TermtraceError) as caught:
+            edit(tuple(speed)).normalize()
+        assert caught.value.code == "invalid_speed"
+        assert caught.value.details["field"] == "clips[0].speed"
+
+
+def test_shared_negative_edits_fail_with_the_same_codes_and_facts(
+    edit_workspace: tuple[Termtrace, Path, Path],
+) -> None:
+    tt, session, root = edit_workspace
+    for case in EDITING["negative"]:
+        path = edit_file(root / "negative" / case["name"], case["edit"], case.get("files"))
+        with pytest.raises(TermtraceError) as caught:
+            plan_semantic(tt, session, path)
+        assert caught.value.code == case["code"], case["name"]
+        facts = {key: caught.value.details[key] for key in case["facts"]}
+        assert facts == case["facts"], case["name"]
+
+
+async def test_semantic_preview_and_every_format_render_from_python(
+    edit_workspace: tuple[Termtrace, Path, Path],
+) -> None:
+    tt, session, root = edit_workspace
+    edit = fixture_edit(SDK_FIXTURES)
+    output = root / "renders"
+    output.mkdir()
+
+    preview = await AsyncTermtrace(binary=TERMTRACE_BIN).video_preview(
+        session, edit, output / "preview", renderer="semantic", fps=EDITING["fps"]
+    )
+    assert Path(preview["contact_sheet"]).is_file()
+    assert preview["plan"]["edit_plan_hash"] == EDITING["edit_plan_hash"]
+
+    completion = json.loads((session / "completion.json").read_text(encoding="utf-8"))
+    assert json.loads((session / "session.json").read_text(encoding="utf-8"))["visual_profile"]
+    for extension, codec in [("mp4", "h264"), ("gif", "gif"), ("webm", "vp9")]:
+        out = output / f"edited.{extension}"
+        render = tt.video_render(session, edit, out, renderer="semantic", fps=EDITING["fps"])
+        assert Path(render["output"]) == out
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(out)],
+            check=True, capture_output=True, text=True,
+        )
+        assert probe.stdout.strip() == codec
+        manifest = json.loads((Path(render["sidecar"]) / "manifest.json").read_text(encoding="utf-8"))
+        if extension == "mp4":
+            assert render["artifact"] is None
+            assert manifest["source_truth_layer"] == "semantic_rendering"
+        else:
+            artifact = render["artifact"]
+            assert artifact is not None
+            assert artifact["provenance"]["source_kind"] == "semantic_rendering"
+            assert artifact["source"]["session_manifest_hash"] == completion["session_manifest_hash"]
+
+    existing = output / "edited.mp4"
+    before = existing.read_bytes()
+    with pytest.raises(TermtraceError, match="already exists"):
+        tt.video_render(session, edit, existing, renderer="semantic", fps=EDITING["fps"])
+    assert existing.read_bytes() == before
+    with pytest.raises(TermtraceError, match="already exists"):
+        tt.video_render(session, edit, output / "edited.gif", renderer="semantic", overwrite=True)

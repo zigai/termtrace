@@ -267,3 +267,25 @@ try {
 The application outcome and the capture are separate. `canonical_success` is false when the application failed, but its capture can still be published. A capture that does not publish rejects with `original_capture_failed` even when the application completed; `completion` then holds the canonical completion. `original_finalization_timeout` keeps the recording owned, so call `waitFinished` again or `forceClose()`. `captureStatus()` reads the supervisor status and reports `abandoned` when the supervisor is gone. Aborting startup tears the capture down before rejecting.
 
 `attachOriginalTarget(target, stateRoot?)` attaches to a running original recording by path or alias, such as `'name:demo'`. Aliases resolve in the registry under `stateRoot`. A string or `Uint8Array` follows the `path:`/`name:` rules. `pathBytes` is the exact session directory. `session()` gives live control for any path, including one that is not UTF-8; `Session.path` is then a display string and `Session.pathBytes` is exact.
+
+## Editing presentation videos
+
+```js
+const { Edit, Termtrace, scope, select } = require('@termtrace/core');
+
+const edit = new Edit({ resource_base: 'assets' }) // relative subtitle paths need a base
+  .clip(select.marker('start'), select.marker('done'), { speed: { numerator: 3, denominator: 2 }, hold_ms: 500 })
+  .annotate({ text: 'Demo', scope: scope.wholeVideo() })
+  .subtitles('captions.ass');
+const tt = new Termtrace();
+const plan = await tt.videoPlan(session, edit, { renderer: 'semantic', fps: 30 });
+await tt.videoRender(session, edit, 'demo.gif', { renderer: 'semantic' });
+```
+
+64-bit selector values are `bigint` (a safe-integer `number` is accepted). `renderer: 'native'`
+never falls back to semantic pixels. Renders refuse an existing output; `overwrite: true`
+replaces only an MP4. `edit.normalize()` returns the canonical edit and its `edit_plan_hash`.
+Rejected edits carry an edit `code` and `details` (`field`, `clip_index`, `marker`). Frame
+rounding: clip start floors and end ceils to frames, the retimed count is
+`ceil(frames * denominator / numerator)`, holds are `ceil(hold_ms * fps / 1000)` frames, output
+frames map back with a floor, and `select.nativeFrame(n)` selects frame `n` exactly.

@@ -1,4 +1,4 @@
-use super::plan_error;
+use super::{plan_error, planning::hash_edit_identity};
 use crate::{Error, Result};
 use std::{
     path::{Path, PathBuf},
@@ -6,17 +6,18 @@ use std::{
     str,
 };
 use termtrace_model::artifact::presentation::{
-    AnnotationScope, ChangeMode, ChangeSource, ChangeVisualization, EditPlan, EditSelector,
-    PixelTransform, PresentationSource, PreviewOptions, TextAnnotation, EDIT_PLAN_VERSION,
+    AnnotationScope, ChangeMode, ChangeSource, ChangeVisualization, EditFailure, EditFailureCode,
+    EditPlan, EditSelector, NormalizedEdit, PixelTransform, PresentationSource, PreviewOptions,
+    TextAnnotation, EDIT_PLAN_VERSION,
 };
 
-/// Read and validate a JSON edit plan, resolving relative subtitle paths beside the plan.
+/// Read a JSON edit plan and normalize it, resolving relative subtitle paths beside the plan.
 ///
 /// # Errors
 ///
-/// Returns an error when the file cannot be read or decoded, or when any edit selector,
-/// transform, annotation, subtitle resource, or version violates the presentation contract.
-pub fn read_edit_plan(path: impl AsRef<Path>) -> Result<EditPlan> {
+/// Returns an error when the file cannot be read or decoded, or when [`normalize_edit`] rejects
+/// the plan.
+pub fn read_edit_plan(path: impl AsRef<Path>) -> Result<NormalizedEdit> {
     let path = path.as_ref();
     let bytes = fs_err::read(path).map_err(|source| {
         return Error::Filesystem {
@@ -25,7 +26,7 @@ pub fn read_edit_plan(path: impl AsRef<Path>) -> Result<EditPlan> {
         };
     })?;
 
-    let mut plan: EditPlan = serde_json::from_slice(&bytes).map_err(|source| {
+    let plan: EditPlan = serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
             json_path: "$".to_owned(),
@@ -34,30 +35,89 @@ pub fn read_edit_plan(path: impl AsRef<Path>) -> Result<EditPlan> {
     })?;
 
     let base = path.parent().unwrap_or_else(|| return Path::new("."));
-    for subtitle in &mut plan.subtitles {
-        if subtitle.ass.is_relative() {
-            subtitle.ass = base.join(&subtitle.ass);
+
+    return normalize_edit(&plan, Some(base));
+}
+
+/// Resolve subtitle paths, validate the edit, and compute its identity.
+///
+/// Absolute subtitle paths are used as given. A relative path is joined to `resource_base`;
+/// without one it fails with `relative_resource_without_base` rather than depending on the
+/// process working directory. Each ASS resource is read and validated now and hashed into the
+/// path-independent `edit_plan_hash`.
+///
+/// # Errors
+///
+/// Returns [`Error::Edit`] for a relative path without a base and for every edit-contract
+/// violation, and filesystem errors when a subtitle resource cannot be read.
+pub fn normalize_edit(edit: &EditPlan, resource_base: Option<&Path>) -> Result<NormalizedEdit> {
+    let mut edit = edit.clone();
+    for (index, subtitle) in edit.subtitles.iter_mut().enumerate() {
+        if subtitle.ass.is_absolute() {
+            continue;
         }
+
+        let base = resource_base.ok_or_else(|| {
+            return edit_error(
+                EditFailureCode::RelativeResourceWithoutBase,
+                format!("subtitles[{index}].ass"),
+                format!(
+                    "relative subtitle path `{}` needs an explicit resource base directory",
+                    subtitle.ass.display()
+                ),
+            );
+        })?;
+        subtitle.ass = base.join(&subtitle.ass);
     }
 
-    validate_edit_plan(&plan)?;
+    validate_edit_plan(&edit)?;
+    let edit_plan_hash = hash_edit_identity(&edit)?;
 
-    return Ok(plan);
+    return Ok(NormalizedEdit {
+        edit,
+        edit_plan_hash,
+    });
+}
+
+pub(super) fn edit_error(
+    code: EditFailureCode,
+    field: impl Into<String>,
+    reason: impl Into<String>,
+) -> Error {
+    return Error::Edit(EditFailure::new(code, field, reason));
+}
+
+fn clip_error(
+    code: EditFailureCode,
+    clip_index: usize,
+    field: &str,
+    reason: impl Into<String>,
+) -> Error {
+    return Error::Edit(
+        EditFailure::new(code, format!("clips[{clip_index}]{field}"), reason).clip(clip_index),
+    );
 }
 
 pub(super) fn validate_edit_plan(plan: &EditPlan) -> Result<()> {
     if plan.version != EDIT_PLAN_VERSION || plan.clips.is_empty() {
-        return Err(plan_error(
+        return Err(edit_error(
+            EditFailureCode::InvalidEditPlan,
+            if plan.version == EDIT_PLAN_VERSION { "clips" } else { "version" },
             "edit plan must use version 1 and contain at least one clip",
         ));
     }
 
-    for clip in &plan.clips {
-        validate_edit_selector(&clip.from)?;
-        validate_edit_selector(&clip.to)?;
+    for (index, clip) in plan.clips.iter().enumerate() {
+        validate_edit_selector(&clip.from, &format!("clips[{index}].from"))
+            .map_err(|error| return with_clip(error, index))?;
+        validate_edit_selector(&clip.to, &format!("clips[{index}].to"))
+            .map_err(|error| return with_clip(error, index))?;
 
         if clip.speed.numerator == 0 || clip.speed.denominator == 0 {
-            return Err(plan_error(
+            return Err(clip_error(
+                EditFailureCode::InvalidSpeed,
+                index,
+                ".speed",
                 "clip speed numerator and denominator must be nonzero",
             ));
         }
@@ -65,36 +125,77 @@ pub(super) fn validate_edit_plan(plan: &EditPlan) -> Result<()> {
         if u64::from(clip.speed.numerator) > u64::from(clip.speed.denominator) * 64
             || u64::from(clip.speed.denominator) > u64::from(clip.speed.numerator) * 64
         {
-            return Err(plan_error("clip speed must be between 1/64 and 64"));
+            return Err(clip_error(
+                EditFailureCode::InvalidSpeed,
+                index,
+                ".speed",
+                "clip speed must be between 1/64 and 64",
+            ));
         }
 
         if clip.caption.as_ref().is_some_and(|caption| {
             return caption.is_empty() || caption.chars().count() > 4096 || caption.contains('\0');
         }) {
-            return Err(plan_error(
+            return Err(clip_error(
+                EditFailureCode::InvalidCaption,
+                index,
+                ".caption",
                 "clip captions must contain 1-4096 non-NUL characters",
             ));
         }
     }
 
-    for annotation in &plan.annotations {
-        validate_annotation(annotation, plan.clips.len())?;
+    for (index, annotation) in plan.annotations.iter().enumerate() {
+        validate_annotation(annotation, index, plan.clips.len())?;
     }
 
-    for subtitle in &plan.subtitles {
+    for (index, subtitle) in plan.subtitles.iter().enumerate() {
+        let field = format!("subtitles[{index}].ass");
         if subtitle.ass.as_os_str().is_empty() {
-            return Err(plan_error("ASS subtitle path must not be empty"));
+            return Err(edit_error(
+                EditFailureCode::InvalidSubtitle,
+                field,
+                "ASS subtitle path must not be empty",
+            ));
         }
 
-        validate_ass_resource(&subtitle.ass)?;
+        validate_ass_resource(&subtitle.ass).map_err(|error| {
+            return match error {
+                Error::InvalidReplay { reason, .. } => {
+                    edit_error(EditFailureCode::InvalidSubtitle, field.clone(), reason)
+                }
+                Error::Filesystem { path, source } if path == subtitle.ass => {
+                    let error = Error::Filesystem { path, source };
+
+                    edit_error(
+                        EditFailureCode::InvalidSubtitle,
+                        field.clone(),
+                        error.to_string(),
+                    )
+                }
+                other => other,
+            };
+        })?;
     }
 
-    for transform in &plan.transforms {
-        validate_pixel_transform(transform)?;
+    for (index, transform) in plan.transforms.iter().enumerate() {
+        validate_pixel_transform(transform).map_err(|reason| {
+            return edit_error(
+                EditFailureCode::InvalidTransform,
+                format!("transforms[{index}]"),
+                reason,
+            );
+        })?;
     }
 
     if let Some(change) = &plan.change_visualization {
-        validate_change_visualization(change)?;
+        validate_change_visualization(change).map_err(|reason| {
+            return edit_error(
+                EditFailureCode::InvalidChangeVisualization,
+                "change_visualization",
+                reason,
+            );
+        })?;
     }
 
     let delivery_format_valid = matches!(
@@ -112,7 +213,9 @@ pub(super) fn validate_edit_plan(plan: &EditPlan) -> Result<()> {
             "medium" | "slow" | "veryslow"
         )
     {
-        return Err(plan_error(
+        return Err(edit_error(
+            EditFailureCode::InvalidEditPlan,
+            "delivery",
             "delivery requires H.264 with a compatible pixel format, CRF 0-51, and a supported encoder preset",
         ));
     }
@@ -120,12 +223,23 @@ pub(super) fn validate_edit_plan(plan: &EditPlan) -> Result<()> {
     if plan.layout.branding.as_ref().is_some_and(|branding| {
         return branding.is_empty() || branding.chars().count() > 256 || branding.contains('\0');
     }) {
-        return Err(plan_error("branding must contain 1-256 non-NUL characters"));
+        return Err(edit_error(
+            EditFailureCode::InvalidEditPlan,
+            "layout.branding",
+            "branding must contain 1-256 non-NUL characters",
+        ));
     }
     return Ok(());
 }
 
-pub(super) fn validate_edit_selector(selector: &EditSelector) -> Result<()> {
+fn with_clip(error: Error, clip_index: usize) -> Error {
+    return match error {
+        Error::Edit(failure) => Error::Edit(failure.clip(clip_index)),
+        other => other,
+    };
+}
+
+pub(super) fn validate_edit_selector(selector: &EditSelector, field: &str) -> Result<()> {
     let count = [
         selector.marker.is_some(),
         selector.monotonic_ns.is_some(),
@@ -138,21 +252,36 @@ pub(super) fn validate_edit_selector(selector: &EditSelector) -> Result<()> {
     .count();
 
     if count != 1 {
-        return Err(plan_error(
+        return Err(edit_error(
+            EditFailureCode::InvalidSelector,
+            field,
             "edit selector requires exactly one marker, monotonicNs, eventSeq, stateId, or nativeFrame",
         ));
     }
 
     if selector.marker.as_deref().is_some_and(str::is_empty) {
-        return Err(plan_error("edit marker must not be empty"));
+        return Err(edit_error(
+            EditFailureCode::InvalidSelector,
+            field,
+            "edit marker must not be empty",
+        ));
     }
     return Ok(());
 }
 
-fn validate_annotation(annotation: &TextAnnotation, clip_count: usize) -> Result<()> {
+fn validate_annotation(annotation: &TextAnnotation, index: usize, clip_count: usize) -> Result<()> {
+    let invalid = |field: &str, reason: String| {
+        return edit_error(
+            EditFailureCode::InvalidAnnotation,
+            format!("annotations[{index}]{field}"),
+            reason,
+        );
+    };
+
     if annotation.text.is_some() == annotation.template.is_some() {
-        return Err(plan_error(
-            "annotation requires exactly one of text or template",
+        return Err(invalid(
+            "",
+            "annotation requires exactly one of text or template".to_owned(),
         ));
     }
 
@@ -163,31 +292,38 @@ fn validate_annotation(annotation: &TextAnnotation, clip_count: usize) -> Result
         .unwrap_or("");
 
     if value.is_empty() || value.chars().count() > 4096 || value.contains('\0') {
-        return Err(plan_error(
-            "annotation text/template must contain 1-4096 non-NUL characters",
+        return Err(invalid(
+            "",
+            "annotation text/template must contain 1-4096 non-NUL characters".to_owned(),
         ));
     }
 
     if let Some(template) = &annotation.template {
-        validate_annotation_template(template)?;
+        validate_annotation_template(template).map_err(|reason| {
+            return invalid(".template", reason);
+        })?;
     }
 
     if let AnnotationScope::Clip { clip_index } = annotation.scope
         && clip_index >= clip_count
     {
-        return Err(plan_error("annotation clip index is out of bounds"));
+        return Err(invalid(
+            ".scope",
+            format!("annotation clip index {clip_index} is out of bounds for {clip_count} clips"),
+        ));
     }
 
     if let AnnotationScope::Range { from, to } = &annotation.scope {
-        validate_edit_selector(from)?;
-        validate_edit_selector(to)?;
+        validate_edit_selector(from, &format!("annotations[{index}].scope.from"))?;
+        validate_edit_selector(to, &format!("annotations[{index}].scope.to"))?;
     }
 
     if annotation.position.x.unsigned_abs() > 32_768
         || annotation.position.y.unsigned_abs() > 32_768
     {
-        return Err(plan_error(
-            "annotation position offsets must be within 32768 pixels",
+        return Err(invalid(
+            ".position",
+            "annotation position offsets must be within 32768 pixels".to_owned(),
         ));
     }
 
@@ -196,43 +332,42 @@ fn validate_annotation(annotation: &TextAnnotation, clip_count: usize) -> Result
         || !valid_rgb(&annotation.style.background)
         || annotation.style.border > 16
     {
-        return Err(plan_error("annotation style is outside bounded values"));
+        return Err(invalid(
+            ".style",
+            "annotation style is outside bounded values".to_owned(),
+        ));
     }
     return Ok(());
 }
 
-fn validate_change_visualization(change: &ChangeVisualization) -> Result<()> {
+fn validate_change_visualization(change: &ChangeVisualization) -> Result<(), &'static str> {
     if change.source == ChangeSource::SemanticCells && change.pixel_threshold.is_some() {
-        return Err(plan_error(
-            "pixel threshold is valid only for encoded-pixel change visualization",
-        ));
+        return Err("pixel threshold is valid only for encoded-pixel change visualization");
     }
 
     if change.source == ChangeSource::EncodedPixels && change.mode == ChangeMode::DirtyRows {
-        return Err(plan_error(
-            "dirty-row change visualization requires semantic-cell evidence",
-        ));
+        return Err("dirty-row change visualization requires semantic-cell evidence");
     }
 
     if change.source == ChangeSource::EncodedPixels && change.mode == ChangeMode::BoundingBox {
-        return Err(plan_error(
+        return Err(
             "encoded-pixel bounding boxes are unavailable; use outline, heatmap, trail, or side_diff",
-        ));
+        );
     }
 
     if change.hold_frames > 240 {
-        return Err(plan_error("change overlay hold must not exceed 240 frames"));
+        return Err("change overlay hold must not exceed 240 frames");
     }
     return Ok(());
 }
 
-fn validate_pixel_transform(transform: &PixelTransform) -> Result<()> {
+fn validate_pixel_transform(transform: &PixelTransform) -> Result<(), &'static str> {
     match transform {
         PixelTransform::Crop { width, height, .. }
         | PixelTransform::Callout { width, height, .. }
             if *width == 0 || *height == 0 =>
         {
-            return Err(plan_error("crop/callout dimensions must be nonzero"));
+            return Err("crop/callout dimensions must be nonzero");
         }
         PixelTransform::Resize { width, height }
             if *width < 2
@@ -242,9 +377,7 @@ fn validate_pixel_transform(transform: &PixelTransform) -> Result<()> {
                 || *width % 2 != 0
                 || *height % 2 != 0 =>
         {
-            return Err(plan_error(
-                "resize dimensions must be even values from 2 through 8192",
-            ));
+            return Err("resize dimensions must be even values from 2 through 8192");
         }
         PixelTransform::Zoom {
             numerator,
@@ -254,16 +387,12 @@ fn validate_pixel_transform(transform: &PixelTransform) -> Result<()> {
             || u32::from(*numerator) > u32::from(*denominator) * 16
             || u32::from(*denominator) > u32::from(*numerator) * 16 =>
         {
-            return Err(plan_error(
-                "zoom ratio must be positive and between 1/16 and 16",
-            ));
+            return Err("zoom ratio must be positive and between 1/16 and 16");
         }
         PixelTransform::Callout {
             label: Some(label), ..
         } if label.is_empty() || label.chars().count() > 256 || label.contains('\0') => {
-            return Err(plan_error(
-                "callout labels must contain 1-256 non-NUL characters",
-            ));
+            return Err("callout labels must contain 1-256 non-NUL characters");
         }
         _ => {}
     }
@@ -387,25 +516,23 @@ pub(super) fn validate_ass_resource(path: &Path) -> Result<()> {
     return Ok(());
 }
 
-fn validate_annotation_template(template: &str) -> Result<()> {
+fn validate_annotation_template(template: &str) -> Result<(), String> {
     let mut token: Option<String> = None;
     for character in template.chars() {
         match (character, &mut token) {
             ('{', None) => token = Some(String::new()),
-            ('{', Some(_)) => return Err(plan_error("annotation template has a nested token")),
+            ('{', Some(_)) => return Err("annotation template has a nested token".to_owned()),
             ('}', None) => {
-                return Err(plan_error(
-                    "annotation template has an unmatched closing brace",
-                ));
+                return Err("annotation template has an unmatched closing brace".to_owned());
             }
             ('}', Some(value)) => {
                 if !matches!(
                     value.as_str(),
                     "output_frame" | "source_frame" | "source_time" | "marker" | "timecode"
                 ) {
-                    return Err(plan_error(format!(
+                    return Err(format!(
                         "annotation template token `{{{value}}}` is unsupported"
-                    )));
+                    ));
                 }
 
                 token = None;
@@ -416,7 +543,7 @@ fn validate_annotation_template(template: &str) -> Result<()> {
     }
 
     if token.is_some() {
-        return Err(plan_error("annotation template has an unclosed token"));
+        return Err("annotation template has an unclosed token".to_owned());
     }
     return Ok(());
 }
