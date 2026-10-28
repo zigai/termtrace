@@ -1,0 +1,2 @@
+- The five cancellation tests in test_testing_helpers.py pass on Python 3.10.20 and 3.14.6; the full Python suite passes on 3.10 (169 tests)
+- Making the async test helper re-raise the interrupting cancellation fails them on 3.10 with REPEATED_CANCEL instead of PRIMARY_CANCEL
