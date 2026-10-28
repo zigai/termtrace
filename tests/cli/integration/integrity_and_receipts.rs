@@ -76,6 +76,45 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
 }
 
 #[test]
+fn verify_resolves_session_names() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "record",
+            "-d",
+            "named",
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; printf named; while :; do sleep .1; done",
+        ])
+        .assert()
+        .success();
+
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "named", "--wait"])
+        .assert()
+        .success();
+
+    let mut verify = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = verify
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["analyze", "verify", "named", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let report: serde_json::Value = serde_json::from_slice(&output).expect("verify JSON");
+    assert_eq!(report["valid"], true);
+}
+
+#[test]
 fn detached_receipt_separates_cryptography_from_signer_trust() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("signed-session");

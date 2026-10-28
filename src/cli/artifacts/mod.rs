@@ -57,8 +57,11 @@ use termtrace_model::{
     execution::session::SessionPhase, protocol::capability::NATIVE_VIDEO_CAPABILITY,
     terminal::observation::StatePoint, terminal::replay::StateSelection, value::ByteString,
 };
-use termtrace_service::artifacts::{
-    source_name, ArtifactService, VideoMode, VideoOutcome, VideoRenderer, VideoRequest,
+use termtrace_service::{
+    artifacts::{
+        source_name, ArtifactService, VideoMode, VideoOutcome, VideoRenderer, VideoRequest,
+    },
+    system::SystemService,
 };
 
 pub(super) fn run_export_asciicast(
@@ -275,10 +278,31 @@ pub(super) fn render_video(
     request: &VideoRequest,
 ) -> Result<ExitCode> {
     let helper = env::current_exe().into_diagnostic()?;
-    let outcome = ArtifactService::video(request, &helper, &mut |message| {
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let idle = Arc::new(AtomicBool::new(true));
+
+    // Only capability probes can be cancelled; signals elsewhere terminate as unhandled.
+    for signal in [SIGINT, SIGTERM] {
+        flag::register_conditional_default(signal, Arc::clone(&idle)).into_diagnostic()?;
+        flag::register(signal, Arc::clone(&cancelled)).into_diagnostic()?;
+    }
+
+    let mut require = |id: &str| {
+        idle.store(false, Ordering::SeqCst);
+        let result = SystemService::require(id, &cancelled);
+        idle.store(true, Ordering::SeqCst);
+
+        return result;
+    };
+    let outcome = ArtifactService::video(request, &helper, &mut require, &mut |message| {
         return write_progress(response, message);
     })
-    .map_err(capability_report)?;
+    .map_err(|error| {
+        if cancelled.load(Ordering::SeqCst) {
+            return miette::miette!("video was cancelled");
+        }
+        return capability_report(error);
+    })?;
 
     return match outcome {
         VideoOutcome::Planned(plan) => write_json_line(response, &plan),

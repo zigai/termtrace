@@ -1,12 +1,11 @@
 //! Presentation videos of completed sessions: plan, preview, or render.
 
 use super::ArtifactService;
-use crate::{error::Error, system::SystemService, Result};
+use crate::{error::Error, Result};
 use std::{
     fmt,
     io::{self, ErrorKind as IoErrorKind},
     path::{Path, PathBuf},
-    sync::atomic::AtomicBool,
     time::Duration,
 };
 use termtrace_engine::{
@@ -215,8 +214,10 @@ pub enum VideoOutcome {
 impl ArtifactService {
     /// Plan, preview, or render a presentation video of a completed session.
     ///
-    /// `helper` is the Termtrace executable that runs native capture helpers; `progress`
-    /// receives human-readable stage announcements.
+    /// `helper` is the Termtrace executable that runs native capture helpers; `require` fails
+    /// unless a capability is ready, normally through
+    /// [`crate::system::SystemService::require`]; `progress` receives human-readable stage
+    /// announcements.
     ///
     /// # Errors
     /// Returns invalid requests, blocked capabilities, incomplete or invalid evidence, and
@@ -224,6 +225,7 @@ impl ArtifactService {
     pub fn video(
         request: &VideoRequest,
         helper: &Path,
+        require: &mut dyn FnMut(&str) -> Result<()>,
         progress: &mut dyn FnMut(fmt::Arguments<'_>),
     ) -> Result<VideoOutcome> {
         let format = match &request.mode {
@@ -311,6 +313,7 @@ impl ArtifactService {
                 provisional_fps,
                 helper,
                 request,
+                require,
                 progress,
             )?)
         } else {
@@ -353,7 +356,7 @@ impl ArtifactService {
         let (out, sidecar) = match (&request.mode, sidecar) {
             (VideoMode::Plan, _) => return Ok(VideoOutcome::Planned(Box::new(plan))),
             (VideoMode::Preview { directory, options }, _) => {
-                require_render_capabilities(source)?;
+                require_render_capabilities(source, require)?;
 
                 let preview = preview_presentation(&plan, directory, *options)?;
 
@@ -369,7 +372,7 @@ impl ArtifactService {
         };
 
         if format.is_none() {
-            require_render_capabilities(source)?;
+            require_render_capabilities(source, require)?;
         }
 
         progress(format_args!(
@@ -434,6 +437,7 @@ fn ensure_native_capture(
     fps: u16,
     helper: &Path,
     request: &VideoRequest,
+    require: &mut dyn FnMut(&str) -> Result<()>,
     progress: &mut dyn FnMut(fmt::Arguments<'_>),
 ) -> Result<PathBuf> {
     let visual = session.join(VISUAL_DIRECTORY);
@@ -460,7 +464,7 @@ fn ensure_native_capture(
         }
     }
 
-    SystemService::require(NATIVE_VIDEO_CAPABILITY, &AtomicBool::new(false))?;
+    require(NATIVE_VIDEO_CAPABILITY)?;
 
     match index_session_for_video(session, u32::from(fps)) {
         Ok(_) | Err(EngineError::ArtifactExists { .. }) => {}
@@ -710,12 +714,15 @@ impl PresetConfig {
     }
 }
 
-fn require_render_capabilities(source: PresentationSourceRequest) -> Result<()> {
+fn require_render_capabilities(
+    source: PresentationSourceRequest,
+    require: &mut dyn FnMut(&str) -> Result<()>,
+) -> Result<()> {
     if let PresentationSourceRequest::Semantic { .. } = source {
-        SystemService::require(SEMANTIC_VIDEO_CAPABILITY, &AtomicBool::new(false))?;
+        require(SEMANTIC_VIDEO_CAPABILITY)?;
     }
 
-    return SystemService::require(PRESENTATION_CAPABILITY, &AtomicBool::new(false));
+    return require(PRESENTATION_CAPABILITY);
 }
 
 /// Replace `out` with the rendered video, hard-linking when the filesystem allows it.
