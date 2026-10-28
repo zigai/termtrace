@@ -426,7 +426,7 @@ fn capture_staged(
             thread::sleep(Duration::from_millis(200));
 
             let video = staging.join("session.mkv");
-            let mut ffmpeg = spawn_video_ffmpeg(None, options, staging, &display, &video)?;
+            let mut ffmpeg = spawn_video_ffmpeg(Some(helper), options, staging, &display, &video)?;
             let duration = range.map_or_else(
                 || {
                     return log.terminal.as_ref().map_or(Duration::ZERO, |event| {
