@@ -1,0 +1,7 @@
+- `termtrace record --visual-profile '{"version":1,"semantic":{"preset":"bundled-v1"}}'` with an empty PATH records a version 13 session carrying the profile and its hash, and a semantic screenshot of it succeeds with an empty PATH
+- A profile naming the font 'No Such Font Zzz' fails before launch with font_unavailable, lists the families Ghostty offered, and creates no session
+- A font_family containing a newline is rejected as an invalid --visual-profile value
+- A recording without a profile still writes a version 12 manifest with no profile field
+- Native tests pass on this host: standard base ignores ambient Ghostty config, original and replay share grid and DPI at 96 and 144, a wrong explicit viewport fails, a host whose fontconfig only offers DejaVu Sans Mono makes native screenshot and artifact capture fail with font_unavailable, and cancelling during profile resolution reports Cancelled within 5 s with no Ghostty left
+- Rust, Python sync/async and Node consume the same fixtures/conformance/sdk/visual-profiles.json vectors and agree on normalized profiles, identities and failure codes
+- `just lint validate test integration bindings-test native-test` passes
