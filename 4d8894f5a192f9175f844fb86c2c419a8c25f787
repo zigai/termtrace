@@ -1,0 +1,4 @@
+- With 30 busy-loop processes on 24 cores and the test at nice 19, scenario_wait_requires_the_requested_stability_interval fails 8 of 10 runs before the change and passes 10 of 10 after
+- Unloaded it passes 3 of 3 runs (about 6.7 s)
+- Making the scenario wait ignore stableForMs fails the test with an unexpected success
+- `just lint validate test integration bindings-test native-test` passes
