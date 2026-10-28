@@ -10,6 +10,7 @@ use termtrace_control::{observe_phase, read_completed};
 use termtrace_model::{
     execution::environment::{ColorPolicy, EnvironmentBase, EnvironmentSpec},
     execution::session::{SessionCompletion, SessionPhase},
+    execution::visual_profile::{VisualProfile, VisualProfileFailure},
     value::ByteString,
 };
 use termtrace_process::poll_until;
@@ -41,6 +42,8 @@ pub struct LaunchSpec {
     /// Terminate the child after this long without input, output, or control activity, in
     /// whole milliseconds.
     pub idle_timeout: Option<Duration>,
+    /// Visual profile committed into the session; legacy ambient defaults when `None`.
+    pub visual_profile: Option<VisualProfile>,
 }
 
 impl LaunchSpec {
@@ -56,6 +59,7 @@ impl LaunchSpec {
             output_byte_budget: None,
             max_duration: None,
             idle_timeout: None,
+            visual_profile: None,
         };
     }
 
@@ -164,6 +168,15 @@ impl LaunchSpec {
         return self;
     }
 
+    /// Select the visual profile committed into the session. A native section is resolved
+    /// and its fonts checked before the application starts.
+    #[must_use]
+    pub fn visual_profile(mut self, profile: VisualProfile) -> Self {
+        self.visual_profile = Some(profile);
+
+        return self;
+    }
+
     pub(crate) fn validate(&self) -> Result<()> {
         if self.command.is_empty() {
             return Err(client_error("launch command is empty"));
@@ -186,11 +199,26 @@ impl LaunchSpec {
             }
         }
 
+        validate_visual_profile(self.visual_profile.as_ref())?;
+
         return self
             .environment
             .validate()
             .map_err(|source| return client_error(source.to_string()));
     }
+}
+
+pub(crate) fn validate_visual_profile(profile: Option<&VisualProfile>) -> Result<()> {
+    if let Some(profile) = profile {
+        profile.normalized().map_err(|error| {
+            return Error::Engine(termtrace_engine::Error::VisualProfile {
+                failure: VisualProfileFailure::InvalidVisualProfile,
+                reason: error.to_string(),
+            });
+        })?;
+    }
+
+    return Ok(());
 }
 
 /// How a freshly spawned recorder ended its startup.

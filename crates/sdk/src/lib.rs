@@ -27,6 +27,11 @@ pub mod session {
         OriginalCaptureStatus, PixelCanvas, SurvivingKind, SurvivingPathRecord,
         WindowResizeDecision, WindowResizeRecord,
     };
+    pub use termtrace_model::execution::visual_profile::{
+        NativeProfileReport, NativeVisualProfile, PaddingPoints, RecordedVisualProfile,
+        SemanticPreset, SemanticVisualProfile, VisualProfile, VisualProfileFailure,
+        VisualProfileReport,
+    };
     pub use termtrace_service::client::{
         await_ready, original_capture_status, send_step_request_id, CommandPostcondition,
         ControlAcknowledgement, LaunchSpec, LocatedSession, MarkOutcome, OriginalFps,

@@ -1,6 +1,6 @@
 import {
   ActionResult, Termtrace, type LaunchOptions, type MutationFailure, type PointerOutcome,
-  type SendStepSpec, type SessionStatus,
+  type SendStepSpec, type SessionStatus, type VisualProfile, type VisualProfileReport,
 } from '@termtrace/core';
 
 async function consumer(tt: Termtrace): Promise<void> {
@@ -55,6 +55,19 @@ async function consumer(tt: Termtrace): Promise<void> {
   const lossy: number = result.input.bytes_written;
   // @ts-expect-error Mutations take no AbortSignal.
   await builder.run({ signal: new AbortController().signal });
-  void textBytes; void narrow; void lossy;
+  const profile: VisualProfile = {
+    version: 1,
+    native: { font_family: 'Example Mono', font_size_points: '13.5', padding_points: { x: 0, y: 4 }, dpi: 144 },
+    semantic: { preset: 'bundled-v1' },
+  };
+  const report: VisualProfileReport = await tt.preflightVisualProfile(profile, 80, 24);
+  const profileHash: string = report.profile_hash;
+  const dpi: number | undefined = report.native?.dpi;
+  await tt.launch(['/bin/true'], { visual_profile: profile });
+  // @ts-expect-error Font sizes are exact decimal strings, never floats.
+  const floatSize: VisualProfile = { version: 1, native: { font_size_points: 13.5 } };
+  // @ts-expect-error The only semantic preset is bundled-v1.
+  const customPreset: VisualProfile = { version: 1, semantic: { preset: 'custom' } };
+  void textBytes; void narrow; void lossy; void profileHash; void dpi; void floatSize; void customPreset;
 }
 void consumer;

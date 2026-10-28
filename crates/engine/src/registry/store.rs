@@ -364,7 +364,7 @@ impl SessionRegistry {
         let manifest = read_manifest(&canonical)?;
 
         if manifest.format != SESSION_MANIFEST_FORMAT
-            || manifest.version != SESSION_MANIFEST_VERSION
+            || manifest.version != manifest.expected_version()
         {
             return Err(registry_error(
                 "publish session alias",

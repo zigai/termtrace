@@ -2161,15 +2161,39 @@ class AsyncTermtrace(Wrapper):
         cols: builtins.int | None = None,
         env: typing.Mapping[builtins.str, builtins.str] | None = None,
         cwd: builtins.str | None = None,
+        visual_profile: types.VisualProfile | None = None,
     ) -> AsyncRecording:
-        r"""Launch a new recorded command session.
+        r"""Launch a new recorded command session. `visual_profile` is committed into the session;
+        its native section, when present, is resolved before the command starts.
 
         # Errors
 
-        Raises `TermtraceError` or a subclass when the command cannot be launched and recorded.
+        Raises `ValueError` for a malformed profile, and `TermtraceError` or a subclass when the
+        profile is invalid or does not resolve, or the command cannot be launched and recorded.
         """
         return AsyncRecording._wrap(
-            await launch(lambda: self._sync.record(command, rows, cols, env, cwd))
+            await launch(
+                lambda: self._sync.record(command, rows, cols, env, cwd, visual_profile)
+            )
+        )
+
+    async def preflight_visual_profile(
+        self,
+        profile: types.VisualProfile,
+        cols: builtins.int | None = None,
+        rows: builtins.int | None = None,
+    ) -> types.VisualProfileReport:
+        r"""Validate a visual profile and report the identity of everything a launch with it would
+        use. A semantic-only profile runs no native program; a native section is resolved by
+        Ghostty and the `cols` by `rows` grid is solved at the profile's DPI. Advisory only.
+
+        # Errors
+
+        Raises `ValueError` for a malformed profile, and `TermtraceError` or a subclass with the
+        visual-profile failure code when it is invalid or does not resolve.
+        """
+        return await asyncio.to_thread(
+            lambda: self._sync.preflight_visual_profile(profile, cols, rows)
         )
 
     async def launch(
@@ -2179,7 +2203,7 @@ class AsyncTermtrace(Wrapper):
     ) -> AsyncRecording:
         r"""Launch a recorded command with typed options: `rows`, `cols`, `cwd`, `environment`
         (`base`, `set` name to bytes, `copy`, `unset`, `color`), `startup_timeout_ms`,
-        `output_byte_budget`, `max_duration_ms`, and `idle_timeout_ms`.
+        `output_byte_budget`, `max_duration_ms`, `idle_timeout_ms`, and `visual_profile`.
 
         Returns once the recorder answers or the session already completed. A cleared environment
         still receives the reserved terminal variables.
@@ -2203,7 +2227,7 @@ class AsyncTermtrace(Wrapper):
         pixels are captured from before its first byte.
 
         `options`: `grid` (`cols`, `rows`) or `viewport` (`width`, `height`), `canvas`, `fps`
-        (24, 30 or 60), `cwd`, `environment`, `ghostty_config`, `alias`, `state_root`,
+        (24, 30 or 60), `cwd`, `environment`, `ghostty_config` or `visual_profile`, `alias`, `state_root`,
         `startup_timeout_ms`, `output_byte_budget`, `max_duration_ms` and `idle_timeout_ms`.
         Cancelling `cancel` tears startup down within a bounded deadline.
 

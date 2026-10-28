@@ -578,9 +578,13 @@ fn validate_formats(formats: &[SaveFormat]) -> Result<()> {
 }
 
 fn semantic_image_resources() -> Result<Vec<SemanticImageResource>> {
+    return Ok(vec![semantic_image_resource()?]);
+}
+
+pub(crate) fn semantic_image_resource() -> Result<SemanticImageResource> {
     let font_set = semantic_font_set().map_err(render_error)?;
 
-    return Ok(vec![SemanticImageResource {
+    return Ok(SemanticImageResource {
         fonts: font_set.resources().cloned().collect(),
         font_set_blake3: font_set.font_set_blake3().to_owned(),
         fallback_policy: "style_face_then_symbols_nerd_font_then_missing_glyph_box".to_owned(),
@@ -593,7 +597,7 @@ fn semantic_image_resources() -> Result<Vec<SemanticImageResource>> {
         cell_height: SEMANTIC_CELL_HEIGHT,
         padding: 0,
         background_policy: "opaque_terminal_background".to_owned(),
-    }]);
+    });
 }
 
 fn pretty_json(value: &impl serde::Serialize, path: &Path) -> Result<Vec<u8>> {

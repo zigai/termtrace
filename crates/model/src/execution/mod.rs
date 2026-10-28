@@ -11,3 +11,4 @@ pub mod receipt;
 pub mod request_journal;
 pub mod session;
 pub mod tmux;
+pub mod visual_profile;

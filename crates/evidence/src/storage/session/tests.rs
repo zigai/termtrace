@@ -22,6 +22,7 @@ use termtrace_model::{
     execution::event_log::DurabilityPolicy,
     execution::provenance::ProvenancePolicy,
     execution::session::*,
+    execution::visual_profile::VisualProfile,
     value::ByteString,
 };
 use uuid::Uuid;
@@ -62,6 +63,7 @@ fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
         },
         geometry_provenance: GeometryProvenance::default(),
         ghostty_visual: None,
+        visual_profile: None,
         child_environment,
         execution_provenance: collect_execution_provenance(
             &ProvenancePolicy::default(),
@@ -210,6 +212,85 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
 
     assert!(matches!(
         validate_manifest(&manifest),
+        Err(Error::InvalidEvidence { .. })
+    ));
+}
+
+#[test]
+fn manifest_version_dispatch_keeps_profileless_sessions_in_the_earlier_format() {
+    let (temporary, _) = completed_fixture(Vec::new());
+    let session = temporary.path().join("session");
+    let legacy = read_manifest(&session).expect("session manifest");
+    assert_eq!(legacy.version, SESSION_MANIFEST_VERSION);
+    assert!(!serde_json::to_string(&legacy)
+        .expect("manifest JSON")
+        .contains("visual_profile"));
+
+    validate_manifest(&legacy).expect("profileless manifest keeps its version");
+
+    let mut semantic = legacy.clone();
+    semantic.visual_profile = Some(VisualProfile::semantic_bundled().record().expect("valid"));
+
+    assert!(matches!(
+        validate_manifest(&semantic),
+        Err(Error::InvalidEvidence { .. })
+    ));
+
+    semantic.version = SESSION_MANIFEST_VISUAL_PROFILE_VERSION;
+    validate_manifest(&semantic).expect("profiled manifest uses the profile version");
+
+    let mut versioned_without_profile = legacy;
+    versioned_without_profile.version = SESSION_MANIFEST_VISUAL_PROFILE_VERSION;
+
+    assert!(matches!(
+        validate_manifest(&versioned_without_profile),
+        Err(Error::InvalidEvidence { .. })
+    ));
+}
+
+#[test]
+fn manifest_validation_binds_the_visual_profile_to_its_hash_and_ghostty_provenance() {
+    let (temporary, _) = completed_fixture(Vec::new());
+    let session = temporary.path().join("session");
+    let standard = VisualProfile::native_standard();
+    let native = standard.native.clone().expect("native section");
+    let mut manifest = read_manifest(&session).expect("session manifest");
+    manifest.version = SESSION_MANIFEST_VISUAL_PROFILE_VERSION;
+    manifest.visual_profile = Some(standard.record().expect("valid"));
+    manifest.ghostty_visual = Some(GhosttyVisualProvenance {
+        source_config: None,
+        overrides: native.overrides(),
+        replay_profile: layout::GHOSTTY_REPLAY_PROFILE.to_owned(),
+        replay_profile_hash: "a".repeat(64),
+        effective_config_hash: "0".repeat(64),
+    });
+    validate_manifest(&manifest).expect("consistent native profile");
+
+    let mut tampered = manifest.clone();
+    if let Some(recorded) = tampered.visual_profile.as_mut() {
+        recorded.profile_hash = "f".repeat(64);
+    }
+
+    assert!(matches!(
+        validate_manifest(&tampered),
+        Err(Error::InvalidEvidence { .. })
+    ));
+
+    let mut different_overrides = manifest.clone();
+    if let Some(provenance) = different_overrides.ghostty_visual.as_mut() {
+        provenance.overrides.font_size = Some("16".to_owned());
+    }
+
+    assert!(matches!(
+        validate_manifest(&different_overrides),
+        Err(Error::InvalidEvidence { .. })
+    ));
+
+    let mut missing_provenance = manifest;
+    missing_provenance.ghostty_visual = None;
+
+    assert!(matches!(
+        validate_manifest(&missing_provenance),
         Err(Error::InvalidEvidence { .. })
     ));
 }

@@ -927,3 +927,111 @@ test('a rejected stop keeps the recording attached', async () => {
     assert.strictEqual((await rec.status()).kind, 'completed');
   });
 });
+
+const VISUAL_PROFILES = JSON.parse(
+  fs.readFileSync(
+    path.resolve(__dirname, '../../../../fixtures/conformance/sdk/visual-profiles.json'),
+    'utf8',
+  ),
+);
+const SEMANTIC_PROFILE = { version: 1, semantic: { preset: 'bundled-v1' } };
+
+test('visual profile vectors agree with the shared contract', async (t) => {
+  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-visual-profile-'));
+  t.after(() => fs.rmSync(tmpdir, { recursive: true, force: true }));
+  const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+
+  for (const vector of VISUAL_PROFILES.positive) {
+    const report = await tt.preflightVisualProfile(vector.profile, 40, 10);
+    assert.strictEqual(report.version, 1);
+    assert.deepStrictEqual(report.profile, vector.normalized, vector.name);
+    assert.strictEqual(report.profile_hash, vector.profile_hash, vector.name);
+    if (vector.native) {
+      assert.strictEqual(report.native.dpi, 96);
+      assert.deepStrictEqual(report.native.discovered_font_families, ['JetBrains Mono']);
+      assert.deepStrictEqual(
+        [report.native.geometry.required_cols, report.native.geometry.required_rows],
+        [40, 10],
+      );
+    } else {
+      assert.strictEqual(report.native, null);
+    }
+    if ('semantic' in vector.normalized) {
+      assert.deepStrictEqual([report.semantic.cell_width, report.semantic.cell_height], [12, 24]);
+    } else {
+      assert.strictEqual(report.semantic, null);
+    }
+  }
+
+  for (const vector of VISUAL_PROFILES.invalid) {
+    await assert.rejects(tt.preflightVisualProfile(vector.profile), (error) => {
+      assert.strictEqual(error.kind, 'invalid_operation', vector.name);
+      assert.strictEqual(error.code, 'invalid_visual_profile', vector.name);
+      return true;
+    });
+  }
+
+  for (const vector of VISUAL_PROFILES.malformed) {
+    assert.throws(
+      () => tt.preflightVisualProfile(vector.profile),
+      (error) => error.message.includes(vector.message),
+      vector.name,
+    );
+  }
+});
+
+test('a semantic visual profile records without native tools', async (t) => {
+  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-semantic-profile-'));
+  const searchPath = process.env.PATH;
+  t.after(() => {
+    process.env.PATH = searchPath;
+    fs.rmSync(tmpdir, { recursive: true, force: true });
+  });
+  process.env.PATH = '';
+  const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+
+  const report = await tt.preflightVisualProfile(SEMANTIC_PROFILE);
+  assert.strictEqual(report.native, null);
+  const rec = await tt.launch(['/bin/sh', '-c', 'echo SEMANTIC_PROFILE'], {
+    visual_profile: SEMANTIC_PROFILE,
+  });
+  assert.ok(await rec.waitForOutput('SEMANTIC_PROFILE', 5000));
+  await rec.stop();
+  const manifest = JSON.parse(fs.readFileSync(path.join(rec.path, 'session.json'), 'utf8'));
+  assert.strictEqual(manifest.version, 13);
+  assert.strictEqual(manifest.visual_profile.profile_hash, report.profile_hash);
+  assert.strictEqual(manifest.ghostty_visual, null);
+
+  await assert.rejects(tt.preflightVisualProfile(VISUAL_PROFILES.positive[1].profile), (error) => {
+    assert.strictEqual(error.code, 'native_profile_unavailable');
+    return true;
+  });
+});
+
+test('native visual profile failures stop before the application starts', async (t) => {
+  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-native-profile-'));
+  t.after(() => fs.rmSync(tmpdir, { recursive: true, force: true }));
+  const root = path.join(tmpdir, 'evidence');
+  const marker = path.join(tmpdir, 'started');
+  const tt = new Termtrace(TERMTRACE_BIN, root);
+  const command = ['/bin/sh', '-c', 'printf started > "$1"', 'probe', marker];
+
+  await assert.rejects(
+    tt.launch(command, {
+      visual_profile: { version: 1, native: { font_family: 'Termtrace Missing Family 7c1d' } },
+    }),
+    (error) => {
+      assert.deepStrictEqual([error.kind, error.code], ['engine', 'font_unavailable']);
+      return true;
+    },
+  );
+  await assert.rejects(
+    tt.launch(command, { visual_profile: VISUAL_PROFILES.invalid[2].profile }),
+    (error) => {
+      assert.strictEqual(error.code, 'invalid_visual_profile');
+      return true;
+    },
+  );
+  assert.strictEqual(fs.existsSync(marker), false);
+  assert.ok(!fs.existsSync(root) || fs.readdirSync(root).length === 0);
+});

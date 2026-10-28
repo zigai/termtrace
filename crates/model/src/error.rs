@@ -48,6 +48,11 @@ pub enum ModelValidationError {
         /// Why the chord was rejected.
         reason: &'static str,
     },
+    /// A visual profile is malformed or unsupported.
+    InvalidVisualProfile {
+        /// Why the profile was rejected.
+        reason: String,
+    },
 }
 
 impl fmt::Display for ModelValidationError {
@@ -91,6 +96,9 @@ impl fmt::Display for ModelValidationError {
             }
             Self::InvalidKeyChord { chord, reason } => {
                 return write!(f, "invalid key chord `{chord}`: {reason}");
+            }
+            Self::InvalidVisualProfile { reason } => {
+                return write!(f, "invalid visual profile: {reason}");
             }
         }
     }

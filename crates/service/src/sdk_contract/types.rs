@@ -46,6 +46,7 @@ use termtrace_model::{
         },
         session::{SessionCompletion, VerificationLevel, VerificationReport},
         tmux::TmuxRecordConfiguration,
+        visual_profile::{VisualProfile, VisualProfileFailure, VisualProfileReport},
     },
     protocol::{
         capability::CapabilityReport,
@@ -210,6 +211,9 @@ catalog!(
     VerificationLevel,
     VerificationReport,
     Versions,
+    VisualProfile,
+    VisualProfileFailure,
+    VisualProfileReport,
     WaitOutcome,
 );
 

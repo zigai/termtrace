@@ -61,7 +61,9 @@ use termtrace_sdk::locator::{LocatorSpec, ScreenFrameQuery, WaitCancellation};
 use termtrace_sdk::output::{OutputCursor, OutputService};
 use termtrace_sdk::registry::RegistryService;
 use termtrace_sdk::screen::{frame_text, StableCaptureOptions};
-use termtrace_sdk::session::{LaunchSpec, SessionTarget, StopOutcome, StopRequest};
+use termtrace_sdk::session::{
+    LaunchSpec, SessionTarget, StopOutcome, StopRequest, VisualProfile, VisualProfileReport,
+};
 use termtrace_sdk::system::SystemService;
 use termtrace_sdk::tmux::TmuxService;
 use termtrace_sdk::{ByteString, EnvironmentSpec, Uuid};
@@ -2263,9 +2265,48 @@ impl JsTermtrace {
             .await;
     }
 
+    /// Validate a visual profile and report the identity of everything a launch with it
+    /// would use. A semantic-only profile runs no native program; a native section is
+    /// resolved by Ghostty and the `cols` by `rows` grid is solved at the profile's DPI.
+    /// Advisory only.
+    ///
+    /// # Errors
+    ///
+    /// Fails for a malformed profile, and rejects with the visual-profile failure code when it
+    /// is invalid or does not resolve.
+    #[napi]
+    pub async fn preflight_visual_profile(
+        &self,
+        profile: Arg<VisualProfile>,
+        cols: Option<u32>,
+        rows: Option<u32>,
+    ) -> napi::Result<Model<VisualProfileReport>> {
+        let grid = |value: Option<u32>, name: &str, default: u16| {
+            return value.map_or(Ok(default), |value| {
+                return u16::try_from(value).map_err(|error| {
+                    return napi::Error::from_reason(format!(
+                        "{name} {value} exceeds 65535: {error}"
+                    ));
+                });
+            });
+        };
+        let cols = grid(cols, "cols", defaults::COLS)?;
+        let rows = grid(rows, "rows", defaults::ROWS)?;
+        let terminal = self.terminal.clone();
+
+        return tokio::task::spawn_blocking(move || {
+            return terminal
+                .preflight_visual_profile(&profile.0, cols, rows)
+                .map(Model)
+                .map_err(to_napi_err);
+        })
+        .await
+        .map_err(|e| return napi::Error::from_reason(e.to_string()))?;
+    }
+
     /// Launch a recorded command with typed options: `rows`, `cols`, `cwd`, `environment`
     /// (`base`, `set` name to bytes, `copy`, `unset`, `color`), `startup_timeout_ms`,
-    /// `output_byte_budget`, `max_duration_ms`, and `idle_timeout_ms`.
+    /// `output_byte_budget`, `max_duration_ms`, `idle_timeout_ms`, and `visual_profile`.
     ///
     /// Resolves once the recorder answers or the session already completed. A cleared
     /// environment still receives the reserved terminal variables.
@@ -2287,7 +2328,7 @@ impl JsTermtrace {
     /// pixels are captured from before its first byte.
     ///
     /// Options: `grid` or `viewport`, `canvas`, `fps` (24, 30 or 60), `cwd`, `environment`,
-    /// `ghostty_config`, `alias`, `state_root`, `startup_timeout_ms`, `output_byte_budget`,
+    /// `ghostty_config` or `visual_profile`, `alias`, `state_root`, `startup_timeout_ms`, `output_byte_budget`,
     /// `max_duration_ms` and `idle_timeout_ms`. Cancelling `cancel` tears startup down within
     /// a bounded deadline; the promise settles only after that.
     ///

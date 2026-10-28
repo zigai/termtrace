@@ -4618,29 +4618,29 @@
       "id": "visual.profiles",
       "family": "visual",
       "core": {
-        "path": "crates/model/src/artifact/visual.rs",
-        "symbol": "VisualManifest"
+        "path": "crates/model/src/execution/visual_profile.rs",
+        "symbol": "VisualProfile"
       },
-      "canonical_model": "VisualManifest / GeometrySolveReport",
+      "canonical_model": "VisualProfile / VisualProfileReport / SessionManifest.visual_profile",
       "rust_feature": "in-process",
       "languages": {
         "rust": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "LaunchSpec::visual_profile / Terminal::preflight_visual_profile"
         },
         "python": {
-          "status": "missing",
-          "name": null,
-          "sync_name": null,
-          "async_name": null
+          "status": "exposed_unverified",
+          "name": "Termtrace.record(visual_profile=) / Termtrace.preflight_visual_profile",
+          "sync_name": "Termtrace.preflight_visual_profile",
+          "async_name": "aio.AsyncTermtrace.preflight_visual_profile"
         },
         "typescript": {
-          "status": "missing",
-          "name": null
+          "status": "exposed_unverified",
+          "name": "Termtrace.launch({visual_profile}) / Termtrace.preflightVisualProfile"
         }
       },
-      "python_async": null,
-      "units": "grid cells; device pixels; DPI/scale explicitly effective; config/font content identities",
+      "python_async": "aio.AsyncTermtrace.preflight_visual_profile",
+      "units": "font_size_points: exact decimal string; padding_points: points per side; dpi: dots per inch; colors: lowercase #rrggbb; viewport: pixels; grid: cells",
       "availability": [
         "Linux",
         "Ghostty",
@@ -4654,8 +4654,8 @@
       "closure_owner": "09",
       "foundation_required": false,
       "reserved": true,
-      "core_status": "partial",
-      "notes": "Existing visual/capture metadata; consistent named profiles and facade closure remain 09. No foundation native certification."
+      "core_status": "implemented",
+      "notes": "Shared vectors: fixtures/conformance/sdk/visual-profiles.json. Native preflight needs Ghostty, Xvfb and the named fonts; semantic-only profiles need none."
     },
     {
       "id": "visual.geometry",

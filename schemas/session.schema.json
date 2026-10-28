@@ -396,7 +396,7 @@
           ]
         },
         "padding_x": {
-          "description": "Symmetric horizontal window padding in pixels.",
+          "description": "Symmetric horizontal window padding in points.",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
@@ -406,7 +406,7 @@
           ]
         },
         "padding_y": {
-          "description": "Symmetric vertical window padding in pixels.",
+          "description": "Symmetric vertical window padding in points.",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
@@ -518,6 +518,93 @@
       ],
       "type": "object"
     },
+    "NativeVisualProfile": {
+      "additionalProperties": false,
+      "description": "Native Ghostty settings. Absent fields keep the base configuration's value.",
+      "properties": {
+        "background": {
+          "description": "Default background as `#rrggbb`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "config": {
+          "description": "Absolute Ghostty config file replacing the isolated Ghostty-default base.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dpi": {
+          "description": "Display DPI used by every native probe, launch, and replay; 96 when absent.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "font_family": {
+          "description": "Exact installed font family; no substitute is accepted.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font_size_points": {
+          "description": "Font size in points as an exact decimal string, such as `\"15\"` or `\"13.5\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "foreground": {
+          "description": "Default foreground as `#rrggbb`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "padding_points": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PaddingPoints"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Window padding in points on each side; zero is an explicit zero."
+        }
+      },
+      "type": "object"
+    },
+    "PaddingPoints": {
+      "additionalProperties": false,
+      "description": "Symmetric window padding in points per side.",
+      "properties": {
+        "x": {
+          "description": "Left and right padding.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "y": {
+          "description": "Top and bottom padding.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
     "ProvenanceCapture": {
       "description": "How one selected provenance value is represented.",
       "oneOf": [
@@ -599,6 +686,25 @@
           "type": "string"
         }
       ]
+    },
+    "RecordedVisualProfile": {
+      "additionalProperties": false,
+      "description": "Normalized profile committed into a canonical session manifest.",
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/VisualProfile",
+          "description": "Normalized selected profile."
+        },
+        "profile_hash": {
+          "description": "BLAKE3 of the compact JSON of `profile`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile",
+        "profile_hash"
+      ],
+      "type": "object"
     },
     "RecorderProvenance": {
       "additionalProperties": false,
@@ -736,6 +842,30 @@
         "privileged",
         "kernel",
         "recorder"
+      ],
+      "type": "object"
+    },
+    "SemanticPreset": {
+      "description": "Bundled semantic fonts and fixed metrics.",
+      "oneOf": [
+        {
+          "const": "bundled-v1",
+          "description": "Bundled JetBrains Mono and Symbols Nerd Font faces with fixed 12x24 cells.",
+          "type": "string"
+        }
+      ]
+    },
+    "SemanticVisualProfile": {
+      "additionalProperties": false,
+      "description": "Semantic renderer selection.",
+      "properties": {
+        "preset": {
+          "$ref": "#/$defs/SemanticPreset",
+          "description": "Bundled semantic resource preset."
+        }
+      },
+      "required": [
+        "preset"
       ],
       "type": "object"
     },
@@ -946,9 +1076,47 @@
       ],
       "type": "object"
     },
+    "VisualProfile": {
+      "additionalProperties": false,
+      "description": "Immutable visual configuration selected for one launch.\n\nThe native section configures Ghostty for native pixels. The semantic section selects the\nbundled semantic renderer and never changes native configuration.",
+      "properties": {
+        "native": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NativeVisualProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Native Ghostty configuration; selecting it requires Ghostty and the named fonts."
+        },
+        "semantic": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SemanticVisualProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Semantic renderer selection."
+        },
+        "version": {
+          "description": "Contract version; exactly 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "type": "object"
+    },
     "WindowPadding": {
       "additionalProperties": false,
-      "description": "Ghostty window padding in points; zero leaves the profile's own padding in effect.",
+      "description": "Solver-selected Ghostty window padding in points; zero leaves the profile's own padding in\neffect.",
       "properties": {
         "x": {
           "description": "Horizontal padding on each side.",
@@ -1119,6 +1287,17 @@
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
+    },
+    "visual_profile": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RecordedVisualProfile"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Visual profile selected at launch; absent for legacy launches using ambient defaults."
     },
     "working_directory": {
       "anyOf": [

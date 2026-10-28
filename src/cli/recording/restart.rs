@@ -206,6 +206,7 @@ pub(super) fn restarted_record_options(
         cell_height_px: manifest.geometry.pixel_height / manifest.geometry.rows,
         geometry_provenance: manifest.geometry_provenance,
         ghostty_profile,
+        visual_profile: manifest.visual_profile.clone(),
         term,
         environment,
         colors: event_log.header.colors,

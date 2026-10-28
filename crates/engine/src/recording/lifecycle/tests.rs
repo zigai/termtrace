@@ -86,6 +86,7 @@ fn isolated_options(output_directory: PathBuf, command: Vec<OsString>) -> Record
         cell_height_px: 18,
         geometry_provenance: GeometryProvenance::default(),
         ghostty_profile: None,
+        visual_profile: None,
         term: "xterm-ghostty".to_owned(),
         environment: EnvironmentSpec::default(),
         colors: TerminalColors::default(),

@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "positive": [
+    {
+      "name": "semantic-bundled",
+      "native": false,
+      "profile": {"version": 1, "semantic": {"preset": "bundled-v1"}},
+      "normalized": {"version": 1, "semantic": {"preset": "bundled-v1"}},
+      "profile_hash": "36b8f3ad2b22f8a427bf691fafdbade1f867338fd5fe3cb457226077d1c6c4d3"
+    },
+    {
+      "name": "native-focused-fields",
+      "native": true,
+      "profile": {
+        "version": 1,
+        "native": {
+          "font_family": "JetBrains Mono",
+          "font_size_points": "13.5",
+          "padding_points": {"x": 0, "y": 6},
+          "foreground": "#D8DEE9",
+          "background": "#20242C"
+        }
+      },
+      "normalized": {
+        "version": 1,
+        "native": {
+          "font_family": "JetBrains Mono",
+          "font_size_points": "13.5",
+          "padding_points": {"x": 0, "y": 6},
+          "foreground": "#d8dee9",
+          "background": "#20242c",
+          "dpi": 96
+        }
+      },
+      "profile_hash": "6ff5d4caec25d0359c4edecb8cecb9fae0c9b7d7d92b027014e39f9a6e0d607b"
+    },
+    {
+      "name": "native-standard",
+      "native": true,
+      "profile": {
+        "version": 1,
+        "native": {
+          "font_family": "JetBrains Mono",
+          "font_size_points": "15",
+          "padding_points": {"x": 8, "y": 8},
+          "foreground": "#d8dee9",
+          "background": "#20242c",
+          "dpi": 96
+        },
+        "semantic": {"preset": "bundled-v1"}
+      },
+      "normalized": {
+        "version": 1,
+        "native": {
+          "font_family": "JetBrains Mono",
+          "font_size_points": "15",
+          "padding_points": {"x": 8, "y": 8},
+          "foreground": "#d8dee9",
+          "background": "#20242c",
+          "dpi": 96
+        },
+        "semantic": {"preset": "bundled-v1"}
+      },
+      "profile_hash": "3889eed6f552ab496acf481e63c5cb3e1fa29c5babceb188a99791bd86c53a4e"
+    }
+  ],
+  "invalid": [
+    {"name": "future-version", "profile": {"version": 2, "semantic": {"preset": "bundled-v1"}}},
+    {"name": "empty", "profile": {"version": 1}},
+    {"name": "nan-size", "profile": {"version": 1, "native": {"font_size_points": "NaN"}}},
+    {"name": "zero-size", "profile": {"version": 1, "native": {"font_size_points": "0"}}},
+    {"name": "negative-size", "profile": {"version": 1, "native": {"font_size_points": "-12"}}},
+    {"name": "exponent-size", "profile": {"version": 1, "native": {"font_size_points": "1e3"}}},
+    {"name": "short-color", "profile": {"version": 1, "native": {"foreground": "#fff"}}},
+    {
+      "name": "config-line-injection",
+      "profile": {"version": 1, "native": {"font_family": "Example Mono\nbackground = #000000"}}
+    },
+    {"name": "zero-dpi", "profile": {"version": 1, "native": {"dpi": 0}}},
+    {"name": "relative-config", "profile": {"version": 1, "native": {"config": "ghostty.config"}}}
+  ],
+  "malformed": [
+    {
+      "name": "unknown-field",
+      "profile": {"version": 1, "semantic": {"preset": "bundled-v1"}, "theme": "dark"},
+      "message": "unknown field"
+    },
+    {
+      "name": "semantic-font",
+      "profile": {"version": 1, "semantic": {"preset": "bundled-v1", "font_family": "Example Mono"}},
+      "message": "unknown field"
+    },
+    {
+      "name": "unsupported-preset",
+      "profile": {"version": 1, "semantic": {"preset": "bundled-v2"}},
+      "message": "unknown variant"
+    },
+    {
+      "name": "numeric-size",
+      "profile": {"version": 1, "native": {"font_size_points": 15}},
+      "message": "invalid type"
+    }
+  ]
+}

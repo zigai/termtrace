@@ -8,6 +8,7 @@ pub use termtrace_control::Error as ControlError;
 use termtrace_model::protocol::management::{FailureContext, ManagementFailure, TmuxFailureFacts};
 use termtrace_model::{
     artifact::original::OriginalCaptureFacts,
+    execution::visual_profile::VisualProfileFailure,
     protocol::{
         control::{CommandError, ControlErrorDetails},
         mutation::{MutationEffect, Retry},
@@ -210,6 +211,10 @@ impl Error {
             },
             Self::Command(_) => ErrorKind::ControlRejected,
             Self::Evidence(_) => ErrorKind::Evidence,
+            Self::Engine(termtrace_engine::Error::VisualProfile {
+                failure: VisualProfileFailure::InvalidVisualProfile,
+                ..
+            }) => ErrorKind::InvalidOperation,
             Self::Engine(_) => ErrorKind::Engine,
             Self::Export(_) => ErrorKind::Export,
             Self::Media(_) => ErrorKind::Media,
@@ -253,6 +258,10 @@ impl Error {
             && let Some(code) = facts.code
         {
             return code.code();
+        }
+
+        if let Self::Engine(termtrace_engine::Error::VisualProfile { failure, .. }) = self {
+            return failure.code();
         }
         return self.kind().as_str();
     }

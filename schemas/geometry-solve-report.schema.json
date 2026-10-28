@@ -105,7 +105,7 @@
     },
     "WindowPadding": {
       "additionalProperties": false,
-      "description": "Ghostty window padding in points; zero leaves the profile's own padding in effect.",
+      "description": "Solver-selected Ghostty window padding in points; zero leaves the profile's own padding in\neffect.",
       "properties": {
         "x": {
           "description": "Horizontal padding on each side.",

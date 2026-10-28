@@ -4,6 +4,7 @@ use crate::{
     execution::environment::ChildEnvironmentPolicy,
     execution::event_log::{DurabilityPolicy, DurabilityRecord},
     execution::provenance::ExecutionProvenance,
+    execution::visual_profile::{NativeVisualProfile, RecordedVisualProfile},
     value::pagination::OutputPage,
     value::ByteString,
 };
@@ -16,6 +17,8 @@ use uuid::Uuid;
 pub const SESSION_MANIFEST_FORMAT: &str = "termtrace-session";
 /// Session manifest schema version.
 pub const SESSION_MANIFEST_VERSION: u32 = 12;
+/// Session manifest schema version of a session that recorded a visual profile.
+pub const SESSION_MANIFEST_VISUAL_PROFILE_VERSION: u32 = 13;
 /// Current tmux-owned-pane provenance contract.
 pub const TMUX_PANE_PROVENANCE_VERSION: u32 = 1;
 /// Completion manifest format identifier.
@@ -205,6 +208,9 @@ pub struct SessionManifest {
     /// Canonical per-recording Ghostty profile, when explicitly resolved.
     #[serde(default)]
     pub ghostty_visual: Option<GhosttyVisualProvenance>,
+    /// Visual profile selected at launch; absent for legacy launches using ambient defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visual_profile: Option<RecordedVisualProfile>,
     /// Value-free child-environment policy; selected values live in execution provenance.
     pub child_environment: ChildEnvironmentPolicy,
     /// Sensitivity-aware execution provenance and its explicit collection policy.
@@ -227,6 +233,28 @@ pub struct SessionManifest {
     pub durability_policy: DurabilityPolicy,
     /// Chain-bound runtime resource limits.
     pub resource_limits: ResourceLimits,
+}
+
+impl SessionManifest {
+    /// Schema version this manifest must declare. Sessions without a visual profile keep the
+    /// format every earlier reader accepts.
+    #[must_use]
+    pub const fn expected_version(&self) -> u32 {
+        if self.visual_profile.is_some() {
+            return SESSION_MANIFEST_VISUAL_PROFILE_VERSION;
+        }
+        return SESSION_MANIFEST_VERSION;
+    }
+
+    /// Display DPI fixed by the recorded native visual profile.
+    #[must_use]
+    pub fn native_profile_dpi(&self) -> Option<u32> {
+        return self
+            .visual_profile
+            .as_ref()
+            .and_then(|recorded| return recorded.profile.native.as_ref())
+            .map(NativeVisualProfile::resolved_dpi);
+    }
 }
 
 /// Where a session is in its life, observed without changing canonical evidence.
@@ -393,7 +421,8 @@ impl CaptureTarget {
     }
 }
 
-/// Ghostty window padding in points; zero leaves the profile's own padding in effect.
+/// Solver-selected Ghostty window padding in points; zero leaves the profile's own padding in
+/// effect.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WindowPadding {
@@ -429,9 +458,9 @@ pub struct GhosttyVisualOverrides {
     pub font_family: Option<String>,
     /// Font size in points, represented exactly as a Ghostty config value.
     pub font_size: Option<String>,
-    /// Symmetric horizontal window padding in pixels.
+    /// Symmetric horizontal window padding in points.
     pub padding_x: Option<u16>,
-    /// Symmetric vertical window padding in pixels.
+    /// Symmetric vertical window padding in points.
     pub padding_y: Option<u16>,
     /// Default foreground color in Ghostty syntax.
     pub foreground: Option<String>,

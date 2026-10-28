@@ -32,6 +32,7 @@ fn fixture(script: &str) -> TempDir {
         cell_height_px: 18,
         geometry_provenance: Default::default(),
         ghostty_profile: None,
+        visual_profile: None,
         term: "xterm-ghostty".into(),
         environment: Default::default(),
         colors: TerminalColors::default(),

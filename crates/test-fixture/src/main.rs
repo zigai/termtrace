@@ -151,6 +151,7 @@ fn generate(arguments: LargeArgs) -> Result<()> {
         geometry: geometry.clone(),
         geometry_provenance: GeometryProvenance::default(),
         ghostty_visual: None,
+        visual_profile: None,
         child_environment: environment.policy().clone(),
         execution_provenance,
         import_provenance: None,

@@ -141,6 +141,67 @@ fn semantic_record_without_ghostty_has_stable_nonwarning_stderr() {
 }
 
 #[test]
+fn semantic_visual_profile_needs_no_native_tools_and_keeps_semantic_pixels() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let script =
+        "printf 'BUNDLED \\033[1mbold\\033[0m \\033[3mitalic\\033[0m \\346\\274\\242e\\314\\201'";
+
+    let record_and_shoot = |name: &str, profile: Option<&str>| {
+        let session = temporary.path().join(name);
+        let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+        record
+            .env("PATH", "")
+            .args(["record", "--no-input", "--cols", "40", "--rows", "4"]);
+
+        if let Some(profile) = profile {
+            record.args(["--visual-profile", profile]);
+        }
+
+        record
+            .arg("--out")
+            .arg(&session)
+            .args(["--", "/bin/sh", "-c", script])
+            .assert()
+            .success();
+
+        let shot = temporary.path().join(format!("{name}-shot"));
+        Command::cargo_bin("termtrace")
+            .expect("binary should build")
+            .env("PATH", "")
+            .arg("screenshot")
+            .arg(&session)
+            .arg("--out")
+            .arg(&shot)
+            .assert()
+            .success();
+
+        return (
+            read_manifest(&session).expect("session manifest"),
+            fs::read(shot.join("screen.png")).expect("semantic screenshot"),
+        );
+    };
+    let (legacy, legacy_png) = record_and_shoot("legacy", None);
+    let (profiled, profiled_png) = record_and_shoot(
+        "profiled",
+        Some(r#"{"version":1,"semantic":{"preset":"bundled-v1"}}"#),
+    );
+
+    assert_eq!(legacy.version, 12);
+    assert!(legacy.visual_profile.is_none());
+    assert_eq!(profiled.version, 13);
+    assert_eq!(
+        profiled.visual_profile,
+        Some(
+            VisualProfile::semantic_bundled()
+                .record()
+                .expect("valid profile")
+        )
+    );
+    assert!(profiled.ghostty_visual.is_none());
+    assert_eq!(legacy_png, profiled_png);
+}
+
+#[test]
 fn custom_provenance_policy_hashes_without_retaining_values() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("custom-provenance");

@@ -23,6 +23,7 @@ use termtrace_model::{
         GeometryProvenance, ImportProvenance, RecordingFailurePolicy, ResourceLimitOutcome,
         ResourceLimits, SessionLineage, TmuxPaneProvenance,
     },
+    execution::visual_profile::RecordedVisualProfile,
     protocol::control::{ControlRequest, ControlResponse, ProcessSignal},
 };
 use termtrace_process::ProcessGroup;
@@ -102,6 +103,8 @@ pub struct RecordOptions {
     pub geometry_provenance: GeometryProvenance,
     /// Canonical per-recording Ghostty visual profile, when configured.
     pub ghostty_profile: Option<ResolvedGhosttyProfile>,
+    /// Visual profile selected at launch, committed into the session manifest.
+    pub visual_profile: Option<RecordedVisualProfile>,
     /// Terminal identity exposed to the child.
     pub term: String,
     /// Deterministic child-environment policy.

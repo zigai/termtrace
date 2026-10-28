@@ -305,6 +305,14 @@ CapabilityStatus: TypeAlias = "Literal['ready', 'blocked']"
 CaptureQuality: TypeAlias = "Literal['live', 'stable', 'completed', 'incomplete']"
 
 
+class CaptureTarget(TypedDict):
+    "Pixel viewport intended for native visual capture."
+
+    height: int
+    padding: NotRequired[WindowPadding]
+    width: int
+
+
 class CellChange(TypedDict):
     "One changed viewport cell."
 
@@ -1003,6 +1011,22 @@ class GarbageCollectionReport(TypedDict):
     state_root: ExactPath
 
 
+class GeometryProbeAttempt(TypedDict):
+    "One viewport and measured grid considered by the exact-grid solver."
+
+    report: TerminalGeometryReport
+    target: CaptureTarget
+
+
+class GeometrySolveReport(TypedDict):
+    "Bounded capture-time search proving the selected viewport fits the canonical grid."
+
+    attempts: list[GeometryProbeAttempt]
+    required_cols: int
+    required_rows: int
+    selected: CaptureTarget
+
+
 InputDescriptor: TypeAlias = "InputDescriptorRaw | InputDescriptorText | InputDescriptorKey | InputDescriptorPaste | InputDescriptorFocus | InputDescriptorPointer | InputDescriptorActivate"
 
 
@@ -1189,6 +1213,7 @@ class LaunchOptions(TypedDict):
     output_byte_budget: int | None
     rows: int | None
     startup_timeout_ms: int | None
+    visual_profile: VisualProfile | None
 
 
 class LaunchOptionsInput(TypedDict):
@@ -1202,6 +1227,7 @@ class LaunchOptionsInput(TypedDict):
     output_byte_budget: NotRequired[int | None]
     rows: NotRequired[int | None]
     startup_timeout_ms: NotRequired[int | None]
+    visual_profile: NotRequired[VisualProfile | None]
 
 
 LifecycleKind: TypeAlias = "Literal['spawned', 'output_closed', 'stopping']"
@@ -1405,6 +1431,31 @@ class NativeCorrelation(TypedDict):
 NativeEvidenceLevel: TypeAlias = "Literal['presentation_eligible', 'scheduled_for_frame', 'post_endpoint_stable_capture', 'frame_observed']"
 
 
+class NativeProfileReport(TypedDict):
+    "Native facts observed while resolving a native profile."
+
+    discovered_font_families: list[str]
+    dpi: int
+    effective_config_hash: str
+    geometry: GeometrySolveReport
+    ghostty_executable_blake3: str
+    ghostty_version: str
+    replay_profile_hash: str
+    requested_font_families: list[str]
+
+
+class NativeVisualProfile(TypedDict):
+    "Native Ghostty settings. Absent fields keep the base configuration's value."
+
+    background: NotRequired[str | None]
+    config: NotRequired[str | None]
+    dpi: NotRequired[int | None]
+    font_family: NotRequired[str | None]
+    font_size_points: NotRequired[str | None]
+    foreground: NotRequired[str | None]
+    padding_points: NotRequired[PaddingPoints | None]
+
+
 NullableString: TypeAlias = "str | None"
 
 
@@ -1521,6 +1572,7 @@ class OriginalLaunchOptions(TypedDict):
     startup_timeout_ms: int | None
     state_root: str | None
     viewport: PixelCanvas | None
+    visual_profile: VisualProfile | None
 
 
 class OriginalLaunchOptionsInput(TypedDict):
@@ -1539,6 +1591,7 @@ class OriginalLaunchOptionsInput(TypedDict):
     startup_timeout_ms: NotRequired[int | None]
     state_root: NotRequired[str | None]
     viewport: NotRequired[PixelCanvas | None]
+    visual_profile: NotRequired[VisualProfile | None]
 
 
 class OriginalRecording(TypedDict):
@@ -1565,6 +1618,13 @@ class OutputPageCursor(TypedDict):
 
     byte_offset: int
     events: EventPageCursor
+
+
+class PaddingPoints(TypedDict):
+    "Symmetric window padding in points per side."
+
+    x: int
+    y: int
 
 
 class PageSource(TypedDict):
@@ -2631,7 +2691,16 @@ class SemanticImageResource(TypedDict):
     text_baseline: int
 
 
+SemanticPreset: TypeAlias = "Literal['bundled-v1']"
+
+
 SemanticRasterProfile: TypeAlias = "Literal['direct', 'supersampled-2x']"
+
+
+class SemanticVisualProfile(TypedDict):
+    "Semantic renderer selection."
+
+    preset: SemanticPreset
 
 
 class SendSpec(TypedDict):
@@ -2990,6 +3059,17 @@ class SurvivingPathRecord(TypedDict):
 
     kind: SurvivingKind
     path: Base64Bytes
+
+
+class TerminalGeometryReport(TypedDict):
+    "Geometry reported by a live terminal through XTWINOPS queries."
+
+    cell_height: int
+    cell_width: int
+    cols: int
+    rows: int
+    text_height: int
+    text_width: int
 
 
 class TerminalMetadata(TypedDict):
@@ -3681,6 +3761,29 @@ class Versions(TypedDict):
     termtrace: str
 
 
+class VisualProfile(TypedDict):
+    "Immutable visual configuration selected for one launch.\n\nThe native section configures Ghostty for native pixels. The semantic section selects the\nbundled semantic renderer and never changes native configuration."
+
+    native: NotRequired[NativeVisualProfile | None]
+    semantic: NotRequired[SemanticVisualProfile | None]
+    version: int
+
+
+VisualProfileFailure: TypeAlias = "Literal['invalid_visual_profile', 'native_profile_unavailable', 'ghostty_config_invalid', 'font_unavailable', 'viewport_mismatch', 'native_profile_failed']"
+
+
+class VisualProfileReport(TypedDict):
+    "Result of validating a visual profile before launch.\n\nThe report holds settings and resource identities only, never local paths or timestamps.\nIt is advisory: a later launch resolves the profile again."
+
+    guarantees: list[str]
+    limitations: list[str]
+    native: NativeProfileReport | None
+    profile: VisualProfile
+    profile_hash: str
+    semantic: SemanticImageResource | None
+    version: int
+
+
 class VtSourceSegment(TypedDict):
     "Half-open byte range within one canonical output event."
 
@@ -3713,3 +3816,10 @@ class WaitOutcome(TypedDict):
 
 
 WideKind: TypeAlias = "Literal['narrow', 'wide', 'spacer_tail', 'spacer_head']"
+
+
+class WindowPadding(TypedDict):
+    "Solver-selected Ghostty window padding in points; zero leaves the profile's own padding in\neffect."
+
+    x: int
+    y: int

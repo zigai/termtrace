@@ -22,7 +22,7 @@ use termtrace_control::{observe_phase, recorder_identity};
 use termtrace_evidence::{artifact::write_secure, session::read_manifest};
 use termtrace_model::{
     execution::session::SessionPhase,
-    execution::session::{SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION},
+    execution::session::SESSION_MANIFEST_FORMAT,
     protocol::control::CONTROL_PROTOCOL_VERSION,
     registry::{
         AliasReservation, DetachedSessionPaths, GarbageCollectionCandidate,

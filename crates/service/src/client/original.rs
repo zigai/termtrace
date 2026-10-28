@@ -1,7 +1,10 @@
 //! Original-execution recordings: the command runs in a private Ghostty display whose pixels
 //! are acquired while the canonical session records it.
 
-use super::{await_ready, client_error, Readiness, Session, SessionTarget, StopRequest};
+use super::{
+    await_ready, client_error, launch::validate_visual_profile, Readiness, Session, SessionTarget,
+    StopRequest,
+};
 use crate::{
     defaults,
     registry::{spawn_detached, RegistryService},
@@ -31,6 +34,7 @@ use std::{
     time::{Duration, Instant},
 };
 use termtrace_control::{observe_phase, read_completed};
+use termtrace_engine::recording::resolve_visual_profile;
 use termtrace_evidence::session::read_manifest;
 use termtrace_media::native_capture::verify_original_capture;
 use termtrace_model::{
@@ -45,6 +49,7 @@ use termtrace_model::{
     execution::{
         environment::EnvironmentSpec,
         session::{SessionCompletion, SessionPhase},
+        visual_profile::{VisualProfile, VisualProfileFailure},
     },
     protocol::capability::NATIVE_VIDEO_CAPABILITY,
     registry::DetachedSessionPaths,
@@ -150,6 +155,8 @@ pub struct OriginalLaunchSpec {
     pub fps: OriginalFps,
     /// Ghostty configuration resolved into the recorded visual profile.
     pub ghostty_config: Option<PathBuf>,
+    /// Visual profile with a native section; replaces `ghostty_config`.
+    pub visual_profile: Option<VisualProfile>,
     /// Registry alias bound to the session once it is live.
     pub alias: Option<String>,
     /// Registry state root for `alias`; the default registry when `None`.
@@ -171,6 +178,7 @@ impl OriginalLaunchSpec {
             canvas: None,
             fps: OriginalFps::default(),
             ghostty_config: None,
+            visual_profile: None,
             alias: None,
             state_root: None,
         };
@@ -211,6 +219,23 @@ impl OriginalLaunchSpec {
 
         if self.state_root.is_some() && self.alias.is_none() {
             return Err(client_error("a registry state root requires an alias"));
+        }
+
+        if let Some(profile) = &self.visual_profile {
+            validate_visual_profile(Some(profile))?;
+
+            if self.ghostty_config.is_some() {
+                return Err(client_error(
+                    "a visual profile replaces the Ghostty config; set only one",
+                ));
+            }
+
+            if profile.native.is_none() {
+                return Err(Error::Engine(termtrace_engine::Error::VisualProfile {
+                    failure: VisualProfileFailure::InvalidVisualProfile,
+                    reason: "original capture requires a native visual profile section".to_owned(),
+                }));
+            }
         }
 
         for (name, limit) in [
@@ -272,6 +297,13 @@ impl OriginalLaunchSpec {
 
         if let Some(path) = &self.ghostty_config {
             arguments.extend(["--ghostty-config".into(), path.as_os_str().into()]);
+        }
+
+        if let Some(profile) = &self.visual_profile {
+            arguments.extend([
+                "--visual-profile".into(),
+                serde_json::to_string(profile).unwrap_or_default().into(),
+            ]);
         }
 
         if let Some(limit) = self.output_byte_budget {
@@ -620,6 +652,33 @@ fn tear_down(session: &Path, helper: &Path, mut child: Child) -> Option<String> 
     );
 }
 
+// Cancellation wins over any failure seen while it was being observed, so a cancelled launch
+// always reports cancellation.
+fn prepare_original(spec: &OriginalLaunchSpec, cancelled: &AtomicBool) -> Result<()> {
+    let prepared = SystemService::require(NATIVE_VIDEO_CAPABILITY, cancelled).and_then(|()| {
+        if let Some(profile) = &spec.visual_profile {
+            resolve_visual_profile(profile, cancelled)?;
+        }
+
+        return Ok(());
+    });
+
+    if !cancelled.load(Ordering::Acquire) {
+        return prepared;
+    }
+    return Err(Error::OriginalCaptureFailed {
+        facts: Box::new(OriginalCaptureFacts {
+            code: Some(OriginalCaptureFailure::Cancelled),
+            state: OriginalCaptureState::Cancelled,
+            session: ByteString::default(),
+            completion: None,
+            surviving: Vec::new(),
+            cleanup: None,
+            reason: "cancelled before the capture started".to_owned(),
+        }),
+    });
+}
+
 impl super::Terminal {
     /// Start `spec` as an original recording and return it once the command runs inside the
     /// captured terminal.
@@ -638,22 +697,7 @@ impl super::Terminal {
     ) -> Result<OriginalSession> {
         spec.validate()?;
 
-        if let Err(error) = SystemService::require(NATIVE_VIDEO_CAPABILITY, cancelled) {
-            if !cancelled.load(Ordering::Acquire) {
-                return Err(error);
-            }
-            return Err(Error::OriginalCaptureFailed {
-                facts: Box::new(OriginalCaptureFacts {
-                    code: Some(OriginalCaptureFailure::Cancelled),
-                    state: OriginalCaptureState::Cancelled,
-                    session: ByteString::default(),
-                    completion: None,
-                    surviving: Vec::new(),
-                    cleanup: None,
-                    reason: "cancelled before the capture started".to_owned(),
-                }),
-            });
-        }
+        prepare_original(spec, cancelled)?;
 
         fs_err::create_dir_all(self.evidence_root()).map_err(|source| {
             return Error::Filesystem {

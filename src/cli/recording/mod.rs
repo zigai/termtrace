@@ -40,9 +40,9 @@ use termtrace_engine::{
     inspection::wait_for_completion,
     recording::{
         inherited_geometry, parse_environment_spec, read_environment_spec,
-        record_with_resize_authority, resolve_ghostty_profile, restore_ghostty_profile,
-        EffectiveEnvironment, RecordOptions, RecordOutcome, ResizeAuthority,
-        ResolvedGhosttyProfile,
+        record_with_resize_authority, resolve_ghostty_profile, resolve_visual_profile,
+        restore_ghostty_profile, EffectiveEnvironment, RecordOptions, RecordOutcome,
+        ResizeAuthority, ResolvedGhosttyProfile,
     },
 };
 use termtrace_evidence::{
@@ -58,6 +58,9 @@ use termtrace_model::{
     execution::session::{
         GeometryProvenance, GeometrySource, GhosttyVisualOverrides, ImportProvenance,
         ResourceLimits, SessionCompletion, SessionGeometry, SessionLineage, SessionManifest,
+    },
+    execution::visual_profile::{
+        NativeVisualProfile, RecordedVisualProfile, VisualProfile, VisualProfileFailure,
     },
     protocol::control::{ScreenPredicate, ScreenWaitQuality},
     registry::{DetachedSessionPaths, RegistryEntry},

@@ -23,7 +23,7 @@ use termtrace_sdk::defaults;
 use termtrace_sdk::integrity::IntegrityService;
 use termtrace_sdk::locator::WaitCancellation;
 use termtrace_sdk::registry::RegistryService;
-use termtrace_sdk::session::{LaunchSpec, SessionTarget};
+use termtrace_sdk::session::{LaunchSpec, SessionTarget, VisualProfile, VisualProfileReport};
 use termtrace_sdk::system::SystemService;
 use termtrace_sdk::tmux::TmuxService;
 use termtrace_sdk::tmux::TmuxStreamingBundleManifest;
@@ -142,12 +142,14 @@ impl PyTermtrace {
         return crate::diagnostics::PyEvidence::new(source);
     }
 
-    /// Launch a new recorded command session.
+    /// Launch a new recorded command session. `visual_profile` is committed into the session;
+    /// its native section, when present, is resolved before the command starts.
     ///
     /// # Errors
     ///
-    /// Raises `TermtraceError` or a subclass when the command cannot be launched and recorded.
-    #[pyo3(signature = (command, rows = None, cols = None, env = None, cwd = None))]
+    /// Raises `ValueError` for a malformed profile, and `TermtraceError` or a subclass when the
+    /// profile is invalid or does not resolve, or the command cannot be launched and recorded.
+    #[pyo3(signature = (command, rows = None, cols = None, env = None, cwd = None, visual_profile = None))]
     pub fn record(
         &self,
         py: Python<'_>,
@@ -156,6 +158,7 @@ impl PyTermtrace {
         cols: Option<u16>,
         env: Option<HashMap<String, String>>,
         cwd: Option<String>,
+        visual_profile: Option<Arg<VisualProfile>>,
     ) -> PyResult<PyRecording> {
         let environment = EnvironmentSpec {
             set: env
@@ -170,15 +173,46 @@ impl PyTermtrace {
             cols,
             cwd,
             environment: Some(environment),
+            visual_profile: visual_profile.map(|profile| return profile.0),
             ..LaunchOptions::default()
         };
 
         return self.start(py, control::launch_spec_from(command, &options)?);
     }
 
+    /// Validate a visual profile and report the identity of everything a launch with it would
+    /// use. A semantic-only profile runs no native program; a native section is resolved by
+    /// Ghostty and the `cols` by `rows` grid is solved at the profile's DPI. Advisory only.
+    ///
+    /// # Errors
+    ///
+    /// Raises `ValueError` for a malformed profile, and `TermtraceError` or a subclass with the
+    /// visual-profile failure code when it is invalid or does not resolve.
+    #[pyo3(signature = (profile, cols = None, rows = None))]
+    pub fn preflight_visual_profile(
+        &self,
+        py: Python<'_>,
+        profile: Arg<VisualProfile>,
+        cols: Option<u16>,
+        rows: Option<u16>,
+    ) -> PyResult<Model<VisualProfileReport>> {
+        let terminal = self.terminal.clone();
+
+        py.detach(move || {
+            return terminal
+                .preflight_visual_profile(
+                    &profile.0,
+                    cols.unwrap_or(defaults::COLS),
+                    rows.unwrap_or(defaults::ROWS),
+                )
+                .map(Model)
+                .map_err(to_py_err);
+        })
+    }
+
     /// Launch a recorded command with typed options: `rows`, `cols`, `cwd`, `environment`
     /// (`base`, `set` name to bytes, `copy`, `unset`, `color`), `startup_timeout_ms`,
-    /// `output_byte_budget`, `max_duration_ms`, and `idle_timeout_ms`.
+    /// `output_byte_budget`, `max_duration_ms`, `idle_timeout_ms`, and `visual_profile`.
     ///
     /// Returns once the recorder answers or the session already completed. A cleared environment
     /// still receives the reserved terminal variables.
@@ -201,7 +235,7 @@ impl PyTermtrace {
     /// pixels are captured from before its first byte.
     ///
     /// `options`: `grid` (`cols`, `rows`) or `viewport` (`width`, `height`), `canvas`, `fps`
-    /// (24, 30 or 60), `cwd`, `environment`, `ghostty_config`, `alias`, `state_root`,
+    /// (24, 30 or 60), `cwd`, `environment`, `ghostty_config` or `visual_profile`, `alias`, `state_root`,
     /// `startup_timeout_ms`, `output_byte_budget`, `max_duration_ms` and `idle_timeout_ms`.
     /// Cancelling `cancel` tears startup down within a bounded deadline.
     ///

@@ -7,6 +7,7 @@ use std::{
     fs::{self, File},
     os::{fd::AsRawFd as _, unix::fs::MetadataExt as _},
     path::Component,
+    sync::atomic::AtomicBool,
 };
 use termtrace_model::execution::session::{recorder_exit_status, RecordingFailurePolicy};
 
@@ -150,6 +151,26 @@ pub(in crate::cli) fn run_record(
         || !overrides.is_empty()
         || matches!(arguments.geometry, GeometryMode::Fit);
 
+    let visual_profile = arguments
+        .visual_profile
+        .as_ref()
+        .map(VisualProfile::record)
+        .transpose()
+        .into_diagnostic()?;
+    if let Some(recorded) = &visual_profile {
+        check_visual_profile_arguments(
+            &arguments,
+            &overrides,
+            resolved_ghostty_profile_provenance.is_some(),
+            recorded,
+        )?;
+    }
+
+    let profile_dpi = visual_profile
+        .as_ref()
+        .and_then(|recorded| return recorded.profile.native.as_ref())
+        .map(NativeVisualProfile::resolved_dpi);
+
     let ghostty_profile = if let Some(provenance) = resolved_ghostty_profile_provenance {
         if !overrides.is_empty() {
             return Err(miette::miette!(
@@ -169,6 +190,10 @@ pub(in crate::cli) fn run_record(
             )
             .into_diagnostic()?,
         )
+    } else if let Some(recorded) = &visual_profile {
+        resolve_visual_profile(&recorded.profile, &AtomicBool::new(false))
+            .into_diagnostic()?
+            .map(|resolution| return resolution.profile)
     } else if needs_profile {
         Some(
             resolve_ghostty_profile(arguments.ghostty_config.as_deref(), overrides)
@@ -178,7 +203,8 @@ pub(in crate::cli) fn run_record(
         None
     };
 
-    let (geometry, geometry_provenance) = resolve_record(&arguments, ghostty_profile.as_ref())?;
+    let (geometry, geometry_provenance) =
+        resolve_record(&arguments, ghostty_profile.as_ref(), profile_dpi)?;
 
     let cell_width_px = geometry
         .pixel_width
@@ -219,6 +245,7 @@ pub(in crate::cli) fn run_record(
             cell_height_px,
             geometry_provenance,
             ghostty_profile,
+            visual_profile,
             term: arguments.term,
             environment,
             colors,
@@ -240,6 +267,26 @@ pub(in crate::cli) fn run_record(
     )?;
 
     return report_record_outcome(outcome);
+}
+
+pub(super) fn check_visual_profile_arguments(
+    arguments: &RecordingArgs,
+    overrides: &GhosttyVisualOverrides,
+    resolved: bool,
+    recorded: &RecordedVisualProfile,
+) -> Result<()> {
+    if !overrides.is_empty() || (arguments.ghostty_config.is_some() && !resolved) {
+        return Err(miette::miette!(
+            "--visual-profile replaces --ghostty-config, --font-family, --font-size, --padding-x, --padding-y, --foreground and --background"
+        ));
+    }
+
+    if recorded.profile.native.is_none() && matches!(arguments.geometry, GeometryMode::Fit) {
+        return Err(miette::miette!(
+            "fitted geometry measures Ghostty and requires a native visual profile section"
+        ));
+    }
+    return Ok(());
 }
 
 pub(super) fn durability_policy_for(arguments: &RecordingArgs) -> Result<DurabilityPolicy> {

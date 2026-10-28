@@ -447,7 +447,8 @@ fn detached_original_resizes_its_window_inside_a_constant_canvas() {
     validate_json_value("original-capture-status.schema.json", &live);
 
     termtrace(&state)
-        .args(["send", "resized", "--resize", "120x34", "--json"])
+        .args(["send", "resized", "--resize", "120x34"])
+        .args(["--until-screen", "winch 34 120", "--json"])
         .assert()
         .success();
 
@@ -740,4 +741,280 @@ fn original_native_names_a_missing_tool_before_creating_a_session() {
             .collect();
         assert_eq!(created, Vec::<OsString>::new(), "{case}");
     }
+}
+
+fn native_profile(fields: &str) -> String {
+    return format!(r#"{{"version":1,"native":{fields},"semantic":{{"preset":"bundled-v1"}}}}"#);
+}
+
+#[test]
+#[ignore = "requires Ghostty, Xvfb and dbus-run-session"]
+fn visual_profile_native_failures_stop_before_launch_without_fallback() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let marker = temporary.path().join("started");
+    let invalid_config = temporary.path().join("invalid.ghostty");
+    fs::write(&invalid_config, "font-size = 12\nnot-a-ghostty-key = 1\n").expect("config");
+
+    for (profile, extra, code) in [
+        (
+            native_profile(r#"{"font_family":"Termtrace Missing Family 7c1d"}"#),
+            Vec::new(),
+            "font_unavailable",
+        ),
+        (
+            native_profile(&format!(
+                r#"{{"config":"{}"}}"#,
+                invalid_config.to_str().expect("UTF-8 path")
+            )),
+            Vec::new(),
+            "ghostty_config_invalid",
+        ),
+        (
+            native_profile("{}"),
+            vec!["--cols", "80", "--rows", "24", "--viewport", "400x300"],
+            "viewport_mismatch",
+        ),
+    ] {
+        let session = temporary.path().join("rejected");
+        let mut command = Command::cargo_bin("termtrace").expect("binary");
+        command
+            .args(["record", "--no-input", "--visual-profile", &profile])
+            .args(&extra)
+            .arg("--out")
+            .arg(&session)
+            .args(["--", "/bin/sh", "-c", "printf started > \"$1\"", "probe"])
+            .arg(&marker)
+            .timeout(Duration::from_secs(60))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(code));
+
+        assert!(!marker.exists(), "{code}: the application started");
+        assert!(!session.exists(), "{code}: a session was created");
+    }
+}
+
+#[test]
+#[ignore = "requires Ghostty, Xvfb, dbus-run-session, FFmpeg, JetBrains Mono and DejaVu Sans Mono"]
+fn visual_profile_native_replay_rejects_a_host_that_substitutes_the_font() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("session");
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["record", "--no-input", "--visual-profile"])
+        .arg(native_profile(
+            r#"{"font_family":"JetBrains Mono","font_size_points":"12"}"#,
+        ))
+        .arg("--out")
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", "echo profiled"])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .success();
+
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["analyze", "index"])
+        .arg(&session)
+        .assert()
+        .success();
+
+    // A host whose only font is DejaVu Sans Mono: Ghostty substitutes it for JetBrains Mono
+    // and still reports the recorded configuration unchanged.
+    let substitute = StdCommand::new("fc-match")
+        .args(["--format=%{file}", "DejaVu Sans Mono"])
+        .output()
+        .expect("fc-match");
+
+    let fonts = temporary.path().join("fonts");
+    fs::create_dir_all(&fonts).expect("font directory");
+    fs::copy(
+        String::from_utf8(substitute.stdout).expect("UTF-8 font path"),
+        fonts.join("substitute.ttf"),
+    )
+    .expect("substitute font");
+    let fontconfig = temporary.path().join("fonts.conf");
+    fs::write(
+        &fontconfig,
+        format!(
+            "<?xml version=\"1.0\"?>\n<fontconfig><dir>{}</dir><cachedir>{}</cachedir></fontconfig>\n",
+            fonts.display(),
+            temporary.path().join("font-cache").display()
+        ),
+    )
+    .expect("fontconfig");
+    let screenshot = temporary.path().join("screenshot");
+    let mut worker = Command::cargo_bin("termtrace").expect("binary");
+    worker
+        .arg("screenshot")
+        .arg(&session)
+        .args(["--renderer", "native", "--out"])
+        .arg(&screenshot);
+
+    let mut direct = Command::cargo_bin("termtrace").expect("binary");
+    direct.args(["artifact", "capture"]).arg(&session);
+
+    for command in [&mut worker, &mut direct] {
+        command
+            .env("FONTCONFIG_FILE", &fontconfig)
+            .timeout(Duration::from_secs(120))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("font_unavailable"));
+    }
+
+    assert!(!screenshot.exists());
+}
+
+#[test]
+#[ignore = "requires Ghostty"]
+fn visual_profile_native_standard_base_ignores_ambient_user_config() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let profile = native_profile(r#"{"font_size_points":"13.5"}"#);
+    let mut replay_hashes = Vec::new();
+
+    for (name, user_config) in [
+        ("plain", ""),
+        (
+            "styled",
+            "font-size = 31\nbackground = #123456\nfont-feature = +liga\n",
+        ),
+    ] {
+        let home = temporary.path().join(format!("{name}-config"));
+        fs::create_dir_all(home.join("ghostty")).expect("user config directory");
+        fs::write(home.join("ghostty/config"), user_config).expect("user config");
+        let session = temporary.path().join(name);
+        let marker = temporary.path().join(format!("{name}-started"));
+
+        Command::cargo_bin("termtrace")
+            .expect("binary")
+            .args([
+                "record",
+                "--no-input",
+                "--visual-profile",
+                &profile,
+                "--out",
+            ])
+            .arg(&session)
+            .args(["--", "/bin/sh", "-c", "printf started > \"$1\"", "probe"])
+            .arg(&marker)
+            .env("XDG_CONFIG_HOME", &home)
+            .timeout(Duration::from_secs(60))
+            .assert()
+            .success();
+
+        assert!(marker.exists());
+
+        let manifest = read_manifest(&session).expect("profiled manifest");
+        let provenance = manifest.ghostty_visual.expect("native provenance");
+        let replay =
+            fs::read_to_string(session.join(&provenance.replay_profile)).expect("replay profile");
+        assert!(replay.contains("font-size = 13.5\n"));
+        assert!(replay.contains("font-feature = -liga\n"));
+        assert!(!replay.contains("31"), "{replay}");
+        assert!(!replay.contains("#123456"), "{replay}");
+
+        replay_hashes.push(provenance.replay_profile_hash);
+    }
+
+    assert_eq!(replay_hashes.first(), replay_hashes.get(1));
+}
+
+#[test]
+#[ignore = "requires Ghostty, Xvfb, dbus-run-session, ImageMagick, FFmpeg and FFprobe"]
+fn visual_profile_native_original_and_replay_share_profile_grid_and_dpi() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let mut cell_heights = Vec::new();
+
+    for dpi in [96, 144] {
+        let session = temporary.path().join(format!("original-{dpi}"));
+        let profile = native_profile(&format!(
+            r##"{{"font_family":"JetBrains Mono","font_size_points":"12","padding_points":{{"x":4,"y":4}},"foreground":"#D8DEE9","background":"#20242c","dpi":{dpi}}}"##
+        ));
+
+        Command::cargo_bin("termtrace")
+            .expect("binary")
+            .args(["record", "--original-native", "--original-grid", "48x8"])
+            .args(["--visual-profile", &profile, "--out"])
+            .arg(&session)
+            .args([
+                "--max-duration",
+                "10s",
+                "--",
+                "/bin/sh",
+                "-c",
+                "printf 'wide \\346\\274\\242 e\\314\\201 \\033[1mbold\\033[0m \\033[3mitalic\\033[0m\\n'; sleep 0.3",
+            ])
+            .timeout(Duration::from_secs(60))
+            .assert()
+            .success();
+
+        let completion = validate_completed_session(&session).expect("valid completed recording");
+        let manifest = read_manifest(&session).expect("session manifest");
+        let recorded = manifest.visual_profile.clone().expect("recorded profile");
+        recorded.validate().expect("recorded profile verifies");
+        let native = recorded.profile.native.clone().expect("native section");
+        assert_eq!(native.dpi, Some(dpi));
+        assert_eq!(native.foreground.as_deref(), Some("#d8dee9"));
+        assert_eq!((manifest.geometry.cols, manifest.geometry.rows), (48, 8));
+        let provenance = manifest.ghostty_visual.clone().expect("native provenance");
+        assert_eq!(provenance.overrides, native.overrides());
+        let original: VisualManifest = serde_json::from_slice(
+            &fs::read(session.join("visual-original/manifest.json")).expect("manifest bytes"),
+        )
+        .expect("original visual manifest");
+        assert_eq!(
+            original.effective_config_hash,
+            provenance.effective_config_hash
+        );
+        assert_eq!(
+            (original.geometry_report.cols, original.geometry_report.rows),
+            (48, 8)
+        );
+        let replay = temporary.path().join(format!("replay-{dpi}"));
+        Command::cargo_bin("termtrace")
+            .expect("binary")
+            .arg("screenshot")
+            .arg(&session)
+            .args(["--renderer", "native", "--out"])
+            .arg(&replay)
+            .timeout(Duration::from_secs(60))
+            .assert()
+            .success();
+
+        let replayed: VisualManifest =
+            serde_json::from_slice(&fs::read(replay.join("manifest.json")).expect("manifest"))
+                .expect("replay visual manifest");
+        assert_eq!(replayed.session_id, manifest.session_id);
+        assert_eq!(
+            replayed.effective_config_hash,
+            provenance.effective_config_hash
+        );
+        assert_eq!(
+            (replayed.geometry_report.cols, replayed.geometry_report.rows),
+            (48, 8)
+        );
+        assert_eq!(
+            replayed.source_event_hash,
+            Some(completion.final_event_hash)
+        );
+        let mismatched = temporary.path().join(format!("mismatch-{dpi}"));
+        Command::cargo_bin("termtrace")
+            .expect("binary")
+            .arg("screenshot")
+            .arg(&session)
+            .args(["--renderer", "native", "--viewport", "300x200", "--out"])
+            .arg(&mismatched)
+            .timeout(Duration::from_secs(60))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("viewport_mismatch"));
+        assert!(!mismatched.exists());
+        cell_heights.push(replayed.geometry_report.cell_height);
+    }
+
+    assert!(
+        cell_heights.first() < cell_heights.get(1),
+        "144 DPI must render taller cells than 96 DPI: {cell_heights:?}"
+    );
 }
