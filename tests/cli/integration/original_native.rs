@@ -447,7 +447,8 @@ fn detached_original_resizes_its_window_inside_a_constant_canvas() {
     validate_json_value("original-capture-status.schema.json", &live);
 
     termtrace(&state)
-        .args(["send", "resized", "--resize", "120x34", "--json"])
+        .args(["send", "resized", "--resize", "120x34"])
+        .args(["--until-screen", "winch 34 120", "--json"])
         .assert()
         .success();
 
