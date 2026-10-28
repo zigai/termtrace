@@ -6,6 +6,7 @@ use crate::cli::{
     artifacts::run_bundle_verify,
     integrity::args::{RecoverArgs, SignArgs, VerifyArgs, VerifyLevelArg},
     output::{paginate, stable_enum_label, write_json_line, write_json_pretty, write_stdout},
+    session_helpers::resolve_session,
 };
 use args::IntegritySubcommand;
 use miette::{IntoDiagnostic as _, Result};
@@ -25,7 +26,7 @@ pub(super) fn run_verify(response: &mut ResponseWriter, arguments: VerifyArgs) -
     }
 
     let mut report = verify_session_with_trust(
-        arguments.session,
+        resolve_session(arguments.session)?.path,
         arguments.level.into(),
         arguments.allowed_signers.as_deref(),
     );

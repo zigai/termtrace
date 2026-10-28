@@ -47,7 +47,7 @@ impl From<VerifyLevelArg> for VerificationLevel {
 
 #[derive(Debug, Args)]
 pub(in crate::cli) struct VerifyArgs {
-    /// Completed canonical session directory.
+    /// Completed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
     /// Verification depth.
     #[arg(long, value_enum, default_value_t = VerifyLevelArg::Content)]
