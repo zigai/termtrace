@@ -5,10 +5,13 @@ use std::{
     process::Command,
     str,
 };
-use termtrace_model::artifact::presentation::{
-    AnnotationScope, ChangeMode, ChangeSource, ChangeVisualization, EditFailure, EditFailureCode,
-    EditPlan, EditSelector, NormalizedEdit, PixelTransform, PresentationSource, PreviewOptions,
-    TextAnnotation, EDIT_PLAN_VERSION,
+use termtrace_model::artifact::{
+    presentation::{
+        AnnotationScope, ChangeMode, ChangeSource, ChangeVisualization, EditFailure,
+        EditFailureCode, EditPlan, EditSelector, NormalizedEdit, PixelTransform,
+        PresentationSource, PreviewOptions, TextAnnotation, EDIT_PLAN_VERSION,
+    },
+    sdk::ArtifactSourceKind,
 };
 
 /// Read a JSON edit plan and normalize it, resolving relative subtitle paths beside the plan.
@@ -446,10 +449,25 @@ pub(super) fn presentation_source_identity_hash(source: &PresentationSource) -> 
     }
 }
 
-pub(super) fn presentation_source_truth_layer(source: &PresentationSource) -> &'static str {
-    match source {
-        PresentationSource::Native { .. } => return "native_encoded_evidence",
-        PresentationSource::Semantic { .. } => return "semantic_rendering",
+pub(super) fn presentation_source_truth_layer(
+    source: &PresentationSource,
+    kind: ArtifactSourceKind,
+) -> Result<&'static str> {
+    match (source, kind) {
+        (PresentationSource::Semantic { .. }, ArtifactSourceKind::SemanticRendering) => {
+            return Ok("semantic_rendering");
+        }
+        (PresentationSource::Native { .. }, ArtifactSourceKind::NativeReplay) => {
+            return Ok("native_replay");
+        }
+        (PresentationSource::Native { .. }, ArtifactSourceKind::OriginalExecution) => {
+            return Ok("original_execution");
+        }
+        _ => {
+            return Err(plan_error(
+                "presentation source does not match the selected source kind",
+            ))
+        }
     }
 }
 

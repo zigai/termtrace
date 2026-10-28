@@ -20,7 +20,8 @@ use termtrace_engine::recording::{record_with_output, RecordOptions};
 use termtrace_evidence::event_log::EventLog;
 use termtrace_model::execution::session::RecordingFailurePolicy;
 use termtrace_model::{
-    artifact::save::SemanticRasterProfile, terminal::replay::SourceRange,
+    artifact::{save::SemanticRasterProfile, sdk::ArtifactSourceKind},
+    terminal::replay::SourceRange,
     value::geometry::TerminalGeometryReport,
 };
 
@@ -325,8 +326,13 @@ fn failed_export_removes_its_staging_directory() {
     };
 
     let destination = temporary.path().join("presentation");
-    pipeline::export_with_capability_check(&plan, &destination, false)
-        .expect_err("invalid source video should fail export");
+    pipeline::export_with_capability_check(
+        &plan,
+        &destination,
+        ArtifactSourceKind::NativeReplay,
+        false,
+    )
+    .expect_err("invalid source video should fail export");
 
     assert!(!destination.exists());
 
@@ -524,7 +530,8 @@ fn exports_multi_clip_h264_presentation_atomically() {
     };
 
     let destination = temporary.path().join("presentation");
-    let outcome = export(&plan, &destination).expect("export presentation");
+    let outcome =
+        export(&plan, &destination, ArtifactSourceKind::NativeReplay).expect("export presentation");
     assert!(outcome.video.is_file());
     assert!(outcome.directory.join("manifest.json").is_file());
     assert!(outcome.directory.join("presentation-map.jsonl").is_file());
@@ -575,6 +582,7 @@ fn exports_multi_clip_h264_presentation_atomically() {
     let preview_outcome = preview(
         &plan,
         temporary.path().join("preview"),
+        ArtifactSourceKind::NativeReplay,
         PreviewOptions {
             columns: 2,
             tile_width: 80,

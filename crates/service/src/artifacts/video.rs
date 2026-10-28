@@ -471,7 +471,7 @@ impl ArtifactService {
             (VideoMode::Preview { directory, options }, _) => {
                 require_render_capabilities(source, require)?;
 
-                let preview = preview_presentation(&plan, directory, *options)?;
+                let preview = preview_presentation(&plan, directory, source_kind, *options)?;
 
                 return Ok(VideoOutcome::Previewed(Box::new(VideoPreview {
                     plan,
@@ -524,7 +524,7 @@ impl ArtifactService {
             })));
         }
 
-        let outcome = export_presentation(&plan, &sidecar)?;
+        let outcome = export_presentation(&plan, &sidecar, source_kind)?;
         if request.overwrite {
             publish(&outcome.video, out)?;
         } else {

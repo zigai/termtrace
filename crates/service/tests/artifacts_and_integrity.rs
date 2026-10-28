@@ -135,5 +135,5 @@ fn native_edit_render_captures_native_pixels_without_a_semantic_fallback() {
     )
     .expect("manifest JSON");
     assert_eq!(manifest["truth_layer"], "presentation_output");
-    assert_eq!(manifest["source_truth_layer"], "native_encoded_evidence");
+    assert_eq!(manifest["source_truth_layer"], "native_replay");
 }

@@ -30,6 +30,7 @@ use termtrace_model::artifact::presentation::{
     PresentationPreviewManifest, PresentationPreviewOutcome, PresentationSource, PreviewOptions,
     PRESENTATION_FORMAT_VERSION,
 };
+use termtrace_model::artifact::sdk::ArtifactSourceKind;
 
 fn require_presentation_tools() -> Result<()> {
     command_version("ffmpeg")?;
@@ -45,19 +46,21 @@ fn require_presentation_tools() -> Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error when the plan has no output frames, its source no longer verifies, the
-/// destination has no parent, presentation tools are unavailable, or rendering, encoding,
-/// or publication fails.
+/// Returns an error when the plan has no output frames, its source no longer verifies or does
+/// not match `source_kind`, the destination has no parent, presentation tools are unavailable,
+/// or rendering, encoding, or publication fails.
 pub fn export(
     plan: &PresentationPlan,
     destination: impl AsRef<Path>,
+    source_kind: ArtifactSourceKind,
 ) -> Result<PresentationOutcome> {
-    return export_with_capability_check(plan, destination.as_ref(), true);
+    return export_with_capability_check(plan, destination.as_ref(), source_kind, true);
 }
 
 pub(super) fn export_with_capability_check(
     plan: &PresentationPlan,
     destination: &Path,
+    source_kind: ArtifactSourceKind,
     check_capabilities: bool,
 ) -> Result<PresentationOutcome> {
     if plan.clips.is_empty() || plan.output_frame_count == 0 {
@@ -65,6 +68,7 @@ pub(super) fn export_with_capability_check(
     }
 
     validate_planned_source(&plan.source)?;
+    let source_truth_layer = presentation_source_truth_layer(&plan.source, source_kind)?;
 
     let parent = destination
         .parent()
@@ -86,7 +90,7 @@ pub(super) fn export_with_capability_check(
     let staging = parent.join(format!(".presentation-{}.tmp", uuid::Uuid::now_v7()));
     create_private_directory(&staging)?;
     let _staging_cleanup = DirectoryCleanup(staging.clone());
-    export_staged(plan, &staging)?;
+    export_staged(plan, &staging, source_truth_layer)?;
     commit_directory(parent, &staging, destination, true)?;
 
     return Ok(PresentationOutcome {
@@ -100,11 +104,13 @@ pub(super) fn export_with_capability_check(
 /// # Errors
 ///
 /// Returns an error when the preview options are invalid, a change-only preview lacks change
-/// visualization, the plan's source no longer verifies, the destination exists or has no parent,
-/// presentation tools are unavailable, or rendering or publication fails.
+/// visualization, the plan's source no longer verifies or does not match `source_kind`, the
+/// destination exists or has no parent, presentation tools are unavailable, or rendering or
+/// publication fails.
 pub fn preview(
     plan: &PresentationPlan,
     destination: impl AsRef<Path>,
+    source_kind: ArtifactSourceKind,
     options: PreviewOptions,
 ) -> Result<PresentationPreviewOutcome> {
     validate_preview_options(options)?;
@@ -146,7 +152,7 @@ pub fn preview(
 
     let composed = parent.join(format!(".preview-source-{}.tmp", uuid::Uuid::now_v7()));
     let _composed_cleanup = DirectoryCleanup(composed.clone());
-    let rendered = export_with_capability_check(plan, &composed, false)?;
+    let rendered = export_with_capability_check(plan, &composed, source_kind, false)?;
     let staging = parent.join(format!(".preview-{}.tmp", uuid::Uuid::now_v7()));
     create_private_directory(&staging)?;
     let _staging_cleanup = DirectoryCleanup(staging.clone());
@@ -558,7 +564,11 @@ pub(super) fn validate_normalized_frames(plan: &PresentationPlan) -> Result<()> 
     return Ok(());
 }
 
-fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<PresentationManifest> {
+fn export_staged(
+    plan: &PresentationPlan,
+    staging: &Path,
+    source_truth_layer: &str,
+) -> Result<PresentationManifest> {
     let ffmpeg_arguments = compose_pixels(plan, staging, false, None)?;
     let (output_probe, ffmpeg_version) =
         thread::scope(|scope| -> Result<(serde_json::Value, String)> {
@@ -639,7 +649,7 @@ fn export_staged(plan: &PresentationPlan, staging: &Path) -> Result<Presentation
         ffmpeg_arguments,
         output_probe,
         truth_layer: "presentation_output".to_owned(),
-        source_truth_layer: presentation_source_truth_layer(&plan.source).to_owned(),
+        source_truth_layer: source_truth_layer.to_owned(),
         output_video_hash,
         members,
     };

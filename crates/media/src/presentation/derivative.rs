@@ -1076,7 +1076,7 @@ mod encoder_tests {
             );
 
             let mp4 = temp.path().join(format!("mp4-{fps}"));
-            super::super::export(&plan, &mp4).unwrap();
+            super::super::export(&plan, &mp4, ArtifactSourceKind::SemanticRendering).unwrap();
 
             assert_eq!(
                 fs_err::read(dest.join("presentation-map.jsonl")).unwrap(),
@@ -1794,7 +1794,7 @@ mod native_encoder_tests {
         verify_derivative_artifact(&directory, &result).unwrap();
         json(&temp.path().join("result.json"), &result).unwrap();
         let mp4 = temp.path().join("mp4");
-        export(&plan, &mp4).unwrap();
+        export(&plan, &mp4, ArtifactSourceKind::NativeReplay).unwrap();
 
         assert_eq!(
             fs_err::read(directory.join("presentation-map.jsonl")).unwrap(),
