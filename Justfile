@@ -90,6 +90,7 @@ native-test:
   bash scripts/native-capability-test.sh
   cargo test --locked --test cli retained_native_video_exports_without_native_capture_tools -- --ignored
   cargo test --locked --test cli original_native -- --ignored
+  cargo test --locked -p termtrace-service --test original_recording -- --ignored --test-threads=1
 
 # Run performance and resource benchmarks on demand (requires native capture tooling)
 bench:

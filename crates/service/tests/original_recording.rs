@@ -18,8 +18,8 @@ use tempfile::TempDir;
 use termtrace_model::{
     artifact::{
         original::{
-            original_capture_status_path, CellGrid, OriginalCaptureFailure, OriginalCaptureState,
-            PixelCanvas,
+            original_capture_status_path, CellGrid, OriginalCaptureFacts, OriginalCaptureFailure,
+            OriginalCaptureState, PixelCanvas, SurvivingKind,
         },
         sdk::ArtifactProvenance,
     },
@@ -150,6 +150,57 @@ fn supervisor_tree(session: &OriginalSession) -> Vec<ProcessIdentity> {
     return tree;
 }
 
+#[allow(
+    clippy::expect_used,
+    reason = "test helper should stop when the capture has no encoder"
+)]
+fn kill_encoder(tree: &[ProcessIdentity]) {
+    let ffmpeg = tree
+        .iter()
+        .find(|process| {
+            return fs::read(format!("/proc/{}/comm", process.pid))
+                .is_ok_and(|comm| return comm.starts_with(b"ffmpeg"));
+        })
+        .expect("encoder process");
+
+    kill(
+        Pid::from_raw(i32::try_from(ffmpeg.pid).expect("encoder PID")),
+        Signal::SIGKILL,
+    )
+    .expect("kill encoder");
+}
+
+#[allow(
+    clippy::panic,
+    reason = "test helper should stop on an unexpected error"
+)]
+fn capture_failure(error: &Error) -> &OriginalCaptureFacts {
+    let Error::OriginalCaptureFailed { facts } = error else {
+        panic!("unexpected error {error:?}");
+    };
+
+    return facts;
+}
+
+fn surviving_paths(facts: &OriginalCaptureFacts, kind: SurvivingKind) -> Vec<PathBuf> {
+    return facts
+        .surviving
+        .iter()
+        .filter(|record| return record.kind == kind)
+        .map(|record| return PathBuf::from(OsStr::from_bytes(record.path.as_bytes())))
+        .collect();
+}
+
+fn assert_surviving_paths_exist(facts: &OriginalCaptureFacts) {
+    for record in &facts.surviving {
+        let path = Path::new(OsStr::from_bytes(record.path.as_bytes()));
+        assert!(
+            path.symlink_metadata().is_ok(),
+            "{record:?} is reported but absent"
+        );
+    }
+}
+
 #[test]
 #[ignore = "requires Ghostty, Xvfb, dbus-run-session and FFmpeg"]
 fn exact_grid_resizes_inside_the_canvas_and_publishes_the_capture() {
@@ -241,35 +292,94 @@ fn killed_encoder_fails_the_capture_but_keeps_canonical_completion() {
         .expect("start");
 
     let tree = supervisor_tree(&original);
-    let ffmpeg = tree
-        .iter()
-        .find(|process| {
-            return fs::read(format!("/proc/{}/comm", process.pid))
-                .is_ok_and(|comm| return comm.starts_with(b"ffmpeg"));
-        })
-        .expect("encoder process");
-
-    kill(
-        Pid::from_raw(i32::try_from(ffmpeg.pid).unwrap()),
-        Signal::SIGKILL,
-    )
-    .expect("kill encoder");
+    kill_encoder(&tree);
 
     let error = original
         .finish(StopRequest::default(), FINISH)
         .expect_err("capture fails");
     assert_eq!(error.kind(), ErrorKind::OriginalCaptureFailed);
 
-    let Error::OriginalCaptureFailed { facts } = &error else {
-        panic!("unexpected error {error:?}");
-    };
-
+    let facts = capture_failure(&error);
     assert_eq!(facts.code, Some(OriginalCaptureFailure::AcquisitionFailed));
     assert!(
         facts.completion.is_some(),
         "the application ran and completed"
     );
     assert_eq!(error.effect(), MutationEffect::Unknown);
+    assert_eq!(facts.cleanup, None);
+
+    let preserved = surviving_paths(facts, SurvivingKind::FailedVisual);
+    assert_eq!(preserved.len(), 1, "{:?}", facts.surviving);
+    assert!(
+        preserved[0]
+            .file_name()
+            .is_some_and(|name| return name.as_bytes().starts_with(b"visual-failed-")),
+        "{preserved:?}"
+    );
+    assert!(preserved[0].join("session.mkv").is_file());
+
+    assert_surviving_paths_exist(facts);
+
+    assert_all_exited(&tree);
+}
+
+#[test]
+#[ignore = "requires Ghostty, Xvfb, dbus-run-session and FFmpeg"]
+fn failed_preservation_reports_cleanup_and_no_preserved_capture() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let terminal = Terminal::new(cargo_bin("termtrace"), temporary.path());
+    let mut original = terminal
+        .start_original(
+            &spec("echo running; while :; do sleep 0.05; done"),
+            &AtomicBool::new(false),
+        )
+        .expect("start");
+
+    let parent = original
+        .session()
+        .path()
+        .parent()
+        .expect("session parent")
+        .to_path_buf();
+
+    let staging = fs::read_dir(&parent)
+        .expect("session parent entries")
+        .map(|entry| return entry.expect("entry").path())
+        .find(|path| {
+            return path
+                .file_name()
+                .is_some_and(|name| return name.as_bytes().starts_with(b".original-visual."));
+        })
+        .expect("capture staging directory");
+
+    fs::remove_dir_all(&staging).expect("remove capture staging");
+
+    let tree = supervisor_tree(&original);
+    kill_encoder(&tree);
+
+    let error = original
+        .finish(StopRequest::default(), FINISH)
+        .expect_err("capture fails");
+
+    let facts = capture_failure(&error);
+    assert_eq!(facts.code, Some(OriginalCaptureFailure::AcquisitionFailed));
+    assert!(facts.cleanup.is_some(), "{facts:?}");
+    assert!(
+        surviving_paths(facts, SurvivingKind::FailedVisual).is_empty(),
+        "{:?}",
+        facts.surviving
+    );
+    assert!(fs::read_dir(&parent)
+        .expect("session parent entries")
+        .all(|entry| {
+            return !entry
+                .expect("entry")
+                .file_name()
+                .as_bytes()
+                .starts_with(b"visual-failed-");
+        }));
+
+    assert_surviving_paths_exist(facts);
 
     assert_all_exited(&tree);
 }

@@ -657,3 +657,87 @@ fn original_native_warns_about_ignored_geometry_flags() {
         .success();
     assert!(!String::from_utf8_lossy(&quiet.get_output().stderr).contains("ignored"));
 }
+
+#[allow(
+    clippy::expect_used,
+    reason = "test helper should stop when the tool directory cannot be built"
+)]
+fn path_without(directory: &Path, hidden: &str) -> OsString {
+    fs::create_dir_all(directory).expect("tool directory");
+
+    for source in env::split_paths(&env::var_os("PATH").expect("PATH")) {
+        let Ok(entries) = fs::read_dir(&source) else {
+            continue;
+        };
+
+        for entry in entries {
+            let name = entry.expect("PATH entry").file_name();
+            let link = directory.join(&name);
+
+            if name != OsStr::new(hidden) && link.symlink_metadata().is_err() {
+                symlink(source.join(&name), link).expect("link tool");
+            }
+        }
+    }
+
+    return directory.as_os_str().to_owned();
+}
+
+#[test]
+#[ignore = "requires Ghostty, Xvfb, dbus-run-session, FFmpeg and FFprobe"]
+fn original_native_names_a_missing_tool_before_creating_a_session() {
+    let cases: [(&str, &str, Option<&str>, &str); 3] = [
+        ("no-ffmpeg", "ffmpeg", None, "ffmpeg"),
+        ("no-xvfb", "Xvfb", None, "Xvfb"),
+        (
+            "no-libx264rgb",
+            "ffmpeg",
+            Some("#!/bin/sh\nprintf ' V....D libx264 H.264\\n'\n"),
+            "libx264rgb",
+        ),
+    ];
+
+    for (case, hidden, replacement, named) in cases {
+        let temporary = TempDir::new().expect("temporary directory");
+        let tools = temporary.path().join("tools");
+        let path = path_without(&tools, hidden);
+
+        if let Some(script) = replacement {
+            let stand_in = tools.join(hidden);
+            fs::write(&stand_in, script).expect("stand-in tool");
+            fs::set_permissions(&stand_in, Permissions::from_mode(0o755)).expect("executable");
+        }
+
+        let output = temporary.path().join("output");
+        let scratch = temporary.path().join("scratch");
+        fs::create_dir_all(&output).expect("output directory");
+
+        fs::create_dir_all(&scratch).expect("scratch directory");
+        let session = output.join("missing-tool.termtrace");
+
+        Command::cargo_bin("termtrace")
+            .expect("binary")
+            .env("PATH", &path)
+            .env("TMPDIR", &scratch)
+            .args([
+                "record",
+                "--original-native",
+                "--original-grid",
+                "80x24",
+                "--out",
+            ])
+            .arg(&session)
+            .args(["--", "/bin/true"])
+            .timeout(Duration::from_secs(60))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(named));
+        assert!(!session.exists(), "{case}: a session was created");
+        let created: Vec<OsString> = fs::read_dir(&output)
+            .expect("output entries")
+            .map(|entry| return entry.expect("entry").file_name())
+            .filter(|name| return name != "missing-tool.termtrace.original-capture.json")
+            .collect();
+        assert_eq!(created, Vec::<OsString>::new(), "{case}");
+    }
+}

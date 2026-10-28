@@ -309,6 +309,11 @@ fn unobserved_outer_resizes_are_unknown_and_late_grids_evolve_the_answer() {
         failure(&resize(&session, silent, 100, 30)),
         ("resize_outcome_unknown", MutationEffect::Unknown)
     );
+    assert_eq!(
+        failure(&resize(&session, silent, 100, 30)),
+        ("resize_outcome_unknown", MutationEffect::Unknown),
+        "a same-ID retry replays the journaled answer"
+    );
 
     outer.behave(Outer::ApplyLater(110, 32, Duration::from_secs(7)));
     let late = Uuid::now_v7();
