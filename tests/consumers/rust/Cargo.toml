@@ -45,3 +45,68 @@ required-features = ["local"]
 name = "editing"
 path = "src/bin/editing.rs"
 required-features = ["local"]
+
+[[bin]]
+name = "delivery"
+path = "src/bin/delivery.rs"
+required-features = ["local"]
+
+[[bin]]
+name = "workflow"
+path = "../../../examples/sdk/rust/workflow.rs"
+required-features = ["local"]
+
+[[test]]
+name = "workflow"
+path = "tests/workflow.rs"
+required-features = ["local"]
+
+[[bin]]
+name = "demo"
+path = "../../../examples/sdk/rust/demo.rs"
+required-features = ["local"]
+
+[[test]]
+name = "session"
+path = "tests/session.rs"
+required-features = ["local"]
+
+[[test]]
+name = "screen"
+path = "tests/screen.rs"
+required-features = ["local"]
+
+[[test]]
+name = "input"
+path = "tests/input.rs"
+required-features = ["local"]
+
+[[test]]
+name = "analysis"
+path = "tests/analysis.rs"
+required-features = ["local"]
+
+[[test]]
+name = "system"
+path = "tests/system.rs"
+required-features = ["local"]
+
+[[test]]
+name = "target"
+path = "tests/target.rs"
+required-features = ["local"]
+
+[[test]]
+name = "delivery"
+path = "tests/delivery.rs"
+required-features = ["local"]
+
+[[bin]]
+name = "native_playback"
+path = "src/bin/native_playback.rs"
+required-features = ["local"]
+
+[[test]]
+name = "native"
+path = "tests/native.rs"
+required-features = ["local"]

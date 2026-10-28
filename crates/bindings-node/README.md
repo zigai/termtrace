@@ -77,6 +77,8 @@ Run the helper's isolated regression tests with `npm test` in this directory.
 
 ## Ordinary Node/Vitest tests (no runner registration)
 
+A complete runnable test is [examples/sdk/typescript/workflow.test.ts](../../examples/sdk/typescript/workflow.test.ts).
+
 ```js
 const { withTermtrace, assertScreenText, normalizedSnapshot } = require('@termtrace/core/testing');
 
@@ -269,6 +271,9 @@ The application outcome and the capture are separate. `canonical_success` is fal
 `attachOriginalTarget(target, stateRoot?)` attaches to a running original recording by path or alias, such as `'name:demo'`. Aliases resolve in the registry under `stateRoot`. A string or `Uint8Array` follows the `path:`/`name:` rules. `pathBytes` is the exact session directory. `session()` gives live control for any path, including one that is not UTF-8; `Session.path` is then a display string and `Session.pathBytes` is exact.
 
 ## Editing presentation videos
+
+[examples/sdk/typescript/demo.ts](../../examples/sdk/typescript/demo.ts) records original pixels and
+edits them into MP4, GIF, and WebM; use `renderer: 'original_execution'` for such recordings.
 
 ```js
 const { Edit, Termtrace, scope, select } = require('@termtrace/core');

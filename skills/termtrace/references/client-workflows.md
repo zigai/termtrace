@@ -1,10 +1,13 @@
 # Programmatic SDK workflows
 
 Use individual CLI commands (`termtrace send`, `termtrace screen --json`, etc.) when a workflow will finish in
-two or three actions. Beyond that, use the canonical Rust SDK (`termtrace_sdk`)
-so repeated observations and actions do not pay process startup and discovery costs. Use `termtrace test`
-when assertions should be repeatable scenarios. Programmatic workflows in Rust are appropriate for branching, loops,
-multiple sessions, or caller-owned retry IDs.
+two or three actions. Beyond that, use an SDK in the caller's language (Rust `termtrace_sdk`, Python
+`termtrace`, or TypeScript `@termtrace/core`) so repeated observations and actions do not pay process
+startup and discovery costs. All three call the same Rust services. Use `termtrace test`
+when assertions should be repeatable scenarios. SDK workflows are appropriate for branching, loops,
+multiple sessions, or caller-owned retry IDs. Runnable versions of one test workflow and one edited
+demo in each language are in `examples/sdk/`; `docs/sdk-capability-contract.md` lists which
+capabilities each language has tests for.
 
 ## Rust SDK for Stateful Workflows
 

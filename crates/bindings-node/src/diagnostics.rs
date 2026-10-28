@@ -87,7 +87,7 @@ fn range(start: Option<Arg<u64>>, end: Option<Arg<u64>>) -> napi::Result<Option<
     };
 }
 
-fn timeout(timeout_ms: Option<f64>, default: Duration) -> napi::Result<Duration> {
+pub(crate) fn timeout(timeout_ms: Option<f64>, default: Duration) -> napi::Result<Duration> {
     return timeout_ms.map_or(Ok(default), |ms| {
         return timeout_from_ms(ms).map_err(argument);
     });

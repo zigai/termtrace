@@ -11,17 +11,28 @@ use termtrace_engine::{
 };
 use termtrace_evidence::receipt::receipt_signing_capability;
 use termtrace_media::{
-    capability::{presentation_capability, semantic_video_capability},
+    capability::{derivative_capability, presentation_capability, semantic_video_capability},
     native_capture::native_capabilities,
 };
+use termtrace_model::artifact::derivative::{DerivativeFormat, GifLoop};
 use termtrace_model::protocol::capability::{
-    CapabilityReport, CapabilityStatus, NATIVE_SCREENSHOT_CAPABILITY, NATIVE_VIDEO_CAPABILITY,
-    PRESENTATION_CAPABILITY, RECEIPT_SIGNING_CAPABILITY, SEMANTIC_VIDEO_CAPABILITY,
+    Capability, CapabilityReport, CapabilityStatus, GIF_DELIVERY_CAPABILITY,
+    NATIVE_SCREENSHOT_CAPABILITY, NATIVE_VIDEO_CAPABILITY, PRESENTATION_CAPABILITY,
+    RECEIPT_SIGNING_CAPABILITY, SEMANTIC_VIDEO_CAPABILITY, WEBM_DELIVERY_CAPABILITY,
 };
 use termtrace_model::{
     protocol::control::CONTROL_PROTOCOL_VERSION, terminal::replay::GHOSTTY_REVISION,
 };
 use termtrace_schema::catalog;
+
+const GIF: DerivativeFormat = DerivativeFormat::Gif {
+    loop_policy: GifLoop::Infinite,
+};
+const WEBM: DerivativeFormat = DerivativeFormat::Webm {};
+
+fn delivery_capability(format: DerivativeFormat) -> Capability {
+    return derivative_capability(format, false, false);
+}
 
 /// System capability and environment introspection service.
 pub struct SystemService;
@@ -36,6 +47,8 @@ impl SystemService {
         let mut external = vec![
             semantic_video_capability(semantic.status == CapabilityStatus::Ready),
             presentation_capability(),
+            delivery_capability(GIF),
+            delivery_capability(WEBM),
         ];
         external.extend(native_capabilities(true, true, cancelled));
         external.push(receipt_signing_capability());
@@ -55,6 +68,8 @@ impl SystemService {
                 semantic_capability().status == CapabilityStatus::Ready,
             )),
             PRESENTATION_CAPABILITY => Some(presentation_capability()),
+            GIF_DELIVERY_CAPABILITY => Some(delivery_capability(GIF)),
+            WEBM_DELIVERY_CAPABILITY => Some(delivery_capability(WEBM)),
             RECEIPT_SIGNING_CAPABILITY => Some(receipt_signing_capability()),
             NATIVE_SCREENSHOT_CAPABILITY | NATIVE_VIDEO_CAPABILITY => native_capabilities(
                 id == NATIVE_SCREENSHOT_CAPABILITY,

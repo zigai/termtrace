@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from termtrace import Instrumentation, Termtrace, TermtraceError, aio
+from termtrace import Edit, Instrumentation, Select, Termtrace, TermtraceError, aio
 from test_evidence_pages import BINARY, ROOT, evidence_root
 
 FIXTURE = json.loads(
@@ -666,3 +666,52 @@ def test_nonutf8_source_debug_forensic_verification_paths_and_source_hashes(
             indent=2,
         )
     )
+
+
+def ffmpeg_without_vp9(directory: Path) -> Path:
+    directory.mkdir()
+    real = subprocess.run(["sh", "-c", "command -v ffmpeg"], check=True, capture_output=True, text=True)
+    wrapper = directory / "ffmpeg"
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        "case \" $* \" in *libvpx-vp9*) echo 'Unknown encoder libvpx-vp9' >&2; exit 1;; esac\n"
+        f"exec '{real.stdout.strip()}' \"$@\"\n"
+    )
+    wrapper.chmod(0o700)
+    return directory
+
+
+def test_delivery_codec_availability_follows_the_ffmpeg_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = Termtrace(binary=BINARY, evidence_root=str(evidence_root(tmp_path) / "sessions"))
+    with client.record(["/bin/sh", "-c", "printf READY; IFS= read -r line"], rows=6, cols=30) as rec:
+        rec.screen().wait_for_text("READY", timeout_secs=5)
+        rec.mark("start")
+        rec.mark("end")
+        rec.stop()
+    edit = Edit().clip(Select.marker("start"), Select.marker("end"))
+
+    def capabilities() -> dict[str, dict]:
+        report = client.system().capabilities()
+        return {item["id"]: item for item in report["capabilities"]}
+
+    host = capabilities()
+    assert host["gif-delivery"]["status"] == "ready"
+    assert host["webm-delivery"]["status"] == "ready"
+
+    tools = ffmpeg_without_vp9(tmp_path / "tools")
+    monkeypatch.setenv("PATH", f"{tools}{os.pathsep}{os.environ['PATH']}")
+    limited = capabilities()
+    assert limited["gif-delivery"]["status"] == "ready"
+    assert limited["webm-delivery"]["status"] == "blocked"
+    assert limited["webm-delivery"]["code"] == "derivative_encoder_unavailable"
+    assert limited["webm-delivery"]["remediation"]
+
+    out = tmp_path / "blocked.webm"
+    with pytest.raises(TermtraceError, match="webm-delivery") as blocked:
+        client.video_render(rec.path, edit, out, renderer="semantic")
+    assert "derivative_encoder_unavailable" in str(blocked.value)
+    assert not out.exists()
+    gif = client.video_render(rec.path, edit, tmp_path / "allowed.gif", renderer="semantic")
+    assert Path(gif["output"]).is_file()

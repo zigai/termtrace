@@ -16,7 +16,7 @@ use super::{
 use crate::{Error, Result};
 use std::{
     fmt::Write as _,
-    path::{Path, PathBuf},
+    path::{self, Path, PathBuf},
     sync::atomic::AtomicBool,
     thread,
     time::Duration,
@@ -116,8 +116,15 @@ pub fn preview(
 
     validate_planned_source(&plan.source)?;
 
-    let destination = destination.as_ref();
+    // FFmpeg runs inside the staging directory, so no path it reads may be relative.
+    let destination = path::absolute(destination.as_ref()).map_err(|source| {
+        return Error::Filesystem {
+            path: destination.as_ref().to_path_buf(),
+            source,
+        };
+    })?;
 
+    let destination = destination.as_path();
     if destination.exists() {
         return Err(Error::ArtifactExists {
             path: destination.to_path_buf(),
@@ -445,8 +452,9 @@ pub(super) fn compose_pixels(
             .to_str()
             .ok_or_else(|| return plan_error("FFmpeg source path must be UTF-8"))?
             .to_owned(),
-        "-filter_complex".to_owned(),
-        filter.trim().to_owned(),
+        // A per-cell overlay graph exceeds the kernel's 128 KiB limit for one argument.
+        "-/filter_complex".to_owned(),
+        "filter.txt".to_owned(),
         "-map".to_owned(),
         "[outv]".to_owned(),
         "-an".to_owned(),

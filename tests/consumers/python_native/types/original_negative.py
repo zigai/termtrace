@@ -1,10 +1,10 @@
 from termtrace import OriginalRecording, Termtrace
-from termtrace.control import OriginalLaunchOptions
+from termtrace.types import OriginalLaunchOptionsInput
 
 
 def misuse(tt: Termtrace, original: OriginalRecording) -> None:
-    options: OriginalLaunchOptions = {"rows": 24}
-    other: OriginalLaunchOptions = {"fps": 25}
+    options: OriginalLaunchOptionsInput = {"rows": 24}
+    other: OriginalLaunchOptionsInput = {"fps": 29.97}
     tt.record_original(["/bin/true"], cancel=True)
     flag: str = original.finish()["canonical_success"]
     original.finish(timeout_ms=1.5)

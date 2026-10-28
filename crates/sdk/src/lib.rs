@@ -111,7 +111,12 @@ pub mod analysis {
 #[cfg(feature = "local")]
 pub mod artifacts {
     #[cfg(feature = "in-process")]
-    pub use termtrace_media::native_capture::{validate_replay_screenshot, NativeReplayWorker};
+    pub use termtrace_media::native_capture::{
+        native_capture_target, validate_replay_screenshot, validate_visual_manifest, CaptureKind,
+        CaptureOptions, CaptureOutcome, NativeReplayWorker, VisualManifest,
+    };
+    #[cfg(feature = "in-process")]
+    pub use termtrace_media::playback::{PlaybackOptions, PlaybackTiming};
     pub use termtrace_model::artifact::bundle::{
         BundleManifest, BundleProfile, BundleVerificationPolicy,
     };
@@ -127,6 +132,7 @@ pub mod artifacts {
     pub use termtrace_model::artifact::save::{
         SaveFormat, SaveManifest, SaveOutcome, SemanticRasterProfile,
     };
+    pub use termtrace_model::terminal::replay::StateSelection;
     pub use termtrace_service::artifacts::{
         output_frames_for_source_frame, source_for_output_frame, ArtifactService, CursorStyle,
         EditSource, VideoMode, VideoOptions, VideoOutcome, VideoPreset, VideoPreview, VideoRender,

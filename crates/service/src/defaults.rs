@@ -21,6 +21,8 @@ pub const IDLE_STABLE_FOR: Duration = Duration::from_millis(500);
 /// How long an idle condition waits for output or a changed screen before reporting
 /// `unchanged`.
 pub const REACTION_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long a native replay worker may take to start its terminal and display.
+pub const NATIVE_REPLAY_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a stop waits for validated completion.
 pub const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long an unreachable live session may take to publish completion before the

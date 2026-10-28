@@ -91,6 +91,8 @@ limited = tt.launch(["my-app"], {"environment": {"base": "clear", "set": {"TOKEN
 
 ## Ordinary tests: immutable assertions and owned evidence
 
+A complete runnable test is [examples/sdk/python/test_workflow.py](../../examples/sdk/python/test_workflow.py).
+
 ```python
 from termtrace.testing import terminal_test, assert_screen_text, assert_snapshot_file
 
@@ -287,6 +289,9 @@ The application outcome and the capture are separate. `canonical_success` is fal
 `attach_original_target(target, state_root=None)` attaches to a running original recording by path or alias, such as `"name:demo"`. Aliases resolve in the registry under `state_root`. `str` and `bytes` follow the `path:`/`name:` rules, and an `os.PathLike` is an exact path. `path_bytes` is the exact session directory. `session()` gives live control for any path, including one that is not UTF-8; `Session.path` is then a display string and `Session.path_bytes` is exact.
 
 ## Editing presentation videos
+
+[examples/sdk/python/demo.py](../../examples/sdk/python/demo.py) records original pixels and edits
+them into MP4, GIF, and WebM; use `renderer="original_execution"` for such recordings.
 
 ```python
 from fractions import Fraction

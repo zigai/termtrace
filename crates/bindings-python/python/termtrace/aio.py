@@ -34,6 +34,7 @@ __all__ = [
     "AsyncEvidence",
     "AsyncInstrumentation",
     "AsyncLocator",
+    "AsyncNative",
     "AsyncOriginalRecording",
     "AsyncOutput",
     "AsyncPointer",
@@ -725,6 +726,29 @@ class AsyncLocator(LocatorBase):
         return await run_cancellable(call, cancel)
 
 
+class AsyncNative(Wrapper):
+    r"""Asynchronous Native: Native replay operations for one canonical session."""
+
+    async def screenshot(
+        self,
+        destination: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        point: types.StatePoint | None = None,
+        timeout_secs: builtins.float | None = None,
+    ) -> types.CaptureOutcome:
+        r"""Replay this completed session in Ghostty and capture `point` (default: the latest
+        presented state) as a PNG in the new `destination` directory, with its manifest and
+        replay endpoint. `timeout_secs` bounds the replay terminal's startup.
+
+        # Errors
+
+        Raises `TermtraceError` or a subclass when the `native-screenshot` capability is blocked,
+        the session is live, `point` does not resolve, `destination` exists, or capture fails.
+        """
+        return await asyncio.to_thread(
+            lambda: self._sync.screenshot(destination, point, timeout_secs)
+        )
+
+
 class AsyncOriginalRecording(Wrapper):
     r"""Asynchronous OriginalRecording: An original recording: a canonical session whose terminal pixels are captured while it runs."""
 
@@ -1066,6 +1090,10 @@ class AsyncRecording(RecordingBase):
     def evidence(self) -> AsyncEvidence:
         r"""Typed evidence operations through the shared service."""
         return AsyncEvidence._wrap(self._sync.evidence())
+
+    def native(self) -> AsyncNative:
+        r"""Native replay operations through the shared service."""
+        return AsyncNative._wrap(self._sync.native())
 
     async def integrity(self) -> AsyncEvidence:
         r"""Typed integrity operations through the shared service."""
@@ -1734,6 +1762,10 @@ class AsyncSession(Wrapper):
         r"""Typed evidence operations through the shared service."""
         return AsyncEvidence._wrap(self._sync.evidence())
 
+    def native(self) -> AsyncNative:
+        r"""Native replay operations through the shared service."""
+        return AsyncNative._wrap(self._sync.native())
+
     async def integrity(self) -> AsyncEvidence:
         r"""Typed integrity operations through the shared service."""
         return AsyncEvidence._wrap(
@@ -2156,6 +2188,57 @@ class AsyncTermtrace(Wrapper):
         r"""Evidence artifacts and integrity operations for one canonical session."""
         return AsyncEvidence._wrap(self._sync.evidence(source))
 
+    def native(
+        self, source: str | bytes | os.PathLike[str] | os.PathLike[bytes]
+    ) -> AsyncNative:
+        r"""Native replay operations for one canonical session."""
+        return AsyncNative._wrap(self._sync.native(source))
+
+    async def run_scenarios(
+        self,
+        scenarios: typing.Sequence[str | bytes | os.PathLike[str] | os.PathLike[bytes]],
+        *,
+        failure_root: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        evidence_root: str
+        | bytes
+        | os.PathLike[str]
+        | os.PathLike[bytes]
+        | None = None,
+        jobs: builtins.int = 1,
+        shard_index: builtins.int | None = None,
+        shard_count: builtins.int | None = None,
+        update_snapshots: builtins.bool = False,
+        reruns: builtins.int = 0,
+        fail_on_flaky: builtins.bool = False,
+    ) -> types.ScenarioSuiteReport:
+        r"""Run scenario documents as one suite with this client's binary. A document with a
+        `matrix` expands to one labelled case per combination; with `shard_index` and
+        `shard_count`, case `i` of the sorted expansion runs only when
+        `i % shard_count == shard_index`. Up to `jobs` cases run at once, each in a fresh session
+        under `evidence_root` (default: this client's evidence root). Failure artifacts go under
+        `failure_root` and snapshot baselines in its sibling `snapshots` directory, replaced when
+        `update_snapshots` is set. A failed case runs again up to `reruns` times; a later pass
+        makes it `flaky`, which fails CI only with `fail_on_flaky`.
+
+        # Errors
+
+        Raises `TermtraceError` when the options are invalid, a document cannot be read or
+        expanded, or the shard is empty. Case failures stay in the report.
+        """
+        return await asyncio.to_thread(
+            lambda: self._sync.run_scenarios(
+                scenarios,
+                failure_root=failure_root,
+                evidence_root=evidence_root,
+                jobs=jobs,
+                shard_index=shard_index,
+                shard_count=shard_count,
+                update_snapshots=update_snapshots,
+                reruns=reruns,
+                fail_on_flaky=fail_on_flaky,
+            )
+        )
+
     async def record(
         self,
         command: typing.Sequence[builtins.str],
@@ -2270,7 +2353,7 @@ class AsyncTermtrace(Wrapper):
     ) -> types.VideoRender:
         r"""Render `edit` to `out`, whose lowercase `.mp4`, `.gif`, or `.webm` extension selects
         the format, keeping a manifested `.termtrace` sidecar beside it. An existing output
-        fails unless `overwrite` is set for an MP4; GIF and WebM are never replaced.
+        fails unless `overwrite` is set for an MP4; GIF and `WebM` are never replaced.
 
         # Errors
 

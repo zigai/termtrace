@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import logging
 import math
@@ -1423,3 +1424,316 @@ async def test_semantic_preview_and_every_format_render_from_python(
     assert existing.read_bytes() == before
     with pytest.raises(TermtraceError, match="already exists"):
         tt.video_render(session, edit, output / "edited.gif", renderer="semantic", overwrite=True)
+
+
+TERMINAL_PROGRAMS = Path(__file__).resolve().parents[3] / "fixtures/programs/terminal"
+INPUT_REPORTER = [str(TERMINAL_PROGRAMS / "input-reporter.py")]
+LINE_COMMAND = [str(TERMINAL_PROGRAMS / "line-command.sh")]
+
+
+def reported(text: str, event: str) -> list[int]:
+    return [int(ms) for ms in re.findall(rf"^{re.escape(event)} T=(\d+)", text, re.MULTILINE)]
+
+
+def wait_for_completed(session: Any) -> dict[str, Any]:
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            status = session.status()
+        except TermtraceError:
+            status = None
+        if status is not None and status["kind"] == "completed":
+            return status
+        assert time.monotonic() < deadline, "session did not complete"
+        time.sleep(0.05)
+
+
+def launch_reporter(tt: Termtrace) -> Recording:
+    rec = tt.launch(INPUT_REPORTER, {"rows": 40, "cols": 80})
+    rec.screen().wait_for_text("REPORTER_READY", timeout_secs=5.0)
+    return rec
+
+
+def test_launch_returns_a_ready_session_and_fails_past_its_readiness_deadline(
+    tmp_path: Path,
+) -> None:
+    tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
+    with tt.launch(["/bin/sh", "-c", "printf STARTED; sleep 30"]) as rec:
+        assert rec.status()["kind"] == "live"
+        assert "STARTED" in rec.screen().wait_for_text("STARTED", timeout_secs=5.0).text
+
+    with pytest.raises(TermtraceError, match="readiness timed out"):
+        tt.launch(["/bin/sh", "-c", "sleep 30"], {"startup_timeout_ms": 1})
+
+
+def test_launch_runs_the_child_in_the_requested_working_directory(tmp_path: Path) -> None:
+    workdir = tmp_path / "child-workdir"
+    workdir.mkdir()
+    (workdir / "marker-file.txt").write_text("marker", encoding="utf-8")
+    tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
+    with tt.launch(
+        ["/bin/sh", "-c", "printf 'CWD=%s\\r\\n' \"$(pwd -P)\"; ls; printf DONE; sleep 30"],
+        {"cwd": str(workdir), "cols": 200},
+    ) as rec:
+        text = rec.screen().wait_for_text("DONE", timeout_secs=5.0).text
+        assert f"CWD={workdir.resolve()}" in text
+        assert "marker-file.txt" in text
+
+    with pytest.raises(TermtraceError):
+        tt.launch(["/bin/sh", "-c", "sleep 30"], {"cwd": str(tmp_path / "missing")})
+
+
+def test_detached_session_keeps_running_and_is_controlled_through_its_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = tmp_path / "state"
+    monkeypatch.setenv("TERMTRACE_STATE_DIR", str(state))
+    tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
+    rec = tt.launch(LINE_COMMAND)
+    try:
+        rec.screen().wait_for_text("LINE_READY", timeout_secs=5.0)
+        tt.registry(str(state)).register("detached-demo", rec.path)
+        rec.detach()
+        assert not rec.is_active()
+        with pytest.raises(RuntimeError):
+            rec.detach()
+
+        by_name = tt.attach_target("name:detached-demo")
+        by_path = tt.attach_target(f"path:{rec.path}")
+        assert by_name.session_id == by_path.session_id == rec.session_id
+        assert by_name.status()["kind"] == "live"
+        assert "LINE_READY" in by_path.screen().text()
+
+        outcome = (
+            by_name.actions()
+            .send_text("detached-input")
+            .send_key("Enter")
+            .until_screen("LINE_VALUE=detached-input", timeout_secs=5.0)
+            .execute()
+        )
+        assert "LINE_VALUE=detached-input" in outcome.text
+        assert wait_for_completed(by_path)["completion"]["exit_code"] == 0
+
+        with pytest.raises(TermtraceError):
+            tt.attach_target("name:unregistered-demo")
+    finally:
+        if not (Path(rec.path) / "completion.json").exists():
+            tt.attach(rec.path).signal("terminate")
+
+
+def test_paste_focus_and_scroll_reach_an_application_that_reports_them(tmp_path: Path) -> None:
+    tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
+    with launch_reporter(tt) as rec:
+        pasted = (
+            rec.actions()
+            .paste("pasted words")
+            .until_screen("PASTE=", timeout_secs=5.0)
+            .execute()
+        )
+        assert len(reported(pasted.text, "PASTE=pasted words")) == 1
+        assert not reported(pasted.text, "KEY=70")
+
+        pointer = rec.pointer()
+        assert pointer.focus(False, strict=True)["kind"] == "applied"
+        rec.screen().wait_for_text("FOCUS=out", timeout_secs=5.0)
+        assert pointer.focus(True, strict=True)["kind"] == "applied"
+        rec.screen().wait_for_text("FOCUS=in", timeout_secs=5.0)
+
+        assert pointer.scroll(4, 2, lines=-2, strict=True)["kind"] == "applied"
+        assert pointer.scroll(9, 7, lines=1, strict=True)["kind"] == "applied"
+        text = rec.screen().wait_for_text("WHEEL=down", timeout_secs=5.0).text
+        assert len(reported(text, "WHEEL=up@5,3")) == 2
+        assert len(reported(text, "WHEEL=down@10,8")) == 1
+
+    with launch_fixture(tt, "echo_command") as rec:
+        assert rec.pointer().focus(True)["kind"] == "noop"
+        assert rec.pointer().scroll(0, 0, lines=1)["kind"] == "noop"
+        with pytest.raises(TermtraceError):
+            rec.pointer().focus(True, strict=True)
+
+
+def test_paced_text_arrives_one_character_at_a_time(tmp_path: Path) -> None:
+    tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
+    with launch_reporter(tt) as rec:
+        rec.actions().send_text("abc").until_screen("KEY=63", timeout_secs=5.0).execute()
+        text = (
+            rec.actions()
+            .pace(200)
+            .send_text("xyz")
+            .until_screen("KEY=7a", timeout_secs=5.0)
+            .execute()
+            .text
+        )
+        burst = [reported(text, f"KEY={key}")[0] for key in ("61", "62", "63")]
+        paced = [reported(text, f"KEY={key}")[0] for key in ("78", "79", "7a")]
+        assert max(burst) - min(burst) < 100
+        assert all(later - earlier >= 150 for earlier, later in itertools.pairwise(paced))
+
+
+def test_wait_for_idle_returns_after_output_stops(tmp_path: Path) -> None:
+    tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
+    ticker = "i=0; while [ $i -lt 8 ]; do i=$((i+1)); printf 'TICK %d\\r\\n' $i; sleep 0.2; done"
+    with tt.launch(["/bin/sh", "-c", f"{ticker}; printf SETTLED; sleep 30"]) as rec:
+        started = time.monotonic()
+        state = rec.screen().wait_for_idle(timeout_secs=15.0)
+        assert time.monotonic() - started >= 1.4
+        assert "TICK 8" in state.text
+        assert "SETTLED" in state.text
+
+    with (
+        tt.launch(["/bin/sh", "-c", "echo BUSY; while :; do date +%s%N; sleep 0.1; done"]) as rec,
+        pytest.raises(TermtraceError, match="stable interval"),
+    ):
+        # A blank screen before the first output would itself be idle.
+        rec.screen().wait_for_text("BUSY", timeout_secs=5.0)
+        rec.screen().wait_for_idle(timeout_secs=1.5)
+
+
+def test_observe_selects_a_hidden_synchronized_state_only_when_asked(tmp_path: Path) -> None:
+    tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
+    rec = tt.launch(["/bin/sh", "-c", "printf '\\033[?2026hHIDDEN-PART\\033[?2026l VISIBLE-PART'"])
+    with rec:
+        rec.output().wait_for(b"VISIBLE-PART", 5)
+    screen = tt.attach(rec.path).screen()
+    hidden = [
+        entry["item"]
+        for entry in rec.analysis().timeline(limit=1000, include_hidden=True)["entries"]
+        if entry["item"]["kind"] == "semantic_state" and not entry["item"]["presented"]
+    ][-1]
+    point = {"selector": "state_id", "state_id": hidden["state_id"]}
+
+    observed = screen.observe(point, include_hidden=True)
+    assert observed["presented"] is False
+    assert observed["state_id"] == hidden["state_id"]
+    assert "HIDDEN-PART" in observed["frame"]["viewport_text"]
+    assert "VISIBLE-PART" not in observed["frame"]["viewport_text"]
+    with pytest.raises(TermtraceError):
+        screen.observe(point)
+    latest = screen.observe()
+    assert latest["presented"] is True
+    assert "VISIBLE-PART" in latest["frame"]["viewport_text"]
+
+
+def test_cache_status_reports_the_checkpoint_a_completed_observation_writes(
+    tmp_path: Path,
+) -> None:
+    tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
+    rec = tt.launch(["/bin/sh", "-c", "printf CACHED-SCREEN"])
+    with rec:
+        rec.output().wait_for(b"CACHED-SCREEN", 5)
+    session = tt.attach(rec.path)
+    before = session.analysis().cache_status()
+    assert (before["entries"], before["compressed_bytes"]) == (0, 0)
+
+    assert session.screen().observe()["resolution"] == "canonical_replay"
+    after = session.analysis().cache_status()
+    assert after["entries"] == 1
+    assert after["compressed_bytes"] > 0
+    assert os.fsdecode(after["directory"]).startswith(rec.path)
+    assert session.screen().observe()["resolution"] == "validated_checkpoint"
+
+    session.analysis().cache_prune()
+    assert session.analysis().cache_status()["entries"] == 0
+
+
+def test_discard_completed_removes_only_a_completed_session(tmp_path: Path) -> None:
+    tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
+    with launch_fixture(tt, "echo_command") as rec:
+        with pytest.raises(TermtraceError):
+            rec.discard_completed()
+        assert rec.status()["kind"] == "live"
+        assert Path(rec.path).is_dir()
+
+    assert rec.status()["kind"] == "completed"
+    rec.discard_completed()
+    assert not Path(rec.path).exists()
+    with pytest.raises(TermtraceError):
+        tt.attach(rec.path)
+    with pytest.raises(TermtraceError):
+        rec.discard_completed()
+
+
+@pytest.mark.asyncio
+async def test_async_paste_pacing_focus_and_scroll_reach_an_application_that_reports_them(
+    tmp_path: Path,
+) -> None:
+    tt = AsyncTermtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
+    async with await tt.launch(INPUT_REPORTER, {"rows": 40, "cols": 80}) as rec:
+        await rec.screen().wait_for_text("REPORTER_READY", timeout_secs=5.0)
+        pasted = await rec.actions().paste("async words").until_screen("PASTE=", timeout_secs=5.0).run()
+        assert pasted.frame is not None
+        assert len(reported(pasted.frame.text, "PASTE=async words")) == 1
+        assert not reported(pasted.frame.text, "KEY=61")
+
+        paced = await rec.actions().pace(200).send_text("xyz").until_screen("KEY=7a", timeout_secs=5.0).run()
+        assert paced.frame is not None
+        arrivals = [reported(paced.frame.text, f"KEY={key}")[0] for key in ("78", "79", "7a")]
+        assert all(later - earlier >= 150 for earlier, later in itertools.pairwise(arrivals))
+
+        pointer = rec.pointer()
+        assert (await pointer.focus(False, strict=True))["kind"] == "applied"
+        await rec.screen().wait_for_text("FOCUS=out", timeout_secs=5.0)
+        assert (await pointer.scroll(2, 3, lines=1, strict=True))["kind"] == "applied"
+        text = (await rec.screen().wait_for_text("WHEEL=down", timeout_secs=5.0)).text
+        assert len(reported(text, "WHEEL=down@3,4")) == 1
+
+
+@pytest.mark.asyncio
+async def test_async_launch_target_idle_observe_cache_and_discard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = tmp_path / "state"
+    monkeypatch.setenv("TERMTRACE_STATE_DIR", str(state))
+    workdir = tmp_path / "async-workdir"
+    workdir.mkdir()
+    tt = AsyncTermtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
+    with pytest.raises(TermtraceError, match="readiness timed out"):
+        await tt.launch(["/bin/sh", "-c", "sleep 30"], {"startup_timeout_ms": 1})
+
+    ticker = "i=0; while [ $i -lt 6 ]; do i=$((i+1)); printf 'TICK %d\\r\\n' $i; sleep 0.1; done"
+    script = (
+        "printf 'CWD=%s\\r\\n' \"$(pwd -P)\"; "
+        f"{ticker}; printf '\\033[?2026hHIDDEN-PART\\033[?2026l VISIBLE-PART'; read -r _"
+    )
+    rec = await tt.launch(["/bin/sh", "-c", script], {"cwd": str(workdir), "cols": 120})
+    try:
+        assert (await rec.status())["kind"] == "live"
+        await rec.screen().wait_for_text("TICK 1", timeout_secs=5.0)
+        started = time.monotonic()
+        idle = await rec.screen().wait_for_idle(timeout_secs=15.0)
+        assert time.monotonic() - started >= 0.4
+        assert "TICK 6" in idle.text
+        assert f"CWD={workdir.resolve()}" in idle.text
+        assert "VISIBLE-PART" in idle.text
+
+        await tt.registry(str(state)).register("async-target", rec.path)
+        session = await tt.attach_target("name:async-target")
+        assert session.session_id == rec.session_id
+        await session.actions().send_key("Enter").run()
+        assert (await rec.wait_for_completion(timeout_ms=10_000))["exit_code"] == 0
+        with pytest.raises(TermtraceError):
+            await tt.attach_target("name:missing-target")
+    finally:
+        if await rec.is_active():
+            await rec.force_close()
+
+    completed = await tt.attach(rec.path)
+    hidden = [
+        entry["item"]
+        for entry in (await completed.analysis().timeline(limit=1000, include_hidden=True))["entries"]
+        if entry["item"]["kind"] == "semantic_state" and not entry["item"]["presented"]
+    ][-1]
+    point: types.StatePoint = {"selector": "state_id", "state_id": hidden["state_id"]}
+    assert (await completed.analysis().cache_status())["entries"] == 0
+    observed = await completed.screen().observe(point, include_hidden=True)
+    assert observed["presented"] is False
+    assert "HIDDEN-PART" in observed["frame"]["viewport_text"]
+    assert "VISIBLE-PART" not in observed["frame"]["viewport_text"]
+    with pytest.raises(TermtraceError):
+        await completed.screen().observe(point)
+    assert (await completed.analysis().cache_status())["entries"] >= 1
+
+    await rec.discard_completed()
+    assert not Path(rec.path).exists()
+    with pytest.raises(TermtraceError):
+        await tt.attach(rec.path)

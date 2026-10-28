@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "tsc -p tsconfig.examples.json && node --test test/*.test.js .examples/*.test.js"
   },
   "dependencies": {
     "@termtrace/core": "file:../../../crates/bindings-node"
   },
   "devDependencies": {
+    "@types/node": "26.6.5",
     "typescript": "5.9.3",
     "vitest": "4.1.12"
   }

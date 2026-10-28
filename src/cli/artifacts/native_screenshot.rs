@@ -1,7 +1,7 @@
 use crate::cli::{
     output::{write_json_line, ResponseWriter},
     session_helpers::attach_session,
-    tooling::require_cli_capability,
+    tooling::{capability_report, require_cli_capability},
 };
 use miette::{IntoDiagnostic as _, Result};
 use signal_hook::{
@@ -9,18 +9,18 @@ use signal_hook::{
     flag, low_level,
 };
 use std::{
-    env,
     path::Path,
     process::ExitCode,
-    sync::{atomic::AtomicBool, Arc},
-    time::Duration,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
-use termtrace_media::native_capture::{native_capture_target, NativeReplayWorker};
 use termtrace_model::{
-    execution::session::CaptureTarget, protocol::capability::NATIVE_SCREENSHOT_CAPABILITY,
-    terminal::observation::StatePoint,
+    artifact::visual::CaptureOutcome, execution::session::CaptureTarget,
+    protocol::capability::NATIVE_SCREENSHOT_CAPABILITY, terminal::observation::StatePoint,
 };
-use termtrace_sdk::session::SessionStatus;
+use termtrace_sdk::{defaults::NATIVE_REPLAY_TIMEOUT, session::SessionStatus};
 
 struct CancellationSignals(Vec<signal_hook::SigId>);
 
@@ -48,9 +48,9 @@ pub(super) fn run(
             .push(flag::register(signal, Arc::clone(&cancelled)).into_diagnostic()?);
     }
 
-    require_cli_capability(NATIVE_SCREENSHOT_CAPABILITY, &cancelled)?;
-
-    let live_boundary = match attach_session(session)?.status().into_diagnostic()? {
+    let attached = attach_session(session)?;
+    let timeout = NATIVE_REPLAY_TIMEOUT;
+    let live_boundary = match attached.status().into_diagnostic()? {
         SessionStatus::Completed { .. } => None,
         SessionStatus::Live { boundaries, .. } => {
             if points != [StatePoint::LatestPresented] {
@@ -63,11 +63,33 @@ pub(super) fn run(
         }
     };
 
-    let helper = env::current_exe().into_diagnostic()?;
-    let (target, _) = native_capture_target(&helper, session, viewport).into_diagnostic()?;
-    let mut worker =
-        NativeReplayWorker::start(&helper, session, target, cancelled, Duration::from_secs(30))
-            .into_diagnostic()?;
+    if let (None, [point]) = (&live_boundary, points) {
+        let capture = attached
+            .native()
+            .screenshot(
+                point,
+                destination,
+                viewport,
+                Arc::clone(&cancelled),
+                timeout,
+            )
+            .map_err(|error| {
+                if cancelled.load(Ordering::SeqCst) {
+                    return miette::miette!(
+                        "the `{NATIVE_SCREENSHOT_CAPABILITY}` capture was cancelled"
+                    );
+                }
+                return capability_report(error);
+            })?;
+
+        return write_single(response, &capture, destination);
+    }
+
+    require_cli_capability(NATIVE_SCREENSHOT_CAPABILITY, &cancelled)?;
+    let mut worker = attached
+        .native()
+        .replay_worker(viewport, cancelled, timeout)
+        .into_diagnostic()?;
 
     if points.len() > 1 {
         let captures = worker
@@ -86,19 +108,20 @@ pub(super) fn run(
         );
     }
 
-    let capture = if let Some(boundary) = live_boundary {
-        worker.capture_latest_prefix(&boundary, destination)
-    } else {
-        worker.capture(
-            points
-                .first()
-                .ok_or_else(|| miette::miette!("missing screenshot selection"))?,
-            destination,
-        )
-    }
-    .into_diagnostic()?;
+    let boundary = live_boundary.ok_or_else(|| miette::miette!("missing screenshot selection"))?;
+    let capture = worker
+        .capture_latest_prefix(&boundary, destination)
+        .into_diagnostic()?;
     worker.close();
 
+    return write_single(response, &capture, destination);
+}
+
+fn write_single(
+    response: &mut ResponseWriter,
+    capture: &CaptureOutcome,
+    destination: &Path,
+) -> Result<ExitCode> {
     return write_json_line(
         response,
         &serde_json::json!({

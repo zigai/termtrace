@@ -11,6 +11,7 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location(
     "sdk_conformance", Path(__file__).parents[1] / "sdk-conformance.py"
 )
+assert spec is not None and spec.loader is not None
 engine = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(engine)
 
@@ -194,6 +195,137 @@ class ConformanceEngineTests(unittest.TestCase):
                     if entry["language"] == "node"
                 )
             )
+
+    def test_cells_certify_only_with_every_referenced_test_passing(self):
+        matrix = {
+            "rows": [
+                {
+                    "id": "family.capability",
+                    "languages": {
+                        "rust": {"status": "verified", "evidence": ["bin:a", "bin:b"]},
+                        "python": {
+                            "status": "verified",
+                            "evidence": ["pytest:x.py::t"],
+                        },
+                        "typescript": {"status": "not_applicable", "evidence": []},
+                    },
+                },
+                {
+                    "id": "family.other",
+                    "languages": {
+                        "rust": {"status": "exposed_unverified", "evidence": []},
+                        "python": {
+                            "status": "verified",
+                            "evidence": ["pytest:x.py::u"],
+                        },
+                        "typescript": {
+                            "status": "verified",
+                            "evidence": ["node:y.js::v"],
+                        },
+                    },
+                },
+            ]
+        }
+        results = {
+            "bin:a": "passed",
+            "bin:b": "skipped",
+            "pytest:x.py::t": "passed",
+            "pytest:x.py::u": "failed",
+        }
+        verdicts = {
+            (cell["row_id"], cell["language"]): cell["verdict"]
+            for cell in engine.evaluate_cells(matrix, results)
+        }
+        self.assertEqual(
+            verdicts,
+            {
+                ("family.capability", "rust"): "not_certified",
+                ("family.capability", "python"): "verified",
+                ("family.capability", "typescript"): "not_applicable",
+                ("family.other", "rust"): "not_certified",
+                ("family.other", "python"): "not_certified",
+                ("family.other", "typescript"): "not_certified",
+            },
+        )
+
+    def test_junit_skips_and_any_failing_parameter_are_not_passes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pytest_xml = Path(directory) / "pytest.xml"
+            pytest_xml.write_text(
+                "<testsuites><testsuite>"
+                '<testcase classname="tests.consumers.test_a" name="test_x[1]"/>'
+                '<testcase classname="tests.consumers.test_a" name="test_x[2]"><failure/></testcase>'
+                '<testcase classname="tests.consumers.test_a.TestGroup" name="test_y"><skipped/></testcase>'
+                '<testcase classname="tests.consumers.test_a" name="test_z"/>'
+                "</testsuite></testsuites>"
+            )
+            self.assertEqual(
+                engine.junit_results(pytest_xml, "pytest"),
+                {
+                    "pytest:test_a.py::test_x": "failed",
+                    "pytest:test_a.py::TestGroup::test_y": "skipped",
+                    "pytest:test_a.py::test_z": "passed",
+                },
+            )
+            node_xml = Path(directory) / "node.xml"
+            node_xml.write_text(
+                '<testsuites><testcase name="runs" file="/x/a.test.js"/>'
+                '<testsuite name="group"><testcase name="skips" file="/x/a.test.js">'
+                '<skipped type="skipped"/></testcase></testsuite></testsuites>'
+            )
+            self.assertEqual(
+                engine.junit_results(node_xml, "node"),
+                {"node:a.test.js::runs": "passed", "node:a.test.js::skips": "skipped"},
+            )
+
+    def test_libtest_ignored_tests_and_targets_are_kept_apart(self):
+        output = (
+            "     Running unittests src/lib.rs (target/debug/deps/x-1)\n"
+            "test module::tests::unit ... ok\n"
+            "     Running tests/native.rs (target/debug/deps/native-2)\n"
+            "test captures_pixels ... ignored\n"
+            "test rejects_input ... FAILED\n"
+            "test restarts_child ... child output\n"
+            "ok\n"
+        )
+        self.assertEqual(
+            engine.libtest_results(output, "pkg"),
+            {
+                "cargo:pkg/lib::module::tests::unit": "passed",
+                "cargo:pkg/native::captures_pixels": "skipped",
+                "cargo:pkg/native::rejects_input": "failed",
+                "cargo:pkg/native::restarts_child": "passed",
+            },
+        )
+
+    def test_mismatch_must_fail_and_report_private_evidence(self):
+        executed = {"execution": "executed", "exit_code": 1}
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / "evidence"
+            session = evidence / "session"
+            session.mkdir(parents=True)
+            evidence.chmod(0o700)
+            (session / "completion.json").write_text('{"session_id": "s"}')
+            (session / "session.json").write_text('{"session_id": "s"}')
+            report = "TERMTRACE_WORKFLOW_FAILURE " + json.dumps(
+                {
+                    "assertion": "expected LINE_VALUE=goodbye",
+                    "observation": "LINE_VALUE=hello",
+                    "session": str(session),
+                    "evidence": str(evidence),
+                }
+            )
+            engine.validate_mismatch(executed, report)
+            for result, output in [
+                ({"execution": "executed", "exit_code": 0}, report),
+                ({"execution": "timeout", "exit_code": None}, report),
+                (executed, "AssertionError without a report"),
+            ]:
+                with self.assertRaises(ValueError):
+                    engine.validate_mismatch(result, output)
+            evidence.chmod(0o755)
+            with self.assertRaises(ValueError):
+                engine.validate_mismatch(executed, report)
 
 
 if __name__ == "__main__":

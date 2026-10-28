@@ -105,6 +105,8 @@ timelines, diffs, state inspection, exact output, and offline verification. Use
 - [Language clients](skills/termtrace/references/client-workflows.md)
 - [Artifacts](skills/termtrace/references/artifacts.md)
 - [Repeatable testing](skills/termtrace/references/testing.md)
+- [Runnable Rust, Python, and TypeScript examples](examples/sdk/README.md)
+- [SDK capability matrix](docs/sdk-capability-contract.md)
 
 Run `termtrace --help` for the normal workflow and direct command help for exact
 options. Avoid recursively traversing deep help or shell-filtering it.

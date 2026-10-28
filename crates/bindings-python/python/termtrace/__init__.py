@@ -17,6 +17,7 @@ from termtrace._termtrace import (
     LocatorSpec,
     LocatorTimeoutError,
     LocatorWaitResult,
+    Native,
     OriginalCaptureFailedError,
     OriginalFinalizationTimeoutError,
     OriginalRecording,
@@ -47,6 +48,7 @@ from termtrace.aio import (
     AsyncEvidence,
     AsyncInstrumentation,
     AsyncLocator,
+    AsyncNative,
     AsyncOriginalRecording,
     AsyncOutput,
     AsyncPointer,
@@ -65,6 +67,7 @@ __all__ = [
     "AsyncActionBuilder",
     "AsyncEvents",
     "AsyncLocator",
+    "AsyncNative",
     "AsyncOriginalRecording",
     "AsyncOutput",
     "AsyncPointer",
@@ -79,6 +82,7 @@ __all__ = [
     "LocatorSpec",
     "LocatorTimeoutError",
     "LocatorWaitResult",
+    "Native",
     "OriginalCaptureFailedError",
     "OriginalFinalizationTimeoutError",
     "OriginalRecording",
@@ -183,4 +187,11 @@ __all__ += [
     "normalize_edit",
     "output_frames_for_source_frame",
     "source_for_output_frame",
+]
+
+from termtrace._termtrace import scenario_ci_failed, write_scenario_junit
+
+__all__ += [
+    "scenario_ci_failed",
+    "write_scenario_junit",
 ]

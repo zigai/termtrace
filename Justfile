@@ -50,9 +50,11 @@ bindings-build:
 # Test native Python language bindings and pytest consumer suite
 test-python:
   uv run --project tests/consumers/python_native pytest -v tests/consumers/python_native
+  uv run --project tests/consumers/python_native pytest -v examples/sdk/python
 
-# Test native Node.js/TypeScript bindings and consumer suite
+# Test native Node.js/TypeScript bindings, the type-checked examples, and consumer suite
 test-node:
+  node --test crates/bindings-node/test/*.test.js
   npm --prefix tests/consumers/node_native test
 
 # Type-check and lint the native Python bindings
@@ -91,6 +93,13 @@ native-test:
   cargo test --locked --test cli retained_native_video_exports_without_native_capture_tools -- --ignored
   cargo test --locked --test cli original_native -- --ignored
   cargo test --locked -p termtrace-service --test original_recording -- --ignored --test-threads=1
+  TERMTRACE_BIN={{justfile_directory()}}/target/debug/termtrace cargo test --locked --manifest-path tests/consumers/rust/Cargo.toml --features local --tests -- --ignored --test-threads=1
+  scripts/sdk-demos.sh
+  TERMTRACE_BIN={{justfile_directory()}}/target/debug/termtrace bash examples/demo.sh "$(mktemp -d -p target demo.XXXXXX)"
+
+# Certify every SDK capability row against executed Rust, Python, and TypeScript tests (requires native tools)
+conformance:
+  scripts/ci-sdk-conformance.sh
 
 # Run performance and resource benchmarks on demand (requires native capture tooling)
 bench:

@@ -1264,3 +1264,212 @@ test('semantic preview and every format render from TypeScript', async () => {
   await assert.rejects(EDIT_TERMTRACE.videoRender(session, edit, existing, options), /already exists/);
   assert.deepStrictEqual(fs.readFileSync(existing), before);
 });
+
+const TERMINAL_PROGRAMS = path.resolve(__dirname, '../../../../fixtures/programs/terminal');
+const INPUT_REPORTER = [path.join(TERMINAL_PROGRAMS, 'input-reporter.py')];
+const LINE_COMMAND = [path.join(TERMINAL_PROGRAMS, 'line-command.sh')];
+
+function reported(text, event) {
+  const escaped = event.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return [...text.matchAll(new RegExp(`^${escaped} T=(\\d+)`, 'gm'))].map((match) => Number(match[1]));
+}
+
+async function withClient(body) {
+  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-behavior-'));
+  try {
+    await body(new Termtrace(TERMTRACE_BIN, path.join(tmpdir, 'sessions')), tmpdir);
+  } finally {
+    fs.rmSync(tmpdir, { recursive: true, force: true });
+  }
+}
+
+async function withReporter(tt, body) {
+  const rec = await tt.launch(INPUT_REPORTER, { rows: 40, cols: 80 });
+  try {
+    await rec.screen().waitForText('REPORTER_READY', 5000);
+    await body(rec);
+  } finally {
+    if (rec.isActive()) await rec.stop();
+  }
+}
+
+async function waitForCompleted(session) {
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    const status = await session.status().catch(() => null);
+    if (status && status.kind === 'completed') return status;
+    assert.ok(Date.now() < deadline, 'session did not complete');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+test('launch resolves with a ready session and fails past its readiness deadline', async () => {
+  await withClient(async (tt) => {
+    const rec = await tt.launch(['/bin/sh', '-c', 'printf STARTED; sleep 30']);
+    try {
+      assert.strictEqual((await rec.status()).kind, 'live');
+      assert.ok((await rec.screen().waitForText('STARTED', 5000)).text.includes('STARTED'));
+    } finally {
+      await rec.stop();
+    }
+    await assert.rejects(tt.launch(['/bin/sh', '-c', 'sleep 30'], { startup_timeout_ms: 1n }), /readiness timed out/);
+  });
+});
+
+test('launch runs the child in the requested working directory', async () => {
+  await withClient(async (tt, tmpdir) => {
+    const workdir = path.join(tmpdir, 'child-workdir');
+    fs.mkdirSync(workdir);
+    fs.writeFileSync(path.join(workdir, 'marker-file.txt'), 'marker');
+    const rec = await tt.launch(
+      ['/bin/sh', '-c', 'printf "CWD=%s\\r\\n" "$(pwd -P)"; ls; printf DONE; sleep 30'],
+      { cwd: workdir, cols: 200 },
+    );
+    try {
+      const text = (await rec.screen().waitForText('DONE', 5000)).text;
+      assert.ok(text.includes(`CWD=${fs.realpathSync(workdir)}`), text);
+      assert.ok(text.includes('marker-file.txt'), text);
+    } finally {
+      await rec.stop();
+    }
+    await assert.rejects(tt.launch(['/bin/sh', '-c', 'sleep 30'], { cwd: path.join(tmpdir, 'missing') }));
+  });
+});
+
+test('a detached session keeps running and is controlled through its target', async () => {
+  await withClient(async (tt, tmpdir) => {
+    const state = path.join(tmpdir, 'state');
+    const previous = process.env.TERMTRACE_STATE_DIR;
+    process.env.TERMTRACE_STATE_DIR = state;
+    const rec = await tt.launch(LINE_COMMAND);
+    try {
+      await rec.screen().waitForText('LINE_READY', 5000);
+      await tt.registry(state).register('detached-demo', rec.path);
+      rec.detach();
+      assert.strictEqual(rec.isActive(), false);
+      assert.throws(() => rec.detach());
+
+      const byName = await tt.attachTarget('name:detached-demo');
+      const byPath = await tt.attachTarget(`path:${rec.path}`);
+      assert.deepStrictEqual([byName.sessionId, byPath.sessionId], [rec.sessionId, rec.sessionId]);
+      assert.strictEqual((await byName.status()).kind, 'live');
+      assert.ok((await byPath.screen().text()).includes('LINE_READY'));
+
+      const outcome = await byName.actions()
+        .sendText('detached-input')
+        .sendKey('Enter')
+        .untilScreen('LINE_VALUE=detached-input', 5000)
+        .execute();
+      assert.ok(outcome.text.includes('LINE_VALUE=detached-input'));
+      assert.strictEqual((await waitForCompleted(byPath)).completion.exit_code, 0);
+
+      await assert.rejects(tt.attachTarget('name:unregistered-demo'));
+    } finally {
+      if (!fs.existsSync(path.join(rec.path, 'completion.json'))) await (await tt.attach(rec.path)).signal('terminate');
+      if (previous === undefined) delete process.env.TERMTRACE_STATE_DIR;
+      else process.env.TERMTRACE_STATE_DIR = previous;
+    }
+  });
+});
+
+test('paste, focus, and scroll reach an application that reports them', async () => {
+  await withClient(async (tt) => {
+    await withReporter(tt, async (rec) => {
+      const pasted = await rec.actions().paste('pasted words').untilScreen('PASTE=', 5000).execute();
+      assert.strictEqual(reported(pasted.text, 'PASTE=pasted words').length, 1);
+      assert.deepStrictEqual(reported(pasted.text, 'KEY=70'), []);
+
+      const pointer = rec.pointer();
+      assert.strictEqual((await pointer.focus(false, { strict: true })).kind, 'applied');
+      await rec.screen().waitForText('FOCUS=out', 5000);
+      assert.strictEqual((await pointer.focus(true, { strict: true })).kind, 'applied');
+      await rec.screen().waitForText('FOCUS=in', 5000);
+
+      assert.strictEqual((await pointer.scroll(4, 2, { lines: -2, strict: true })).kind, 'applied');
+      assert.strictEqual((await pointer.scroll(9, 7, { lines: 1, strict: true })).kind, 'applied');
+      const text = (await rec.screen().waitForText('WHEEL=down', 5000)).text;
+      assert.strictEqual(reported(text, 'WHEEL=up@5,3').length, 2);
+      assert.strictEqual(reported(text, 'WHEEL=down@10,8').length, 1);
+    });
+  });
+  await withFixture('echo_command', undefined, async (rec) => {
+    assert.strictEqual((await rec.pointer().focus(true)).kind, 'noop');
+    assert.strictEqual((await rec.pointer().scroll(0, 0, { lines: 1 })).kind, 'noop');
+    await assert.rejects(rec.pointer().focus(true, { strict: true }));
+  });
+});
+
+test('paced text arrives one character at a time', async () => {
+  await withClient(async (tt) => {
+    await withReporter(tt, async (rec) => {
+      await rec.actions().sendText('abc').untilScreen('KEY=63', 5000).execute();
+      const { text } = await rec.actions().pace(200).sendText('xyz').untilScreen('KEY=7a', 5000).execute();
+      const burst = ['61', '62', '63'].map((key) => reported(text, `KEY=${key}`)[0]);
+      const paced = ['78', '79', '7a'].map((key) => reported(text, `KEY=${key}`)[0]);
+      assert.ok(Math.max(...burst) - Math.min(...burst) < 100, String(burst));
+      assert.ok(paced.slice(1).every((later, index) => later - paced[index] >= 150), String(paced));
+    });
+  });
+});
+
+test('waitForIdle resolves after output stops', async () => {
+  await withClient(async (tt) => {
+    const ticker = "i=0; while [ $i -lt 8 ]; do i=$((i+1)); printf 'TICK %d\\r\\n' $i; sleep 0.2; done";
+    const rec = await tt.launch(['/bin/sh', '-c', `${ticker}; printf SETTLED; sleep 30`]);
+    try {
+      const started = Date.now();
+      const state = await rec.screen().waitForIdle(15000);
+      assert.ok(Date.now() - started >= 1400);
+      assert.ok(state.text.includes('TICK 8'));
+      assert.ok(state.text.includes('SETTLED'));
+    } finally {
+      await rec.stop();
+    }
+    const busy = await tt.launch(['/bin/sh', '-c', 'echo BUSY; while :; do date +%s%N; sleep 0.1; done']);
+    try {
+      // A blank screen before the first output would itself be idle.
+      await busy.screen().waitForText('BUSY', 5000);
+      await assert.rejects(busy.screen().waitForIdle(1500), /stable interval/);
+    } finally {
+      await busy.stop();
+    }
+  });
+});
+
+test('cacheStatus reports the checkpoint a completed observation writes', async () => {
+  await withClient(async (tt) => {
+    const rec = await tt.launch(['/bin/sh', '-c', 'printf CACHED-SCREEN']);
+    await rec.output().waitFor(new Uint8Array(Buffer.from('CACHED-SCREEN')), 5000);
+    await rec.stop();
+    const session = await tt.attach(rec.path);
+    const before = await session.analysis().cacheStatus();
+    assert.deepStrictEqual([before.entries, before.compressed_bytes], [0n, 0n]);
+
+    assert.strictEqual((await session.screen().observe()).resolution, 'canonical_replay');
+    const after = await session.analysis().cacheStatus();
+    assert.strictEqual(after.entries, 1n);
+    assert.ok(after.compressed_bytes > 0n);
+    assert.ok(Buffer.from(after.directory).toString().startsWith(rec.path));
+    assert.strictEqual((await session.screen().observe()).resolution, 'validated_checkpoint');
+
+    await session.analysis().cachePrune();
+    assert.strictEqual((await session.analysis().cacheStatus()).entries, 0n);
+  });
+});
+
+test('discardCompleted removes only a completed session', async () => {
+  await withClient(async (tt) => {
+    const rec = await tt.launch(INTERACTION.echo_command);
+    await rec.screen().waitForText(INTERACTION.ready_text, 5000);
+    await assert.rejects(rec.discardCompleted());
+    assert.strictEqual((await rec.status()).kind, 'live');
+    assert.ok(fs.statSync(rec.path).isDirectory());
+    await rec.stop();
+
+    assert.strictEqual((await rec.status()).kind, 'completed');
+    await rec.discardCompleted();
+    assert.strictEqual(fs.existsSync(rec.path), false);
+    await assert.rejects(tt.attach(rec.path));
+    await assert.rejects(rec.discardCompleted());
+  });
+});

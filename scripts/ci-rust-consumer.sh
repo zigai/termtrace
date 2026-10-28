@@ -35,3 +35,4 @@ recorder_pid=""
 test -s "$scratch/session/completion.json"
 cargo run --locked --quiet --manifest-path "$consumer" --features local --bin local -- "$scratch/local-evidence"
 cargo run --locked --quiet --manifest-path "$consumer" --features local --bin editing -- "$scratch/editing"
+cargo test --locked --manifest-path "$consumer" --features local --tests

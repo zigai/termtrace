@@ -18,7 +18,9 @@ mod diagnostics;
 mod evidence;
 mod host;
 mod locator;
+mod native;
 mod original;
+pub mod scenario;
 pub mod testing;
 pub mod video;
 
@@ -994,6 +996,15 @@ impl JsSession {
         };
     }
 
+    /// Native replay operations through the shared service.
+    #[napi]
+    pub fn native(&self) -> native::JsNative {
+        return native::JsNative {
+            terminal: self.terminal.clone(),
+            path: self.session_path.clone(),
+        };
+    }
+
     /// Typed integrity operations through the shared service.
     #[napi]
     pub fn integrity(&self) -> diagnostics::JsEvidence {
@@ -1579,6 +1590,15 @@ impl JsRecording {
     #[napi]
     pub fn evidence(&self) -> diagnostics::JsEvidence {
         return diagnostics::JsEvidence {
+            path: PathBuf::from(&self.path),
+        };
+    }
+
+    /// Native replay operations through the shared service.
+    #[napi]
+    pub fn native(&self) -> native::JsNative {
+        return native::JsNative {
+            terminal: self.terminal.clone(),
             path: PathBuf::from(&self.path),
         };
     }
@@ -2221,6 +2241,34 @@ impl JsTermtrace {
     #[napi]
     pub fn evidence(&self, source: Arg<ExactPath>) -> diagnostics::JsEvidence {
         return diagnostics::JsEvidence::new(source);
+    }
+
+    /// Run scenario documents as one suite with this client's binary. A document with a
+    /// `matrix` expands to one labelled case per combination; with a shard, case `i` of the
+    /// sorted expansion runs only when `i % shardCount == shardIndex`. Up to `jobs` cases run at
+    /// once, each in a fresh session. A failed case runs again up to `reruns` times; a later
+    /// pass makes it `flaky`, which fails CI only with `failOnFlaky`.
+    ///
+    /// # Errors
+    ///
+    /// Rejects when the options are invalid, a document cannot be read or expanded, or the
+    /// shard is empty. Case failures stay in the report.
+    #[napi]
+    pub async fn run_scenarios(
+        &self,
+        scenarios: Vec<Arg<ExactPath>>,
+        options: scenario::JsScenarioSuiteOptions,
+    ) -> napi::Result<Model<termtrace_model::scenario::ScenarioSuiteReport>> {
+        return scenario::run(&self.terminal, scenarios, options).await;
+    }
+
+    /// Native replay operations for one canonical session.
+    #[napi]
+    pub fn native(&self, source: Arg<ExactPath>) -> native::JsNative {
+        return native::JsNative {
+            terminal: self.terminal.clone(),
+            path: source.0 .0,
+        };
     }
 
     /// Create a new Termtrace instance with optional binary and evidence root paths.

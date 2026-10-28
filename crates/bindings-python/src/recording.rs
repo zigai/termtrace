@@ -221,6 +221,14 @@ impl PyRecording {
         };
     }
 
+    /// Native replay operations through the shared service.
+    pub fn native(&self) -> crate::native::PyNative {
+        return crate::native::PyNative {
+            terminal: self.terminal.clone(),
+            path: PathBuf::from(&self.path),
+        };
+    }
+
     /// Typed integrity operations through the shared service.
     pub fn integrity(&self) -> crate::diagnostics::PyEvidence {
         return crate::diagnostics::PyEvidence {

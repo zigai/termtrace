@@ -422,6 +422,45 @@ fi
 }
 
 #[test]
+fn semantic_preview_accepts_a_relative_directory() {
+    let temporary = TempDir::new().expect("temporary directory");
+    Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .current_dir(temporary.path())
+        .args(["record", "--no-input", "--out", "session"])
+        .args(["/bin/sh", "-c", "printf PREVIEW; sleep 0.3"])
+        .assert()
+        .success();
+    let log = EventLog::read(temporary.path().join("session/events.jsonl")).expect("event log");
+    let end = log.events.last().expect("final event").monotonic_ns;
+    fs::write(
+        temporary.path().join("edit.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "clips": [{ "from": { "monotonicNs": 0 }, "to": { "monotonicNs": end } }]
+        }))
+        .expect("edit JSON"),
+    )
+    .expect("write edit plan");
+    Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .current_dir(temporary.path())
+        .args(["video", "session", "--renderer", "semantic", "--fps", "24"])
+        .args(["--edit", "edit.json", "--preview-out", "review/preview"])
+        .assert()
+        .success();
+
+    assert!(temporary
+        .path()
+        .join("review/preview/contact-sheet.png")
+        .is_file());
+    assert!(temporary
+        .path()
+        .join("review/preview/preview.mp4")
+        .is_file());
+}
+
+#[test]
 fn semantic_video_is_explicit_and_native_remains_the_default() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("semantic-video-session");

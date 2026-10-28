@@ -1,9 +1,19 @@
-from termtrace import MediaArtifactResult, decode_media_artifact, encode_media_artifact
-from termtrace.contracts import decimal_unsigned, timeout_seconds
+from termtrace import ActionResult, ScreenFrame
+from termtrace.types import ArtifactProductKind, MediaArtifactResult
 
-value: MediaArtifactResult = decode_media_artifact('{}')
-wide: int = value['members'][0]['byte_length']
-raw: bytes = value['directory_bytes']
-encoded: str = encode_media_artifact(value)
-max128: int = decimal_unsigned('340282366920938463463374607431768211455', 128)
-seconds: float = timeout_seconds(timeout_ms=1250)
+
+def consume(
+    value: MediaArtifactResult, frame: ScreenFrame, result: ActionResult
+) -> None:
+    wide: int = value["members"][0]["byte_length"]
+    raw: bytes = value["directory_bytes"]
+    seq: int = value["source"]["boundary"]["next_event_seq"]
+    kind: ArtifactProductKind = value["product_kind"]
+    if value["provenance"]["kind"] == "presentation_output":
+        source_kind = value["provenance"]["source_kind"]
+        del source_kind
+    schema: str | None = value["members"][0]["schema_type"]
+    encoded: str = frame.to_json()
+    decoded: ScreenFrame = ScreenFrame.from_json(encoded)
+    replayed: ActionResult = ActionResult.from_json(result.to_json())
+    del wide, raw, seq, kind, schema, decoded, replayed
