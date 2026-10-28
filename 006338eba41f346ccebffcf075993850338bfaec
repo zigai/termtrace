@@ -1,0 +1,6 @@
+- The Python SDK plans an Edit built with Select.at_ns(0)..at_ns(500ms) at 2x speed to 8 output frames, renders it to a 1920x1128 8-frame GIF, refuses to render onto the existing GIF, reports a reversed clip as clip_out_of_range at clips[0], and rejects a float event id with TypeError
+- Rust, Python and Node build the shared fixtures/conformance/sdk/editing.json edit independently and get the same edit_plan_hash; all shared negative cases report the same code and facts in each language
+- CLI --edit files keep their plan JSON and edit_plan_hash from before the change
+- A native edit render with no prior capture captures native pixels and records native_encoded_evidence, never semantic pixels
+- Preview contact sheets and rendered semantic and native frames from Rust, Python and Node look correct
+- `just lint validate test integration bindings-test native-test` passes
