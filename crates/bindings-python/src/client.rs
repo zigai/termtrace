@@ -4,6 +4,7 @@ use crate::control;
 use crate::errors::to_py_err;
 use crate::host::{Arg, Model, PathArg};
 use crate::recording::PyRecording;
+use crate::scenario::scenario_err;
 use crate::session::PySession;
 use crate::video::{video, EditArg};
 use pyo3::exceptions::PyRuntimeError;
@@ -18,6 +19,7 @@ use termtrace_model::execution::event_log::RecoveryReport;
 use termtrace_model::execution::session::{VerificationLevel, VerificationReport};
 use termtrace_model::protocol::capability::CapabilityReport;
 use termtrace_model::registry::{GarbageCollectionReport, RegistryEntry, RegistryListEntry};
+use termtrace_model::scenario::ScenarioSuiteReport;
 use termtrace_sdk::artifacts::{
     ArtifactService, GifLoop, PresentationPlan, PreviewOptions, SemanticRasterProfile, VideoMode,
     VideoOptions, VideoOutcome, VideoPreview, VideoRender, VideoRenderer,
@@ -28,6 +30,7 @@ use termtrace_sdk::defaults;
 use termtrace_sdk::integrity::IntegrityService;
 use termtrace_sdk::locator::WaitCancellation;
 use termtrace_sdk::registry::RegistryService;
+use termtrace_sdk::scenario::{run_suite, ScenarioSuiteOptions};
 use termtrace_sdk::session::{LaunchSpec, SessionTarget, VisualProfile, VisualProfileReport};
 use termtrace_sdk::system::SystemService;
 use termtrace_sdk::tmux::TmuxService;
@@ -145,6 +148,64 @@ impl PyTermtrace {
     /// Evidence artifacts and integrity operations for one canonical session.
     pub fn evidence(&self, source: PathArg) -> crate::diagnostics::PyEvidence {
         return crate::diagnostics::PyEvidence::new(source);
+    }
+
+    /// Native replay operations for one canonical session.
+    pub fn native(&self, source: PathArg) -> crate::native::PyNative {
+        return crate::native::PyNative {
+            terminal: self.terminal.clone(),
+            path: source.0,
+        };
+    }
+
+    /// Run scenario documents as one suite with this client's binary. A document with a
+    /// `matrix` expands to one labelled case per combination; with `shard_index` and
+    /// `shard_count`, case `i` of the sorted expansion runs only when
+    /// `i % shard_count == shard_index`. Up to `jobs` cases run at once, each in a fresh session
+    /// under `evidence_root` (default: this client's evidence root). Failure artifacts go under
+    /// `failure_root` and snapshot baselines in its sibling `snapshots` directory, replaced when
+    /// `update_snapshots` is set. A failed case runs again up to `reruns` times; a later pass
+    /// makes it `flaky`, which fails CI only with `fail_on_flaky`.
+    ///
+    /// # Errors
+    ///
+    /// Raises `TermtraceError` when the options are invalid, a document cannot be read or
+    /// expanded, or the shard is empty. Case failures stay in the report.
+    #[pyo3(signature = (scenarios, *, failure_root, evidence_root = None, jobs = 1, shard_index = None, shard_count = None, update_snapshots = false, reruns = 0, fail_on_flaky = false))]
+    #[expect(clippy::too_many_arguments, reason = "Python keyword arguments")]
+    pub fn run_scenarios(
+        &self,
+        py: Python<'_>,
+        scenarios: Vec<PathArg>,
+        failure_root: PathArg,
+        evidence_root: Option<PathArg>,
+        jobs: usize,
+        shard_index: Option<usize>,
+        shard_count: Option<usize>,
+        update_snapshots: bool,
+        reruns: u8,
+        fail_on_flaky: bool,
+    ) -> PyResult<Model<ScenarioSuiteReport>> {
+        let options = ScenarioSuiteOptions {
+            binary: self.terminal.binary().to_path_buf(),
+            evidence_root: evidence_root.map_or_else(
+                || return self.terminal.evidence_root().to_path_buf(),
+                |root| return root.0,
+            ),
+            failure_root: failure_root.0,
+            jobs,
+            shard_index,
+            shard_count,
+            update_snapshots,
+            reruns,
+            fail_on_flaky,
+        };
+
+        return py.detach(move || {
+            return run_suite(scenarios.into_iter().map(|path| return path.0), &options)
+                .map(Model)
+                .map_err(scenario_err);
+        });
     }
 
     /// Launch a new recorded command session. `visual_profile` is committed into the session;

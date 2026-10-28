@@ -11,13 +11,14 @@ env = dict(os.environ, MYPYPATH=str(root / "crates/bindings-python/python"))
 types = Path("tests/consumers/python_native/types")
 # Each negative fixture must be rejected on exactly these lines and nowhere else.
 fixtures = {
-    "contracts": [5, 6, 7, 8],
+    "contracts": [6, 7, 8, 9],
     "screen": [8, 9, 10, 11, 12],
-    "control": [7, 8, 9, 10, 11, 12, 13],
-    "testing": [5, 6, 7, 8, 9],
+    "control": [6, 7, 8, 9, 10, 11, 12],
+    "testing": [12, 13, 14, 15, 16],
     "evidence": [10, 11, 12, 13, 14],
     "diagnostics": [10, 11, 12, 13, 14, 15, 23, 24],
     "original": [6, 7, 8, 9, 10],
+    "editing": [8, 9, 10, 11, 12, 13],
 }
 
 

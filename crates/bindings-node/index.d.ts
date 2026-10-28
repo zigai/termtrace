@@ -2,7 +2,7 @@
 /* eslint-disable */
 
 // <sdk-types>
-import type { Arg, JsonValue, Model, ActOutcome, ActionInputResult, ActionModeChange, ActionOutputSummary, ActionPostconditionResult, ActionPostconditionResultIdle, ActionPostconditionResultNone, ActionPostconditionResultScreen, ActionWarning, ActorBoundaries, AnnotationAnchor, AnnotationPosition, AnnotationScope, AnnotationScopeClip, AnnotationScopeOutputFrame, AnnotationScopeRange, AnnotationScopeWholeVideo, AnnotationStyle, AnyValue, ApplicationAcknowledgement, ApplicationEvent, ApplicationEventKind, ArtifactManifestRef, ArtifactMember, ArtifactProductKind, ArtifactProvenance, ArtifactProvenanceNativeReplay, ArtifactProvenanceOriginalExecution, ArtifactProvenancePresentationOutput, ArtifactProvenanceSemanticRendering, ArtifactRelativePath, ArtifactSensitivity, ArtifactSourceKind, ArtifactSourceRef, AssertionFrameIdentity, AtomSpec, AtomSpecBytes, AtomSpecKey, AtomSpecPaste, AtomSpecText, Base64Bytes, BundleManifest, BundleProfile, ByteOutputPage, BytePayloadSummary, CanonicalBoundary, Capability, CapabilityReport, CapabilityStatus, CaptionLayout, CaptureQuality, CaptureTarget, CellChange, CellGrid, CellState, CellStyle, ChangeMode, ChangeRegion, ChangeSource, ChangeVisualization, ClockSample, ColorPolicy, ColorSpec, ColorSpecNone, ColorSpecPalette, ColorSpecRgb, ColorState, CommandOutcome, ConditionSpec, ConditionSpecIdle, ConditionSpecNone, ConditionSpecScreen, ControlAcknowledgement, ControlErrorDetails, ControlOutcome, ControlOutcomeAcknowledged, ControlOutcomeMarked, CursorMaskFrame, CursorState, CursorStyle, DecimalU64, DiagnoseReport, DiagnosticCheck, DiagnosticFinding, DiffEndpoint, DirtyState, DurabilityMode, DurabilityPolicy, DurabilityRecord, EditClip, EditFailure, EditFailureCode, EditPlan, EditSelector, EditSource, EditSourceFile, EditSourcePlan, EnvironmentBase, EnvironmentSpec, ErrorReport, Event, EventApplication, EventExit, EventFollowPosition, EventFollowPositionCompleted, EventFollowPositionLive, EventHostError, EventInputIntent, EventInputResult, EventLifecycle, EventMarker, EventMetadata, EventMetadataApplication, EventMetadataExit, EventMetadataHostError, EventMetadataInputIntent, EventMetadataInputResult, EventMetadataLifecycle, EventMetadataMarker, EventMetadataOutput, EventMetadataQueryResponse, EventMetadataResizeIntent, EventMetadataResizeResult, EventMetadataSignalIntent, EventMetadataSignalResult, EventOutput, EventPage, EventPageCursor, EventProjection, EventQueryResponse, EventResizeIntent, EventResizeResult, EventSignalIntent, EventSignalResult, EvidencePolicy, ExactPath, ExplainFinding, ExplainOutputPage, ExplainReport, FinalizationReport, FindingConfidence, FrameDetail, GarbageCollectionCandidate, GarbageCollectionReport, GeometryProbeAttempt, GeometrySolveReport, GifLoop, InputDescriptor, InputDescriptorActivate, InputDescriptorFocus, InputDescriptorKey, InputDescriptorPaste, InputDescriptorPointer, InputDescriptorRaw, InputDescriptorText, InputKind, InputSequenceAtomOutcome, InputSequenceFailureDetails, InputSource, InvalidRegionReason, LastActionAnalysis, LastActionBoundary, LastActionDiagnosticsReport, LastActionReport, LaunchOptions, LifecycleKind, LiveEventCursor, LocatorCondition, LocatorConditionCount, LocatorFailure, LocatorWaitFailure, LocatorWaitFailureCancelled, LocatorWaitFailureLocatorTimeout, ManagementFailure, ManagementFailureOriginalCapture, ManagementFailureRegistryRestart, ManagementFailureTmux, MarkOutcome, MarkerRecord, MaskedSnapshotOptions, MatchRange, MatchedCell, MediaArtifactResult, ModeState, MouseButton, MutationEffect, MutationEffectApplied, MutationEffectNotApplied, MutationEffectPartial, MutationEffectUnknown, MutationJournalStatus, NativeCorrelation, NativeEvidenceLevel, NativeProfileReport, NativeVisualProfile, NormalizedAnnotation, NormalizedChangeFrame, NormalizedClip, NormalizedEdit, NormalizedSubtitle, NullableString, Observation, ObservationFrame, ObservationIntegrity, ObservationResolution, ObservationSourceKind, Observers, OperationStatus, OriginalCaptureFacts, OriginalCaptureFailure, OriginalCaptureFailureRecord, OriginalCaptureState, OriginalCaptureStatus, OriginalLaunchOptions, OutputFrameSource, OutputPage, OutputPageCursor, PaddingPoints, PageSource, PendingOperationReport, PixelCanvas, PixelTransform, PixelTransformCallout, PixelTransformCrop, PixelTransformCursorMask, PixelTransformResize, PixelTransformZoom, PointerOperation, PointerOperationClick, PointerOperationDrag, PointerOperationMultiClick, PointerOperationScroll, PointerOutcome, PointerOutcomeActivated, PointerOutcomeApplied, PointerOutcomeNoop, PostconditionSummary, PostconditionSummaryIdle, PostconditionSummaryNone, PostconditionSummaryScreen, PresentationDelivery, PresentationLayout, PresentationPlan, PresentationSource, PresentationSourceNative, PresentationSourceSemantic, PreviewOptions, ProcessSignal, ProjectedEventPage, ProjectionSpec, ProvenanceCapture, QueryDescription, QueryError, QueryErrorIndexOutOfBounds, QueryErrorInsufficientFrameDetail, QueryErrorInvalidQuery, QueryErrorMultipleMatches, QueryErrorNoMatch, QueryErrorQueryResourceLimit, RationalSpeed, ReactionSpec, RecoveryIssue, RecoveryReport, RegistryEntry, RegistryListEntry, RegistrySessionResolution, ReplayCachePruneReport, ReplayCacheStatus, ResourceLimitKind, ResourceLimitOutcome, RestartAttempt, RestartConfiguration, RestartDurability, RestartFailureFacts, RestartFailurePhase, RestartProvenance, RestartReport, Retry, ReviewExportManifest, ReviewSearchMatch, ReviewSearchResult, ReviewSummary, Rgb, RowChange, RowDiff, RowMove, SaveFormat, SaveManifest, SaveOutcome, SavedFile, ScreenAppearance, ScreenCell, ScreenCellRow, ScreenChanges, ScreenFrameData, ScreenFrameDataCells, ScreenFrameDataNone, ScreenFrameDataSpans, ScreenFrameDataText, ScreenFrameFailureDetails, ScreenFrameSource, ScreenFrameSourceActor, ScreenFrameSourceResolved, ScreenGeometry, ScreenMode, ScreenModeAlternateScreen, ScreenModeAnsi, ScreenModeBracketedPaste, ScreenModeDec, ScreenModeSynchronizedOutput, ScreenModeWraparound, ScreenPostconditionQuality, ScreenPredicate, ScreenPredicateAbsent, ScreenPredicateAll, ScreenPredicateAny, ScreenPredicateContains, ScreenPredicateCursor, ScreenPredicateExcludesRegex, ScreenPredicateMatchesRegex, ScreenPredicateMode, ScreenPredicateRegionAbsent, ScreenPredicateRegionContains, ScreenPredicateRowAbsent, ScreenPredicateRowContains, ScreenPredicateStateHash, ScreenRegion, ScreenRowChange, ScreenSpan, ScreenSpanRow, ScreenTextRow, ScreenWaitQuality, ScreenWaitResult, SdkArtifactMember, SdkCanonicalBoundary, SecondaryFailure, SemanticDiff, SemanticFontResource, SemanticFontRole, SemanticImageResource, SemanticPreset, SemanticRasterProfile, SemanticVideoCanvas, SemanticVideoSourcePlan, SemanticVisualProfile, SendSpec, SendStepSpec, SendStepSpecActivate, SendStepSpecFocus, SendStepSpecInput, SendStepSpecMark, SendStepSpecPointer, SendStepSpecResize, SendStepSpecSignal, SessionCompletion, SessionFailure, SessionGeometry, SessionPhase, SessionStatus, SessionStatusCompleted, SessionStatusLive, SnapshotProfile, SourceRange, SpanCell, StableCaptureQuality, StableScreenCapture, StateDelta, StateHashComparison, StatePoint, StatePointEventSeq, StatePointLatestPresented, StatePointMarker, StatePointMonotonicNs, StatePointStateHash, StatePointStateId, StateRecord, StopReport, StopReportCompleted, StopReportRequested, StyleFilter, SubtitleTrack, SuccessorReadiness, SurvivingKind, SurvivingPathRecord, TerminalGeometryReport, TerminalMetadata, TerminalMode, TestOutcome, TextAnnotation, TimelineEntry, TimelineItem, TimelineItemCanonicalEvent, TimelineItemSemanticState, TimelineItemVtToken, TimelinePage, TmuxCatalog, TmuxCatalogGaps, TmuxCatalogSummary, TmuxCatalogTracks, TmuxCompositeTrack, TmuxCoverage, TmuxCoverageGap, TmuxEventRecord, TmuxEventRecordActivePaneChanged, TmuxEventRecordActiveWindowChanged, TmuxEventRecordCompositeTrackLinked, TmuxEventRecordCoverageGapOpened, TmuxEventRecordCoverageGapResolved, TmuxEventRecordLayoutChanged, TmuxEventRecordObserverStarted, TmuxEventRecordPaneCreated, TmuxEventRecordPaneDestroyed, TmuxEventRecordPaneModeChanged, TmuxEventRecordPaneMoved, TmuxEventRecordPaneTrackCompleted, TmuxEventRecordPaneTrackLinked, TmuxEventRecordRecordingCompleted, TmuxEventRecordRecordingStarted, TmuxEventRecordRecordingStopping, TmuxEventRecordServerIdentityBound, TmuxEventRecordSessionCreated, TmuxEventRecordSessionDestroyed, TmuxEventRecordWindowCreated, TmuxEventRecordWindowDestroyed, TmuxEventRecordZoomChanged, TmuxEvents, TmuxFailureFacts, TmuxFailurePhase, TmuxGapCatalogEntry, TmuxGapKind, TmuxGhosttyProfile, TmuxJournalBoundary, TmuxPaneAddress, TmuxPaneSnapshot, TmuxPaneStatus, TmuxPaneTrack, TmuxRecordConfiguration, TmuxRecordingCoverage, TmuxRecordingLifecycle, TmuxRecordingManifest, TmuxRecordingStart, TmuxScopeMode, TmuxScopePolicy, TmuxServerIdentity, TmuxSessionLink, TmuxSocket, TmuxSocketName, TmuxSocketPath, TmuxStatusReport, TmuxStreamingBundleManifest, TmuxTrackCatalogEntry, TruthLayer, ValueChange, ValueChange2, ValueChange3, ValueChange4, ValueChange5, ValueChange6, ValueChange7, ValueChange8, VerificationFinding, VerificationLevel, VerificationReport, Versions, VideoOptions, VideoPreview, VideoRender, VideoRenderConfig, VideoRenderer, VisualProfile, VisualProfileFailure, VisualProfileReport, VtSourceSegment, VtToken, VtTokenKind, WaitOutcome, WideKind, WindowPadding } from './types'
+import type { Arg, JsonValue, Model, ActOutcome, ActionInputResult, ActionModeChange, ActionOutputSummary, ActionPostconditionResult, ActionPostconditionResultIdle, ActionPostconditionResultNone, ActionPostconditionResultScreen, ActionWarning, ActorBoundaries, AnnotationAnchor, AnnotationPosition, AnnotationScope, AnnotationScopeClip, AnnotationScopeOutputFrame, AnnotationScopeRange, AnnotationScopeWholeVideo, AnnotationStyle, AnyValue, ApplicationAcknowledgement, ApplicationEvent, ApplicationEventKind, ArtifactManifestRef, ArtifactMember, ArtifactProductKind, ArtifactProvenance, ArtifactProvenanceNativeReplay, ArtifactProvenanceOriginalExecution, ArtifactProvenancePresentationOutput, ArtifactProvenanceSemanticRendering, ArtifactRelativePath, ArtifactSensitivity, ArtifactSourceKind, ArtifactSourceRef, AssertionFrameIdentity, AtomSpec, AtomSpecBytes, AtomSpecKey, AtomSpecPaste, AtomSpecText, Base64Bytes, BundleManifest, BundleProfile, ByteOutputPage, BytePayloadSummary, CanonicalBoundary, Capability, CapabilityReport, CapabilityStatus, CaptionLayout, CaptureOutcome, CaptureQuality, CaptureTarget, CellChange, CellGrid, CellState, CellStyle, ChangeMode, ChangeRegion, ChangeSource, ChangeVisualization, ClockSample, ColorPolicy, ColorSpec, ColorSpecNone, ColorSpecPalette, ColorSpecRgb, ColorState, CommandOutcome, ConditionSpec, ConditionSpecIdle, ConditionSpecNone, ConditionSpecScreen, ControlAcknowledgement, ControlErrorDetails, ControlOutcome, ControlOutcomeAcknowledged, ControlOutcomeMarked, CursorMaskFrame, CursorState, CursorStyle, DecimalU64, DiagnoseReport, DiagnosticCheck, DiagnosticFinding, DiffEndpoint, DirtyState, DurabilityMode, DurabilityPolicy, DurabilityRecord, EditClip, EditFailure, EditFailureCode, EditPlan, EditSelector, EditSource, EditSourceFile, EditSourcePlan, EnvironmentBase, EnvironmentSpec, ErrorReport, Event, EventApplication, EventExit, EventFollowPosition, EventFollowPositionCompleted, EventFollowPositionLive, EventHostError, EventInputIntent, EventInputResult, EventLifecycle, EventMarker, EventMetadata, EventMetadataApplication, EventMetadataExit, EventMetadataHostError, EventMetadataInputIntent, EventMetadataInputResult, EventMetadataLifecycle, EventMetadataMarker, EventMetadataOutput, EventMetadataQueryResponse, EventMetadataResizeIntent, EventMetadataResizeResult, EventMetadataSignalIntent, EventMetadataSignalResult, EventOutput, EventPage, EventPageCursor, EventProjection, EventQueryResponse, EventResizeIntent, EventResizeResult, EventSignalIntent, EventSignalResult, EvidencePolicy, ExactPath, ExplainFinding, ExplainOutputPage, ExplainReport, FinalizationReport, FindingConfidence, FrameDetail, GarbageCollectionCandidate, GarbageCollectionReport, GeometryProbeAttempt, GeometrySolveReport, GifLoop, InputDescriptor, InputDescriptorActivate, InputDescriptorFocus, InputDescriptorKey, InputDescriptorPaste, InputDescriptorPointer, InputDescriptorRaw, InputDescriptorText, InputKind, InputSequenceAtomOutcome, InputSequenceFailureDetails, InputSource, InvalidRegionReason, LastActionAnalysis, LastActionBoundary, LastActionDiagnosticsReport, LastActionReport, LaunchOptions, LifecycleKind, LiveEventCursor, LocatorCondition, LocatorConditionCount, LocatorFailure, LocatorWaitFailure, LocatorWaitFailureCancelled, LocatorWaitFailureLocatorTimeout, ManagementFailure, ManagementFailureOriginalCapture, ManagementFailureRegistryRestart, ManagementFailureTmux, MarkOutcome, MarkerRecord, MaskedSnapshotOptions, MatchRange, MatchedCell, MediaArtifactResult, ModeState, MouseButton, MutationEffect, MutationEffectApplied, MutationEffectNotApplied, MutationEffectPartial, MutationEffectUnknown, MutationJournalStatus, NativeCorrelation, NativeEvidenceLevel, NativeProfileReport, NativeVisualProfile, NormalizedAnnotation, NormalizedChangeFrame, NormalizedClip, NormalizedEdit, NormalizedSubtitle, NullableString, Observation, ObservationFrame, ObservationIntegrity, ObservationResolution, ObservationSourceKind, Observers, OperationStatus, OriginalCaptureFacts, OriginalCaptureFailure, OriginalCaptureFailureRecord, OriginalCaptureState, OriginalCaptureStatus, OriginalLaunchOptions, OutputFrameSource, OutputPage, OutputPageCursor, PaddingPoints, PageSource, PendingOperationReport, PixelCanvas, PixelTransform, PixelTransformCallout, PixelTransformCrop, PixelTransformCursorMask, PixelTransformResize, PixelTransformZoom, PointerOperation, PointerOperationClick, PointerOperationDrag, PointerOperationMultiClick, PointerOperationScroll, PointerOutcome, PointerOutcomeActivated, PointerOutcomeApplied, PointerOutcomeNoop, PostconditionSummary, PostconditionSummaryIdle, PostconditionSummaryNone, PostconditionSummaryScreen, PresentationDelivery, PresentationLayout, PresentationPlan, PresentationSource, PresentationSourceNative, PresentationSourceSemantic, PreviewOptions, ProcessSignal, ProjectedEventPage, ProjectionSpec, ProvenanceCapture, QueryDescription, QueryError, QueryErrorIndexOutOfBounds, QueryErrorInsufficientFrameDetail, QueryErrorInvalidQuery, QueryErrorMultipleMatches, QueryErrorNoMatch, QueryErrorQueryResourceLimit, RationalSpeed, ReactionSpec, RecoveryIssue, RecoveryReport, RegistryEntry, RegistryListEntry, RegistrySessionResolution, ReplayCachePruneReport, ReplayCacheStatus, ResourceLimitKind, ResourceLimitOutcome, RestartAttempt, RestartConfiguration, RestartDurability, RestartFailureFacts, RestartFailurePhase, RestartProvenance, RestartReport, Retry, ReviewExportManifest, ReviewSearchMatch, ReviewSearchResult, ReviewSummary, Rgb, RowChange, RowDiff, RowMove, SaveFormat, SaveManifest, SaveOutcome, SavedFile, ScenarioAttemptReport, ScenarioCaseReport, ScenarioCaseStatus, ScenarioFailure, ScenarioInfrastructureError, ScenarioReport, ScenarioStatus, ScenarioStepResult, ScenarioSuiteReport, ScenarioSuiteStatus, ScreenAppearance, ScreenCell, ScreenCellRow, ScreenChanges, ScreenFrameData, ScreenFrameDataCells, ScreenFrameDataNone, ScreenFrameDataSpans, ScreenFrameDataText, ScreenFrameFailureDetails, ScreenFrameSource, ScreenFrameSourceActor, ScreenFrameSourceResolved, ScreenGeometry, ScreenMode, ScreenModeAlternateScreen, ScreenModeAnsi, ScreenModeBracketedPaste, ScreenModeDec, ScreenModeSynchronizedOutput, ScreenModeWraparound, ScreenPostconditionQuality, ScreenPredicate, ScreenPredicateAbsent, ScreenPredicateAll, ScreenPredicateAny, ScreenPredicateContains, ScreenPredicateCursor, ScreenPredicateExcludesRegex, ScreenPredicateMatchesRegex, ScreenPredicateMode, ScreenPredicateRegionAbsent, ScreenPredicateRegionContains, ScreenPredicateRowAbsent, ScreenPredicateRowContains, ScreenPredicateStateHash, ScreenRegion, ScreenRowChange, ScreenSpan, ScreenSpanRow, ScreenTextRow, ScreenWaitQuality, ScreenWaitResult, SdkArtifactMember, SdkCanonicalBoundary, SecondaryFailure, SemanticDiff, SemanticFontResource, SemanticFontRole, SemanticImageResource, SemanticPreset, SemanticRasterProfile, SemanticVideoCanvas, SemanticVideoSourcePlan, SemanticVisualProfile, SendSpec, SendStepSpec, SendStepSpecActivate, SendStepSpecFocus, SendStepSpecInput, SendStepSpecMark, SendStepSpecPointer, SendStepSpecResize, SendStepSpecSignal, SessionCompletion, SessionFailure, SessionGeometry, SessionPhase, SessionStatus, SessionStatusCompleted, SessionStatusLive, SnapshotProfile, SourceRange, SpanCell, StableCaptureQuality, StableScreenCapture, StateDelta, StateHashComparison, StatePoint, StatePointEventSeq, StatePointLatestPresented, StatePointMarker, StatePointMonotonicNs, StatePointStateHash, StatePointStateId, StateRecord, StopReport, StopReportCompleted, StopReportRequested, StyleFilter, SubtitleTrack, SuccessorReadiness, SurvivingKind, SurvivingPathRecord, TerminalGeometryReport, TerminalMetadata, TerminalMode, TestOutcome, TextAnnotation, TimelineEntry, TimelineItem, TimelineItemCanonicalEvent, TimelineItemSemanticState, TimelineItemVtToken, TimelinePage, TmuxCatalog, TmuxCatalogGaps, TmuxCatalogSummary, TmuxCatalogTracks, TmuxCompositeTrack, TmuxCoverage, TmuxCoverageGap, TmuxEventRecord, TmuxEventRecordActivePaneChanged, TmuxEventRecordActiveWindowChanged, TmuxEventRecordCompositeTrackLinked, TmuxEventRecordCoverageGapOpened, TmuxEventRecordCoverageGapResolved, TmuxEventRecordLayoutChanged, TmuxEventRecordObserverStarted, TmuxEventRecordPaneCreated, TmuxEventRecordPaneDestroyed, TmuxEventRecordPaneModeChanged, TmuxEventRecordPaneMoved, TmuxEventRecordPaneTrackCompleted, TmuxEventRecordPaneTrackLinked, TmuxEventRecordRecordingCompleted, TmuxEventRecordRecordingStarted, TmuxEventRecordRecordingStopping, TmuxEventRecordServerIdentityBound, TmuxEventRecordSessionCreated, TmuxEventRecordSessionDestroyed, TmuxEventRecordWindowCreated, TmuxEventRecordWindowDestroyed, TmuxEventRecordZoomChanged, TmuxEvents, TmuxFailureFacts, TmuxFailurePhase, TmuxGapCatalogEntry, TmuxGapKind, TmuxGhosttyProfile, TmuxJournalBoundary, TmuxPaneAddress, TmuxPaneSnapshot, TmuxPaneStatus, TmuxPaneTrack, TmuxRecordConfiguration, TmuxRecordingCoverage, TmuxRecordingLifecycle, TmuxRecordingManifest, TmuxRecordingStart, TmuxScopeMode, TmuxScopePolicy, TmuxServerIdentity, TmuxSessionLink, TmuxSocket, TmuxSocketName, TmuxSocketPath, TmuxStatusReport, TmuxStreamingBundleManifest, TmuxTrackCatalogEntry, TruthLayer, ValueChange, ValueChange2, ValueChange3, ValueChange4, ValueChange5, ValueChange6, ValueChange7, ValueChange8, VerificationFinding, VerificationLevel, VerificationReport, Versions, VideoOptions, VideoPreview, VideoRender, VideoRenderConfig, VideoRenderer, VisualProfile, VisualProfileFailure, VisualProfileReport, VtSourceSegment, VtToken, VtTokenKind, WaitOutcome, WideKind, WindowPadding } from './types'
 export type * from './types'
 // </sdk-types>
 
@@ -573,6 +573,21 @@ export declare class LocatorWaitResult {
 }
 export type JsLocatorWaitResult = LocatorWaitResult
 
+/** Native replay operations for one canonical session. */
+export declare class Native {
+  /**
+   * Replay this completed session in Ghostty and capture `options.point` as a PNG in the
+   * new `destination` directory, with its manifest and replay endpoint.
+   *
+   * # Errors
+   *
+   * Rejects when the `native-screenshot` capability is blocked, the session is live, the
+   * point does not resolve, `destination` exists, or capture fails.
+   */
+  screenshot(destination: Arg<ExactPath>, options?: NativeScreenshotOptions | undefined | null): Promise<Model<CaptureOutcome>>
+}
+export type JsNative = Native
+
 /** An original recording: a canonical session whose terminal pixels are captured while it runs. */
 export declare class OriginalRecording {
   /** Unique session identifier. */
@@ -750,6 +765,8 @@ export declare class Recording {
   analysis(): Diagnostics
   /** Typed evidence operations through the shared service. */
   evidence(): Evidence
+  /** Native replay operations through the shared service. */
+  native(): Native
   /** Typed integrity operations through the shared service. */
   integrity(): Evidence
   /** Source-bound exact PTY output pages. */
@@ -1305,6 +1322,8 @@ export declare class Session {
   analysis(): Diagnostics
   /** Typed evidence operations through the shared service. */
   evidence(): Evidence
+  /** Native replay operations through the shared service. */
+  native(): Native
   /** Typed integrity operations through the shared service. */
   integrity(): Evidence
   /** Source-bound exact PTY output pages. */
@@ -1523,6 +1542,21 @@ export declare class Termtrace {
   analysis(source: Arg<ExactPath>): Diagnostics
   /** Evidence artifacts and integrity operations for one canonical session. */
   evidence(source: Arg<ExactPath>): Evidence
+  /**
+   * Run scenario documents as one suite with this client's binary. A document with a
+   * `matrix` expands to one labelled case per combination; with a shard, case `i` of the
+   * sorted expansion runs only when `i % shardCount == shardIndex`. Up to `jobs` cases run at
+   * once, each in a fresh session. A failed case runs again up to `reruns` times; a later
+   * pass makes it `flaky`, which fails CI only with `failOnFlaky`.
+   *
+   * # Errors
+   *
+   * Rejects when the options are invalid, a document cannot be read or expanded, or the
+   * shard is empty. Case failures stay in the report.
+   */
+  runScenarios(scenarios: Array<Arg<ExactPath>>, options: ScenarioSuiteOptions): Promise<Model<ScenarioSuiteReport>>
+  /** Native replay operations for one canonical session. */
+  native(source: Arg<ExactPath>): Native
   /** Create a new Termtrace instance with optional binary and evidence root paths. */
   constructor(binary?: string | undefined | null, evidenceRoot?: string | undefined | null)
   /**
@@ -1970,6 +2004,14 @@ export interface NativeLocatorWaitOptions {
   stableForMs?: number
 }
 
+/** Options of one native replay screenshot. */
+export interface NativeScreenshotOptions {
+  /** State point; the latest presented state when omitted. */
+  point?: Arg<StatePoint>
+  /** Bound on the replay terminal's startup in milliseconds; 30 seconds when omitted. */
+  timeoutMs?: number
+}
+
 /**
  * Normalize this exact capture, without observing or retrying.
  *
@@ -2009,6 +2051,32 @@ export interface PointerOptions {
   requestId?: string
   /** Presented-state guard. */
   ifState?: string
+}
+
+/**
+ * Whether CI must fail for `report`: any failed case, an infrastructure error, a flaky case
+ * under `fail_on_flaky`, or a `status` that does not match the cases.
+ */
+export declare function scenarioCiFailed(report: Arg<ScenarioSuiteReport>): boolean
+
+/** Selection, concurrency, snapshot, and rerun settings of one scenario suite. */
+export interface ScenarioSuiteOptions {
+  /** Parent of failure artifacts; snapshot baselines live in its sibling `snapshots`. */
+  failureRoot: Arg<ExactPath>
+  /** Parent of each case's fresh session; the client's evidence root when omitted. */
+  evidenceRoot?: Arg<ExactPath>
+  /** Maximum cases run at once; 1 when omitted. */
+  jobs?: number
+  /** Zero-based shard index; requires `shardCount`. */
+  shardIndex?: number
+  /** Total shard count; requires `shardIndex`. */
+  shardCount?: number
+  /** Replace snapshot baselines instead of comparing them. */
+  updateSnapshots?: boolean
+  /** Fresh-session reruns of a failed case; 0 when omitted. */
+  reruns?: number
+  /** Make a flaky case fail CI. */
+  failOnFlaky?: boolean
 }
 
 /** Bounds of an actor-side screen wait. */
@@ -2053,3 +2121,14 @@ export interface TextLocatorOptions {
 
 /** Returns the Termtrace core version. */
 export declare function version(): string
+
+/**
+ * Write `report` as JUnit XML to the new file `path`, one `testcase` per case with every
+ * attempt in its output. A failed case, or a flaky one under `fail_on_flaky`, is a `failure`;
+ * an infrastructure error is an `error`.
+ *
+ * # Errors
+ *
+ * Rejects when the file cannot be securely written.
+ */
+export declare function writeScenarioJunit(path: Arg<ExactPath>, report: Arg<ScenarioSuiteReport>): Promise<void>

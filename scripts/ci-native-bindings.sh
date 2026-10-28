@@ -13,11 +13,13 @@ uv run --project crates/bindings-python mypy crates/bindings-python/python/termt
 
 echo "=== 3. Running Python Consumer Test Suite ==="
 uv run --project tests/consumers/python_native pytest -v tests/consumers/python_native
+uv run --project tests/consumers/python_native pytest -v examples/sdk/python
 
 echo "=== 4. Building Native Node Extension ==="
 bunx @napi-rs/cli build --cwd crates/bindings-node
 
-echo "=== 5. Running Node Consumer Test Suite ==="
+echo "=== 5. Running Node Helper Units, TypeScript Examples, and Consumer Suite ==="
+node --test crates/bindings-node/test/*.test.js
 npm --prefix tests/consumers/node_native test
 
 echo "=== All Native Language Bindings Verified Successfully ==="

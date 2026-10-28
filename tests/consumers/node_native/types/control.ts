@@ -69,5 +69,24 @@ async function consumer(tt: Termtrace): Promise<void> {
   // @ts-expect-error The only semantic preset is bundled-v1.
   const customPreset: VisualProfile = { version: 1, semantic: { preset: 'custom' } };
   void textBytes; void narrow; void lossy; void profileHash; void dpi; void floatSize; void customPreset;
+
+  const reporter = await tt.launch(['/bin/sh'], { cwd: '/srv/app', startup_timeout_ms: 500n });
+  const pasted: ActionResult = await reporter.actions().paste('words').pace(20).sendText('ab').run();
+  const scrolled: PointerOutcome = await reporter.pointer().scroll(0, 0, { lines: -2, strict: true });
+  const focused: PointerOutcome = await reporter.pointer().focus(false, { strict: true });
+  const idleText: string = (await reporter.screen().waitForIdle(500)).text;
+  const target = await tt.attachTarget('name:example');
+  const cachedEntries: bigint = (await target.analysis().cacheStatus()).entries;
+  reporter.detach();
+  await reporter.discardCompleted();
+  // @ts-expect-error Readiness deadlines are u64 milliseconds and therefore bigint.
+  const numericDeadline: LaunchOptions = { startup_timeout_ms: 500 };
+  // @ts-expect-error Wheel ticks are a signed count, never text.
+  await reporter.pointer().scroll(0, 0, { lines: '2' });
+  // @ts-expect-error Focus takes the new focus state, not options alone.
+  await reporter.pointer().focus({ strict: true });
+  // @ts-expect-error Cache entry counts are u64 and therefore bigint.
+  const lossyEntries: number = (await target.analysis().cacheStatus()).entries;
+  void pasted; void scrolled; void focused; void idleText; void cachedEntries; void numericDeadline; void lossyEntries;
 }
 void consumer;

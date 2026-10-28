@@ -25,6 +25,10 @@ Choose the least-sensitive artifact that proves the requested outcome.
   rendering.
 - A video artifact is complete only when its source type, full render
   configuration, plan, and provenance are retained with the validated output.
+- For a `record --original-native` session, render with
+  `--renderer original-execution`; it uses only the captured pixels and fails when
+  they are absent. GIF/WebM envelopes record `source_kind`. The MP4 sidecar records
+  its source video path and hash; compare that hash with `visual-original/manifest.json`.
 
 ## Bundles and review
 

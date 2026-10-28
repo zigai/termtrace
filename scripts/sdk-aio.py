@@ -18,6 +18,7 @@ WRAPPED = [
     "Evidence",
     "Instrumentation",
     "Locator",
+    "Native",
     "OriginalRecording",
     "Output",
     "Pointer",
@@ -46,6 +47,7 @@ IMMEDIATE = {
         "events",
         "evidence",
         "instrumentation",
+        "native",
         "output",
         "pointer",
         "screen",
@@ -57,11 +59,20 @@ IMMEDIATE = {
         "events",
         "evidence",
         "instrumentation",
+        "native",
         "output",
         "pointer",
         "screen",
     },
-    "Termtrace": {"analysis", "evidence", "instrumentation", "registry", "system", "tmux"},
+    "Termtrace": {
+        "analysis",
+        "evidence",
+        "instrumentation",
+        "native",
+        "registry",
+        "system",
+        "tmux",
+    },
 }
 
 # Mutations keep running after a cancelled await and are tracked until they return.

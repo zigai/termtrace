@@ -144,6 +144,7 @@ for (const name of [
   'assertNoPresentedTransient', 'assertExists', 'assertNotExists', 'assertCount',
   'assertMatchText', 'assertMatchStyle', 'finalizeRecordings',
   'normalizeEdit', 'sourceForOutputFrame', 'outputFramesForSourceFrame',
+  'writeScenarioJunit', 'scenarioCiFailed',
 ]) {
   const method = nativeBinding[name];
   nativeBinding[name] = function (...args) {
@@ -180,6 +181,7 @@ module.exports.Registry = nativeBinding.Registry;
 module.exports.Tmux = nativeBinding.Tmux;
 module.exports.System = nativeBinding.System;
 module.exports.Instrumentation = nativeBinding.Instrumentation;
+module.exports.Native = nativeBinding.Native;
 
 module.exports.Edit = nativeBinding.Edit;
 module.exports.Selector = nativeBinding.Selector;
@@ -188,3 +190,5 @@ module.exports.scope = nativeBinding.scope;
 module.exports.normalizeEdit = nativeBinding.normalizeEdit;
 module.exports.sourceForOutputFrame = nativeBinding.sourceForOutputFrame;
 module.exports.outputFramesForSourceFrame = nativeBinding.outputFramesForSourceFrame;
+module.exports.writeScenarioJunit = nativeBinding.writeScenarioJunit;
+module.exports.scenarioCiFailed = nativeBinding.scenarioCiFailed;

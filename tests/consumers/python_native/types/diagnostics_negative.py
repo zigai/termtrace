@@ -1,12 +1,12 @@
 from termtrace import Termtrace
-from termtrace.evidence import EvidenceSaveResult, EvidenceRegistryEntry, EvidenceTmuxGap
+from termtrace.types import RegistryEntry, SaveOutcome, TmuxCoverageGap
 
 
 def need_text(value: str) -> None:
     pass
 
 
-def bad(saved: EvidenceSaveResult, client: Termtrace) -> None:
+def bad(saved: SaveOutcome, client: Termtrace) -> None:
     need_text(saved["manifest"]["files"][0]["byte_count"])
     client.evidence(b"/source").bundle(b"/destination", "automatic")
     client.evidence(b"/source").verify("sig")
@@ -19,6 +19,6 @@ def need_integer(value: int) -> None:
     pass
 
 
-def bad_nullable(registered: EvidenceRegistryEntry, gap: EvidenceTmuxGap) -> None:
+def bad_nullable(registered: RegistryEntry, gap: TmuxCoverageGap) -> None:
     need_integer(registered["recorder_process_start_ticks"])
-    need_integer(gap["gap"]["resolved_unix_ns"])
+    need_integer(gap["resolved_unix_ns"])

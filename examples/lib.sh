@@ -3,8 +3,11 @@
 set -Eeuo pipefail
 
 DEMO_REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-TERMTRACE_BIN=${TERMTRACE_BIN:-"$DEMO_REPO_ROOT/target/release/termtrace"}
-RECORDER_PID=
+DEMO_BUILD_RELEASE=
+if [[ -z ${TERMTRACE_BIN:-} ]]; then
+    TERMTRACE_BIN=$DEMO_REPO_ROOT/target/release/termtrace
+    DEMO_BUILD_RELEASE=1
+fi
 
 require_demo_tools() {
     local tool
@@ -26,96 +29,57 @@ prepare_demo_directory() {
     mkdir -m 700 -p "$directory"
 }
 
-wait_for_control() {
+stop_session_on_error() {
     local session=$1
-    local stderr_log=$2
-    local attempt
-    for attempt in $(seq 1 200); do
-        if "$TERMTRACE_BIN" --response agent status "$session" 2>/dev/null |
-            jq -e '.session_state == "live"' >/dev/null; then
-            return 0
-        fi
-        if [[ -n ${RECORDER_PID:-} ]] && ! kill -0 "$RECORDER_PID" 2>/dev/null; then
-            printf 'recorder exited before control became ready\n' >&2
-            tail -n 40 "$stderr_log" >&2 || true
-            return 1
-        fi
-        sleep 0.05
+    if "$TERMTRACE_BIN" status "$session" --json 2>/dev/null | jq -e '.lifecycle == "live"' >/dev/null; then
+        "$TERMTRACE_BIN" stop "$session" --wait >/dev/null 2>&1 || true
+    fi
+}
+
+wait_for_published_capture() {
+    local session=$1
+    local state
+    for _ in $(seq 1 600); do
+        state=$("$TERMTRACE_BIN" status "$session" --json | jq -r '.original_capture.state')
+        case $state in
+            published) return 0 ;;
+            live | finalizing) sleep 0.1 ;;
+            *)
+                printf 'original capture ended as %s\n' "$state" >&2
+                return 1
+                ;;
+        esac
     done
-    printf 'timed out waiting for recorder readiness: %s\n' "$session" >&2
-    tail -n 40 "$stderr_log" >&2 || true
+    printf 'timed out waiting for the original capture: %s\n' "$session" >&2
     return 1
 }
 
-stop_recorder_on_error() {
-    local session=${1:-}
-    if [[ -n $session ]]; then
-        "$TERMTRACE_BIN" stop "$session" >/dev/null 2>&1 || true
-    fi
-    if [[ -n ${RECORDER_PID:-} ]] && kill -0 "$RECORDER_PID" 2>/dev/null; then
-        kill "$RECORDER_PID" 2>/dev/null || true
-        wait "$RECORDER_PID" 2>/dev/null || true
-    fi
-}
-
-wait_for_recorder() {
-    local stderr_log=$1
-    local status
-    set +e
-    wait "$RECORDER_PID"
-    status=$?
-    set -e
-    RECORDER_PID=
-    if ((status != 0)); then
-        printf 'recorder failed with exit status %s\n' "$status" >&2
-        tail -n 80 "$stderr_log" >&2 || true
-        return "$status"
-    fi
-}
-
-derive_and_capture() {
+export_edited_videos() {
     local session=$1
     local demo_directory=$2
-    "$TERMTRACE_BIN" analyze index "$session" >"$demo_directory/index.json"
-    "$TERMTRACE_BIN" analyze inspect "$session" --format json >"$demo_directory/final-state.json"
-    "$TERMTRACE_BIN" analyze inspect "$session" --format text >"$demo_directory/final-screen.txt"
-    "$TERMTRACE_BIN" analyze inspect "$session" --state 0 --format json >"$demo_directory/initial-state.json"
+    local edit=$demo_directory/edit.json
+    local extension
+    jq -n '{
+        version: 1,
+        clips: [{
+            from: {marker: "showcase-ready"},
+            to: {marker: "signals-observed"},
+            speed: {numerator: 1, denominator: 1},
+            hold_ms: 500,
+            caption: "State-guarded input and terminal signals"
+        }],
+        layout: {caption: "footer"}
+    }' >"$edit"
 
-    "$TERMTRACE_BIN" artifact asciicast \
-        "$session" \
-        --out "$demo_directory/session.cast"
-
-    "$TERMTRACE_BIN" artifact capture \
-        "$session" \
-        --width 1920 \
-        --height 1080 \
-        --fps 24 >"$demo_directory/capture.json"
-
-    ffprobe \
-        -v error \
-        -select_streams v:0 \
-        -show_entries stream=codec_name,pix_fmt,r_frame_rate,avg_frame_rate,width,height,nb_frames \
-        -show_entries format=duration \
-        -of json \
-        "$session/visual/session.mkv" >"$demo_directory/video-probe.json"
-
-    ffmpeg \
-        -v error \
-        -y \
-        -i "$session/visual/session.mkv" \
-        -c:v libx264 \
-        -preset medium \
-        -crf 18 \
-        -pix_fmt yuv420p \
-        -movflags +faststart \
-        "$demo_directory/showcase.mp4"
-    chmod 600 "$demo_directory/showcase.mp4"
-
-    jq -s '
-    map(select(.event.type? != null))
-    | group_by(.event.type)
-    | map({type: .[0].event.type, count: length})
-  ' "$session/events.jsonl" >"$demo_directory/event-counts.json"
+    "$TERMTRACE_BIN" video "$session" --renderer original-execution --fps 24 --edit "$edit" \
+        --preview-out "$demo_directory/preview" --json >"$demo_directory/preview.json"
+    for extension in mp4 gif webm; do
+        "$TERMTRACE_BIN" video "$session" --renderer original-execution --fps 24 --edit "$edit" \
+            --out "$demo_directory/showcase.$extension" --json >"$demo_directory/video-$extension.json"
+        ffprobe -v error -count_frames -select_streams v:0 \
+            -show_entries stream=codec_name,width,height,nb_read_frames -show_entries format=duration \
+            -of json "$demo_directory/showcase.$extension" >"$demo_directory/probe-$extension.json"
+    done
 }
 
 print_demo_result() {
@@ -124,8 +88,7 @@ print_demo_result() {
     local session=$3
     printf '\n%s demo complete\n' "$name"
     printf '  artifacts:  %s\n' "$directory"
-    printf '  video:      %s\n' "$session/visual/session.mkv"
-    printf '  showcase:   %s\n' "$directory/showcase.mp4"
-    printf '  screenshot: %s\n' "$session/visual/final.png"
-    printf '  states:     %s\n' "$session/derived/states.jsonl.zst"
+    printf '  session:    %s\n' "$session"
+    printf '  videos:     %s\n' "$directory"/showcase.{mp4,gif,webm}
+    printf '  preview:    %s\n' "$directory/preview/contact-sheet.png"
 }

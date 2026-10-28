@@ -4,68 +4,53 @@ set -Eeuo pipefail
 source "$(dirname "$0")/lib.sh"
 
 umask 077
-require_demo_tools jq ffmpeg ffprobe ghostty python3 Xvfb dbus-run-session
-cargo build --manifest-path "$DEMO_REPO_ROOT/Cargo.toml" --locked --release
+require_demo_tools jq ffprobe ghostty python3 Xvfb dbus-run-session
+if [[ -n $DEMO_BUILD_RELEASE ]]; then
+    cargo build --manifest-path "$DEMO_REPO_ROOT/Cargo.toml" --locked --release
+fi
 
 OUTPUT_ROOT=${1:-"$DEMO_REPO_ROOT/demo-artifacts"}
 DEMO_DIRECTORY=$OUTPUT_ROOT/showcase
 SESSION=$DEMO_DIRECTORY/run
-STDERR_LOG=$DEMO_DIRECTORY/recorder.stderr.log
+PROFILE='{"version":1,"native":{"font_family":"JetBrains Mono","font_size_points":"12","dpi":96}}'
 prepare_demo_directory "$DEMO_DIRECTORY"
+# Keep the background session's alias out of the user's registry.
+export TERMTRACE_STATE_DIR=$DEMO_DIRECTORY/state
 
-trap 'stop_recorder_on_error "$SESSION"' EXIT
+"$TERMTRACE_BIN" doctor --require native-video --json >"$DEMO_DIRECTORY/doctor-native-video.json"
+"$TERMTRACE_BIN" doctor --require native-screenshot --json >"$DEMO_DIRECTORY/doctor-native-screenshot.json"
+
+trap 'stop_session_on_error "$SESSION"' EXIT
 "$TERMTRACE_BIN" record \
-    --no-input \
+    --original-native \
+    --original-grid 80x24 \
+    --original-canvas 1280x720 \
+    --original-fps 24 \
+    --visual-profile "$PROFILE" \
     --out "$SESSION" \
-    --geometry fit \
-    --viewport 1920x1080 \
-    --font-size 18 \
+    --detach showcase \
+    --until-screen SHOWCASE_READY \
+    --timeout 30s \
+    --json \
     python3 "$DEMO_REPO_ROOT/examples/apps/terminal_showcase.py" \
-    >"$DEMO_DIRECTORY/live-output.ansi" \
-    2>"$STDERR_LOG" &
-RECORDER_PID=$!
+    </dev/null >"$DEMO_DIRECTORY/record.json"
 
-wait_for_control "$SESSION" "$STDERR_LOG"
-
-"$TERMTRACE_BIN" status "$SESSION" >"$DEMO_DIRECTORY/status-before.json"
-
-"$TERMTRACE_BIN" wait "$SESSION" --screen SHOWCASE_READY --timeout 15s \
-    >"$DEMO_DIRECTORY/wait-ready.json"
-"$TERMTRACE_BIN" control mark "$SESSION" --label showcase-ready \
-    >"$DEMO_DIRECTORY/mark-ready.json"
-
-"$TERMTRACE_BIN" control resize \
-    "$SESSION" \
-    --cols 120 \
-    --rows 36 \
-    --pixel-width 1080 \
-    --pixel-height 648 >"$DEMO_DIRECTORY/resize.json"
-"$TERMTRACE_BIN" wait "$SESSION" --screen RESIZED:120x36 --timeout 5s \
-    >"$DEMO_DIRECTORY/wait-resize.json"
-
-printf 'continue-from-file\n' >"$DEMO_DIRECTORY/agent-input.bin"
-"$TERMTRACE_BIN" send \
-    "$SESSION" \
-    --file "$DEMO_DIRECTORY/agent-input.bin" \
-    >"$DEMO_DIRECTORY/send-file.json"
-"$TERMTRACE_BIN" wait "$SESSION" --screen AGENT_INPUT:continue-from-file --timeout 5s \
-    >"$DEMO_DIRECTORY/wait-input.json"
-for signal_name in user1 user2 hangup interrupt; do
-    "$TERMTRACE_BIN" control signal "$SESSION" --signal "$signal_name" \
-        >"$DEMO_DIRECTORY/signal-$signal_name.json"
+"$TERMTRACE_BIN" send "$SESSION" --mark showcase-ready --json >"$DEMO_DIRECTORY/mark-ready.json"
+"$TERMTRACE_BIN" send "$SESSION" --text $'continue-from-file\n' \
+    --until-screen WAITING_FOR_SIGNALS --json >"$DEMO_DIRECTORY/send-text.json"
+for signal_name in user1:SIGUSR1 user2:SIGUSR2 hangup:SIGHUP interrupt:SIGINT; do
+    "$TERMTRACE_BIN" send "$SESSION" --signal "${signal_name%%:*}" \
+        --until-screen "SIGNAL:${signal_name#*:}" --json >"$DEMO_DIRECTORY/signal-${signal_name%%:*}.json"
 done
-for signal_name in SIGUSR1 SIGUSR2 SIGHUP SIGINT; do
-    "$TERMTRACE_BIN" wait "$SESSION" --screen "SIGNAL:$signal_name" --timeout 5s \
-        >"$DEMO_DIRECTORY/wait-$signal_name.json"
-done
-"$TERMTRACE_BIN" control mark "$SESSION" --label signals-observed \
-    >"$DEMO_DIRECTORY/mark-signals.json"
+"$TERMTRACE_BIN" send "$SESSION" --mark signals-observed --json >"$DEMO_DIRECTORY/mark-signals.json"
 
-"$TERMTRACE_BIN" stop "$SESSION" >"$DEMO_DIRECTORY/stop.json"
-wait_for_recorder "$STDERR_LOG"
+"$TERMTRACE_BIN" stop "$SESSION" --wait --json >"$DEMO_DIRECTORY/stop.json"
+wait_for_published_capture "$SESSION"
 trap - EXIT
 
-derive_and_capture "$SESSION" "$DEMO_DIRECTORY"
+export_edited_videos "$SESSION" "$DEMO_DIRECTORY"
+"$TERMTRACE_BIN" artifact asciicast "$SESSION" --out "$DEMO_DIRECTORY/session.cast"
+"$TERMTRACE_BIN" analyze inspect "$SESSION" --format text >"$DEMO_DIRECTORY/final-screen.txt"
 
 mkdir -m 700 "$DEMO_DIRECTORY/recovered"
 cp "$SESSION/events.jsonl" "$DEMO_DIRECTORY/damaged-events.jsonl"
@@ -78,10 +63,6 @@ printf '{"truncated_tail":' >>"$DEMO_DIRECTORY/damaged-events.jsonl"
 
 cmp "$SESSION/events.jsonl" "$DEMO_DIRECTORY/recovered/events.jsonl"
 
-"$TERMTRACE_BIN" analyze index "$DEMO_DIRECTORY/recovered" --live-snapshot \
-    >"$DEMO_DIRECTORY/recovered-index.json"
-"$TERMTRACE_BIN" analyze inspect "$DEMO_DIRECTORY/recovered" --format text \
-    >"$DEMO_DIRECTORY/recovered-final-screen.txt"
 mkdir -m 700 "$DEMO_DIRECTORY/tampered"
 jq -c '
   if .event.type? == "output" then
@@ -106,8 +87,7 @@ fi
 
 printf '%s\n' "$TAMPER_STATUS" >"$DEMO_DIRECTORY/tamper-exit-status.txt"
 
-"$TERMTRACE_BIN" tooling schemas --out "$DEMO_DIRECTORY/generated-schemas" \
-    >"$DEMO_DIRECTORY/schema-paths.txt"
+"$TERMTRACE_BIN" schema --out "$DEMO_DIRECTORY/generated-schemas" >"$DEMO_DIRECTORY/schema-paths.txt"
 
 print_demo_result "End-to-end" "$DEMO_DIRECTORY" "$SESSION"
 printf '  recovery:   %s\n' "$DEMO_DIRECTORY/recovery-report.json"

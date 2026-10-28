@@ -1,8 +1,9 @@
-from termtrace import MediaArtifactResult, decode_media_artifact
-from termtrace.contracts import decimal_unsigned, timeout_seconds
+from termtrace import ScreenFrame
+from termtrace.types import MediaArtifactResult
 
-value: MediaArtifactResult = decode_media_artifact('{}')
-value['directory_bytes'] = 'AA=='
-value['source']['boundary']['next_event_seq'] = '9007199254740993'
-decimal_unsigned('1', 32)
-timeout_seconds(timeout_ms='1s')
+
+def misuse(value: MediaArtifactResult) -> None:
+    value["directory_bytes"] = "AA=="
+    value["source"]["boundary"]["next_event_seq"] = "9007199254740993"
+    value["product_kind"] = "movie"
+    ScreenFrame.from_json(b"{}")

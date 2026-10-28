@@ -39,6 +39,7 @@ use termtrace_model::{
         },
         save::{SaveFormat, SaveOutcome},
         sdk::MediaArtifactResult,
+        visual::CaptureOutcome,
     },
     execution::{
         application::ApplicationAcknowledgement,
@@ -61,6 +62,7 @@ use termtrace_model::{
         GarbageCollectionReport, RegistryEntry, RegistryListEntry, RegistrySessionResolution,
         RestartConfiguration, RestartReport,
     },
+    scenario::ScenarioSuiteReport,
     terminal::{
         analysis::{DiagnoseReport, DiagnosticCheck, ExplainReport, LastActionAnalysis},
         diff::{ScreenChanges, SemanticDiff},
@@ -132,6 +134,7 @@ catalog!(
     BundleProfile,
     ByteOutputPage,
     CapabilityReport,
+    CaptureOutcome,
     CaptureQuality,
     ColorState,
     CommandOutcome,
@@ -194,6 +197,7 @@ catalog!(
     ReviewSummary,
     SaveFormat,
     SaveOutcome,
+    ScenarioSuiteReport,
     ScreenChanges,
     ScreenFrameContent,
     ScreenFrameSource,

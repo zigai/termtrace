@@ -1,13 +1,15 @@
 # SDK capability contract v1 (Linux / Ghostty)
 
-This is the implemented **task 01 foundation**, not full SDK parity certification.
 `fixtures/conformance/sdk/matrix.json` is the authoritative leaf inventory. Each
 row identifies core source, canonical model, Rust feature, sync/async Python and
 TypeScript exposure, units, runtime requirements, positive/negative/lifecycle
-vectors and closure owner. `exposed_unverified` means a name exists, **not** that
-its guarantee has passed. `partial` includes reduced frames and JSON-string
-legacy reports. `missing` describes the SDK facade, not absence of core code.
-`core_status` separately distinguishes implemented, partial and reserved work.
+vectors and closure owner. Each language entry lists its `evidence`: the tests that
+prove it (`cargo:package/target::test`, `bin:consumer`, `pytest:file::test`,
+`node:file::title`, `demo:language`). `verified` requires evidence; the certify
+profile passes a cell only when every referenced test ran and passed in that run.
+`exposed_unverified` means a name exists without such a test. `not_applicable`
+marks a language-specific or internal helper and carries a `reason`. `missing` describes the SDK
+facade, not absence of core code.
 
 The table below renders the baseline inventory; evidence-specific verification
 lives in the separate report, never inferred from a family's happy path. The 450
@@ -110,7 +112,17 @@ Python cancellation/delegation regressions are run, not weakened or replaced.
 ```
 python3 scripts/sdk-conformance.py --profile inventory
 python3 scripts/sdk-conformance.py --profile foundation --output target/sdk-run-UNIQUE
+scripts/ci-sdk-conformance.sh --output target/sdk-certification-UNIQUE   # just conformance
 ```
+
+`certify` runs the foundation profile, the Python, Node and Rust suites (JUnit or libtest
+results per test, native tests included), the Rust consumers, the native demos
+(`scripts/sdk-demos.sh`) and the three deliberate-mismatch runs of `examples/sdk`. It fails on a
+stale `contract_sha256` (the hash of the public declarations and this document; record it with
+`--record-contract-hash` after reviewing the matrix), a mismatch run that passes or reports no
+private evidence, an unavailable native tool, and any cell that is not `verified` with all
+evidence passing. `report.json` lists every cell with its evidence outcomes and the
+uncertified cells.
 
 Prerequisites: built `target/debug/termtrace`, built Python/Node native bindings,
 consumer Python environment with pytest, `npm ci` in the Node consumer, and the
@@ -183,164 +195,164 @@ canonical evidence, or mark reserved rows verified from foundation results.
 <!-- sdk-matrix:start -->
 | Capability | Rust | Python | TypeScript | Owner |
 |---|---|---|---|---|
-| session.launch | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| session.environment | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| session.geometry | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| session.resource_limits | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| session.readiness | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| session.attach | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| session.target | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| session.status | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| screen.observe | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| screen.resolve | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| screen.provenance | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| screen.hidden | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| screen.presented | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| screen.text | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| screen.spans | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| screen.cells | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| screen.bounds | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| screen.cursor | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| screen.modes | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| screen.colors | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| screen.wraps | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| locators.text | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| locators.regex | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| locators.style | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| locators.regions | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| locators.strictness | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| waits.text | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| waits.stable | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| waits.reaction | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| waits.idle | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| input.text | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| input.key | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| input.bytes | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| input.paste | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| input.pointer | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| input.focus | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| input.pacing | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| input.resize | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| input.signal | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| input.markers | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| input.ordered_send | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| mutation.stale_guard | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| mutation.request_identity | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| mutation.deduplication | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| mutation.input_outcome | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| mutation.postcondition | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| mutation.effects | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| mutation.retry | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| lifecycle.stop | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| lifecycle.completion | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| lifecycle.detach | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| lifecycle.force_close | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| lifecycle.reaping | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| lifecycle.cancellation | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| testing.assertions | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| testing.snapshots | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| testing.update_policy | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| testing.rust_helper | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| testing.pytest | missing | exposed_unverified | missing | 04 |
-| testing.node_helper | missing | missing | exposed_unverified | 04 |
-| testing.cleanup_evidence | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| output.bytes | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| output.cursor | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| output.wait | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| events.filtering | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| events.follow | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| events.pagination | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| analysis.timeline | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| analysis.diff | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| analysis.explain | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| analysis.diagnose | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| analysis.last_action | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| instrumentation.events | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| instrumentation.spans | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| integrity.verification | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| integrity.recovery | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| integrity.receipts | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| integrity.signing | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| integrity.sensitivity | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| bundles.create | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| bundles.profiles | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| bundles.verify | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| registry.discovery | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| registry.register | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| registry.remove | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| registry.restart | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| registry.gc | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| tmux.management | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| tmux.aggregation | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| tmux.verification | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| system.probes | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| system.versions | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| system.schemas | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| system.diagnostics | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| artifacts.png | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| artifacts.svg | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| artifacts.html | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| artifacts.txt | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| artifacts.json | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| artifacts.deep_json | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| artifacts.vt | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| artifacts.asciicast | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| native.original_recording | exposed_unverified | exposed_unverified | exposed_unverified | 07 |
-| native.live_control | exposed_unverified | exposed_unverified | exposed_unverified | 07 |
-| native.replay_screenshot | exposed_unverified | missing | missing | 07 |
-| native.replay_video | exposed_unverified | missing | missing | 07 |
-| native.playback | exposed_unverified | missing | missing | 07 |
-| delivery.gif | missing | missing | missing | 08 |
-| delivery.webm | missing | missing | missing | 08 |
-| delivery.codec_availability | missing | missing | missing | 08 |
-| delivery.no_replace | missing | missing | missing | 08 |
-| visual.profiles | exposed_unverified | exposed_unverified | exposed_unverified | 09 |
-| visual.geometry | missing | missing | missing | 09 |
-| visual.fonts | missing | missing | missing | 09 |
-| visual.dpi | missing | missing | missing | 09 |
-| visual.config_identity | missing | missing | missing | 09 |
-| presentation.edit_plans | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
-| presentation.selectors | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
-| presentation.clips | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
-| presentation.speeds | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
-| presentation.holds | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
-| presentation.annotations | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
-| presentation.subtitles | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
-| presentation.transforms | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
-| presentation.dry_run | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
-| presentation.mapping | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
-| presentation.preview | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
-| presentation.export | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
-| presentation.verification | exposed_unverified | exposed_unverified | exposed_unverified | 10 |
-| workflows.parallel | exposed_unverified | missing | missing | 11 |
-| workflows.sharded | exposed_unverified | missing | missing | 11 |
-| workflows.matrix | exposed_unverified | missing | missing | 11 |
-| workflows.snapshots | exposed_unverified | missing | missing | 11 |
-| workflows.aggregate | exposed_unverified | missing | missing | 11 |
-| workflows.junit | exposed_unverified | missing | missing | 11 |
-| workflows.ci_verdict | exposed_unverified | missing | missing | 11 |
-| input.scroll | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| session.working_directory | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| screen.frame | exposed_unverified | exposed_unverified | exposed_unverified | 02 |
-| testing.cursor | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| testing.exists | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| testing.not_exists | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| testing.count | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| testing.match_text | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| testing.style | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| testing.wraps | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| testing.neutral_region | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| testing.presented_transient | exposed_unverified | exposed_unverified | exposed_unverified | 04 |
-| instrumentation.end_span | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| registry.resolve | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| analysis.cache_status | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| analysis.cache_prune | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| analysis.markers | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| analysis.review_summary | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| analysis.review_search | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| analysis.review_export | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
-| lifecycle.discard_completed | exposed_unverified | exposed_unverified | exposed_unverified | 03 |
-| output.pagination | exposed_unverified | exposed_unverified | exposed_unverified | 05 |
+| session.launch | verified | verified | verified | 03 |
+| session.environment | verified | verified | verified | 03 |
+| session.geometry | verified | verified | verified | 03 |
+| session.resource_limits | verified | verified | verified | 03 |
+| session.readiness | verified | verified | verified | 03 |
+| session.attach | verified | verified | verified | 03 |
+| session.target | verified | verified | verified | 03 |
+| session.status | verified | verified | verified | 03 |
+| screen.observe | verified | verified | verified | 02 |
+| screen.resolve | verified | verified | verified | 02 |
+| screen.provenance | verified | verified | verified | 02 |
+| screen.hidden | verified | verified | verified | 02 |
+| screen.presented | verified | verified | verified | 02 |
+| screen.text | verified | verified | verified | 02 |
+| screen.spans | verified | verified | verified | 02 |
+| screen.cells | verified | verified | verified | 02 |
+| screen.bounds | verified | verified | verified | 02 |
+| screen.cursor | verified | verified | verified | 02 |
+| screen.modes | verified | verified | verified | 02 |
+| screen.colors | verified | verified | verified | 02 |
+| screen.wraps | verified | verified | verified | 02 |
+| locators.text | verified | verified | verified | 02 |
+| locators.regex | verified | verified | verified | 02 |
+| locators.style | verified | verified | verified | 02 |
+| locators.regions | verified | verified | verified | 02 |
+| locators.strictness | verified | verified | verified | 02 |
+| waits.text | verified | verified | verified | 02 |
+| waits.stable | verified | verified | verified | 02 |
+| waits.reaction | verified | verified | verified | 02 |
+| waits.idle | verified | verified | verified | 02 |
+| input.text | verified | verified | verified | 03 |
+| input.key | verified | verified | verified | 03 |
+| input.bytes | verified | verified | verified | 03 |
+| input.paste | verified | verified | verified | 03 |
+| input.pointer | verified | verified | verified | 03 |
+| input.focus | verified | verified | verified | 03 |
+| input.pacing | verified | verified | verified | 03 |
+| input.resize | verified | verified | verified | 03 |
+| input.signal | verified | verified | verified | 03 |
+| input.markers | verified | verified | verified | 03 |
+| input.ordered_send | verified | verified | verified | 03 |
+| mutation.stale_guard | verified | verified | verified | 03 |
+| mutation.request_identity | verified | verified | verified | 03 |
+| mutation.deduplication | verified | verified | verified | 03 |
+| mutation.input_outcome | verified | verified | verified | 03 |
+| mutation.postcondition | verified | verified | verified | 03 |
+| mutation.effects | verified | verified | verified | 03 |
+| mutation.retry | verified | verified | verified | 03 |
+| lifecycle.stop | verified | verified | verified | 03 |
+| lifecycle.completion | verified | verified | verified | 03 |
+| lifecycle.detach | verified | verified | verified | 03 |
+| lifecycle.force_close | verified | verified | verified | 03 |
+| lifecycle.reaping | verified | verified | verified | 03 |
+| lifecycle.cancellation | verified | verified | verified | 03 |
+| testing.assertions | verified | verified | verified | 04 |
+| testing.snapshots | verified | verified | verified | 04 |
+| testing.update_policy | verified | verified | verified | 04 |
+| testing.rust_helper | verified | verified | verified | 04 |
+| testing.pytest | not_applicable | verified | not_applicable | 04 |
+| testing.node_helper | not_applicable | not_applicable | verified | 04 |
+| testing.cleanup_evidence | verified | verified | verified | 04 |
+| output.bytes | verified | verified | verified | 05 |
+| output.cursor | verified | verified | verified | 05 |
+| output.wait | verified | verified | verified | 05 |
+| events.filtering | verified | verified | verified | 05 |
+| events.follow | verified | verified | verified | 05 |
+| events.pagination | verified | verified | verified | 05 |
+| analysis.timeline | verified | verified | verified | 05 |
+| analysis.diff | verified | verified | verified | 05 |
+| analysis.explain | verified | verified | verified | 05 |
+| analysis.diagnose | verified | verified | verified | 05 |
+| analysis.last_action | verified | verified | verified | 05 |
+| instrumentation.events | verified | verified | verified | 05 |
+| instrumentation.spans | verified | verified | verified | 05 |
+| integrity.verification | verified | verified | verified | 05 |
+| integrity.recovery | verified | verified | verified | 05 |
+| integrity.receipts | verified | verified | verified | 05 |
+| integrity.signing | verified | verified | verified | 05 |
+| integrity.sensitivity | verified | verified | verified | 05 |
+| bundles.create | verified | verified | verified | 05 |
+| bundles.profiles | verified | verified | verified | 05 |
+| bundles.verify | verified | verified | verified | 05 |
+| registry.discovery | verified | verified | verified | 05 |
+| registry.register | verified | verified | verified | 05 |
+| registry.remove | verified | verified | verified | 05 |
+| registry.restart | verified | verified | verified | 05 |
+| registry.gc | verified | verified | verified | 05 |
+| tmux.management | verified | verified | verified | 05 |
+| tmux.aggregation | verified | verified | verified | 05 |
+| tmux.verification | verified | verified | verified | 05 |
+| system.probes | verified | verified | verified | 05 |
+| system.versions | verified | verified | verified | 05 |
+| system.schemas | verified | verified | verified | 05 |
+| system.diagnostics | verified | verified | verified | 05 |
+| artifacts.png | verified | verified | verified | 05 |
+| artifacts.svg | verified | verified | verified | 05 |
+| artifacts.html | verified | verified | verified | 05 |
+| artifacts.txt | verified | verified | verified | 05 |
+| artifacts.json | verified | verified | verified | 05 |
+| artifacts.deep_json | verified | verified | verified | 05 |
+| artifacts.vt | verified | verified | verified | 05 |
+| artifacts.asciicast | verified | verified | verified | 05 |
+| native.original_recording | verified | verified | verified | 07 |
+| native.live_control | verified | verified | verified | 07 |
+| native.replay_screenshot | verified | verified | verified | 07 |
+| native.replay_video | verified | verified | verified | 07 |
+| native.playback | verified | not_applicable | not_applicable | 07 |
+| delivery.gif | verified | verified | verified | 08 |
+| delivery.webm | verified | verified | verified | 08 |
+| delivery.codec_availability | verified | verified | verified | 08 |
+| delivery.no_replace | verified | verified | verified | 08 |
+| visual.profiles | verified | verified | verified | 09 |
+| visual.geometry | verified | verified | verified | 09 |
+| visual.fonts | verified | verified | verified | 09 |
+| visual.dpi | verified | verified | verified | 09 |
+| visual.config_identity | verified | verified | verified | 09 |
+| presentation.edit_plans | verified | verified | verified | 10 |
+| presentation.selectors | verified | verified | verified | 10 |
+| presentation.clips | verified | verified | verified | 10 |
+| presentation.speeds | verified | verified | verified | 10 |
+| presentation.holds | verified | verified | verified | 10 |
+| presentation.annotations | verified | verified | verified | 10 |
+| presentation.subtitles | verified | verified | verified | 10 |
+| presentation.transforms | verified | verified | verified | 10 |
+| presentation.dry_run | verified | verified | verified | 10 |
+| presentation.mapping | verified | verified | verified | 10 |
+| presentation.preview | verified | verified | verified | 10 |
+| presentation.export | verified | verified | verified | 10 |
+| presentation.verification | verified | verified | verified | 10 |
+| workflows.parallel | verified | verified | verified | 11 |
+| workflows.sharded | verified | verified | verified | 11 |
+| workflows.matrix | verified | verified | verified | 11 |
+| workflows.snapshots | verified | verified | verified | 11 |
+| workflows.aggregate | verified | verified | verified | 11 |
+| workflows.junit | verified | verified | verified | 11 |
+| workflows.ci_verdict | verified | verified | verified | 11 |
+| input.scroll | verified | verified | verified | 03 |
+| session.working_directory | verified | verified | verified | 03 |
+| screen.frame | verified | verified | verified | 02 |
+| testing.cursor | verified | verified | verified | 04 |
+| testing.exists | verified | verified | verified | 04 |
+| testing.not_exists | verified | verified | verified | 04 |
+| testing.count | verified | verified | verified | 04 |
+| testing.match_text | verified | verified | verified | 04 |
+| testing.style | verified | verified | verified | 04 |
+| testing.wraps | verified | verified | verified | 04 |
+| testing.neutral_region | verified | verified | verified | 04 |
+| testing.presented_transient | verified | verified | verified | 04 |
+| instrumentation.end_span | verified | verified | verified | 05 |
+| registry.resolve | verified | verified | verified | 05 |
+| analysis.cache_status | verified | verified | verified | 05 |
+| analysis.cache_prune | verified | verified | verified | 05 |
+| analysis.markers | verified | verified | verified | 05 |
+| analysis.review_summary | verified | verified | verified | 05 |
+| analysis.review_search | verified | verified | verified | 05 |
+| analysis.review_export | verified | verified | verified | 05 |
+| lifecycle.discard_completed | verified | verified | verified | 03 |
+| output.pagination | verified | verified | verified | 05 |
 
 <!-- sdk-matrix:end -->
 

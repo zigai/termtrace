@@ -4,8 +4,8 @@ use crate::native_capture::process::probe_output;
 use std::{process::Command, result::Result as StdResult, time::Duration};
 use termtrace_model::artifact::derivative::DerivativeFormat;
 use termtrace_model::protocol::capability::{
-    Capability, CapabilityStatus, PRESENTATION_CAPABILITY, PRESENTATION_TOOLS,
-    SEMANTIC_VIDEO_CAPABILITY, SEMANTIC_VIDEO_TOOLS,
+    Capability, CapabilityStatus, DELIVERY_TOOLS, GIF_DELIVERY_CAPABILITY, PRESENTATION_CAPABILITY,
+    PRESENTATION_TOOLS, SEMANTIC_VIDEO_CAPABILITY, SEMANTIC_VIDEO_TOOLS, WEBM_DELIVERY_CAPABILITY,
 };
 use termtrace_process::find_executable;
 
@@ -190,12 +190,12 @@ pub fn derivative_capability(
     needs_drawtext: bool,
 ) -> Capability {
     let id = match format {
-        DerivativeFormat::Gif { .. } => "delivery.gif",
-        DerivativeFormat::Webm {} => "delivery.webm",
+        DerivativeFormat::Gif { .. } => GIF_DELIVERY_CAPABILITY,
+        DerivativeFormat::Webm {} => WEBM_DELIVERY_CAPABILITY,
     };
 
     let probe = || -> StdResult<(), String> {
-        if !missing(&["ffmpeg", "ffprobe"]).is_empty() {
+        if !missing(DELIVERY_TOOLS).is_empty() {
             return Err("FFmpeg/FFprobe unavailable".into());
         }
 

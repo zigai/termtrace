@@ -1,10 +1,13 @@
 use super::super::{
-    capture_native, playback, CaptureOptions, CaptureOutcome, Duration, Error, PlaybackOptions,
-    Result, Session,
+    capture_native, playback, CaptureOptions, CaptureOutcome, Duration, Error, Path,
+    PlaybackOptions, Result, Session, StatePoint,
 };
+use crate::system::SystemService;
 use std::sync::{atomic::AtomicBool, Arc};
 use termtrace_media::native_capture::{native_capture_target, NativeReplayWorker};
-use termtrace_model::execution::session::CaptureTarget;
+use termtrace_model::{
+    execution::session::CaptureTarget, protocol::capability::NATIVE_SCREENSHOT_CAPABILITY,
+};
 
 /// Session-bound native capture, playback, and presentation operations.
 pub struct Native<'session> {
@@ -37,6 +40,31 @@ impl Native<'_> {
             timeout,
         )
         .map_err(Error::from);
+    }
+
+    /// Capture one native screenshot of `point` in this completed session into the new
+    /// `destination` directory, holding the PNG, its manifest, and the replay endpoint.
+    ///
+    /// Requires the `native-screenshot` capability, then starts a replay worker, captures, and
+    /// closes the worker. `cancelled` is checked during the probe and replay.
+    ///
+    /// # Errors
+    /// Returns an error when the capability is blocked, the session is live, `point` does not
+    /// resolve, `destination` exists, or the capture cannot be produced within `timeout`.
+    pub fn screenshot(
+        &self,
+        point: &StatePoint,
+        destination: &Path,
+        viewport: Option<CaptureTarget>,
+        cancelled: Arc<AtomicBool>,
+        timeout: Duration,
+    ) -> Result<CaptureOutcome> {
+        SystemService::require(NATIVE_SCREENSHOT_CAPABILITY, &cancelled)?;
+        let mut worker = self.replay_worker(viewport, cancelled, timeout)?;
+        let capture = worker.capture(point, destination)?;
+        worker.close();
+
+        return Ok(capture);
     }
 
     /// Capture native pixels for this canonical session.

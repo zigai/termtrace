@@ -18,8 +18,10 @@ pub mod evidence;
 pub mod host;
 mod input;
 pub mod locator;
+pub mod native;
 pub mod original;
 pub mod recording;
+pub mod scenario;
 pub mod screen;
 pub mod session;
 pub mod testing;
@@ -72,6 +74,7 @@ fn _termtrace(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<diagnostics::PyInstrumentation>()?;
     m.add_class::<diagnostics::PySystem>()?;
     m.add_class::<evidence::PyOutput>()?;
+    m.add_class::<native::PyNative>()?;
     m.add_class::<recording::PyRecording>()?;
     m.add_class::<original::PyOriginalRecording>()?;
     m.add_class::<session::PySession>()?;
@@ -93,6 +96,7 @@ fn _termtrace(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     testing::register(m)?;
     video::register(m)?;
+    scenario::register(m)?;
     m.add(
         "ExpectationMismatchError",
         m.py().get_type::<errors::ExpectationMismatchError>(),

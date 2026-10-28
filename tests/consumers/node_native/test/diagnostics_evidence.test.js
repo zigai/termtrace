@@ -331,3 +331,45 @@ test('nonUTF8 source debug/forensic bundles retain exact verification paths and 
   }
   fs.writeFileSync(path.join(root, 'verification-path-observed.json'), JSON.stringify({source_base64:source.toString('base64'), profiles, source_hashes_before:before, source_hashes_after:hashes(source)}, null, 2));
 });
+
+function ffmpegWithoutVp9(directory) {
+  fs.mkdirSync(directory);
+  const real = spawnSync('sh', ['-c', 'command -v ffmpeg'], { encoding: 'utf8' }).stdout.trim();
+  const wrapper = path.join(directory, 'ffmpeg');
+  fs.writeFileSync(wrapper, `#!/bin/sh\ncase " $* " in *libvpx-vp9*) echo 'Unknown encoder libvpx-vp9' >&2; exit 1;; esac\nexec '${real}' "$@"\n`, { mode: 0o700 });
+  return directory;
+}
+
+test('delivery codec availability follows the ffmpeg on PATH', async (t) => {
+  const { Edit, select } = require('@termtrace/core');
+  const root = fs.mkdtempSync(path.join(process.env.TASK05_EVIDENCE || os.tmpdir(), 'node-codecs-'));
+  const client = new Termtrace(binary, path.join(root, 'sessions'));
+  const rec = await client.launch(['/bin/sh', '-c', 'printf READY; IFS= read -r line'], { cols: 30, rows: 6 });
+  try {
+    await rec.output().waitFor(bytes('READY'), 5000);
+    await rec.mark('start');
+    await rec.mark('end');
+    await rec.stop();
+  } finally { if (rec.isActive()) await rec.stop(); }
+  const edit = new Edit().clip(select.marker('start'), select.marker('end'));
+  const capabilities = async () => Object.fromEntries((await client.system().capabilities()).capabilities.map(item => [item.id, item]));
+
+  const host = await capabilities();
+  assert.equal(host['gif-delivery'].status, 'ready');
+  assert.equal(host['webm-delivery'].status, 'ready');
+
+  const original = process.env.PATH;
+  t.after(() => { process.env.PATH = original; });
+  process.env.PATH = `${ffmpegWithoutVp9(path.join(root, 'tools'))}${path.delimiter}${original}`;
+  const limited = await capabilities();
+  assert.equal(limited['gif-delivery'].status, 'ready');
+  assert.equal(limited['webm-delivery'].status, 'blocked');
+  assert.equal(limited['webm-delivery'].code, 'derivative_encoder_unavailable');
+  assert.ok(limited['webm-delivery'].remediation);
+
+  const out = path.join(root, 'blocked.webm');
+  await assert.rejects(client.videoRender(rec.path, edit, out, { renderer: 'semantic' }), /webm-delivery.*derivative_encoder_unavailable/s);
+  assert.equal(fs.existsSync(out), false);
+  const gif = await client.videoRender(rec.path, edit, path.join(root, 'allowed.gif'), { renderer: 'semantic' });
+  assert.ok(fs.statSync(gif.output).isFile());
+});

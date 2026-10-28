@@ -2,11 +2,12 @@ from pathlib import Path
 
 from termtrace import OriginalCaptureFailedError, OriginalRecording, Termtrace
 from termtrace.aio import AsyncOriginalRecording, AsyncTermtrace
-from termtrace.control import OriginalLaunchOptions, OriginalRecordingResult
+from termtrace.types import OriginalCaptureStatus, OriginalLaunchOptionsInput
+from termtrace.types import OriginalRecording as OriginalRecordingResult
 
 
 def finish(tt: Termtrace) -> bool:
-    options: OriginalLaunchOptions = {
+    options: OriginalLaunchOptionsInput = {
         "grid": {"cols": 80, "rows": 24},
         "canvas": {"width": 1280, "height": 720},
         "fps": 30,
@@ -15,9 +16,10 @@ def finish(tt: Termtrace) -> bool:
     original.session().resize(100, 30)
     try:
         result: OriginalRecordingResult = original.finish(5000)
-    except OriginalCaptureFailedError as error:
-        exit_code = error.completion["exit_code"] if error.completion else None
-        del exit_code
+    except OriginalCaptureFailedError:
+        status: OriginalCaptureStatus = original.capture_status()
+        failed = status["failure"]
+        del failed
         return False
     seq: int = result["capture"]["source"]["boundary"]["next_event_seq"]
     del seq

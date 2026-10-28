@@ -390,6 +390,14 @@ CapabilityStatus: TypeAlias = "Literal['ready', 'blocked']"
 CaptionLayout: TypeAlias = "Literal['footer', 'overlay', 'none']"
 
 
+class CaptureOutcome(TypedDict):
+    "Completed native capture."
+
+    directory: ExactPath
+    screenshot: ExactPath
+    video: ExactPath | None
+
+
 CaptureQuality: TypeAlias = "Literal['live', 'stable', 'completed', 'incomplete']"
 
 
@@ -1583,21 +1591,6 @@ class MarkerRecord(TypedDict):
     semantic_state_id: int | None
 
 
-class MarkerRecordInput(TypedDict):
-    "Canonical marker with duplicate and nominal-frame context."
-
-    event_seq: int
-    label: str
-    monotonic_ns: int
-    native_evidence_level: str
-    nominal_frame: int
-    occurrence_count: int
-    occurrence_index: int
-    presentation_eligible: bool
-    semantic_state_hash: NotRequired[str | None]
-    semantic_state_id: NotRequired[int | None]
-
-
 class MaskedSnapshotOptions(TypedDict):
     "Options for the separate version-one cells comparison format.\n\nMasks exclude unstable comparison cells. They do not redact canonical evidence."
 
@@ -1742,19 +1735,6 @@ class NormalizedAnnotation(TypedDict):
     z_order: int
 
 
-class NormalizedAnnotationInput(TypedDict):
-    "One annotation resolved to a half-open output-frame interval."
-
-    annotation_index: int
-    output_end_frame: int
-    output_start_frame: int
-    position: AnnotationPosition
-    style: AnnotationStyle
-    template: NotRequired[str | None]
-    text: NotRequired[str | None]
-    z_order: int
-
-
 class NormalizedChangeFrame(TypedDict):
     "Semantic delta nominally scheduled onto presentation frames."
 
@@ -1771,20 +1751,6 @@ class NormalizedClip(TypedDict):
     "Resolved clip and exact source/output frame decisions."
 
     caption: str | None
-    hold_frame_count: int
-    output_end_frame: int
-    output_start_frame: int
-    retimed_frame_count: int
-    source_end_frame: int
-    source_range: SourceRange
-    source_start_frame: int
-    speed: RationalSpeed
-
-
-class NormalizedClipInput(TypedDict):
-    "Resolved clip and exact source/output frame decisions."
-
-    caption: NotRequired[str | None]
     hold_frame_count: int
     output_end_frame: int
     output_start_frame: int
@@ -2279,33 +2245,6 @@ class PresentationPlan(TypedDict):
     version: int
 
 
-class PresentationPlanInput(TypedDict):
-    "Dry-run output binding a normalized edit to immutable visual evidence."
-
-    annotations: list[NormalizedAnnotationInput]
-    change_algorithm: NotRequired[str | None]
-    change_frames: list[NormalizedChangeFrame]
-    change_visualization: NotRequired[ChangeVisualizationInput | None]
-    clips: list[NormalizedClipInput]
-    cursor_masks: list[CursorMaskFrame]
-    delivery: PresentationDeliveryInput
-    edit_plan_hash: str
-    fps: int
-    layout: PresentationLayoutInput
-    markers: list[MarkerRecordInput]
-    output_frame_count: int
-    output_height: int
-    output_width: int
-    render_config: NotRequired[VideoRenderConfigInput | None]
-    source: PresentationSource
-    source_geometry: TerminalGeometryReport
-    source_height: int
-    source_width: int
-    subtitles: list[NormalizedSubtitle]
-    transforms: list[PixelTransformInput]
-    version: int
-
-
 PresentationSource: TypeAlias = "PresentationSourceNative | PresentationSourceSemantic"
 
 
@@ -2733,6 +2672,140 @@ class SavedFile(TypedDict):
     path: str
     renderer: str | None
     truth_layer: str | None
+
+
+class ScenarioAttemptReport(TypedDict):
+    "One fresh-session attempt retained within a scenario suite result."
+
+    attempt: int
+    duration_ms: int
+    report: ScenarioReport
+
+
+class ScenarioAttemptReportInput(TypedDict):
+    "One fresh-session attempt retained within a scenario suite result."
+
+    attempt: int
+    duration_ms: int
+    report: ScenarioReportInput
+
+
+class ScenarioCaseReport(TypedDict):
+    "Every attempt for one selected scenario document."
+
+    attempts: list[ScenarioAttemptReport]
+    scenario: ExactPath
+    status: ScenarioCaseStatus
+
+
+class ScenarioCaseReportInput(TypedDict):
+    "Every attempt for one selected scenario document."
+
+    attempts: list[ScenarioAttemptReportInput]
+    scenario: ExactPath
+    status: ScenarioCaseStatus
+
+
+ScenarioCaseStatus: TypeAlias = "Literal['passed', 'flaky', 'failed']"
+
+
+class ScenarioFailure(TypedDict):
+    "Stable failure context for one scenario step."
+
+    message: str
+    request_ids: list[str]
+    step_index: int
+    step_kind: str
+
+
+class ScenarioInfrastructureError(TypedDict):
+    "Safe structured infrastructure diagnostic. No child output or environment values."
+
+    code: str
+    message: str
+    phase: str
+
+
+class ScenarioReport(TypedDict):
+    "Machine-readable scenario outcome."
+
+    artifact_warnings: list[str]
+    canonical_session: ExactPath | None
+    failure: ScenarioFailure | None
+    failure_artifacts: ExactPath | None
+    infrastructure_errors: list[ScenarioInfrastructureError]
+    name: str
+    session_id: str | None
+    status: ScenarioStatus
+    steps: list[ScenarioStepResult]
+    version: int
+
+
+class ScenarioReportInput(TypedDict):
+    "Machine-readable scenario outcome."
+
+    artifact_warnings: list[str]
+    canonical_session: NotRequired[ExactPath | None]
+    failure: NotRequired[ScenarioFailure | None]
+    failure_artifacts: NotRequired[ExactPath | None]
+    infrastructure_errors: list[ScenarioInfrastructureError]
+    name: str
+    session_id: NotRequired[str | None]
+    status: ScenarioStatus
+    steps: list[ScenarioStepResultInput]
+    version: int
+
+
+ScenarioStatus: TypeAlias = "Literal['passed', 'failed', 'error']"
+
+
+class ScenarioStepResult(TypedDict):
+    "One executed step and its canonical provenance."
+
+    index: int
+    kind: str
+    request_ids: list[str]
+    state_hash: str | None
+
+
+class ScenarioStepResultInput(TypedDict):
+    "One executed step and its canonical provenance."
+
+    index: int
+    kind: str
+    request_ids: list[str]
+    state_hash: NotRequired[str | None]
+
+
+class ScenarioSuiteReport(TypedDict):
+    "Machine-readable sharded, bounded-concurrency scenario suite result."
+
+    cases: list[ScenarioCaseReport]
+    duration_ms: int
+    fail_on_flaky: bool
+    infrastructure_errors: list[ScenarioInfrastructureError]
+    jobs: int
+    shard_count: int | None
+    shard_index: int | None
+    status: ScenarioSuiteStatus
+    version: int
+
+
+class ScenarioSuiteReportInput(TypedDict):
+    "Machine-readable sharded, bounded-concurrency scenario suite result."
+
+    cases: list[ScenarioCaseReportInput]
+    duration_ms: int
+    fail_on_flaky: bool
+    infrastructure_errors: list[ScenarioInfrastructureError]
+    jobs: int
+    shard_count: NotRequired[int | None]
+    shard_index: NotRequired[int | None]
+    status: ScenarioSuiteStatus
+    version: int
+
+
+ScenarioSuiteStatus: TypeAlias = "Literal['passed', 'flaky', 'failed']"
 
 
 class ScreenAppearance(TypedDict):

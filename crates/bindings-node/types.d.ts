@@ -407,6 +407,16 @@ export type CapabilityStatus = "ready" | "blocked"
 /** Placement of the per-clip caption preset. */
 export type CaptionLayout = "footer" | "overlay" | "none"
 
+/** Completed native capture. */
+export interface CaptureOutcome {
+  /** Atomically committed visual directory. */
+  directory: ExactPath
+  /** Final native screenshot path. */
+  screenshot: ExactPath
+  /** Video path. */
+  video?: ExactPath | null
+}
+
 /** How settled the observed state is. */
 export type CaptureQuality = "live" | "stable" | "completed" | "incomplete"
 
@@ -3058,6 +3068,115 @@ export interface SavedFile {
   /** Rendering truth layer, when this member is a rendering. */
   truth_layer?: string | null
 }
+
+/** One fresh-session attempt retained within a scenario suite result. */
+export interface ScenarioAttemptReport {
+  /** One-based attempt number. */
+  attempt: number
+  /** Wall-clock duration including cleanup and evidence publication, in milliseconds. */
+  duration_ms: bigint
+  /** Complete fresh-session result. */
+  report: ScenarioReport
+}
+
+/** Every attempt for one selected scenario document. */
+export interface ScenarioCaseReport {
+  /** Ordered fresh-session attempts, including failed attempts before a pass. */
+  attempts: Array<ScenarioAttemptReport>
+  /** Input scenario document path. */
+  scenario: ExactPath
+  /** Factual verdict, independent of exit policy. */
+  status: ScenarioCaseStatus
+}
+
+/** Factual verdict for a selected case. */
+export type ScenarioCaseStatus = "passed" | "flaky" | "failed"
+
+/** Stable failure context for one scenario step. */
+export interface ScenarioFailure {
+  /** Safe diagnostic without child environment values. */
+  message: string
+  /** Caller-owned mutation identifiers allocated before the failure. */
+  request_ids: Array<string>
+  /** Zero-based failed step index. */
+  step_index: bigint
+  /** Stable scenario step kind. */
+  step_kind: string
+}
+
+/** Safe structured infrastructure diagnostic. No child output or environment values. */
+export interface ScenarioInfrastructureError {
+  /** Stable machine-readable error code. */
+  code: string
+  /** Safe bounded explanation. */
+  message: string
+  /** Lifecycle or reporting phase. */
+  phase: string
+}
+
+/** Machine-readable scenario outcome. */
+export interface ScenarioReport {
+  /** Optional evidence derivations that could not be produced. */
+  artifact_warnings: Array<string>
+  /** Owner-only canonical evidence path, absent for prelaunch failures. */
+  canonical_session?: ExactPath | null
+  /** First failure, if any. */
+  failure?: ScenarioFailure | null
+  /** Atomic failure evidence directory, only after successful publication. */
+  failure_artifacts?: ExactPath | null
+  /** Ordered required infrastructure failures, including secondary cleanup errors. */
+  infrastructure_errors: Array<ScenarioInfrastructureError>
+  /** Scenario name. */
+  name: string
+  /** Immutable canonical session identity, absent when launch never returned a session. */
+  session_id?: string | null
+  /** Overall disposition. */
+  status: ScenarioStatus
+  /** Successfully completed steps. */
+  steps: Array<ScenarioStepResult>
+  /** Scenario report contract version (independent of documents). */
+  version: number
+}
+
+/** Overall scenario disposition. */
+export type ScenarioStatus = "passed" | "failed" | "error"
+
+/** One executed step and its canonical provenance. */
+export interface ScenarioStepResult {
+  /** Zero-based step index. */
+  index: bigint
+  /** Stable scenario step kind. */
+  kind: string
+  /** Caller-owned mutation request identifiers used by this step. */
+  request_ids: Array<string>
+  /** Matched presented state hash when applicable. */
+  state_hash?: string | null
+}
+
+/** Machine-readable sharded, bounded-concurrency scenario suite result. */
+export interface ScenarioSuiteReport {
+  /** Ordered selected scenarios and their retained attempts. */
+  cases: Array<ScenarioCaseReport>
+  /** Wall-clock suite duration in milliseconds (not summed worker time). */
+  duration_ms: bigint
+  /** Effective policy: recovered expectation failures make CI fail when true. */
+  fail_on_flaky: boolean
+  /** Ordered suite-level reporting/orchestration errors. */
+  infrastructure_errors: Array<ScenarioInfrastructureError>
+  /** Requested maximum worker count. */
+  jobs: bigint
+  /** Optional total shard count. */
+  shard_count?: bigint | null
+  /** Optional zero-based shard index. */
+  shard_index?: bigint | null
+  /** Overall disposition. */
+  status: ScenarioSuiteStatus
+  /** Suite result contract version. */
+  version: number
+}
+
+/** Overall multi-scenario disposition. */
+export type ScenarioSuiteStatus = "passed" | "flaky" | "failed"
 
 /** Complete appearance shared by an exact cell or a lossless span. */
 export interface ScreenAppearance {

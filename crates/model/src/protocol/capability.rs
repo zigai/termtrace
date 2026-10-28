@@ -15,6 +15,10 @@ pub const NATIVE_VIDEO_CAPABILITY: &str = "native-video";
 pub const SEMANTIC_VIDEO_CAPABILITY: &str = "semantic-video";
 /// Edited presentation export capability identifier.
 pub const PRESENTATION_CAPABILITY: &str = "presentation";
+/// GIF delivery encoding capability identifier.
+pub const GIF_DELIVERY_CAPABILITY: &str = "gif-delivery";
+/// `WebM` (VP9) delivery encoding capability identifier.
+pub const WEBM_DELIVERY_CAPABILITY: &str = "webm-delivery";
 /// SSH receipt-signing capability identifier.
 pub const RECEIPT_SIGNING_CAPABILITY: &str = "receipt-signing";
 /// Stable capability identifiers in report order.
@@ -25,6 +29,8 @@ pub const CAPABILITY_IDS: &[&str] = &[
     NATIVE_VIDEO_CAPABILITY,
     SEMANTIC_VIDEO_CAPABILITY,
     PRESENTATION_CAPABILITY,
+    GIF_DELIVERY_CAPABILITY,
+    WEBM_DELIVERY_CAPABILITY,
     RECEIPT_SIGNING_CAPABILITY,
 ];
 /// Programs the native screenshot probe and capture run.
@@ -37,6 +43,8 @@ pub const NATIVE_VIDEO_TOOLS: &[&str] =
 pub const SEMANTIC_VIDEO_TOOLS: &[&str] = &["ffmpeg", "ffprobe"];
 /// Programs presentation export runs.
 pub const PRESENTATION_TOOLS: &[&str] = &["ffmpeg", "ffprobe"];
+/// Programs GIF and `WebM` delivery encoding runs.
+pub const DELIVERY_TOOLS: &[&str] = &["ffmpeg", "ffprobe"];
 /// Programs receipt signing runs.
 pub const RECEIPT_SIGNING_TOOLS: &[&str] = &["ssh-keygen"];
 
@@ -48,6 +56,7 @@ pub fn capability_tools(id: &str) -> &'static [&'static str] {
         NATIVE_VIDEO_CAPABILITY => NATIVE_VIDEO_TOOLS,
         SEMANTIC_VIDEO_CAPABILITY => SEMANTIC_VIDEO_TOOLS,
         PRESENTATION_CAPABILITY => PRESENTATION_TOOLS,
+        GIF_DELIVERY_CAPABILITY | WEBM_DELIVERY_CAPABILITY => DELIVERY_TOOLS,
         RECEIPT_SIGNING_CAPABILITY => RECEIPT_SIGNING_TOOLS,
         _ => &[],
     };

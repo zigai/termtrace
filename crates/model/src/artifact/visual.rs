@@ -86,13 +86,20 @@ pub enum CaptureKind {
 }
 
 /// Completed native capture.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CaptureOutcome {
     /// Atomically committed visual directory.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub directory: PathBuf,
     /// Video path.
+    #[serde(default, with = "crate::value::exact_path::option")]
+    #[schemars(with = "Option<crate::value::ExactPath>")]
     pub video: Option<PathBuf>,
     /// Final native screenshot path.
+    #[serde(with = "crate::value::exact_path")]
+    #[schemars(with = "crate::value::ExactPath")]
     pub screenshot: PathBuf,
 }
 
