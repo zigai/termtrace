@@ -1,9 +1,10 @@
 import asyncio
 import uuid
 
-from termtrace import ActionResult, Recording, TermtraceError
+from termtrace import ActionResult, Recording, Termtrace, TermtraceError
 from termtrace.aio import AsyncRecording
 from termtrace.control import LaunchOptions, PointerResult, SendStep, SessionStatus
+from termtrace.types import VisualProfile, VisualProfileReport
 
 
 def consume(recording: Recording) -> None:
@@ -28,6 +29,15 @@ def consume(recording: Recording) -> None:
         seq: int = status["boundaries"]["durable"]["next_event_seq"]
         del seq
     options: LaunchOptions = {"environment": {"base": "clear", "set": {"X": b"\x01"}}, "max_duration_ms": 100}
+    profile: VisualProfile = {
+        "version": 1,
+        "native": {"font_family": "Example Mono", "font_size_points": "13.5", "padding_points": {"x": 0, "y": 4}},
+        "semantic": {"preset": "bundled-v1"},
+    }
+    options["visual_profile"] = profile
+    report: VisualProfileReport = Termtrace().preflight_visual_profile(profile, cols=80, rows=24)
+    profile_hash: str = report["profile_hash"]
+    del profile_hash
     try:
         recording.mark("x")
     except TermtraceError as error:

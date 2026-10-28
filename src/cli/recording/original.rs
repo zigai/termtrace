@@ -254,12 +254,14 @@ fn layout(
     grid: Option<CellGrid>,
     canvas: Option<CaptureTarget>,
     profile: &ResolvedGhosttyProfile,
+    native: Option<&NativeVisualProfile>,
 ) -> Result<Layout> {
     let initial = viewport.unwrap_or(DEFAULT_VIEWPORT);
     let (window, solver) = match grid {
         Some(grid) => {
-            let report = solve_ghostty_geometry(helper, grid.cols, grid.rows, initial, profile)
-                .into_diagnostic()?;
+            let report =
+                solve_ghostty_geometry(helper, grid.cols, grid.rows, initial, profile, native)
+                    .into_diagnostic()?;
 
             (report.selected, Some(report))
         }
@@ -356,7 +358,7 @@ pub(super) fn run(response: &mut ResponseWriter, mut arguments: RecordArgs) -> R
 
     let helper = env::current_exe().into_diagnostic()?;
     let restart = arguments.restart_source.take();
-    let (profile, grid, canvas, fps) = match &restart {
+    let (profile, grid, canvas, fps, native) = match &restart {
         Some(predecessor) => predecessor_capture(predecessor)?,
         None => {
             let overrides = GhosttyVisualOverrides {
@@ -367,18 +369,52 @@ pub(super) fn run(response: &mut ResponseWriter, mut arguments: RecordArgs) -> R
                 foreground: arguments.recording.foreground.take(),
                 background: arguments.recording.background.take(),
             };
-            let profile =
-                resolve_ghostty_profile(arguments.recording.ghostty_config.as_deref(), overrides)
-                    .into_diagnostic()?;
+            let (profile, native) = if let Some(visual) = &arguments.recording.visual_profile {
+                let recorded = visual.record().into_diagnostic()?;
+                super::record::check_visual_profile_arguments(
+                    &arguments.recording,
+                    &overrides,
+                    false,
+                    &recorded,
+                )?;
+
+                let native = recorded.profile.native.clone().ok_or_else(|| {
+                    return miette::miette!(
+                        "original capture renders native pixels and requires a native visual profile section"
+                    );
+                })?;
+
+                let resolution = resolve_visual_profile(&recorded.profile, &AtomicBool::new(false))
+                    .into_diagnostic()?
+                    .ok_or_else(|| miette::miette!("native visual profile did not resolve"))?;
+
+                (resolution.profile, Some(native))
+            } else {
+                (
+                    resolve_ghostty_profile(
+                        arguments.recording.ghostty_config.as_deref(),
+                        overrides,
+                    )
+                    .into_diagnostic()?,
+                    None,
+                )
+            };
 
             (
                 profile,
                 arguments.original_grid,
                 arguments.original_canvas,
                 arguments.original_fps.unwrap_or(24),
+                native,
             )
         }
     };
+
+    if native.is_some() && backend != OriginalCaptureBackend::PrivateX11 {
+        return Err(miette::miette!(
+            "a native visual profile fixes the display DPI and requires the private-x11 original backend"
+        ));
+    }
 
     let layout = if backend == OriginalCaptureBackend::PrivateX11 {
         layout(
@@ -387,6 +423,7 @@ pub(super) fn run(response: &mut ResponseWriter, mut arguments: RecordArgs) -> R
             grid,
             canvas,
             &profile,
+            native.as_ref(),
         )?
     } else {
         Layout {
@@ -462,7 +499,7 @@ pub(super) fn run(response: &mut ResponseWriter, mut arguments: RecordArgs) -> R
         kind: CaptureKind::Video,
         destination: None,
         scale: None,
-        dpi: None,
+        dpi: native.as_ref().map(NativeVisualProfile::resolved_dpi),
     };
 
     let provenance = serde_json::to_string(&profile.provenance).into_diagnostic()?;
@@ -603,16 +640,18 @@ pub(super) fn run(response: &mut ResponseWriter, mut arguments: RecordArgs) -> R
     });
 }
 
-// A faithful successor reuses the predecessor's resolved profile, exact initial grid, canvas
-// and acquisition rate. Only a published predecessor capture can be restarted this way.
-fn predecessor_capture(
-    predecessor: &Path,
-) -> Result<(
+// Profile, exact grid, canvas, acquisition rate and native visual profile of one capture.
+type CaptureSettings = (
     ResolvedGhosttyProfile,
     Option<CellGrid>,
     Option<CaptureTarget>,
     u16,
-)> {
+    Option<NativeVisualProfile>,
+);
+
+// A faithful successor reuses the predecessor's resolved profile, exact initial grid, canvas
+// and acquisition rate. Only a published predecessor capture can be restarted this way.
+fn predecessor_capture(predecessor: &Path) -> Result<CaptureSettings> {
     let bytes = fs::read(original_capture_status_path(predecessor)).into_diagnostic()?;
     let status: OriginalCaptureStatus = serde_json::from_slice(&bytes).into_diagnostic()?;
     status
@@ -627,6 +666,11 @@ fn predecessor_capture(
     }
 
     let manifest = read_manifest(predecessor).into_diagnostic()?;
+    let native = manifest
+        .visual_profile
+        .as_ref()
+        .and_then(|recorded| return recorded.profile.native.clone());
+
     let provenance = manifest
         .ghostty_visual
         .ok_or_else(|| miette::miette!("predecessor has no recorded Ghostty profile"))?;
@@ -648,6 +692,7 @@ fn predecessor_capture(
             status.canvas.height,
         )),
         status.fps,
+        native,
     ));
 }
 

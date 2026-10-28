@@ -22,7 +22,10 @@ use std::{
     env, fs, path::Path, process::Command, str, sync::atomic::AtomicBool, thread, time::Duration,
 };
 use termtrace_control::read_completed;
-use termtrace_engine::{replay::visit_session_states_while, timeline::resolve_source_range};
+use termtrace_engine::{
+    recording::verify_profile_fonts, replay::visit_session_states_while,
+    timeline::resolve_source_range,
+};
 use termtrace_evidence::{
     artifact::{
         append_artifact_root, collect_artifact_members, commit_directory, create_private_directory,
@@ -272,7 +275,7 @@ fn capture_staged(
         )?;
     }
 
-    let profile_root = if let Some(provenance) = &manifest.ghostty_visual {
+    let replay = if let Some(provenance) = &manifest.ghostty_visual {
         if provenance.replay_profile != layout::GHOSTTY_REPLAY_PROFILE {
             return Err(Error::InvalidReplay {
                 reason: format!(
@@ -293,10 +296,15 @@ fn capture_staged(
             });
         }
 
-        Some(materialize(&staging.join("ghostty-profile"), &replay)?)
+        Some(replay)
     } else {
         None
     };
+
+    let profile_root = replay
+        .as_deref()
+        .map(|replay| return materialize(&staging.join("ghostty-profile"), replay))
+        .transpose()?;
 
     let effective_config =
         command_output_in_profile("ghostty", &["+show-config"], profile_root.as_deref())?;
@@ -327,6 +335,12 @@ fn capture_staged(
         });
     }
 
+    if let Some(replay) = &replay
+        && manifest.native_profile_dpi().is_some()
+    {
+        verify_profile_fonts(replay, &effective_config)?;
+    }
+
     let ghostty_version =
         String::from_utf8_lossy(&command_output("ghostty", &["+version"])?).into_owned();
 
@@ -354,6 +368,10 @@ fn capture_staged(
         Some(scaling.dpi),
     )?;
     wait_for_x_socket(&lease, &mut xvfb, Duration::from_secs(5))?;
+
+    if let Some(dpi) = scaling.font_dpi {
+        super::window::publish_font_dpi(&display, dpi)?;
+    }
 
     let geometry_path = staging.join("geometry-preflight.json");
     let timing_file = staging.join("playback-timing.json");
@@ -695,6 +713,9 @@ pub struct DisplayScaling {
     pub gdk_scale: u32,
     /// Fractional GDK font scaling factor (set as `GDK_DPI_SCALE` in Ghostty).
     pub gdk_dpi_scale: f64,
+    /// GTK font DPI that a visual profile fixes through the profile's GTK settings; GTK 4
+    /// ignores `GDK_DPI_SCALE`, so this is the only fractional font scale Ghostty honors.
+    pub font_dpi: Option<u32>,
 }
 
 impl DisplayScaling {
@@ -733,7 +754,21 @@ impl DisplayScaling {
             scale: effective_scale,
             gdk_scale,
             gdk_dpi_scale,
+            font_dpi: None,
         });
+    }
+
+    /// Scaling fixed by a visual profile: unscaled windows with Ghostty's font and padding
+    /// scaled by `dpi / 96` through GTK's font DPI.
+    #[must_use]
+    pub fn profile(dpi: u32) -> Self {
+        return Self {
+            dpi,
+            scale: f64::from(dpi) / 96.0,
+            gdk_scale: 1,
+            gdk_dpi_scale: 1.0,
+            font_dpi: Some(dpi),
+        };
     }
 
     /// Calculate display scaling from a given DPI value.
@@ -778,20 +813,33 @@ fn display_units(value: f64) -> Result<u32> {
     return Ok(units);
 }
 
-/// Resolve display scaling for native headless capture from explicit options,
-/// environment variables, or recorded session provenance/geometry heuristics.
+/// Resolve display scaling for native headless capture from the session's visual profile,
+/// explicit options, environment variables, or recorded session provenance/geometry heuristics.
 ///
 /// Environment and provenance values that are not positive finite numbers are ignored like
 /// unparsable ones.
 ///
 /// # Errors
 ///
-/// Returns an error when an explicit scale or DPI option is zero, negative, or non-finite, or when
-/// the resolved scale's derived DPI does not fit `u32`.
+/// Returns an error when an explicit scale or DPI option is zero, negative, or non-finite or
+/// conflicts with the session's visual profile, or when the resolved scale's derived DPI does not
+/// fit `u32`.
 pub fn resolve_display_scaling(
     options: &CaptureOptions,
     manifest: Option<&SessionManifest>,
 ) -> Result<DisplayScaling> {
+    if let Some(dpi) = manifest.and_then(SessionManifest::native_profile_dpi) {
+        if options.dpi.is_some_and(|explicit| return explicit != dpi) || options.scale.is_some() {
+            return Err(Error::InvalidReplay {
+                reason: format!(
+                    "the session's visual profile fixes {dpi} DPI; omit the conflicting DPI or scale"
+                ),
+                source: None,
+            });
+        }
+        return Ok(DisplayScaling::profile(dpi));
+    }
+
     // 1. Explicit options
     if let Some(dpi) = options.dpi {
         return DisplayScaling::from_dpi(dpi);
@@ -902,8 +950,16 @@ pub fn resolve_display_scaling(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use termtrace_model::{execution::session::WindowPadding, terminal::replay::StateSelection};
+    use std::{io, path::PathBuf};
+    use termtrace_engine::{
+        analysis::profile::resolve,
+        recording::{record_with_output, RecordOptions},
+    };
+    use termtrace_model::{
+        execution::session::{RecordingFailurePolicy, WindowPadding},
+        execution::visual_profile::{NativeVisualProfile, VisualProfile},
+        terminal::replay::StateSelection,
+    };
 
     fn options(fps: u16) -> CaptureOptions {
         return CaptureOptions {
@@ -1014,5 +1070,71 @@ mod tests {
             resolve_display_scaling(&opt_4k, None).expect("resolve scaling"),
             DisplayScaling::from_scale(2.0).expect("valid display scaling")
         );
+    }
+
+    #[test]
+    fn recorded_visual_profile_fixes_dpi_over_environment_and_viewport_heuristics() {
+        let mut profile = VisualProfile::native_standard();
+        if let Some(native) = profile.native.as_mut() {
+            native.dpi = Some(144);
+        }
+
+        let overrides = profile
+            .native
+            .as_ref()
+            .map(NativeVisualProfile::overrides)
+            .expect("native section");
+
+        let resolved = resolve(b"", None, overrides, |config| return Ok(config.to_vec()))
+            .expect("resolved profile bytes");
+
+        let temporary = tempfile::TempDir::new().expect("temporary session");
+        let session = temporary.path().join("session");
+        record_with_output(
+            &RecordOptions {
+                failure_policy: RecordingFailurePolicy::Stop,
+                output_directory: session.clone(),
+                creation_alias: None,
+                lineage: None,
+                import_provenance: None,
+                tmux_pane: None,
+                command: vec!["/bin/true".into()],
+                working_directory: None,
+                cols: 80,
+                rows: 24,
+                cell_width_px: 18,
+                cell_height_px: 36,
+                geometry_provenance: Default::default(),
+                ghostty_profile: Some(resolved),
+                visual_profile: Some(profile.record().expect("valid profile")),
+                term: "xterm-256color".to_owned(),
+                environment: Default::default(),
+                colors: Default::default(),
+                forward_stdin: false,
+                continue_after_output_mirror_closes: false,
+                durability_policy: Default::default(),
+                provenance_policy: Default::default(),
+                resource_limits: Default::default(),
+            },
+            &mut io::sink(),
+        )
+        .expect("record profiled session");
+
+        let manifest = read_manifest(&session).expect("profiled manifest");
+        let mut large = options(24);
+        large.width = 3840;
+        large.height = 2160;
+
+        assert_eq!(
+            resolve_display_scaling(&large, Some(&manifest)).expect("resolve scaling"),
+            DisplayScaling::profile(144)
+        );
+        assert_eq!(
+            resolve_display_scaling(&options(24).with_dpi(144), Some(&manifest))
+                .expect("matching explicit DPI"),
+            DisplayScaling::profile(144)
+        );
+        assert!(resolve_display_scaling(&options(24).with_dpi(96), Some(&manifest)).is_err());
+        assert!(resolve_display_scaling(&options(24).with_scale(1.5), Some(&manifest)).is_err());
     }
 }

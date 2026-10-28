@@ -10,8 +10,9 @@ use termtrace_model::{
     execution::session::{
         GeometrySource, ResourceLimitKind, SessionCompletion, SessionManifest,
         COMPLETION_VALIDATION_VERSION, SESSION_COMPLETION_FORMAT, SESSION_COMPLETION_VERSION,
-        SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, TMUX_PANE_PROVENANCE_VERSION,
+        SESSION_MANIFEST_FORMAT, TMUX_PANE_PROVENANCE_VERSION,
     },
+    execution::visual_profile::NativeVisualProfile,
     protocol::control::control_socket_name,
 };
 
@@ -333,11 +334,33 @@ pub(super) fn validate_manifest(manifest: &SessionManifest) -> Result<()> {
         )));
     }
 
-    if manifest.version != SESSION_MANIFEST_VERSION {
+    if manifest.version != manifest.expected_version() {
         return Err(Error::invalid(format!(
             "unsupported session format version {}",
             manifest.version
         )));
+    }
+
+    if let Some(recorded) = &manifest.visual_profile {
+        recorded
+            .validate()
+            .map_err(|error| return Error::invalid(error.to_string()))?;
+        let expected = recorded
+            .profile
+            .native
+            .as_ref()
+            .map(NativeVisualProfile::overrides);
+
+        if expected.as_ref()
+            != manifest
+                .ghostty_visual
+                .as_ref()
+                .map(|provenance| return &provenance.overrides)
+        {
+            return Err(Error::invalid(
+                "session visual profile disagrees with its recorded Ghostty provenance",
+            ));
+        }
     }
 
     if manifest.control_socket != control_socket_name(manifest.session_id) {

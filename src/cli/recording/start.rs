@@ -338,6 +338,11 @@ pub(super) fn record_arguments(
         push_record_option(&mut arguments, "--ghostty-config", path.as_os_str());
     }
 
+    if let Some(profile) = &recording.visual_profile {
+        let json = serde_json::to_string(profile).unwrap_or_default();
+        push_record_option(&mut arguments, "--visual-profile", OsStr::new(&json));
+    }
+
     if let Some(value) = &recording.font_family {
         push_record_option(&mut arguments, "--font-family", OsStr::new(value));
     }

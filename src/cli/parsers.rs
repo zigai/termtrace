@@ -3,8 +3,8 @@ use std::{ffi::OsStr, path::PathBuf, result::Result as StdResult, time::Duration
 pub(super) use termtrace_engine::timeline::parse_time_offset_ns;
 use termtrace_model::{
     execution::provenance::ProvenanceCapture, execution::session::CaptureTarget,
-    protocol::control::ScreenPredicate, terminal::analysis::DiagnosticCheck,
-    terminal::screen::ScreenRegion,
+    execution::visual_profile::VisualProfile, protocol::control::ScreenPredicate,
+    terminal::analysis::DiagnosticCheck, terminal::screen::ScreenRegion,
 };
 use termtrace_sdk::defaults;
 
@@ -259,6 +259,15 @@ pub(super) fn parse_rgb_color(value: &str) -> StdResult<String, String> {
         return Err("color must use #RRGGBB syntax".to_owned());
     }
     return Ok(format!("#{}", hex.to_ascii_lowercase()));
+}
+
+pub(super) fn parse_visual_profile(value: &str) -> StdResult<VisualProfile, String> {
+    let profile: VisualProfile = serde_json::from_str(value)
+        .map_err(|error| return format!("invalid visual profile: {error}"))?;
+
+    return profile
+        .normalized()
+        .map_err(|error| return error.to_string());
 }
 
 pub(super) fn parse_bounded_screen_regex(value: &str) -> StdResult<String, String> {

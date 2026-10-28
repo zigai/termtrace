@@ -1,5 +1,5 @@
 use super::{
-    capture::{preserve_failed, require_native_tools, validate_options},
+    capture::{preserve_failed, require_native_tools, validate_options, DisplayScaling},
     capture_io::{
         check_cancelled, command_output, command_output_in_profile, external_error, outcome,
         secure_permissions,
@@ -687,6 +687,11 @@ fn capture_staged(
         wait_for_x_socket(lease, &mut server, Duration::from_secs(5))
             .map_err(stage(AcquisitionFailed, cancelled))?;
 
+        if let Some(dpi) = options.dpi {
+            super::window::publish_font_dpi(&format!(":{}", lease.number), dpi)
+                .map_err(stage(AcquisitionFailed, cancelled))?;
+        }
+
         Some(server)
     } else {
         None
@@ -743,6 +748,13 @@ fn capture_staged(
             .env("DISPLAY", display)
             .env("GDK_BACKEND", "x11")
             .env("LIBGL_ALWAYS_SOFTWARE", "1");
+
+        if let Some(dpi) = options.dpi {
+            let scaling = DisplayScaling::profile(dpi);
+            command
+                .env("GDK_SCALE", scaling.gdk_scale.to_string())
+                .env("GDK_DPI_SCALE", format!("{}", scaling.gdk_dpi_scale));
+        }
     } else {
         command.env("GDK_BACKEND", "wayland");
     }

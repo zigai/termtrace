@@ -13,7 +13,7 @@ types = Path("tests/consumers/python_native/types")
 fixtures = {
     "contracts": [5, 6, 7, 8],
     "screen": [8, 9, 10, 11, 12],
-    "control": [6, 7, 8, 9, 10],
+    "control": [7, 8, 9, 10, 11, 12, 13],
     "testing": [5, 6, 7, 8, 9],
     "evidence": [10, 11, 12, 13, 14],
     "diagnostics": [10, 11, 12, 13, 14, 15, 23, 24],

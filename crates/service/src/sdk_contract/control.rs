@@ -17,6 +17,7 @@ use std::{ffi::OsString, mem, path::PathBuf, time::Duration};
 use termtrace_model::{
     artifact::original::{CellGrid, PixelCanvas},
     execution::environment::EnvironmentSpec,
+    execution::visual_profile::VisualProfile,
     protocol::control::{
         ActionPostconditionResult, ControlCommand, ControlPayload, PointerOperation, ProcessSignal,
         ScreenPostconditionQuality, ScreenPredicate, StableCaptureQuality, MAX_CONTROL_WAIT,
@@ -525,6 +526,9 @@ pub struct LaunchOptions {
     /// Terminate after this long without input, output, or control activity.
     #[serde(default)]
     pub idle_timeout_ms: Option<u64>,
+    /// Visual profile committed into the session; legacy ambient defaults when absent.
+    #[serde(default)]
+    pub visual_profile: Option<VisualProfile>,
 }
 
 impl LaunchOptions {
@@ -552,6 +556,7 @@ impl LaunchOptions {
         spec.output_byte_budget = self.output_byte_budget;
         spec.max_duration = self.max_duration_ms.map(Duration::from_millis);
         spec.idle_timeout = self.idle_timeout_ms.map(Duration::from_millis);
+        spec.visual_profile.clone_from(&self.visual_profile);
         spec.validate()?;
 
         return Ok(spec);
@@ -596,6 +601,9 @@ pub struct OriginalLaunchOptions {
     /// Ghostty configuration resolved into the recorded visual profile.
     #[serde(default)]
     pub ghostty_config: Option<String>,
+    /// Visual profile with a native section; replaces `ghostty_config`.
+    #[serde(default)]
+    pub visual_profile: Option<VisualProfile>,
     /// Registry alias bound once the session is live.
     #[serde(default)]
     pub alias: Option<String>,
@@ -648,6 +656,7 @@ impl OriginalLaunchOptions {
         spec.max_duration = self.max_duration_ms.map(Duration::from_millis);
         spec.idle_timeout = self.idle_timeout_ms.map(Duration::from_millis);
         spec.ghostty_config = self.ghostty_config.as_ref().map(PathBuf::from);
+        spec.visual_profile.clone_from(&self.visual_profile);
         spec.alias.clone_from(&self.alias);
         spec.state_root = self.state_root.as_ref().map(PathBuf::from);
 

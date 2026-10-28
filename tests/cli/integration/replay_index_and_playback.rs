@@ -719,6 +719,7 @@ fn playback_does_not_echo_terminal_query_responses() {
         },
         geometry_provenance: GeometryProvenance::default(),
         ghostty_visual: None,
+        visual_profile: None,
         child_environment: environment.policy().clone(),
         execution_provenance: collect_execution_provenance(
             &ProvenancePolicy::default(),

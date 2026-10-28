@@ -93,6 +93,7 @@ fn record_pane(mut recording: PaneRecording) -> Result<ExitCode> {
             capture_target: None,
         },
         ghostty_profile,
+        visual_profile: None,
         term: recording.term,
         environment: EnvironmentSpec {
             unset: [String::from("TERMTRACE_RESPONSE")].into_iter().collect(),

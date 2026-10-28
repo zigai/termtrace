@@ -1,5 +1,5 @@
 use super::{
-    capture::preserve_failed,
+    capture::{preserve_failed, DisplayScaling},
     capture_io::{
         check_cancelled, command_output, command_output_in_profile, external_error, read_json,
         secure_permissions, unix_now_ns,
@@ -32,6 +32,7 @@ use std::{
     time::{Duration, Instant},
 };
 use termtrace_engine::observation::{replay_endpoint_for_prefix, replay_endpoint_for_session};
+use termtrace_engine::recording::verify_profile_fonts;
 use termtrace_evidence::{
     artifact::{
         append_artifact_prefix_root, collect_artifact_members, commit_directory,
@@ -118,7 +119,8 @@ impl NativeReplayWorker {
         let work =
             WorkDirectory(temp_dir().join(format!("termtrace-worker-{}", uuid::Uuid::now_v7())));
         create_private_directory(&work.0)?;
-        let profile = if let Some(provenance) = &manifest.ghostty_visual {
+
+        let replay = if let Some(provenance) = &manifest.ghostty_visual {
             if provenance.replay_profile != layout::GHOSTTY_REPLAY_PROFILE {
                 return Err(failure("unsupported recorded replay profile path"));
             }
@@ -129,10 +131,15 @@ impl NativeReplayWorker {
                 return Err(failure("recorded replay profile hash differs"));
             }
 
-            Some(materialize(&work.0.join("profile"), &bytes)?)
+            Some(bytes)
         } else {
             None
         };
+
+        let profile = replay
+            .as_deref()
+            .map(|bytes| return materialize(&work.0.join("profile"), bytes))
+            .transpose()?;
 
         let effective =
             command_output_in_profile("ghostty", &["+show-config"], profile.as_deref())?;
@@ -154,10 +161,17 @@ impl NativeReplayWorker {
             return Err(failure("recorded effective Ghostty configuration changed"));
         }
 
+        if let Some(replay) = &replay
+            && manifest.native_profile_dpi().is_some()
+        {
+            verify_profile_fonts(replay, &effective)?;
+        }
+
         let version =
             String::from_utf8_lossy(&command_output("ghostty", &["+version"])?).into_owned();
 
         let canvas = super::geometry::session_canvas(&session, target)?;
+        let profile_dpi = manifest.native_profile_dpi();
         let lease = DisplayLease::acquire()?;
         let display = format!(":{}", lease.number);
         let mut xvfb = spawn_xvfb(
@@ -166,9 +180,13 @@ impl NativeReplayWorker {
             canvas.width,
             canvas.height,
             &work.0,
-            None,
+            profile_dpi,
         )?;
         wait_for_x_socket(&lease, &mut xvfb, timeout.min(Duration::from_secs(5)))?;
+
+        if let Some(dpi) = profile_dpi {
+            super::window::publish_font_dpi(&display, dpi)?;
+        }
 
         let socket_name = format!("termtrace-replay-{}", uuid::Uuid::now_v7());
         let socket = abstract_socket_label(&socket_name);
@@ -203,6 +221,13 @@ impl NativeReplayWorker {
 
         if let Some(profile) = profile {
             command.env("XDG_CONFIG_HOME", profile);
+        }
+
+        if let Some(dpi) = profile_dpi {
+            let scaling = DisplayScaling::profile(dpi);
+            command
+                .env("GDK_SCALE", scaling.gdk_scale.to_string())
+                .env("GDK_DPI_SCALE", format!("{}", scaling.gdk_dpi_scale));
         }
 
         let mut ghostty = ManagedChild::spawn_logged("ghostty replay worker", &mut command)?;

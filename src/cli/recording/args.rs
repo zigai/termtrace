@@ -1,6 +1,6 @@
 use crate::cli::parsers::{
     parse_bounded_screen_regex, parse_capture_target, parse_font_size, parse_idle_interval,
-    parse_provenance_rule, parse_rgb_color, parse_wait_deadline_duration,
+    parse_provenance_rule, parse_rgb_color, parse_visual_profile, parse_wait_deadline_duration,
 };
 use clap::{parser::ValueSource, ArgMatches, Args, ValueEnum};
 use std::{ffi::OsString, path::PathBuf, time::Duration};
@@ -12,6 +12,7 @@ use termtrace_model::{
     execution::event_log::{DurabilityMode, DurabilityPolicy},
     execution::provenance::{ProvenanceCapture, ProvenancePolicyKind},
     execution::session::CaptureTarget,
+    execution::visual_profile::VisualProfile,
     registry::{RestartConfiguration, RestartDurability, RestartProvenance},
     terminal::state::{MAX_TERMINAL_COLUMNS, MAX_TERMINAL_ROWS},
 };
@@ -277,6 +278,12 @@ pub(in crate::cli) struct RecordingArgs {
     #[arg(long)]
     pub(in crate::cli) ghostty_config: Option<PathBuf>,
 
+    /// Versioned visual profile as JSON, for example
+    /// `{"version":1,"semantic":{"preset":"bundled-v1"}}`; replaces --ghostty-config and the
+    /// focused Ghostty options.
+    #[arg(long, value_parser = parse_visual_profile)]
+    pub(in crate::cli) visual_profile: Option<VisualProfile>,
+
     /// Override the regular Ghostty font family.
     #[arg(long)]
     pub(in crate::cli) font_family: Option<String>,
@@ -285,11 +292,11 @@ pub(in crate::cli) struct RecordingArgs {
     #[arg(long, value_parser = parse_font_size)]
     pub(in crate::cli) font_size: Option<String>,
 
-    /// Override symmetric Ghostty horizontal padding in pixels.
+    /// Override symmetric Ghostty horizontal padding in points.
     #[arg(long)]
     pub(in crate::cli) padding_x: Option<u16>,
 
-    /// Override symmetric Ghostty vertical padding in pixels.
+    /// Override symmetric Ghostty vertical padding in points.
     #[arg(long)]
     pub(in crate::cli) padding_y: Option<u16>,
 

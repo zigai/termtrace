@@ -9,8 +9,11 @@ use std::{
 };
 use x11rb::{
     connection::Connection as _,
-    protocol::xproto::{ConfigureWindowAux, ConnectionExt as _, MapState, Window},
+    protocol::xproto::{
+        AtomEnum, ConfigureWindowAux, ConnectionExt as _, MapState, PropMode, Window,
+    },
     rust_connection::RustConnection,
+    wrapper::ConnectionExt as _,
 };
 
 /// The single mapped top-level window of a private display.
@@ -80,6 +83,41 @@ impl TerminalWindow {
             .flush()
             .map_err(|error| return window_error("resize the terminal window", error));
     }
+}
+
+/// Publish `Xft.dpi` on a private display before Ghostty starts.
+///
+/// Ghostty multiplies its content scale by GTK's font DPI over 96. GTK 4 ignores
+/// `GDK_DPI_SCALE` and, without a settings daemon, reads that DPI only from the display's
+/// `Xft.dpi` resource, so fractional profile DPI must be set here.
+pub(crate) fn publish_font_dpi(display: &str, dpi: u32) -> Result<()> {
+    let operation = "publish the display font DPI";
+    let (connection, screen) =
+        x11rb::connect(Some(display)).map_err(|error| return window_error(operation, error))?;
+
+    let root = connection
+        .setup()
+        .roots
+        .get(screen)
+        .ok_or_else(|| return window_error(operation, "screen is missing"))?
+        .root;
+
+    connection
+        .change_property8(
+            PropMode::REPLACE,
+            root,
+            AtomEnum::RESOURCE_MANAGER,
+            AtomEnum::STRING,
+            format!("Xft.dpi:\t{dpi}\n").as_bytes(),
+        )
+        .map_err(|error| return window_error(operation, error))?;
+    connection
+        .get_input_focus()
+        .map_err(|error| return window_error(operation, error))?
+        .reply()
+        .map_err(|error| return window_error(operation, error))?;
+
+    return Ok(());
 }
 
 /// Grid metrics reported by the terminal for its current window.

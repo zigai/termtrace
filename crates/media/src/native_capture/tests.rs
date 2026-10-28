@@ -1,12 +1,12 @@
 use super::{
-    geometry::{solve_geometry_with, validate_capture},
+    geometry::{solve_geometry_with, validate_capture, PaddingSearch},
     process::{wait_for_playback_handshake, ManagedChild},
 };
 use std::{process::Command, time::Duration};
 use termtrace_evidence::artifact::write_secure;
 use termtrace_model::{
     artifact::playback::PlaybackFailure,
-    execution::session::{CaptureTarget, GeometrySource, SessionGeometry},
+    execution::session::{CaptureTarget, GeometrySource, SessionGeometry, WindowPadding},
     value::geometry::TerminalGeometryReport,
 };
 
@@ -41,19 +41,25 @@ fn capture_geometry_error_reports_actual_and_recorded_grids() {
 
 #[test]
 fn geometry_solver_converges_and_independently_verifies_exact_grid() {
-    let report = solve_geometry_with(100, 25, CaptureTarget::new(1280, 720), |target| {
-        let text_width = target.width.saturating_sub(20);
-        let text_height = target.height.saturating_sub(40);
+    let report = solve_geometry_with(
+        100,
+        25,
+        CaptureTarget::new(1280, 720),
+        PaddingSearch::Free,
+        |target| {
+            let text_width = target.width.saturating_sub(20);
+            let text_height = target.height.saturating_sub(40);
 
-        return Ok(TerminalGeometryReport {
-            cols: text_width / 8,
-            rows: text_height / 16,
-            cell_width: 8,
-            cell_height: 16,
-            text_width,
-            text_height,
-        });
-    })
+            return Ok(TerminalGeometryReport {
+                cols: text_width / 8,
+                rows: text_height / 16,
+                cell_width: 8,
+                cell_height: 16,
+                text_width,
+                text_height,
+            });
+        },
+    )
     .expect("solve exact grid");
     assert_eq!(report.selected, CaptureTarget::new(820, 440));
     assert_eq!(report.attempts.len(), 3);
@@ -99,7 +105,7 @@ impl SimulatedWindow {
     }
 
     fn solve(self, cols: u16, rows: u16, initial: CaptureTarget) -> CaptureTarget {
-        let report = solve_geometry_with(cols, rows, initial, |target| {
+        let report = solve_geometry_with(cols, rows, initial, PaddingSearch::Free, |target| {
             return Ok(self.report(target));
         })
         .expect("solve grid below the minimum window");
@@ -158,20 +164,61 @@ fn geometry_solver_corrects_padding_for_high_density_displays() {
 }
 
 #[test]
-fn geometry_solver_reports_cycles_with_measured_candidates() {
-    let error = solve_geometry_with(100, 25, CaptureTarget::new(800, 400), |target| {
-        let text_width = target.width.saturating_sub(20);
-        let text_height = target.height.saturating_sub(20);
-
-        return Ok(TerminalGeometryReport {
-            cols: 99,
-            rows: 24,
-            cell_width: 8,
-            cell_height: 16,
-            text_width,
-            text_height,
-        });
+fn fixed_profile_padding_is_never_overridden_and_impossible_fits_fail() {
+    let padded_initial = CaptureTarget {
+        padding: WindowPadding { x: 6, y: 9 },
+        ..CaptureTarget::new(700, 400)
+    };
+    let fitted = solve_geometry_with(50, 18, padded_initial, PaddingSearch::Fixed, |target| {
+        return Ok(SMALL_WINDOW.report(target));
     })
+    .expect("a grid above the minimum window fits by size alone");
+
+    let selected = SMALL_WINDOW.report(fitted.selected);
+    assert_eq!((selected.cols, selected.rows), (50, 18));
+    assert!(fitted
+        .attempts
+        .iter()
+        .all(|attempt| return attempt.target.padding.is_none()));
+
+    let mut probed = Vec::new();
+    let error = solve_geometry_with(
+        40,
+        18,
+        CaptureTarget::new(608, 560),
+        PaddingSearch::Fixed,
+        |target| {
+            probed.push(target);
+
+            return Ok(SMALL_WINDOW.report(target));
+        },
+    )
+    .expect_err("a grid below the minimum window needs other padding");
+    assert!(error.to_string().contains("fixed padding"), "{error}");
+    assert!(probed.iter().all(|target| return target.padding.is_none()));
+}
+
+#[test]
+fn geometry_solver_reports_cycles_with_measured_candidates() {
+    let error = solve_geometry_with(
+        100,
+        25,
+        CaptureTarget::new(800, 400),
+        PaddingSearch::Free,
+        |target| {
+            let text_width = target.width.saturating_sub(20);
+            let text_height = target.height.saturating_sub(20);
+
+            return Ok(TerminalGeometryReport {
+                cols: 99,
+                rows: 24,
+                cell_width: 8,
+                cell_height: 16,
+                text_width,
+                text_height,
+            });
+        },
+    )
     .expect_err("cycle must fail");
     assert!(error.to_string().contains("search cycled"));
     assert!(error.to_string().contains("800x400px=>99x24"));

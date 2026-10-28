@@ -508,6 +508,7 @@ fn facade_render_configuration_survives_normalization() {
         cell_height_px: 16,
         geometry_provenance: Default::default(),
         ghostty_profile: None,
+        visual_profile: None,
         term: "xterm-256color".to_owned(),
         environment: Default::default(),
         colors: Default::default(),

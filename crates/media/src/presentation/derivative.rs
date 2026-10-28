@@ -986,7 +986,7 @@ mod encoder_tests {
         let options = RecordOptions {
             failure_policy: RecordingFailurePolicy::Stop, output_directory:session.clone(), creation_alias:None,lineage:None,import_provenance:None,tmux_pane:None,
             command: vec!["/bin/sh".into(),"-c".into(),format!("printf x >> '{}'; printf '\\033[41mRED\\033[0m'; sleep 0.15; printf '\\r\\033[42mGREEN\\033[0m'; sleep 0.15", sentinel.display()).into()],
-            working_directory:None,cols:12,rows:3,cell_width_px:8,cell_height_px:16,geometry_provenance:Default::default(),ghostty_profile:None,
+            working_directory:None,cols:12,rows:3,cell_width_px:8,cell_height_px:16,geometry_provenance:Default::default(),ghostty_profile:None,visual_profile:None,
             term:"xterm-256color".into(),environment:Default::default(),colors:Default::default(),forward_stdin:false,continue_after_output_mirror_closes:false,
             durability_policy:Default::default(),provenance_policy:Default::default(),resource_limits:Default::default(),
         };

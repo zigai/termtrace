@@ -2,8 +2,11 @@
 
 use assert_cmd::cargo::cargo_bin;
 use nix::{
-    sys::signal::{kill, Signal},
-    unistd::Pid,
+    sys::{
+        signal::{kill, Signal},
+        stat::Mode,
+    },
+    unistd::{mkfifo, Pid},
 };
 use std::{
     ffi::OsStr,
@@ -23,6 +26,7 @@ use termtrace_model::{
         },
         sdk::ArtifactProvenance,
     },
+    execution::visual_profile::{NativeVisualProfile, VisualProfile},
     protocol::{control::ScreenPredicate, mutation::MutationEffect},
     terminal::state::{KeyChord, KeyModifiers, NamedKey},
     value::ByteString,
@@ -280,6 +284,65 @@ fn failing_application_still_publishes_its_capture() {
 }
 
 #[test]
+#[ignore = "requires Ghostty, Xvfb, dbus-run-session, FFmpeg and JetBrains Mono"]
+fn visual_profile_is_resolved_before_startup_and_committed_into_the_session() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let terminal = Terminal::new(cargo_bin("termtrace"), temporary.path());
+
+    let mut profile = VisualProfile::native_standard();
+    if let Some(native) = profile.native.as_mut() {
+        native.dpi = Some(144);
+    }
+
+    let mut missing = spec("echo never");
+    missing.visual_profile = Some(VisualProfile {
+        version: 1,
+        native: Some(NativeVisualProfile {
+            font_family: Some("Termtrace Missing Family 7c1d".to_owned()),
+            ..NativeVisualProfile::default()
+        }),
+        semantic: None,
+    });
+    let Err(error) = terminal.start_original(&missing, &AtomicBool::new(false)) else {
+        panic!("a missing font must not start the capture");
+    };
+
+    assert_eq!(error.code(), "font_unavailable");
+    assert_eq!(
+        fs::read_dir(temporary.path())
+            .expect("evidence root")
+            .count(),
+        0
+    );
+
+    let mut profiled = spec("echo profiled; sleep 0.3");
+    profiled.geometry = OriginalGeometry::Grid(CellGrid { cols: 48, rows: 8 });
+    profiled.visual_profile = Some(profile.clone());
+    let mut original = terminal
+        .start_original(&profiled, &AtomicBool::new(false))
+        .expect("start");
+    let recording = original.wait_finished(FINISH).expect("capture publishes");
+    assert!(recording.canonical_success);
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(original.session().path().join("session.json")).expect("session manifest"),
+    )
+    .expect("manifest JSON");
+    assert_eq!(manifest["version"], 13);
+    assert_eq!(
+        manifest["visual_profile"]["profile_hash"],
+        profile.identity().expect("profile identity")
+    );
+    assert_eq!(manifest["visual_profile"]["profile"]["native"]["dpi"], 144);
+    assert_eq!(
+        (
+            manifest["geometry"]["cols"].as_u64(),
+            manifest["geometry"]["rows"].as_u64()
+        ),
+        (Some(48), Some(8))
+    );
+}
+
+#[test]
 #[ignore = "requires Ghostty, Xvfb, dbus-run-session and FFmpeg"]
 fn killed_encoder_fails_the_capture_but_keeps_canonical_completion() {
     let temporary = TempDir::new().expect("temporary directory");
@@ -475,6 +538,88 @@ fn cancelled_startup_tears_down_and_reports_cancellation() {
         leftovers.is_empty(),
         "environment staging survived: {leftovers:?}"
     );
+}
+
+#[test]
+#[ignore = "requires Ghostty, Xvfb, dbus-run-session and FFmpeg"]
+fn cancellation_during_profile_resolution_stops_the_query_and_reports_cancellation() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let evidence = temporary.path().join("evidence");
+    let terminal = Terminal::new(cargo_bin("termtrace"), &evidence);
+
+    // Ghostty blocks opening a FIFO config that has no writer, so the query never finishes.
+    let config = temporary.path().join("config.ghostty");
+    mkfifo(&config, Mode::S_IRUSR | Mode::S_IWUSR).expect("config FIFO");
+    let mut blocked = spec("echo never");
+    blocked.visual_profile = Some(VisualProfile {
+        version: 1,
+        native: Some(NativeVisualProfile {
+            config: Some(config.to_str().expect("UTF-8 path").to_owned()),
+            ..NativeVisualProfile::default()
+        }),
+        semantic: None,
+    });
+
+    let cancelled = AtomicBool::new(false);
+    let (outcome, returned, cancelled_at) = thread::scope(|scope| {
+        let canceller = scope.spawn(|| {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while processes_naming(&config).is_empty() {
+                assert!(
+                    Instant::now() < deadline,
+                    "Ghostty never queried the config"
+                );
+
+                thread::sleep(Duration::from_millis(5));
+            }
+
+            thread::sleep(Duration::from_millis(200));
+
+            cancelled.store(true, Ordering::Release);
+
+            return Instant::now();
+        });
+
+        let outcome = terminal.start_original(&blocked, &cancelled);
+        let returned = Instant::now();
+
+        return (outcome, returned, canceller.join().expect("canceller"));
+    });
+
+    let Err(error) = outcome else {
+        panic!("a cancelled launch returned a session");
+    };
+    let Error::OriginalCaptureFailed { facts } = &error else {
+        panic!("unexpected error {error:?}");
+    };
+
+    assert_eq!(facts.code, Some(OriginalCaptureFailure::Cancelled));
+    assert!(returned.duration_since(cancelled_at) < Duration::from_secs(5));
+    assert!(!evidence.exists());
+
+    let queries = processes_naming(&config);
+    assert!(queries.is_empty(), "Ghostty query survived: {queries:?}");
+}
+
+#[allow(
+    clippy::expect_used,
+    reason = "test helper should stop when /proc cannot be read"
+)]
+fn processes_naming(path: &Path) -> Vec<String> {
+    let argument = path.as_os_str().as_bytes();
+
+    return fs::read_dir("/proc")
+        .expect("process table")
+        .flatten()
+        .filter(|entry| {
+            return fs::read(entry.path().join("cmdline")).is_ok_and(|cmdline| {
+                return cmdline
+                    .windows(argument.len())
+                    .any(|window| return window == argument);
+            });
+        })
+        .map(|entry| return entry.file_name().to_string_lossy().into_owned())
+        .collect();
 }
 
 #[test]

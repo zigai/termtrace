@@ -47,6 +47,7 @@ fn write_manifest(dir: &Path) -> Uuid {
         },
         geometry_provenance: GeometryProvenance::default(),
         ghostty_visual: None,
+        visual_profile: None,
         child_environment: ChildEnvironmentPolicy::default(),
         execution_provenance: collect_execution_provenance(
             &ProvenancePolicy::default(),

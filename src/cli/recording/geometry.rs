@@ -191,11 +191,36 @@ pub(super) fn manual_geometry(arguments: &RecordingArgs) -> Result<SessionGeomet
 pub(super) fn resolve_record(
     arguments: &RecordingArgs,
     ghostty_profile: Option<&ResolvedGhosttyProfile>,
+    profile_dpi: Option<u32>,
 ) -> Result<(SessionGeometry, GeometryProvenance)> {
     match arguments.geometry {
         GeometryMode::Manual => {
+            let geometry = manual_geometry(arguments)?;
+
+            // A native visual profile makes an explicit viewport a commitment, so check it now.
+            if let (Some(target), Some(profile), Some(dpi)) =
+                (arguments.viewport, ghostty_profile, profile_dpi)
+            {
+                let helper = current_exe().into_diagnostic()?;
+                let report = probe_ghostty_geometry(&helper, target, profile, Some(dpi))
+                    .into_diagnostic()?;
+
+                if (report.cols, report.rows) != (geometry.cols, geometry.rows) {
+                    return Err(miette::miette!(
+                        "visual profile {}: viewport {}x{} renders {}x{} cells at {dpi} DPI, but the recording requires {}x{} cells",
+                        VisualProfileFailure::ViewportMismatch.code(),
+                        target.width,
+                        target.height,
+                        report.cols,
+                        report.rows,
+                        geometry.cols,
+                        geometry.rows
+                    ));
+                }
+            }
+
             return Ok((
-                manual_geometry(arguments)?,
+                geometry,
                 GeometryProvenance {
                     source: GeometrySource::Manual,
                     capture_target: arguments.viewport,
@@ -224,7 +249,9 @@ pub(super) fn resolve_record(
             })?;
 
             let helper = current_exe().into_diagnostic()?;
-            let report = probe_ghostty_geometry(&helper, target, profile).into_diagnostic()?;
+            let report =
+                probe_ghostty_geometry(&helper, target, profile, profile_dpi).into_diagnostic()?;
+
             let geometry = SessionGeometry {
                 cols: report.cols,
                 rows: report.rows,

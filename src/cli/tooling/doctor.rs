@@ -773,6 +773,7 @@ fn record_smoke() -> StdResult<(), String> {
         cell_height_px: 18,
         geometry_provenance: GeometryProvenance::default(),
         ghostty_profile: None,
+        visual_profile: None,
         term: "xterm-ghostty".to_owned(),
         environment: EnvironmentSpec::default(),
         colors: TerminalColors::default(),

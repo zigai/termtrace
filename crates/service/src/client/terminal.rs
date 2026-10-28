@@ -6,7 +6,14 @@ use std::{
     os::unix::fs::OpenOptionsExt as _,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::atomic::AtomicBool,
     time::Instant,
+};
+use termtrace_engine::recording::resolve_visual_profile;
+use termtrace_media::native_capture::preflight_visual_profile;
+use termtrace_model::{
+    artifact::original::CellGrid,
+    execution::visual_profile::{VisualProfile, VisualProfileReport},
 };
 use uuid::Uuid;
 
@@ -49,12 +56,33 @@ impl Terminal {
 
     /// Spawn a recorder for `spec` and return its owned session once it is reachable.
     ///
+    /// A native visual profile is resolved and its fonts checked before anything is spawned;
+    /// the recorder resolves it again and commits its own result.
+    ///
     /// # Errors
     ///
-    /// Returns an error when the spec is invalid, the recorder cannot be spawned, or it exits
-    /// or misses the startup deadline without becoming reachable.
+    /// Returns an error when the spec is invalid, a native visual profile does not resolve,
+    /// the recorder cannot be spawned, or it exits or misses the startup deadline without
+    /// becoming reachable.
     pub fn start(&self, spec: LaunchSpec) -> Result<Session> {
         spec.validate()?;
+        if let Some(profile) = &spec.visual_profile {
+            resolve_visual_profile(profile, &AtomicBool::new(false))?;
+        }
+
+        let visual_profile = spec
+            .visual_profile
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|source| {
+                return Error::InvalidJson {
+                    path: PathBuf::from("<visual-profile>"),
+                    json_path: "$".to_owned(),
+                    source,
+                };
+            })?;
+
         fs_err::create_dir_all(&self.evidence_root).map_err(|source| {
             return Error::Filesystem {
                 path: self.evidence_root.clone(),
@@ -99,6 +127,10 @@ impl Terminal {
             .arg("--out")
             .arg(&path)
             .arg("--environment-spec-stdin");
+
+        if let Some(profile) = &visual_profile {
+            process.arg("--visual-profile").arg(profile);
+        }
 
         if let Some(limit) = spec.output_byte_budget {
             process.arg("--output-byte-budget").arg(limit.to_string());
@@ -171,6 +203,28 @@ impl Terminal {
         let _wait = recorder.wait();
 
         return Err(failure);
+    }
+
+    /// Validate `profile` and report the identity of everything a launch with it would use,
+    /// solving the exact `cols` by `rows` grid at the profile's DPI when it selects native
+    /// pixels. A semantic-only profile runs no native program. The report is advisory.
+    ///
+    /// # Errors
+    ///
+    /// Returns the classified visual-profile failure, or a media error when no viewport
+    /// reproduces the grid.
+    pub fn preflight_visual_profile(
+        &self,
+        profile: &VisualProfile,
+        cols: u16,
+        rows: u16,
+    ) -> Result<VisualProfileReport> {
+        return preflight_visual_profile(&self.binary, profile, CellGrid { cols, rows }).map_err(
+            |error| match error {
+                termtrace_media::Error::Engine(source) => return Error::Engine(source),
+                other => return Error::Media(other),
+            },
+        );
     }
 
     /// Attach to an existing session without taking ownership of its recorder.

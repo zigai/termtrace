@@ -38,7 +38,7 @@ use termtrace_model::{
     execution::session::{
         SessionCompletion, SessionFailure, SessionGeometry, SessionManifest,
         COMPLETION_VALIDATION_VERSION, SESSION_COMPLETION_FORMAT, SESSION_COMPLETION_VERSION,
-        SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION,
+        SESSION_MANIFEST_FORMAT, SESSION_MANIFEST_VERSION, SESSION_MANIFEST_VISUAL_PROFILE_VERSION,
     },
     terminal::replay::GHOSTTY_REVISION,
     terminal::state::supported_geometry_cell_count,
@@ -372,7 +372,11 @@ fn write_session_manifest(
     let manifest = SessionManifest {
         failure_policy: options.failure_policy,
         format: SESSION_MANIFEST_FORMAT.to_owned(),
-        version: SESSION_MANIFEST_VERSION,
+        version: if options.visual_profile.is_some() {
+            SESSION_MANIFEST_VISUAL_PROFILE_VERSION
+        } else {
+            SESSION_MANIFEST_VERSION
+        },
         session_id,
         creation_alias: options.creation_alias.clone(),
         lineage: options.lineage.clone(),
@@ -396,6 +400,7 @@ fn write_session_manifest(
             .ghostty_profile
             .as_ref()
             .map(|profile| return profile.provenance.clone()),
+        visual_profile: options.visual_profile.clone(),
         execution_provenance: collect_execution_provenance(
             &options.provenance_policy,
             effective_environment.variables(),

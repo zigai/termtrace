@@ -11,4 +11,7 @@ pub(super) use actor::{
 };
 pub use environment::{parse_environment_spec, read_environment_spec};
 pub use geometry::inherited_geometry;
-pub use profile::{resolve_ghostty_profile, resolved_terminal_colors, restore_ghostty_profile};
+pub use profile::{
+    resolve_ghostty_profile, resolve_visual_profile, resolved_terminal_colors,
+    restore_ghostty_profile, verify_profile_fonts, NativeProfileResolution,
+};

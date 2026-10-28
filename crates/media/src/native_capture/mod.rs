@@ -21,7 +21,9 @@ mod worker;
 pub use crate::{Error, Result};
 pub use capability::native_capabilities;
 pub use capture::{capture, resolve_display_scaling, DisplayScaling};
-pub use geometry::{native_capture_target, probe_ghostty_geometry, solve_ghostty_geometry};
+pub use geometry::{
+    native_capture_target, preflight_visual_profile, probe_ghostty_geometry, solve_ghostty_geometry,
+};
 pub use original::{
     capture_original, verify_original_capture, OriginalCapture, OriginalCaptureBackend,
     OriginalCaptureRequest, OriginalGrid, OriginalRecorderPaths, CAPTURE_ENVIRONMENT,

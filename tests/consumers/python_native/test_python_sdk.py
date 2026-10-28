@@ -1064,3 +1064,111 @@ def test_rejected_stop_keeps_the_recording_attached() -> None:
         finally:
             if rec.is_active():
                 rec.force_close()
+
+
+VISUAL_PROFILES = json.loads(
+    (
+        Path(__file__).resolve().parents[3]
+        / "fixtures/conformance/sdk/visual-profiles.json"
+    ).read_text(encoding="utf-8")
+)
+SEMANTIC_PROFILE = {"version": 1, "semantic": {"preset": "bundled-v1"}}
+
+
+def assert_visual_profile_report(report: dict[str, Any], vector: dict[str, Any]) -> None:
+    assert report["version"] == 1
+    assert report["profile"] == vector["normalized"]
+    assert report["profile_hash"] == vector["profile_hash"]
+    if vector["native"]:
+        native = report["native"]
+        assert native["dpi"] == 96
+        assert native["discovered_font_families"] == ["JetBrains Mono"]
+        assert (native["geometry"]["required_cols"], native["geometry"]["required_rows"]) == (40, 10)
+        assert len(native["effective_config_hash"]) == 64
+    else:
+        assert report["native"] is None
+    if "semantic" in vector["normalized"]:
+        assert report["semantic"]["font_set_blake3"]
+        assert (report["semantic"]["cell_width"], report["semantic"]["cell_height"]) == (12, 24)
+    else:
+        assert report["semantic"] is None
+
+
+async def test_visual_profile_vectors_agree_in_sync_and_async_preflight() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sync = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
+        asynchronous = AsyncTermtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
+
+        for vector in VISUAL_PROFILES["positive"]:
+            assert_visual_profile_report(
+                sync.preflight_visual_profile(vector["profile"], cols=40, rows=10), vector
+            )
+            assert_visual_profile_report(
+                await asynchronous.preflight_visual_profile(vector["profile"], cols=40, rows=10),
+                vector,
+            )
+
+        for vector in VISUAL_PROFILES["invalid"]:
+            with pytest.raises(TermtraceError) as invalid:
+                sync.preflight_visual_profile(vector["profile"])
+            assert (invalid.value.kind, invalid.value.code) == (
+                "invalid_operation",
+                "invalid_visual_profile",
+            ), vector["name"]
+            with pytest.raises(TermtraceError) as invalid_async:
+                await asynchronous.preflight_visual_profile(vector["profile"])
+            assert invalid_async.value.code == "invalid_visual_profile", vector["name"]
+
+        for vector in VISUAL_PROFILES["malformed"]:
+            with pytest.raises(ValueError, match=vector["message"]):
+                sync.preflight_visual_profile(vector["profile"])
+            with pytest.raises(ValueError, match=vector["message"]):
+                await asynchronous.preflight_visual_profile(vector["profile"])
+
+
+def test_semantic_visual_profile_records_without_native_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PATH", "")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
+        report = tt.preflight_visual_profile(SEMANTIC_PROFILE)
+        assert report["native"] is None
+        with tt.record(
+            ["/bin/sh", "-c", "echo SEMANTIC_PROFILE"], visual_profile=SEMANTIC_PROFILE
+        ) as rec:
+            assert rec.wait_for_output("SEMANTIC_PROFILE", timeout_secs=5.0)
+        manifest = json.loads((Path(rec.path) / "session.json").read_text(encoding="utf-8"))
+        assert manifest["version"] == 13
+        assert manifest["visual_profile"]["profile_hash"] == report["profile_hash"]
+        assert manifest["ghostty_visual"] is None
+
+        with pytest.raises(TermtraceError) as unavailable:
+            tt.preflight_visual_profile(VISUAL_PROFILES["positive"][1]["profile"])
+        assert unavailable.value.code == "native_profile_unavailable"
+
+
+def test_native_visual_profile_failures_stop_before_the_application_starts() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir) / "evidence"
+        marker = Path(tmpdir) / "started"
+        tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(root))
+        missing_font = {
+            "version": 1,
+            "native": {"font_family": "Termtrace Missing Family 7c1d"},
+        }
+        with pytest.raises(TermtraceError) as missing:
+            tt.record(
+                ["/bin/sh", "-c", 'printf started > "$1"', "probe", str(marker)],
+                visual_profile=missing_font,
+            )
+        assert (missing.value.kind, missing.value.code) == ("engine", "font_unavailable")
+
+        with pytest.raises(TermtraceError) as invalid:
+            tt.launch(
+                ["/bin/sh", "-c", 'printf started > "$1"', "probe", str(marker)],
+                {"visual_profile": VISUAL_PROFILES["invalid"][2]["profile"]},
+            )
+        assert invalid.value.code == "invalid_visual_profile"
+        assert not marker.exists()
+        assert not root.exists() or not any(root.iterdir())

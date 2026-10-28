@@ -349,6 +349,16 @@ export type CapabilityStatus = "ready" | "blocked"
 /** How settled the observed state is. */
 export type CaptureQuality = "live" | "stable" | "completed" | "incomplete"
 
+/** Pixel viewport intended for native visual capture. */
+export interface CaptureTarget {
+  /** Viewport height in pixels. */
+  height: number
+  /** Balanced Ghostty window padding that fits a grid smaller than Ghostty's minimum window. */
+  padding?: WindowPadding
+  /** Viewport width in pixels. */
+  width: number
+}
+
 /** One changed viewport cell. */
 export interface CellChange {
   /** Complete later cell, absent outside later geometry. */
@@ -1175,6 +1185,26 @@ export interface GarbageCollectionReport {
   state_root: ExactPath
 }
 
+/** One viewport and measured grid considered by the exact-grid solver. */
+export interface GeometryProbeAttempt {
+  /** Grid, cell, and text-area dimensions reported by Ghostty. */
+  report: TerminalGeometryReport
+  /** Whole native viewport supplied to Ghostty. */
+  target: CaptureTarget
+}
+
+/** Bounded capture-time search proving the selected viewport fits the canonical grid. */
+export interface GeometrySolveReport {
+  /** Ordered probe decisions, including the independently measured final target. */
+  attempts: Array<GeometryProbeAttempt>
+  /** Required canonical columns. */
+  required_cols: number
+  /** Required canonical rows. */
+  required_rows: number
+  /** Exact-grid selected viewport. */
+  selected: CaptureTarget
+}
+
 /** Structured semantic provenance for exact input bytes. */
 export type InputDescriptor = InputDescriptorRaw | InputDescriptorText | InputDescriptorKey | InputDescriptorPaste | InputDescriptorFocus | InputDescriptorPointer | InputDescriptorActivate
 
@@ -1442,6 +1472,8 @@ export interface LaunchOptions {
   rows?: number | null
   /** Recorder readiness deadline. */
   startup_timeout_ms?: bigint | null
+  /** Visual profile committed into the session; legacy ambient defaults when absent. */
+  visual_profile?: VisualProfile | null
 }
 
 /** Why a process lifecycle transition occurred. */
@@ -1670,6 +1702,44 @@ export interface NativeCorrelation {
 /** Strength of evidence relating a semantic finding to native presentation. */
 export type NativeEvidenceLevel = "presentation_eligible" | "scheduled_for_frame" | "post_endpoint_stable_capture" | "frame_observed"
 
+/** Native facts observed while resolving a native profile. */
+export interface NativeProfileReport {
+  /** Requested families Ghostty discovered under their exact names. */
+  discovered_font_families: Array<string>
+  /** Display DPI used for the geometry probe and every later native launch. */
+  dpi: number
+  /** BLAKE3 of the exact effective configuration reported by Ghostty. */
+  effective_config_hash: string
+  /** Exact-grid viewport search at that DPI. */
+  geometry: GeometrySolveReport
+  /** BLAKE3 of the Ghostty executable that resolved the profile. */
+  ghostty_executable_blake3: string
+  /** Installed Ghostty version report. */
+  ghostty_version: string
+  /** BLAKE3 of the exact replay-profile input bytes. */
+  replay_profile_hash: string
+  /** Font families named by the effective configuration. */
+  requested_font_families: Array<string>
+}
+
+/** Native Ghostty settings. Absent fields keep the base configuration's value. */
+export interface NativeVisualProfile {
+  /** Default background as `#rrggbb`. */
+  background?: string | null
+  /** Absolute Ghostty config file replacing the isolated Ghostty-default base. */
+  config?: string | null
+  /** Display DPI used by every native probe, launch, and replay; 96 when absent. */
+  dpi?: number | null
+  /** Exact installed font family; no substitute is accepted. */
+  font_family?: string | null
+  /** Font size in points as an exact decimal string, such as `"15"` or `"13.5"`. */
+  font_size_points?: string | null
+  /** Default foreground as `#rrggbb`. */
+  foreground?: string | null
+  /** Window padding in points on each side; zero is an explicit zero. */
+  padding_points?: PaddingPoints | null
+}
+
 export type NullableString = string | null
 
 /** Truth-labeled observation of one terminal state. */
@@ -1840,6 +1910,8 @@ export interface OriginalLaunchOptions {
   state_root?: string | null
   /** Initial Ghostty window size in pixels; the grid follows its font metrics. */
   viewport?: PixelCanvas | null
+  /** Visual profile with a native section; replaces `ghostty_config`. */
+  visual_profile?: VisualProfile | null
 }
 
 /** A finished original recording whose capture was published. */
@@ -1874,6 +1946,14 @@ export interface OutputPageCursor {
   byte_offset: bigint
   /** Chain endpoint through the event containing the last returned byte. */
   events: EventPageCursor
+}
+
+/** Symmetric window padding in points per side. */
+export interface PaddingPoints {
+  /** Left and right padding. */
+  x: number
+  /** Top and bottom padding. */
+  y: number
 }
 
 /** Identity of the canonical file opened for a page. Display paths are not authoritative. */
@@ -3069,8 +3149,17 @@ export interface SemanticImageResource {
   text_baseline: number
 }
 
+/** Bundled semantic fonts and fixed metrics. */
+export type SemanticPreset = "bundled-v1"
+
 /** Deterministic semantic rasterization quality profile. */
 export type SemanticRasterProfile = "direct" | "supersampled-2x"
+
+/** Semantic renderer selection. */
+export interface SemanticVisualProfile {
+  /** Bundled semantic resource preset. */
+  preset: SemanticPreset
+}
 
 /** Ordered mixed steps sent under one caller identity, in host form. */
 export interface SendSpec {
@@ -3422,6 +3511,22 @@ export interface SurvivingPathRecord {
   kind: SurvivingKind
   /** Exact Linux path bytes. */
   path: Base64Bytes
+}
+
+/** Geometry reported by a live terminal through XTWINOPS queries. */
+export interface TerminalGeometryReport {
+  /** Height of one rendered cell in pixels. */
+  cell_height: number
+  /** Width of one rendered cell in pixels. */
+  cell_width: number
+  /** Terminal columns. */
+  cols: number
+  /** Terminal rows. */
+  rows: number
+  /** Height of the complete text area in pixels. */
+  text_height: number
+  /** Width of the complete text area in pixels. */
+  text_width: number
 }
 
 /** Terminal metadata controlled by OSC sequences. */
@@ -4289,6 +4394,37 @@ export interface Versions {
   termtrace: string
 }
 
+/** Immutable visual configuration selected for one launch. The native section configures Ghostty for native pixels. The semantic section selects the bundled semantic renderer and never changes native configuration. */
+export interface VisualProfile {
+  /** Native Ghostty configuration; selecting it requires Ghostty and the named fonts. */
+  native?: NativeVisualProfile | null
+  /** Semantic renderer selection. */
+  semantic?: SemanticVisualProfile | null
+  /** Contract version; exactly 1. */
+  version: number
+}
+
+/** Stable visual-profile failure categories shared by every SDK. */
+export type VisualProfileFailure = "invalid_visual_profile" | "native_profile_unavailable" | "ghostty_config_invalid" | "font_unavailable" | "viewport_mismatch" | "native_profile_failed"
+
+/** Result of validating a visual profile before launch. The report holds settings and resource identities only, never local paths or timestamps. It is advisory: a later launch resolves the profile again. */
+export interface VisualProfileReport {
+  /** What a launch with this profile guarantees. */
+  guarantees: Array<string>
+  /** What it does not guarantee. */
+  limitations: Array<string>
+  /** Native resolution facts, when the native section is selected. */
+  native?: NativeProfileReport | null
+  /** Normalized profile. */
+  profile: VisualProfile
+  /** BLAKE3 identity of `profile`. */
+  profile_hash: string
+  /** Bundled semantic resources, when the semantic section is selected. */
+  semantic?: SemanticImageResource | null
+  /** Report version; exactly 1. */
+  version: number
+}
+
 /** Half-open byte range within one canonical output event. */
 export interface VtSourceSegment {
   /** Exclusive byte offset within the event payload. */
@@ -4332,3 +4468,11 @@ export interface WaitOutcome {
 
 /** Authoritative width role reported by Ghostty for one terminal cell. */
 export type WideKind = "narrow" | "wide" | "spacer_tail" | "spacer_head"
+
+/** Solver-selected Ghostty window padding in points; zero leaves the profile's own padding in effect. */
+export interface WindowPadding {
+  /** Horizontal padding on each side. */
+  x: number
+  /** Vertical padding on each side. */
+  y: number
+}

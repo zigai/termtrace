@@ -126,6 +126,7 @@ pub(crate) use termtrace_model::{
     execution::session::{
         CaptureTarget, GeometrySource, SessionCompletion, SessionManifest, TmuxPaneLaunchKind,
     },
+    execution::visual_profile::VisualProfile,
     protocol::control::{
         ControlCommand, ControlPayload, ControlRequest, ControlResult, ScreenMode, ScreenPredicate,
         ScreenWaitQuality, StableCaptureQuality, StateHashComparison,

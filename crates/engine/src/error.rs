@@ -6,6 +6,7 @@ use std::{
 };
 use termtrace_model::{
     error::{ModelValidationError, ThreadPanicError},
+    execution::visual_profile::VisualProfileFailure,
     terminal::{screen::ScreenFrameError, state::terminal_geometry_limits},
 };
 use uuid::Uuid;
@@ -217,6 +218,13 @@ pub enum Error {
     },
     /// A stable model value failed its own validation contract.
     ModelValidation(ModelValidationError),
+    /// A visual profile could not be validated or resolved; no substitute was used.
+    VisualProfile {
+        /// Stable failure category.
+        failure: VisualProfileFailure,
+        /// Failure description.
+        reason: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -367,6 +375,9 @@ impl fmt::Display for Error {
                 return write!(f, "{operation} failed: {reason}");
             }
             Self::ModelValidation(source) => return write!(f, "model validation failed: {source}"),
+            Self::VisualProfile { failure, reason } => {
+                return write!(f, "visual profile {}: {reason}", failure.code());
+            }
         }
     }
 }

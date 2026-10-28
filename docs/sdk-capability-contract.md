@@ -294,7 +294,7 @@ canonical evidence, or mark reserved rows verified from foundation results.
 | delivery.webm | missing | missing | missing | 08 |
 | delivery.codec_availability | missing | missing | missing | 08 |
 | delivery.no_replace | missing | missing | missing | 08 |
-| visual.profiles | missing | missing | missing | 09 |
+| visual.profiles | exposed_unverified | exposed_unverified | exposed_unverified | 09 |
 | visual.geometry | missing | missing | missing | 09 |
 | visual.fonts | missing | missing | missing | 09 |
 | visual.dpi | missing | missing | missing | 09 |
@@ -423,3 +423,33 @@ Actual sources, hash observations and command logs are in the Task05 handoff, no
 labels or old extension binaries. Native builds remain sequential and normal unversioned builds.
 No task05 code creates another report/terminal/scenario engine, changes the original04 owner/finalizer
 or Stop-effect contract, or admits downstream work without independent lead review.
+
+## Task09 visual profiles
+
+`VisualProfile` v1 is one launch setting: `{"version":1,"semantic":{"preset":"bundled-v1"}}`
+selects the bundled semantic fonts and fixed 12x24 metrics and runs no native program. A
+`native` section selects Ghostty: `config` (absolute path replacing the isolated
+Ghostty-default base; no user config is read), `font_family` (exact installed name),
+`font_size_points` (exact decimal string such as `"13.5"`), `padding_points` (`x`/`y` points
+per side; `0` is explicit), `foreground`/`background` (`#rrggbb`, normalized to lowercase) and
+`dpi` (24 to 960, normalized to 96 when absent). Ligatures are disabled unless the config sets
+`font-feature`. Unknown fields, other versions or presets, control characters and malformed
+values are rejected before launch.
+
+Rust uses `LaunchSpec::visual_profile`, Python `record(..., visual_profile=)`, both use the
+`visual_profile` key in launch and original-launch options, and the CLI takes
+`record --visual-profile JSON`. `preflight_visual_profile` / `preflightVisualProfile` returns
+`VisualProfileReport`: the normalized profile and its BLAKE3 `profile_hash`, bundled semantic
+resources, and for native profiles the Ghostty version and executable hash, replay and
+effective config hashes, requested and discovered font families, DPI and the exact-grid
+solve. It is advisory; every launch resolves again. Failure codes are
+`invalid_visual_profile` (kind `invalid_operation`), `native_profile_unavailable`,
+`ghostty_config_invalid`, `font_unavailable`, `viewport_mismatch` and `native_profile_failed`.
+Malformed JSON shapes fail as host decoding errors. Shared vectors are in
+`fixtures/conformance/sdk/visual-profiles.json`.
+
+A session with a profile records it in `session.json` as `visual_profile` and uses manifest
+version 13; sessions without one keep version 12 and are legacy launches using ambient
+defaults. Every native probe, original capture and replay of a profiled session uses the
+profile's DPI. Installed families do not prove which font renders each glyph, and native
+pixels are not expected to match semantic pixels or other hosts.
