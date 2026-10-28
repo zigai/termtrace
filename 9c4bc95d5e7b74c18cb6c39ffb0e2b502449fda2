@@ -1,0 +1,4 @@
+- Breaking the supervisor's failure record (dropping the visual-failed entry and the cleanup text) fails both preservation tests; restoring it passes them
+- Skipping the ffmpeg and libx264rgb checks makes the missing-tool test fail on the no-ffmpeg case
+- Not journaling unknown resize answers makes the same-ID retry return operation_id_collision and fails the resize test
+- `just lint validate test integration bindings-test native-test` passes, including 13 of 13 native service tests
