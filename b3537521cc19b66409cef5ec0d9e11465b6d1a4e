@@ -1,0 +1,3 @@
+- SIGINT to the process group 4, 5, 6, 7 and 8 s into `termtrace video s8 --renderer native` (an 8-line, 4 s recording) leaves no x11grab ffmpeg, Xvfb or staging dir; before the change ffmpeg kept running after SIGINT at 6 s
+- A full native render of the same session publishes all 168 frames at 1124x634 (ffprobe packet count)
+- `just lint validate test integration bindings-test native-test` and `just native-check` pass
