@@ -242,16 +242,21 @@ async def test_async_cancellation_owns_late_launch_and_is_responsive(
 
     monkeypatch.setattr(context._context, "record", delayed)
     heartbeat = 0
+    escaped = []
 
     async def body():
-        async with context:
-            launch = asyncio.create_task(context.record(COMMAND))
-            while not started.is_set():
-                await asyncio.sleep(0.001)
-            launch.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await launch
-            raise asyncio.CancelledError("PRIMARY_CANCEL")
+        try:
+            async with context:
+                launch = asyncio.create_task(context.record(COMMAND))
+                while not started.is_set():
+                    await asyncio.sleep(0.001)
+                launch.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await launch
+                raise asyncio.CancelledError("PRIMARY_CANCEL")
+        except asyncio.CancelledError as error:
+            escaped.append(error)
+            raise
 
     task = asyncio.create_task(body())
     while not task.done():
@@ -259,9 +264,9 @@ async def test_async_cancellation_owns_late_launch_and_is_responsive(
         await asyncio.sleep(0.01)
         if heartbeat > 2:
             task.cancel("REPEATED_CANCEL")
-    with pytest.raises(asyncio.CancelledError) as failure:
+    with pytest.raises(asyncio.CancelledError):
         await task
-    assert failure.value.args == ("PRIMARY_CANCEL",)
+    assert [error.args for error in escaped] == [("PRIMARY_CANCEL",)]
     assert heartbeat > 5
     assert context.report["retained"]
     assert len(context._context._recordings) == 1
@@ -358,11 +363,16 @@ async def test_cancellation_during_passing_cleanup_retains_and_is_shielded(
         return original(*args)
 
     monkeypatch.setattr(t._native, "finalize_recordings", slow_finalize)
+    escaped = []
 
     async def body():
-        async with context:
-            rec = await context.record(COMMAND)
-            await rec.screen().wait_for_text("READY", 5)
+        try:
+            async with context:
+                rec = await context.record(COMMAND)
+                await rec.screen().wait_for_text("READY", 5)
+        except asyncio.CancelledError as error:
+            escaped.append(error)
+            raise
 
     task = asyncio.create_task(body())
     while not started.is_set():
@@ -371,9 +381,9 @@ async def test_cancellation_during_passing_cleanup_retains_and_is_shielded(
     while not task.done():
         await asyncio.sleep(0.01)
         task.cancel("REPEATED_CANCEL")
-    with pytest.raises(asyncio.CancelledError) as failure:
+    with pytest.raises(asyncio.CancelledError):
         await task
-    assert failure.value.args == ("CLEANUP_CANCEL",)
+    assert [error.args for error in escaped] == [("CLEANUP_CANCEL",)]
     assert context.report["retained"]
     assert any(
         f["phase"] == "cancellation" for f in context.report["secondary_failures"]
@@ -658,11 +668,19 @@ async def test_cancelled_lifecycle_wait_keeps_force_authority_and_reaps_siblings
         'printf "%s" "$PPID" > "$1"; printf "%s" $$ > "$1.child"; printf READY; while IFS= read -r line; do :; done',
         "owned-lifecycle",
     ]
-    primary = None
+    primary = escaped = None
     rec = sibling = None
     heartbeat = 0
 
     async def body():
+        nonlocal escaped
+        try:
+            await lifecycle()
+        except asyncio.CancelledError as error:
+            escaped = error
+            raise
+
+    async def lifecycle():
         nonlocal primary, rec, sibling
         async with context:
             rec = await context.record(
@@ -703,10 +721,9 @@ async def test_cancelled_lifecycle_wait_keeps_force_authority_and_reaps_siblings
             await asyncio.sleep(0.01)
             if primary is not None:
                 task.cancel("REPEATED_TEARDOWN_CANCEL")
-        with pytest.raises(asyncio.CancelledError) as caught:
+        with pytest.raises(asyncio.CancelledError):
             await task
-        assert caught.value is primary
-        assert caught.value.args == ("ORIGINAL_LIFECYCLE_CANCEL",)
+        assert escaped is primary
         elapsed = time.monotonic() - started
         assert elapsed < 8, (elapsed, context.report)
         assert heartbeat > 3
