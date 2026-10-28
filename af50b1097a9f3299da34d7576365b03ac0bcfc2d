@@ -1,0 +1,3 @@
+- `termtrace analyze verify vsess --json` on a completed detached session named vsess reports "valid": true; the main build reports "valid": false for the same session
+- New integration test verify_resolves_session_names fails without the fix and passes with it
+- `just lint validate test integration bindings-test native-test` passes
