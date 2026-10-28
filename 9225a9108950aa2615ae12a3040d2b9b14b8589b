@@ -1,0 +1,2 @@
+- detached_original_resizes_its_window_inside_a_constant_canvas failed 3 of 10 runs on a separate main build and passes 22 of 22 runs once the resize send waits for the app's winch line
+- `just lint validate test integration bindings-test native-test` passes
