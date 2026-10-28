@@ -1,0 +1,6 @@
+- `just conformance` (scripts/sdk-conformance.py --profile certify) reports verdict certified: 18 of 18 checks pass, 0 uncertified cells across Rust, Python and TypeScript, with native.playback not_applicable for Python and TypeScript
+- Rust, Python and TypeScript workflow examples pass, and each mismatch run exits nonzero with the failed assertion, session, last observation and a 0700 evidence directory
+- Each language's native demo records the showcase once with the original-native API and a visual profile, then renders MP4, GIF and WebM plus a preview from that recording; ffprobe matches each plan and canonical hashes are unchanged
+- examples/demo.sh runs end to end through the public CLI with no direct FFmpeg calls
+- A certified conformance run leaves no /tmp/ttc.* scratch directory
+- `just lint validate test integration bindings-test native-test` passes
