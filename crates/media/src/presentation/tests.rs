@@ -344,6 +344,103 @@ fn failed_export_removes_its_staging_directory() {
 }
 
 #[test]
+fn full_screen_outline_change_composes_beyond_the_argument_limit() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let source = temporary.path().join("source.mkv");
+    let status = Command::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=640x384:rate=24:duration=0.25",
+            "-c:v",
+            "ffv1",
+        ])
+        .arg(&source)
+        .status()
+        .expect("run FFmpeg fixture");
+    assert!(status.success());
+
+    let geometry = TerminalGeometryReport {
+        cols: 80,
+        rows: 24,
+        cell_width: 8,
+        cell_height: 16,
+        text_width: 640,
+        text_height: 384,
+    };
+
+    let every_cell = (0..24u16)
+        .flat_map(|row| {
+            return (0..80u16).map(move |column| {
+                return ChangeRegion {
+                    x: column * 8,
+                    y: row * 16,
+                    width: 8,
+                    height: 16,
+                };
+            });
+        })
+        .collect::<Vec<_>>();
+
+    let plan = PresentationPlan {
+        version: PRESENTATION_FORMAT_VERSION,
+        edit_plan_hash: "a".repeat(64),
+        source: PresentationSource::Native {
+            video_hash: hash_file(&source).expect("source hash"),
+            video: source,
+        },
+        fps: 24,
+        clips: vec![NormalizedClip {
+            source_range: SourceRange {
+                start_monotonic_ns: 0,
+                end_monotonic_ns: 250_000_000,
+            },
+            source_start_frame: 0,
+            source_end_frame: 6,
+            output_start_frame: 0,
+            output_end_frame: 6,
+            retimed_frame_count: 6,
+            hold_frame_count: 0,
+            speed: RationalSpeed::default(),
+            caption: None,
+        }],
+        output_frame_count: 6,
+        source_width: 640,
+        source_height: 384,
+        output_width: 640,
+        output_height: 384,
+        source_geometry: geometry,
+        change_visualization: Some(ChangeVisualization {
+            source: ChangeSource::SemanticCells,
+            mode: ChangeMode::Outline,
+            hold_frames: 0,
+            pixel_threshold: None,
+        }),
+        change_frames: vec![NormalizedChangeFrame {
+            state_id: 1,
+            state_hash: "b".repeat(64),
+            source_frame: 0,
+            output_frames: vec![0],
+            changed_regions: every_cell,
+            dirty_rows: (0..24).collect(),
+            evidence_level: "semantic_scheduled_for_frame".to_owned(),
+        }],
+        ..PresentationPlan::default()
+    };
+
+    let staging = temporary.path().join("staging");
+    fs_err::create_dir(&staging).expect("staging directory");
+    pipeline::compose_pixels(&plan, &staging, true, None)
+        .expect("compose a full-screen outline overlay");
+
+    assert!(staging.join("composed.mkv").is_file());
+}
+
+#[test]
 #[ignore = "requires FFmpeg with libx264"]
 fn exports_multi_clip_h264_presentation_atomically() {
     let temporary = tempfile::tempdir().expect("temporary directory");
