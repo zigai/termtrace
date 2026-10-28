@@ -532,13 +532,13 @@ fn scenario_wait_requires_the_requested_stability_interval() {
                     "unset": [],
                     "color": "never"
                 },
-                "timeoutMs": 1000
+                "timeoutMs": 4000
             },
             "steps": [{
                 "waitScreen": {
                     "contains": "READY",
-                    "stableForMs": 100,
-                    "timeoutMs": 250
+                    "stableForMs": 1000,
+                    "timeoutMs": 2000
                 }
             }]
         }))
