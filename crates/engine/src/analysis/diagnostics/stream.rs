@@ -1,9 +1,11 @@
 use super::{
     analysis_error, detect_cursor_jumps, detect_dirty_discrepancies, detect_redundant_full_redraw,
-    detect_transients, native_correlations_for_state, ValidatedVisualManifest,
+    detect_transients, native_correlations_for_state, EffectEvidence, ValidatedVisualManifest,
 };
 use crate::{
-    replay::{trust::SourceIdentity, visit_recording_states_range_while, ValidatedSession},
+    replay::{
+        trust::SourceIdentity, visit_recording_replay_range_while, ReplayVisit, ValidatedSession,
+    },
     timeline::stream::TokenCursor,
     Result,
 };
@@ -97,14 +99,27 @@ fn diagnose_recording(
         .map_err(sql_error)?;
     const MAX_DIAGNOSTIC_STATES: usize = 2_000;
     let mut state_count = 0_usize;
+    let mut effects = EffectEvidence::default();
 
-    visit_recording_states_range_while(
+    visit_recording_replay_range_while(
         session,
         completed,
         None,
         &AtomicBool::new(false),
-        |record, _| {
+        |visit| {
+            let record = match visit {
+                ReplayVisit::State(record, _) => record,
+                ReplayVisit::Effect(record) => {
+                    effects.record(&record);
+
+                    return Ok(true);
+                }
+            };
+
+            let record = &record;
+
             state_count = state_count.saturating_add(1);
+
             if state_count > MAX_DIAGNOSTIC_STATES {
                 return Ok(false);
             }
@@ -167,6 +182,10 @@ fn diagnose_recording(
     )?;
 
     drop(state_insert);
+
+    if checks.contains(&DiagnosticCheck::Effects) {
+        effects.findings(&mut findings);
+    }
 
     if !hidden.is_empty() {
         let count = hidden.len();

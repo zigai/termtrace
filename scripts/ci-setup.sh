@@ -39,7 +39,7 @@ if [[ "$mode" == native ]]; then
     meson setup --reconfigure "$blueprint/build" "$blueprint" --prefix "$root/.tools/ci" -Ddocs=false
     meson install -C "$blueprint/build"
     export PATH="$root/.tools/ci/bin:$PATH"
-    readonly zig="$root/.tools/zig-$(uname -m)-linux-0.15.2/zig"
+    readonly zig="$root/.tools/zig-$(uname -m)-linux-0.17.0/zig"
     (
         cd "$root/vendor/ghostty"
         "$zig" build -Doptimize=ReleaseFast -Dapp-runtime=gtk \

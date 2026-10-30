@@ -1,6 +1,9 @@
 //! Stable ordered timeline contracts.
 
-use crate::{execution::event::Event, terminal::state::DirtyState, terminal::vt::VtToken};
+use crate::{
+    execution::event::Event, terminal::effect::TerminalEffect, terminal::state::DirtyState,
+    terminal::vt::VtToken,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +45,13 @@ pub enum TimelineItem {
         modes_changed: bool,
         /// Whether terminal metadata changed.
         metadata_changed: bool,
+    },
+    /// A side effect libghostty-vt reported while replaying output.
+    TerminalEffect {
+        /// Offset of the completing byte within the responsible output event.
+        event_byte_offset: u64,
+        /// Reported effect.
+        effect: TerminalEffect,
     },
     /// A non-output canonical event retained verbatim.
     CanonicalEvent {

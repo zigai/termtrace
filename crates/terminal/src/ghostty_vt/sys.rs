@@ -1,7 +1,7 @@
 //! Generated libghostty-vt declarations; never exposed outside the adapter.
 //!
 //! The declarations are pinned to Ghostty revision
-//! `55a3e33ab26a23d75b274b23c7f76d837db00578`. Regenerate them only as part
+//! `9781c0afc8225510e33127466f0815eb51086d7d`. Regenerate them only as part
 //! of an intentional Ghostty upgrade with
 //! `scripts/generate-ghostty-vt-bindings.sh`.
 

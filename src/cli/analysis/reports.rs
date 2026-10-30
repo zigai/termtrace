@@ -43,6 +43,7 @@ use termtrace_model::{
     execution::session::SessionPhase,
     terminal::analysis::{DiagnoseReport, ExplainOutputPage, ExplainReport},
     terminal::diff::SemanticDiff,
+    terminal::effect::{PayloadDigest, TerminalEffect},
     terminal::observation::StatePoint,
     terminal::timeline::{TimelineEntry, TimelineItem},
     value::pagination::OutputPage,
@@ -633,6 +634,14 @@ fn timeline_text(entry: &TimelineEntry) -> Result<String> {
             modes_changed,
             metadata_changed,
         ),
+        TimelineItem::TerminalEffect {
+            event_byte_offset,
+            effect,
+        } => format!(
+            "effect {} byte {event_byte_offset}{}",
+            effect_label(effect)?,
+            effect_text(effect)?
+        ),
         TimelineItem::CanonicalEvent { event } => canonical_event_text(event)?,
         TimelineItem::VtToken { token } => {
             let location = token.source.first().map_or_else(
@@ -656,6 +665,85 @@ fn timeline_text(entry: &TimelineEntry) -> Result<String> {
     return Ok(format!(
         "{seconds}.{fractional:09}s  event {event}  {detail}"
     ));
+}
+
+fn effect_label(effect: &TerminalEffect) -> Result<String> {
+    let value = serde_json::to_value(effect).into_diagnostic()?;
+
+    return value
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| return miette::miette!("terminal effect did not serialize its type"));
+}
+
+// Clipboard and notification payloads may hold secrets, so only digests are printed.
+fn effect_text(effect: &TerminalEffect) -> Result<String> {
+    let digest = |digest: &PayloadDigest| {
+        return format!("{}B:{}", digest.byte_length, digest.blake3);
+    };
+
+    let lossy = |bytes: &[u8]| return quoted_text(&String::from_utf8_lossy(bytes));
+    let text = match effect {
+        TerminalEffect::Bell
+        | TerminalEffect::FullReset
+        | TerminalEffect::InputStart
+        | TerminalEffect::ProcessingError => String::new(),
+        TerminalEffect::TitleChanged { title } => format!(" title={}", lossy(title.as_bytes())?),
+        TerminalEffect::WorkingDirectoryChanged { location } => {
+            format!(" location={}", lossy(location.as_bytes())?)
+        }
+        TerminalEffect::ClipboardWrite {
+            target,
+            representations,
+        } => {
+            let contents = representations
+                .iter()
+                .map(|representation| {
+                    return format!("{}={}", representation.mime, digest(&representation.data));
+                })
+                .collect::<Vec<_>>();
+
+            format!(
+                " target={} data=[{}]",
+                stable_enum_label(target)?,
+                contents.join(" ")
+            )
+        }
+        TerminalEffect::DesktopNotification { title, body } => {
+            format!(" title={} body={}", digest(title), digest(body))
+        }
+        TerminalEffect::ProgressReport { state, percent } => format!(
+            " state={} percent={}",
+            stable_enum_label(state)?,
+            optional_display(*percent)
+        ),
+        TerminalEffect::WindowResizeRequest { rows, columns } => format!(
+            " rows={} columns={}",
+            optional_display(*rows),
+            optional_display(*columns)
+        ),
+        TerminalEffect::PromptStart { prompt } => format!(" prompt={}", stable_enum_label(prompt)?),
+        TerminalEffect::CommandStart { command } => match command {
+            Some(command) => format!(" command={}", lossy(command.as_bytes())?),
+            None => String::new(),
+        },
+        TerminalEffect::CommandEnd { exit_code, error } => {
+            let error = match error {
+                Some(error) => format!(" error={}", lossy(error.as_bytes())?),
+                None => String::new(),
+            };
+
+            format!(" exit={}{error}", optional_display(*exit_code))
+        }
+        TerminalEffect::UnknownSequence { kind, identifier } => format!(
+            " {} id={}",
+            stable_enum_label(kind)?,
+            lossy(identifier.as_bytes())?
+        ),
+    };
+
+    return Ok(text);
 }
 
 fn canonical_event_text(event: &Event) -> Result<String> {

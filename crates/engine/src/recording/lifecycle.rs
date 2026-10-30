@@ -44,7 +44,7 @@ use termtrace_model::{
     terminal::state::supported_geometry_cell_count,
     value::ByteString,
 };
-use termtrace_terminal::{GhosttyVt, PresentationTracker, QueryTracker};
+use termtrace_terminal::GhosttyVt;
 use uuid::Uuid;
 
 const MUTATION_CACHE_CAPACITY: usize = 256;
@@ -202,7 +202,12 @@ fn record_to(
     )?;
 
     let actor_state: Result<(LiveTerminal, MutationJournal)> = (|| {
-        let live = initialize_live_terminal(TerminalGeometry::from(pty_size), &options.colors)?;
+        let live = initialize_live_terminal(
+            TerminalGeometry::from(pty_size),
+            &options.term,
+            &options.colors,
+        )?;
+
         let journal = MutationJournal::create(&options.output_directory)?;
 
         return Ok((live, journal));
@@ -660,32 +665,33 @@ fn validate_options(options: &RecordOptions) -> Result<PtySize> {
 
 fn initialize_live_terminal(
     geometry: TerminalGeometry,
+    term: &str,
     colors: &TerminalColors,
 ) -> Result<LiveTerminal> {
     let mut semantic = GhosttyVt::new(geometry.cols, geometry.rows, 100_000)?;
     semantic.apply_terminal_colors(colors)?;
+    semantic.set_terminfo_name(term)?;
     semantic.resize(
         geometry.cols,
         geometry.rows,
         geometry_cell_size(geometry.pixel_width, geometry.cols),
         geometry_cell_size(geometry.pixel_height, geometry.rows),
     )?;
+    semantic.capture_render_holds()?;
     let presented = semantic.snapshot()?;
 
     return Ok(LiveTerminal {
         semantic,
-        presentation_tracker: PresentationTracker::new(presented.modes.synchronized_output),
         presented,
         presented_stale: false,
         row_hashes: RefCell::new(Vec::new()),
         cached_state_hash: RefCell::new(None),
-        query_tracker: QueryTracker::default(),
         pending_query_responses: Vec::new(),
         source_event_seq: None,
-        source_byte_offset: None,
         suppress_mirrored_queries: false,
         mirror_output: Vec::new(),
-        mirror_sequence: Vec::new(),
+        open_sequence: Vec::new(),
+        open_sequence_mirrored: false,
         geometry,
     });
 }

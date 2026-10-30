@@ -657,7 +657,7 @@ fn last_action_uses_the_full_journaled_multi_atom_request_boundary() {
             "--",
             "/bin/sh",
             "-c",
-            "trap 'exit 0' TERM; printf READY; while IFS= read -r line; do printf '\\r\\nRESULT:%s' \"$line\"; done",
+            "trap 'exit 0' TERM; printf READY; while IFS= read -r line; do printf '\\033]133;C\\007\\r\\nRESULT:%s\\033]133;D;7\\007' \"$line\"; done",
         ])
         .assert()
         .success();
@@ -739,6 +739,16 @@ fn last_action_uses_the_full_journaled_multi_atom_request_boundary() {
     assert!(report["rows_changed"]
         .as_array()
         .is_some_and(|rows| return !rows.is_empty()));
+    assert_eq!(report["shell_command"]["exit_code"], 7);
+    assert!(report["shell_command"]["started"]["event_seq"]
+        .as_u64()
+        .zip(report["action"]["intent_event_seq"].as_u64())
+        .is_some_and(|(started, intent)| return started > intent));
+    assert!(report["warnings"].as_array().is_some_and(|warnings| {
+        return warnings
+            .iter()
+            .any(|warning| return warning["code"] == "shell_command_failed");
+    }));
 }
 
 #[test]

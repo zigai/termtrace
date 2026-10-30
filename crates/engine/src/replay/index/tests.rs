@@ -1,7 +1,10 @@
 use super::*;
 use std::time::{Duration, Instant};
 use termtrace_evidence::event_log::{EventLogWriter, SessionClock};
-use termtrace_model::execution::event::{Event, EventBody, EventLogHeader};
+use termtrace_model::{
+    execution::event::{Event, EventBody, EventLogHeader},
+    value::ByteString,
+};
 
 fn writer(path: &Path) -> EventLogWriter {
     let clock = SessionClock::now().expect("clock");
@@ -109,6 +112,7 @@ fn file_index_matches_memory_and_excludes_later_appends() {
             "control-source-index.jsonl",
             "states.jsonl.zst",
             "checkpoints.jsonl.zst",
+            "checkpoints.bin",
             "final.txt",
             "manifest.json",
         ] {

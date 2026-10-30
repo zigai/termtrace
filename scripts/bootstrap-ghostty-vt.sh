@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly zig_version=0.15.2
+readonly zig_version=0.17.0
 readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ghostty="$root/vendor/ghostty"
 readonly tools="$root/.tools"
@@ -15,11 +15,11 @@ fi
 case "$(uname -m)" in
     x86_64)
         readonly zig_arch=x86_64
-        readonly zig_sha256=02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
+        readonly zig_sha256=1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026
         ;;
     aarch64)
         readonly zig_arch=aarch64
-        readonly zig_sha256=958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f
+        readonly zig_sha256=9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8
         ;;
     *)
         echo "unsupported architecture: $(uname -m)" >&2

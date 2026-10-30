@@ -86,6 +86,50 @@
       "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
       "type": "string"
     },
+    "ClipboardRepresentation": {
+      "additionalProperties": false,
+      "description": "One MIME representation of a clipboard write.",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/PayloadDigest",
+          "description": "Digest of the decoded representation data."
+        },
+        "mime": {
+          "description": "MIME type of the representation.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mime",
+        "data"
+      ],
+      "type": "object"
+    },
+    "ClipboardTarget": {
+      "description": "Clipboard a program asked to write.",
+      "oneOf": [
+        {
+          "const": "standard",
+          "description": "The standard system clipboard.",
+          "type": "string"
+        },
+        {
+          "const": "selection",
+          "description": "The selection clipboard.",
+          "type": "string"
+        },
+        {
+          "const": "primary",
+          "description": "The primary selection clipboard.",
+          "type": "string"
+        },
+        {
+          "const": "other",
+          "description": "A target this build does not name.",
+          "type": "string"
+        }
+      ]
+    },
     "DirtyState": {
       "description": "Global render dirtiness reported by Ghostty.",
       "oneOf": [
@@ -988,6 +1032,406 @@
         }
       ]
     },
+    "PayloadDigest": {
+      "additionalProperties": false,
+      "description": "Length and short hash of a payload that may hold a secret, without the payload.",
+      "properties": {
+        "blake3": {
+          "description": "Leading hex characters of the payload's BLAKE3 hash.",
+          "type": "string"
+        },
+        "byte_length": {
+          "description": "Payload length in bytes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "byte_length",
+        "blake3"
+      ],
+      "type": "object"
+    },
+    "ProgressState": {
+      "description": "State of an OSC 9;4 progress report.",
+      "oneOf": [
+        {
+          "const": "remove",
+          "description": "Remove any progress indication.",
+          "type": "string"
+        },
+        {
+          "const": "set",
+          "description": "Determinate progress.",
+          "type": "string"
+        },
+        {
+          "const": "error",
+          "description": "Failed progress.",
+          "type": "string"
+        },
+        {
+          "const": "indeterminate",
+          "description": "Indeterminate progress.",
+          "type": "string"
+        },
+        {
+          "const": "pause",
+          "description": "Paused progress.",
+          "type": "string"
+        },
+        {
+          "const": "other",
+          "description": "A state this build does not name.",
+          "type": "string"
+        }
+      ]
+    },
+    "PromptKind": {
+      "description": "Which prompt an OSC 133 prompt start draws.",
+      "oneOf": [
+        {
+          "const": "primary",
+          "description": "The main prompt before each command.",
+          "type": "string"
+        },
+        {
+          "const": "right",
+          "description": "A prompt at the right edge of the line.",
+          "type": "string"
+        },
+        {
+          "const": "continuation",
+          "description": "A prompt for an extra line of a multi-line command.",
+          "type": "string"
+        },
+        {
+          "const": "secondary",
+          "description": "Another prompt for an extra input line, such as bash's PS2.",
+          "type": "string"
+        },
+        {
+          "const": "other",
+          "description": "A prompt kind this build does not name.",
+          "type": "string"
+        }
+      ]
+    },
+    "TerminalEffect": {
+      "description": "A side effect the program asked the terminal for, as libghostty-vt reported it.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "BEL outside any control string.",
+          "properties": {
+            "type": {
+              "const": "bell",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "OSC 0 or OSC 2 set the window title.",
+          "properties": {
+            "title": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "New title bytes."
+            },
+            "type": {
+              "const": "title_changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "title"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "OSC 7, OSC 9, or OSC 1337 reported the working directory.",
+          "properties": {
+            "location": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Reported location, usually a `file://` URI; empty clears it."
+            },
+            "type": {
+              "const": "working_directory_changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "location"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "OSC 52, OSC 1337, or OSC 5522 asked to write the clipboard.",
+          "properties": {
+            "representations": {
+              "description": "Representations of the written value; empty clears the clipboard.",
+              "items": {
+                "$ref": "#/$defs/ClipboardRepresentation"
+              },
+              "type": "array"
+            },
+            "target": {
+              "$ref": "#/$defs/ClipboardTarget",
+              "description": "Destination clipboard."
+            },
+            "type": {
+              "const": "clipboard_write",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "target",
+            "representations"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "OSC 9 or OSC 777 asked for a desktop notification.",
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/PayloadDigest",
+              "description": "Digest of the notification body."
+            },
+            "title": {
+              "$ref": "#/$defs/PayloadDigest",
+              "description": "Digest of the notification title."
+            },
+            "type": {
+              "const": "desktop_notification",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "title",
+            "body"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "OSC 9;4 reported progress.",
+          "properties": {
+            "percent": {
+              "description": "Percentage from 0 through 100 when the program sent one.",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/$defs/ProgressState",
+              "description": "Reported state."
+            },
+            "type": {
+              "const": "progress_report",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "RIS reset the terminal.",
+          "properties": {
+            "type": {
+              "const": "full_reset",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "CSI 8 t asked to resize the window; the terminal itself is not resized.",
+          "properties": {
+            "columns": {
+              "description": "Requested columns, absent to keep the current width.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "rows": {
+              "description": "Requested rows, absent to keep the current height.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "window_resize_request",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "OSC 133 started drawing a prompt.",
+          "properties": {
+            "prompt": {
+              "$ref": "#/$defs/PromptKind",
+              "description": "Which prompt started."
+            },
+            "type": {
+              "const": "prompt_start",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "prompt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "OSC 133 marked the end of the prompt and the start of command input.",
+          "properties": {
+            "type": {
+              "const": "input_start",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "OSC 133 marked the submitted command starting to run.",
+          "properties": {
+            "command": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Base64Bytes"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Decoded command line when the shell sent one."
+            },
+            "type": {
+              "const": "command_start",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "OSC 133 marked the command finishing.",
+          "properties": {
+            "error": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Base64Bytes"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Error description when the shell sent one."
+            },
+            "exit_code": {
+              "description": "Exit code when the shell reported one.",
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "command_end",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The program sent an APC or OSC string that the semantic engine ignored.",
+          "properties": {
+            "identifier": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Leading command name or number: at most 16 ASCII alphanumeric, `-`, `_`, or `.` bytes."
+            },
+            "kind": {
+              "$ref": "#/$defs/UnknownSequenceKind",
+              "description": "Control string family."
+            },
+            "type": {
+              "const": "unknown_sequence",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "kind",
+            "identifier"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "libghostty-vt hit an error that may have prevented a semantic update.",
+          "properties": {
+            "type": {
+              "const": "processing_error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "TimelineEntry": {
       "additionalProperties": false,
       "description": "One ordered, source-bound timeline item.",
@@ -1101,6 +1545,32 @@
         },
         {
           "additionalProperties": false,
+          "description": "A side effect libghostty-vt reported while replaying output.",
+          "properties": {
+            "effect": {
+              "$ref": "#/$defs/TerminalEffect",
+              "description": "Reported effect."
+            },
+            "event_byte_offset": {
+              "description": "Offset of the completing byte within the responsible output event.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "terminal_effect",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "event_byte_offset",
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A non-output canonical event retained verbatim.",
           "properties": {
             "event": {
@@ -1136,6 +1606,21 @@
             "token"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "UnknownSequenceKind": {
+      "description": "Family of a control string the semantic engine does not implement.",
+      "oneOf": [
+        {
+          "const": "apc",
+          "description": "Application Program Command.",
+          "type": "string"
+        },
+        {
+          "const": "osc",
+          "description": "Operating System Command.",
+          "type": "string"
         }
       ]
     },

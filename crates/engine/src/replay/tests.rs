@@ -1,22 +1,18 @@
 use super::engine::{inspect_latest_presented_fast, inspect_latest_presented_fast_with_limits};
 use super::*;
 use proptest::{collection, prelude::*};
-use std::{
-    str::from_utf8,
-    sync::{atomic::AtomicBool, Arc},
-};
+use std::sync::{atomic::AtomicBool, Arc};
 use termtrace_evidence::{
     artifact::create_private_directory,
     event_log::{EventLog, EventLogWriter, SessionClock},
 };
 use termtrace_model::{
-    execution::event::{Event, EventLogHeader, EventRecord},
+    execution::event::{Event, EventLogHeader, EventRecord, OperationStatus},
     terminal::state::{DirtyState, WideKind},
     value::ByteString,
 };
 use termtrace_terminal::GhosttyVt;
 use uuid::Uuid;
-use zstd::stream::decode_all;
 
 fn output_log(data: &[u8]) -> EventLog {
     return EventLog {
@@ -53,6 +49,87 @@ fn output_log_with_geometry(data: &[u8], cols: u16, rows: u16) -> EventLog {
     log.header.pixel_height = rows.saturating_mul(16);
 
     return log;
+}
+
+fn event_log(cols: u16, rows: u16, events: Vec<Event>) -> EventLog {
+    let mut log = output_log_with_geometry(b"", cols, rows);
+    log.events = events
+        .into_iter()
+        .zip(0_u64..)
+        .map(|(event, seq)| {
+            return EventRecord {
+                observed_monotonic_ns: None,
+                seq,
+                monotonic_ns: seq.saturating_add(1),
+                prev_hash: "0".repeat(64),
+                hash: "1".repeat(64),
+                event,
+            };
+        })
+        .collect();
+
+    return log;
+}
+
+fn output(data: &[u8]) -> Event {
+    return Event::Output {
+        data: ByteString::from(data),
+    };
+}
+
+fn resize(cols: u16, rows: u16) -> [Event; 2] {
+    let operation_id = Uuid::now_v7();
+
+    return [
+        Event::ResizeIntent {
+            operation_id,
+            cols,
+            rows,
+            pixel_width: cols.saturating_mul(8),
+            pixel_height: rows.saturating_mul(16),
+        },
+        Event::ResizeResult {
+            operation_id,
+            status: OperationStatus::Applied,
+            error_code: None,
+        },
+    ];
+}
+
+// Checkpoints every state of a full replay, then resumes from each one. The resumed replay must
+// emit exactly the canonical records after that checkpoint and reach the same final state.
+fn assert_every_checkpoint_resumes_canonically(log: &EventLog) {
+    let mut canonical = Vec::new();
+    let mut seeds = Vec::new();
+    let artifacts = replay_with(log, None, |record, _, engine| {
+        seeds.push(ReplaySeed {
+            record: record.clone(),
+            checkpoint: engine
+                .encode_checkpoint()?
+                .expect("replay engines track unfinished input"),
+        });
+
+        canonical.push(record);
+
+        return Ok(());
+    })
+    .expect("canonical replay");
+
+    for seed in seeds {
+        let start = usize::try_from(seed.record.state_id).expect("state index");
+        let mut resumed = Vec::new();
+        let seeded =
+            replay_with_seed_and_limits(log, None, seed, DEFAULT_REPLAY_LIMITS, |record, _, _| {
+                resumed.push(record);
+
+                return Ok(());
+            })
+            .expect("checkpoint replay");
+
+        assert_eq!(resumed, canonical[start..], "resumed from state {start}");
+        assert_eq!(seeded.final_state_hash, artifacts.final_state_hash);
+        assert_eq!(seeded.state_count, artifacts.state_count);
+    }
 }
 
 #[test]
@@ -190,6 +267,30 @@ fn fast_endpoint_excludes_uncommitted_synchronized_output() {
 }
 
 #[test]
+fn fast_endpoint_keeps_the_frame_from_the_start_of_a_hold() {
+    let log = output_log(b"shown\x1b[?2026;1049hhidden");
+    let fast = inspect_latest_presented_fast(&log).expect("fast endpoint replay");
+    assert_eq!(
+        termtrace_terminal::semantic_viewport_text(&fast.state).trim_end(),
+        "shown"
+    );
+    assert!(!fast.state.modes.alternate_screen);
+    assert_eq!(fast.event_byte_offset, Some(4));
+}
+
+#[test]
+fn fast_endpoint_presents_again_after_a_reset_ends_a_hold() {
+    let log = output_log(b"kept\x1b[?2026hlost\x1bcafter");
+    let fast = inspect_latest_presented_fast(&log).expect("fast endpoint replay");
+    assert_eq!(
+        termtrace_terminal::semantic_viewport_text(&fast.state).trim_end(),
+        "after"
+    );
+    assert!(!fast.state.modes.synchronized_output);
+    assert_eq!(fast.event_byte_offset, Some(22));
+}
+
+#[test]
 fn replay_enforces_output_and_capture_work_budgets() {
     let log = output_log(b"abc");
     let output_error = replay_with_limits(
@@ -236,16 +337,11 @@ fn validated_checkpoint_seed_skips_long_session_canonical_output_prefix() {
     let checkpoint_offset = 1_024;
     let mut seed = None;
 
-    replay_with(&log, None, |record, state, engine| {
+    replay_with(&log, None, |record, _, engine| {
         if record.event_byte_offset == Some(checkpoint_offset) {
             seed = Some(ReplaySeed {
-                inspection: StateInspection {
-                    record,
-                    state: state.clone(),
-                },
-                engine_vt: engine
-                    .format_replay_seed()?
-                    .expect("serializable primary-screen checkpoint"),
+                record,
+                checkpoint: engine.encode_checkpoint()?.expect("checkpoint available"),
             });
         }
 
@@ -284,46 +380,35 @@ fn validated_checkpoint_seed_skips_long_session_canonical_output_prefix() {
 }
 
 #[test]
-fn alternate_screen_checkpoint_seed_is_rejected_before_replay() {
-    let data = b"main-screen\x1b[?1049halternate\x1b[?1049l-after";
-    let log = output_log(data);
-    let checkpoint_offset = u64::try_from(
-        data.windows(b"alternate".len())
-            .position(|window| return window == b"alternate")
-            .expect("alternate payload"),
-    )
-    .expect("checkpoint offset")
-    .saturating_add(u64::try_from(b"alternate".len()).expect("payload length"))
-    .saturating_sub(1);
+fn checkpoints_resume_alternate_screen_pending_wrap_and_unfinished_input() {
+    assert_every_checkpoint_resumes_canonically(&output_log_with_geometry(
+        b"main-screen\x1b[?1049halternate\x1b[?1049l-after",
+        12,
+        3,
+    ));
 
-    let mut seed = None;
+    assert_every_checkpoint_resumes_canonically(&event_log(
+        4,
+        3,
+        vec![
+            output(b"abcd"),
+            output(b"e\x1b[3"),
+            output(b"1mred \xe2\x82"),
+            output(b"\xac\x1b]2;split"),
+            output(b"-title\x07\x1b]4;1;rgb:12/34/56\x07\x1b]10;rgb:aa/bb/cc\x07"),
+            output(b"\x1b]11;rgb:01/02/03\x07\x1b[31mX\x1b]110\x07Y"),
+        ],
+    ));
+}
 
-    replay_with(&log, None, |record, state, engine| {
-        if record.event_byte_offset == Some(checkpoint_offset) {
-            seed = Some(ReplaySeed {
-                inspection: StateInspection {
-                    record,
-                    state: state.clone(),
-                },
-                engine_vt: engine
-                    .format_replay_seed()?
-                    .expect("serializable alternate-screen checkpoint"),
-            });
-        }
-
-        return Ok(());
-    })
-    .expect("alternate-screen checkpoint source replay");
-
-    let error = replay_with_seed_and_limits(
-        &log,
-        None,
-        seed.expect("alternate-screen checkpoint"),
-        DEFAULT_REPLAY_LIMITS,
-        |_, _, _| return Ok(()),
-    )
-    .expect_err("alternate-screen seed cannot reconstruct hidden primary-screen state");
-    assert!(matches!(error, Error::CheckpointReconstruction { .. }));
+#[test]
+fn checkpoints_resume_across_resizes_and_scrollback() {
+    let mut events = vec![output(b"one\r\ntwo\r\nthree\r\nfour\r\nfive")];
+    events.extend(resize(6, 2));
+    events.push(output(b"\r\nsix"));
+    events.extend(resize(10, 5));
+    events.push(output(b"seven"));
+    assert_every_checkpoint_resumes_canonically(&event_log(8, 3, events));
 }
 
 #[test]
@@ -385,12 +470,11 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
         .expect("validated checkpoint lookup")
         .expect("nearest late checkpoint");
     assert_eq!(
-        seed.inspection.record.state_id,
+        seed.record.state_id,
         *checkpoint_ids.last().expect("last checkpoint")
     );
 
     let seed_offset = seed
-        .inspection
         .record
         .event_byte_offset
         .expect("output checkpoint offset");
@@ -415,40 +499,36 @@ fn long_index_emits_periodic_validated_checkpoint_entries() {
             .final_state_hash
     );
 
-    let compressed =
-        fs_err::read(directory.join("checkpoints.jsonl.zst")).expect("compressed checkpoints");
-    let checkpoint_text = decode_all(compressed.as_slice()).expect("checkpoint stream");
-    let checkpoints: Vec<SemanticReplayCheckpoint> = from_utf8(&checkpoint_text)
-        .expect("checkpoint UTF-8")
-        .lines()
-        .map(|line| return serde_json::from_str(line).expect("semantic checkpoint"))
-        .collect();
+    let index = DerivedIndex::open(&log)
+        .expect("trusted index lookup")
+        .expect("cataloged index");
 
-    for checkpoint in checkpoints {
-        validate_replay_seed(
-            &log,
-            &ReplaySeed {
-                inspection: checkpoint.inspection,
-                engine_vt: checkpoint.engine_vt.into_bytes(),
-            },
-        )
-        .expect("checkpoint must seed the pinned Ghostty engine");
+    for state_id in checkpoint_ids {
+        let seed = index
+            .nearest_seed(&StateSelector::StateId(state_id))
+            .expect("checkpoint lookup")
+            .expect("checkpoint at its own state");
+        assert_eq!(seed.record.state_id, state_id);
+
+        validate_replay_seed(&log, &seed).expect("checkpoint must seed the pinned Ghostty engine");
     }
 }
 
 #[test]
-fn periodic_checkpoint_reconstructs_scrolling_grid() {
-    let mut data: Vec<u8> = Vec::new();
-    for line in 0..400 {
-        data.extend(format!("scrolling-line-{line:04}\r\n").as_bytes());
+fn every_periodic_checkpoint_candidate_is_written() {
+    // Long unbroken lines keep the cursor in pending wrap and the alternate screen hides the
+    // primary one; neither may prevent a checkpoint.
+    let mut data = b"\x1b[?1049h".to_vec();
+    for line in 0..40 {
+        data.extend(format!("{line:04}").repeat(60).as_bytes());
     }
 
     let log = output_log(&data);
     let temporary = tempfile::TempDir::new().expect("temporary directory");
     let directory = temporary.path().join("derived");
     create_private_directory(&directory).expect("private derived directory");
-    index::write(&directory, &log, None, true, StateSelection::All)
-        .expect("scrolling grids must produce validated periodic checkpoints");
+    let (artifacts, _) = index::write(&directory, &log, None, true, StateSelection::All)
+        .expect("periodic checkpoint index");
 
     let checkpoint_count = fs_err::read_to_string(directory.join("state-index.jsonl"))
         .expect("state index")
@@ -456,9 +536,9 @@ fn periodic_checkpoint_reconstructs_scrolling_grid() {
         .map(|line| return serde_json::from_str::<StateIndexEntry>(line).expect("index entry"))
         .filter(|entry| return entry.checkpoint)
         .count();
-    assert!(
-        checkpoint_count > 1,
-        "scrolling replay must retain usable checkpoints beyond the initial state"
+    assert_eq!(
+        u64::try_from(checkpoint_count).expect("checkpoint count"),
+        artifacts.state_count.div_ceil(128)
     );
 }
 
@@ -575,58 +655,45 @@ fn row_delta_emits_and_reconstructs_wrap_facts_without_cell_changes() {
     );
 }
 
+const CHECKPOINT_FRAGMENTS: &[&[u8]] = &[
+    b"x",
+    b"wide\xe7\x95\x8c",
+    b"\r\n",
+    b"\xe2\x82",
+    b"\xac",
+    b"\x1b[3",
+    b"1m",
+    b"\x1b[?1049h",
+    b"\x1b[?1049l",
+    b"\x1b]2;title",
+    b"\x07",
+    b"\x1b",
+    b"]10;rgb:11/22/33\x07",
+    b"\x1b]4;2;rgb:44/55/66\x07",
+    b"\x1bP+q544e",
+    b"\x1b\\",
+];
+
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(64))]
+    #![proptest_config(ProptestConfig::with_cases(32))]
 
     #[test]
-    fn arbitrary_replay_checkpoint_is_lossless_or_explicitly_unavailable(
-        data in collection::vec(0x20_u8..0x7f, 1..128),
-        checkpoint_selector in any::<usize>(),
+    fn arbitrary_checkpoint_resumes_the_canonical_state_sequence(
+        chunks in collection::vec(
+            collection::vec(0..CHECKPOINT_FRAGMENTS.len(), 1..6),
+            1..5,
+        ),
     ) {
-        let log = output_log(&data);
-        let checkpoint_index = checkpoint_selector % data.len();
-        let checkpoint_offset = checkpoint_index as u64;
-        let mut seed = None;
-        let mut unserialized_checkpoint = None;
-        replay_with(&log, None, |record, state, engine| {
-            if record.event_byte_offset == Some(checkpoint_offset) {
-                if let Some(engine_vt) = engine.format_replay_seed()? {
-                    seed = Some(ReplaySeed {
-                        inspection: StateInspection {
-                            record,
-                            state: state.clone(),
-                        },
-                        engine_vt,
-                    });
-                } else {
-                    unserialized_checkpoint = Some(state.clone());
-                }
-            }
-            return Ok(());
-        })
-        .expect("checkpoint source replay");
+        let events = chunks
+            .iter()
+            .map(|fragments| {
+                return output(&fragments
+                    .iter()
+                    .flat_map(|&index| return CHECKPOINT_FRAGMENTS[index].iter().copied())
+                    .collect::<Vec<_>>());
+            })
+            .collect();
 
-        let Some(seed) = seed else {
-            prop_assert!(unserialized_checkpoint.is_some(), "unserialized checkpoint state must be captured");
-            return Ok(());
-        };
-        let remaining = data.len().saturating_sub(checkpoint_index.saturating_add(1)) as u64;
-        let seeded = replay_with_seed_and_limits(
-            &log,
-            None,
-            seed,
-            ReplayLimits {
-                output_bytes: remaining,
-                ..DEFAULT_REPLAY_LIMITS
-            },
-            |_, _, _| return Ok(()),
-        )
-        .expect("checkpoint replay");
-        let canonical = replay(&log).expect("canonical replay");
-        prop_assert_eq!(
-            seeded.final_state_hash,
-            canonical.artifacts.final_state_hash
-        );
-        prop_assert_eq!(seeded.state_count, canonical.artifacts.state_count);
+        assert_every_checkpoint_resumes_canonically(&event_log(6, 3, events));
     }
 }

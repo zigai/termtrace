@@ -116,8 +116,9 @@ pub(super) fn parse_diagnostic_check(value: &str) -> StdResult<DiagnosticCheck, 
         "modes" => Ok(DiagnosticCheck::Modes),
         "palette" => Ok(DiagnosticCheck::Palette),
         "query-loop" => Ok(DiagnosticCheck::QueryLoop),
+        "effects" => Ok(DiagnosticCheck::Effects),
         _ => Err(format!(
-            "unknown diagnostic check `{value}`; expected full-redraw, transient, dirty, cursor, modes, palette, or query-loop"
+            "unknown diagnostic check `{value}`; expected full-redraw, transient, dirty, cursor, modes, palette, query-loop, or effects"
         )),
     };
 }

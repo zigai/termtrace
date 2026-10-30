@@ -55,6 +55,54 @@
       ],
       "type": "object"
     },
+    "ActionShellCommand": {
+      "additionalProperties": false,
+      "description": "First shell command that OSC 133 marks report after the action's input intent.",
+      "properties": {
+        "command": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Base64Bytes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Decoded command line when the shell sent one."
+        },
+        "ended": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommandMark"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Mark where the command finished, absent while it still runs."
+        },
+        "exit_code": {
+          "description": "Exit code the shell reported with the end mark.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "started": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommandMark"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Mark where the command started running, absent when the shell skipped it."
+        }
+      },
+      "type": "object"
+    },
     "ActionWarning": {
       "additionalProperties": false,
       "description": "One bounded warning derived from canonical action evidence.",
@@ -79,6 +127,34 @@
         "code",
         "confidence",
         "facts"
+      ],
+      "type": "object"
+    },
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
+    "CommandMark": {
+      "additionalProperties": false,
+      "description": "Canonical output byte that carried an OSC 133 mark.",
+      "properties": {
+        "event_byte_offset": {
+          "description": "Offset of that byte within the event.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "event_seq": {
+          "description": "Canonical output event holding the mark's completing byte.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "event_seq",
+        "event_byte_offset"
       ],
       "type": "object"
     },
@@ -469,6 +545,17 @@
           "description": "Canonical session identity.",
           "format": "uuid",
           "type": "string"
+        },
+        "shell_command": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActionShellCommand"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Shell command boundaries after the action, when the shell sent OSC 133 marks."
         },
         "source_final_event_hash": {
           "description": "Final canonical source hash.",

@@ -109,7 +109,12 @@ impl<'source> TimelineRanks<'source> {
         return Ok(());
     }
 
-    pub(super) fn before(&mut self, key: TimelineKey, state_id: u64) -> Result<(u64, u64, u64)> {
+    pub(super) fn before(
+        &mut self,
+        key: TimelineKey,
+        state_id: u64,
+        effects_before: u64,
+    ) -> Result<(u64, u64, u64)> {
         while self.canonical_next.is_some_and(|next| return next < key) {
             self.canonical_count = self
                 .canonical_count
@@ -127,7 +132,8 @@ impl<'source> TimelineRanks<'source> {
         }
 
         let rank = state_id
-            .checked_add(self.canonical_count)
+            .checked_add(effects_before)
+            .and_then(|rank| return rank.checked_add(self.canonical_count))
             .and_then(|rank| return rank.checked_add(self.control_count))
             .ok_or_else(|| return invalid_replay("checkpoint timeline rank overflow"))?;
 

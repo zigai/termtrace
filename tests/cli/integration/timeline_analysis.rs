@@ -15,7 +15,7 @@ fn streamed_diagnostic_detectors_match_materialized_reports() {
     let session = temporary.path().join("detectors");
     let mut record = Command::cargo_bin("termtrace").expect("binary");
     record.args(["record", "--no-input", "--out"]).arg(&session)
-        .args(["--", "/bin/sh", "-c", "printf '\\033[?2026hhidden\\033[?2026l\\033[2J\\033[HAAA\\033[HBBB\\033[HAAA\\033[20;30Hjump\\033[3J\\033[?25l\\033[?25h\\033[?25l\\033[6n\\033[6n\\033[6n'"])
+        .args(["--", "/bin/sh", "-c", "printf '\\033[?2026hhidden\\033[?2026l\\033[2J\\033[HAAA\\033[HBBB\\033[HAAA\\033[20;30Hjump\\033[3J\\033[?25l\\033[?25h\\033[?25l\\033[6n\\033[6n\\033[6n\\033]7400;x\\007\\033_Zcustom;y\\033\\\\'"])
         .assert().success();
 
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
@@ -59,6 +59,113 @@ fn streamed_diagnostic_detectors_match_materialized_reports() {
 
         assert_eq!(actual, expected);
     }
+}
+
+#[test]
+fn terminal_effects_show_in_timeline_and_diagnose_without_payloads() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("effects");
+    // `c2VjcmV0LXZhbHVl` is base64 for `secret-value`.
+    let script = concat!(
+        "printf '\\033]133;A\\007$ \\033]133;B\\007\\033]133;C\\007out\\033]133;D;3\\007';",
+        "printf '\\033]52;c;c2VjcmV0LXZhbHVl\\007\\033]777;notify;Build;hunter2-body\\007';",
+        "printf '\\033]7400;token=abc\\007\\033]7400;b\\007\\007'",
+    );
+
+    let mut record = Command::cargo_bin("termtrace").expect("binary");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", script])
+        .assert()
+        .success();
+
+    let run = |arguments: &[&str]| {
+        let mut command = Command::cargo_bin("termtrace").expect("binary");
+        let output = command
+            .args(arguments)
+            .arg(&session)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        return String::from_utf8(output).expect("UTF-8 output");
+    };
+    let timeline = run(&["analyze", "timeline", "--all"]);
+    let jsonl = run(&["analyze", "timeline", "--all", "--jsonl"]);
+    let diagnose_text = run(&["analyze", "diagnose", "--check", "effects"]);
+    let diagnose_json = run(&["analyze", "diagnose", "--check", "effects", "--json"]);
+
+    for output in [&timeline, &jsonl, &diagnose_text, &diagnose_json] {
+        for secret in [
+            "secret-value",
+            "c2VjcmV0LXZhbHVl",
+            "hunter2",
+            "aHVudGVyMi1ib2R5",
+            "token=abc",
+        ] {
+            assert!(!output.contains(secret), "{secret} leaked into {output}");
+        }
+    }
+
+    let effects = timeline
+        .lines()
+        .filter_map(|line| return line.split_once("effect ").map(|(_, effect)| return effect))
+        .map(|effect| {
+            return effect
+                .split_once(" byte ")
+                .map_or(effect, |(kind, _)| return kind);
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        effects,
+        [
+            "prompt_start",
+            "input_start",
+            "command_start",
+            "command_end",
+            "clipboard_write",
+            "desktop_notification",
+            "unknown_sequence",
+            "unknown_sequence",
+            "bell",
+        ]
+    );
+    assert!(timeline.contains(" exit=3"));
+    assert!(timeline.contains("target=standard data=[text/plain=12B:"));
+    assert!(timeline.contains(r#"osc id="7400""#));
+
+    let entries = jsonl
+        .lines()
+        .map(|line| return serde_json::from_str::<serde_json::Value>(line).expect("JSON line"))
+        .filter(|entry| {
+            return entry.pointer("/item/kind") == Some(&serde_json::json!("terminal_effect"));
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(entries.len(), effects.len());
+    assert!(entries.iter().all(|entry| {
+        return entry["event_seq"].is_u64()
+            && entry["monotonic_ns"].is_u64()
+            && entry
+                .pointer("/item/event_byte_offset")
+                .is_some_and(serde_json::Value::is_u64);
+    }));
+    assert_eq!(
+        entries[4].pointer("/item/effect/representations/0/data/byte_length"),
+        Some(&serde_json::json!(12))
+    );
+
+    let report: serde_json::Value = serde_json::from_str(&diagnose_json).expect("diagnose JSON");
+    let findings = report["findings"].as_array().expect("findings");
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0]["code"], "ignored_control_strings");
+    assert!(findings[0]["facts"][0]
+        .as_str()
+        .is_some_and(|fact| return fact.starts_with("the program sent 2 APC or OSC strings")));
+    assert_eq!(findings[0]["facts"][1], "first kinds: OSC 7400");
+    assert!(diagnose_text.contains("ignored_control_strings"));
 }
 
 #[test]

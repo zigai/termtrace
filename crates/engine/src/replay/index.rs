@@ -1,6 +1,6 @@
 use super::{
-    between, engine::validate_generated_replay_seed, invalid_replay, json_error, replay_for_index,
-    trust::SourceIdentity, ReplaySeed,
+    between, invalid_replay, json_error, replay_for_index, trust::SourceIdentity, ReplaySeed,
+    ReplayVisit,
 };
 use crate::completion;
 use crate::{timeline::resolve_source_range, Error, Result};
@@ -9,7 +9,8 @@ use std::{
     env,
     fmt::Write as _,
     fs::File,
-    io::{BufRead, BufReader, BufWriter, Write},
+    io::{BufRead, BufReader, BufWriter, Read as _, Seek as _, SeekFrom, Write},
+    num::TryFromIntError,
     path::{Path, PathBuf},
 };
 use termtrace_evidence::{
@@ -27,14 +28,16 @@ use termtrace_model::{
     execution::session::SessionCompletion,
     terminal::replay::{
         IndexOptions, IndexOutcome, ReplayArtifacts, ReplayManifest, SemanticReplayCheckpoint,
-        SourceRange, StateIndexEntry, StateInspection, StateRecord, StateSelection, StateSelector,
-        GHOSTTY_REVISION, STATE_FORMAT_VERSION, STATE_INDEX,
+        SourceRange, StateIndexEntry, StateRecord, StateSelection, StateSelector, GHOSTTY_REVISION,
+        STATE_FORMAT_VERSION, STATE_INDEX,
     },
     terminal::state::SemanticState,
-    value::ByteString,
 };
 use uuid::Uuid;
-use zstd::stream::write::Encoder as ZstdEncoder;
+use zstd::{
+    bulk::Compressor,
+    stream::{decode_all, write::Encoder as ZstdEncoder},
+};
 
 mod control;
 mod rank;
@@ -49,6 +52,8 @@ use source::IndexSource;
 const REPLAY_CHECKPOINT_STATE_COUNT: u64 = 128;
 const INDEX_MANIFEST: &str = "manifest.json";
 const CHECKPOINTS: &str = "checkpoints.jsonl.zst";
+const CHECKPOINT_FRAMES: &str = "checkpoints.bin";
+const CHECKPOINT_COMPRESSION_LEVEL: i32 = 3;
 pub(crate) const CONTROL_INDEX: &str = "control-index.jsonl";
 pub(crate) const CONTROL_SOURCE_INDEX: &str = "control-source-index.jsonl";
 
@@ -463,18 +468,162 @@ fn load_nearest_replay_seed(
         })?;
         let checkpoint: SemanticReplayCheckpoint = serde_json::from_str(&line)
             .map_err(|source| return json_error(checkpoints_path.clone(), source))?;
-        if checkpoint_precedes_selector(&checkpoint.inspection.record, &checkpoint_selector) {
-            selected = Some(ReplaySeed {
-                inspection: checkpoint.inspection,
-                engine_vt: checkpoint.engine_vt.into_bytes(),
-            });
+        if checkpoint_precedes_selector(&checkpoint, &checkpoint_selector) {
+            selected = Some(checkpoint);
             continue;
         }
 
         break;
     }
 
-    return Ok(selected);
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+
+    return read_checkpoint_frame(&directory.join(CHECKPOINT_FRAMES), &selected).map(Some);
+}
+
+fn read_checkpoint_frame(path: &Path, entry: &SemanticReplayCheckpoint) -> Result<ReplaySeed> {
+    let filesystem_error = |source| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        };
+    };
+
+    let length = usize::try_from(entry.length)
+        .map_err(|source| return checkpoint_length_error("frame", source))?;
+
+    let mut file = fs_err::File::open(path).map_err(filesystem_error)?;
+    file.seek(SeekFrom::Start(entry.offset))
+        .map_err(filesystem_error)?;
+
+    let mut compressed = vec![0_u8; length];
+    file.read_exact(&mut compressed).map_err(filesystem_error)?;
+    let frame = decode_all(compressed.as_slice()).map_err(filesystem_error)?;
+
+    let malformed = || return invalid_replay("replay checkpoint frame is malformed");
+    let (record_len, rest) = frame.split_first_chunk::<4>().ok_or_else(malformed)?;
+    let record_len = usize::try_from(u32::from_le_bytes(*record_len))
+        .map_err(|source| return checkpoint_length_error("record", source))?;
+    let (record, checkpoint) = rest.split_at_checked(record_len).ok_or_else(malformed)?;
+    let record: StateRecord = serde_json::from_slice(record)
+        .map_err(|source| return json_error(path.to_path_buf(), source))?;
+
+    if record.state_id != entry.state_id
+        || record.event_seq != entry.event_seq
+        || record.monotonic_ns != entry.monotonic_ns
+    {
+        return Err(invalid_replay(
+            "replay checkpoint frame does not match its catalog entry",
+        ));
+    }
+    return Ok(ReplaySeed {
+        record,
+        checkpoint: checkpoint.to_vec(),
+    });
+}
+
+fn checkpoint_length_error(part: &str, source: TryFromIntError) -> Error {
+    return Error::InvalidReplay {
+        reason: format!("replay checkpoint {part} length does not fit"),
+        source: Some(Box::new(source)),
+    };
+}
+
+struct CheckpointWriter {
+    catalog: ZstdEncoder<'static, File>,
+    frames: BufWriter<File>,
+    compressor: Compressor<'static>,
+    offset: u64,
+}
+
+impl CheckpointWriter {
+    fn create(directory: &Path) -> Result<Self> {
+        let catalog_path = directory.join(CHECKPOINTS);
+        let catalog_error = |source| {
+            return Error::Filesystem {
+                path: catalog_path.clone(),
+                source,
+            };
+        };
+        let mut catalog =
+            ZstdEncoder::new(secure_file(&catalog_path)?, CHECKPOINT_COMPRESSION_LEVEL)
+                .map_err(catalog_error)?;
+        catalog.include_checksum(true).map_err(catalog_error)?;
+
+        let compressor = Compressor::new(CHECKPOINT_COMPRESSION_LEVEL).map_err(|source| {
+            return Error::Filesystem {
+                path: directory.join(CHECKPOINT_FRAMES),
+                source,
+            };
+        })?;
+
+        return Ok(Self {
+            catalog,
+            frames: secure_writer(&directory.join(CHECKPOINT_FRAMES))?,
+            compressor,
+            offset: 0,
+        });
+    }
+
+    fn append(&mut self, record: &StateRecord, checkpoint: &[u8], directory: &Path) -> Result<()> {
+        let frames_error = |source| {
+            return Error::Filesystem {
+                path: directory.join(CHECKPOINT_FRAMES),
+                source,
+            };
+        };
+
+        let record_json = serde_json::to_vec(record)
+            .map_err(|source| return json_error(directory.join(CHECKPOINT_FRAMES), source))?;
+        let record_len = u32::try_from(record_json.len())
+            .map_err(|source| return checkpoint_length_error("record", source))?;
+
+        let mut frame = Vec::with_capacity(4 + record_json.len() + checkpoint.len());
+        frame.extend_from_slice(&record_len.to_le_bytes());
+        frame.extend_from_slice(&record_json);
+        frame.extend_from_slice(checkpoint);
+        let compressed = self.compressor.compress(&frame).map_err(frames_error)?;
+        self.frames.write_all(&compressed).map_err(frames_error)?;
+
+        let length = u64::try_from(compressed.len()).unwrap_or(u64::MAX);
+        let entry = SemanticReplayCheckpoint {
+            state_id: record.state_id,
+            event_seq: record.event_seq,
+            monotonic_ns: record.monotonic_ns,
+            offset: self.offset,
+            length,
+        };
+
+        self.offset = self
+            .offset
+            .checked_add(length)
+            .ok_or_else(|| return invalid_replay("replay checkpoint frame offset overflow"))?;
+
+        return write_json_line(&mut self.catalog, &entry, directory);
+    }
+
+    fn finish(self, directory: &Path) -> Result<()> {
+        let catalog_path = directory.join(CHECKPOINTS);
+        let catalog = self.catalog.finish().map_err(|source| {
+            return Error::Filesystem {
+                path: catalog_path.clone(),
+                source,
+            };
+        })?;
+        catalog.sync_data().map_err(|source| {
+            return Error::Filesystem {
+                path: catalog_path,
+                source,
+            };
+        })?;
+
+        return Ok(finish_writer(
+            self.frames,
+            &directory.join(CHECKPOINT_FRAMES),
+        )?);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -486,14 +635,17 @@ enum CheckpointSelector {
     MonotonicNs(u64),
 }
 
-fn checkpoint_precedes_selector(record: &StateRecord, selector: &CheckpointSelector) -> bool {
+fn checkpoint_precedes_selector(
+    checkpoint: &SemanticReplayCheckpoint,
+    selector: &CheckpointSelector,
+) -> bool {
     return match selector {
         CheckpointSelector::Final | CheckpointSelector::LatestPresented => true,
-        CheckpointSelector::StateId(state_id) => record.state_id <= *state_id,
-        CheckpointSelector::EventSeq(event_seq) => record
+        CheckpointSelector::StateId(state_id) => checkpoint.state_id <= *state_id,
+        CheckpointSelector::EventSeq(event_seq) => checkpoint
             .event_seq
             .is_none_or(|value| return value <= *event_seq),
-        CheckpointSelector::MonotonicNs(monotonic_ns) => record.monotonic_ns <= *monotonic_ns,
+        CheckpointSelector::MonotonicNs(monotonic_ns) => checkpoint.monotonic_ns <= *monotonic_ns,
     };
 }
 
@@ -594,33 +746,20 @@ fn write_source_index(
         };
     })?;
 
-    let checkpoints_path = directory.join(CHECKPOINTS);
-    let checkpoints_file = secure_file(&checkpoints_path)?;
-    let mut checkpoints =
-        zstd::stream::write::Encoder::new(checkpoints_file, 3).map_err(|source| {
-            return Error::Filesystem {
-                path: checkpoints_path.clone(),
-                source,
-            };
-        })?;
-    checkpoints.include_checksum(true).map_err(|source| {
-        return Error::Filesystem {
-            path: checkpoints_path.clone(),
-            source,
-        };
-    })?;
-
+    let mut checkpoints = CheckpointWriter::create(directory)?;
     let mut index = secure_writer(&directory.join(STATE_INDEX))?;
     let mut retained_state_count = 0_u64;
     let mut final_retained_state_hash = None;
     let mut previous_retained_state = None;
     let mut current_bucket: Option<u64> = None;
     let mut pending_state: Option<(StateRecord, SemanticState)> = None;
+    let mut effects_before = 0_u64;
     let mut records = source.records()?;
 
     let commit_retained_state = |mut record: StateRecord,
                                  state: &SemanticState,
                                  checkpoint: bool,
+                                 effects_before: u64,
                                  ranks: &mut TimelineRanks,
                                  states: &mut ZstdEncoder<File>,
                                  index: &mut BufWriter<File>,
@@ -644,7 +783,8 @@ fn write_source_index(
             record.event_byte_offset.unwrap_or(0),
         );
         let (timeline_rank, control_index_offset, control_rank) = if checkpoint {
-            let (rank, offset, control_count) = ranks.before(state_key, record.state_id)?;
+            let (rank, offset, control_count) =
+                ranks.before(state_key, record.state_id, effects_before)?;
 
             (Some(rank), Some(offset), Some(control_count))
         } else {
@@ -678,44 +818,30 @@ fn write_source_index(
         records.by_ref(),
         source_range,
         sampling_stride_ns,
-        |record, state, engine| {
+        |visit, engine| {
+            let (record, state) = match visit {
+                ReplayVisit::State(record, state) => (record, state),
+                ReplayVisit::Effect(_) => {
+                    effects_before = effects_before.saturating_add(1);
+
+                    return Ok(());
+                }
+            };
+
             let checkpoint_candidate = state_selection == StateSelection::All
-                && !state.modes.alternate_screen
                 && record.state_id % REPLAY_CHECKPOINT_STATE_COUNT == 0;
 
             let mut checkpoint = false;
 
-            if checkpoint_candidate && let Some(engine_vt) = engine.format_replay_seed()? {
-                let inspection = StateInspection {
-                    record: record.clone(),
-                    state: state.clone(),
-                };
-                let seed = ReplaySeed {
-                    inspection: inspection.clone(),
-                    engine_vt: engine_vt.clone(),
-                };
-
-                match validate_generated_replay_seed(source.header(), &seed) {
-                    Ok(()) => {
-                        write_json_line(
-                            &mut checkpoints,
-                            &SemanticReplayCheckpoint {
-                                inspection,
-                                engine_vt: ByteString::from(engine_vt),
-                            },
-                            directory,
-                        )?;
-
-                        checkpoint = true;
-                    }
-                    Err(Error::CheckpointReconstruction { mismatched_fields }) => {
-                        tracing::debug!(
-                            state_id = record.state_id,
-                            ?mismatched_fields,
-                            "skipped non-reconstructable semantic replay checkpoint"
-                        );
-                    }
-                    Err(error) => return Err(error),
+            if checkpoint_candidate {
+                if let Some(bytes) = engine.encode_checkpoint()? {
+                    checkpoints.append(&record, &bytes, directory)?;
+                    checkpoint = true;
+                } else {
+                    tracing::debug!(
+                        state_id = record.state_id,
+                        "skipped replay checkpoint inside an over-long unfinished sequence"
+                    );
                 }
             }
 
@@ -731,6 +857,7 @@ fn write_source_index(
                         record,
                         state,
                         checkpoint,
+                        effects_before,
                         &mut ranks,
                         &mut states,
                         &mut index,
@@ -751,6 +878,7 @@ fn write_source_index(
                             pending_rec,
                             &pending_st,
                             false,
+                            effects_before,
                             &mut ranks,
                             &mut states,
                             &mut index,
@@ -770,6 +898,7 @@ fn write_source_index(
                     record,
                     state,
                     checkpoint,
+                    effects_before,
                     &mut ranks,
                     &mut states,
                     &mut index,
@@ -789,6 +918,7 @@ fn write_source_index(
             pending_rec,
             &pending_st,
             false,
+            effects_before,
             &mut ranks,
             &mut states,
             &mut index,
@@ -818,18 +948,7 @@ fn write_source_index(
         };
     })?;
 
-    let checkpoints_file = checkpoints.finish().map_err(|source| {
-        return Error::Filesystem {
-            path: checkpoints_path.clone(),
-            source,
-        };
-    })?;
-    checkpoints_file.sync_data().map_err(|source| {
-        return Error::Filesystem {
-            path: checkpoints_path,
-            source,
-        };
-    })?;
+    checkpoints.finish(directory)?;
 
     finish_writer(index, &directory.join(STATE_INDEX))?;
     write_secure(&directory.join("final.txt"), &artifacts.final_text)?;

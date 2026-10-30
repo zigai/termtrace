@@ -131,7 +131,9 @@ fn actor_snapshot_refresh_invalidates_the_presented_hash() {
         EventLogWriter::create(directory.join("events.jsonl"), &header, clock).expect("event log");
 
     let journal = MutationJournal::create(&directory).expect("mutation journal");
-    let live = initialize_live_terminal(geometry.into(), &options.colors).expect("live terminal");
+    let live = initialize_live_terminal(geometry.into(), &options.term, &options.colors)
+        .expect("live terminal");
+
     let mut output = io::sink();
     let mut actor = SessionActor::new(
         spawned,

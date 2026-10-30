@@ -1,7 +1,7 @@
 use super::selection::range_error;
 use crate::replay::{
-    timeline_event, visit_states_range, visit_states_range_while, visit_states_seeded_while,
-    DerivedIndex, ReplaySeed, CONTROL_INDEX, CONTROL_SOURCE_INDEX,
+    timeline_event, visit_replay_range_while, visit_replay_seeded_while, DerivedIndex, ReplaySeed,
+    ReplayVisit, CONTROL_INDEX, CONTROL_SOURCE_INDEX,
 };
 use crate::{Error, Result};
 #[cfg(test)]
@@ -15,10 +15,10 @@ use std::{
 use termtrace_evidence::event_log::EventLog;
 use termtrace_model::{
     execution::event::Event,
+    terminal::effect::TerminalEffectRecord,
     terminal::replay::{
         ControlSourceIndexEntry, StateIndexEntry, StateRecord, StateSelector, STATE_INDEX,
     },
-    terminal::state::SemanticState,
     terminal::vt::VtToken,
 };
 use termtrace_model::{
@@ -82,6 +82,10 @@ pub(super) fn timeline_key(entry: &TimelineEntry) -> TimelineKey {
         TimelineItem::SemanticState {
             event_byte_offset, ..
         } => (2, event_byte_offset.unwrap_or(0)),
+        // Equal to the key of the state the same byte produced; replay order puts the effect first.
+        TimelineItem::TerminalEffect {
+            event_byte_offset, ..
+        } => (2, *event_byte_offset),
     };
 
     return (
@@ -118,6 +122,29 @@ pub(super) fn semantic_timeline_entry(state: &StateRecord) -> TimelineEntry {
             modes_changed: state.delta.modes.is_some(),
             metadata_changed: state.delta.metadata.is_some(),
         },
+    };
+}
+
+pub(super) fn effect_timeline_entry(record: TerminalEffectRecord) -> TimelineEntry {
+    return TimelineEntry {
+        monotonic_ns: record.monotonic_ns,
+        event_seq: Some(record.event_seq),
+        item: TimelineItem::TerminalEffect {
+            event_byte_offset: record.event_byte_offset,
+            effect: record.effect,
+        },
+    };
+}
+
+// Hidden states are skipped unless requested; effects are always part of the timeline.
+pub(super) fn replay_timeline_entry(
+    visit: ReplayVisit<'_>,
+    include_hidden_states: bool,
+) -> Option<TimelineEntry> {
+    return match visit {
+        ReplayVisit::State(record, _) => (include_hidden_states || record.presented)
+            .then(|| return semantic_timeline_entry(&record)),
+        ReplayVisit::Effect(record) => Some(effect_timeline_entry(record)),
     };
 }
 
@@ -687,14 +714,10 @@ pub fn build_timeline(
     range: Option<SourceRange>,
 ) -> Result<Vec<TimelineEntry>> {
     let mut entries = Vec::new();
-    visit_states_range(log, range, |state, _| {
-        if !include_hidden_states && !state.presented {
-            return Ok(());
-        }
+    visit_replay_range_while(log, range, |visit| {
+        entries.extend(replay_timeline_entry(visit, include_hidden_states));
 
-        entries.push(semantic_timeline_entry(state));
-
-        return Ok(());
+        return Ok(true);
     })?;
 
     for record in &log.events {
@@ -764,6 +787,7 @@ pub fn build_timeline(
         }
     }
 
+    // Stable, so an effect stays ahead of the state with the same key.
     entries.sort_by_key(timeline_key);
 
     return Ok(entries);
@@ -805,7 +829,7 @@ pub fn build_timeline_page(
 
     let checkpoint_rank = checkpoint.as_ref().map_or(0, |(rank, _, _)| return *rank);
     let minimum_key = checkpoint.as_ref().map(|(_, seed, _)| {
-        return timeline_key(&semantic_timeline_entry(&seed.inspection.record));
+        return timeline_key(&semantic_timeline_entry(&seed.record));
     });
 
     let auxiliary_start = minimum_key
@@ -842,12 +866,11 @@ pub fn build_timeline_page(
         has_next: false,
     };
 
-    let mut visitor = |record: &StateRecord, _: &SemanticState| {
-        if !include_hidden_states && !record.presented {
+    let mut visitor = |visit: ReplayVisit<'_>| {
+        let Some(semantic) = replay_timeline_entry(visit, include_hidden_states) else {
             return Ok(true);
-        }
+        };
 
-        let semantic = semantic_timeline_entry(record);
         loop {
             if pending_auxiliary.is_none() {
                 pending_auxiliary = auxiliary.next()?;
@@ -877,8 +900,8 @@ pub fn build_timeline_page(
         return Ok(collector.push(semantic));
     };
     match checkpoint {
-        Some((_, seed, _)) => visit_states_seeded_while(log, seed, &mut visitor)?,
-        None => visit_states_range_while(log, range, &mut visitor)?,
+        Some((_, seed, _)) => visit_replay_seeded_while(log, seed, &mut visitor)?,
+        None => visit_replay_range_while(log, range, &mut visitor)?,
     }
 
     while !collector.has_next {

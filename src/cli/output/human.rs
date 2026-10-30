@@ -216,9 +216,16 @@ pub(crate) fn human_action_summary(value: &serde_json::Value) -> String {
 
 pub(crate) fn human_last_action_summary(report: &LastActionReport) -> Result<String> {
     let status = stable_enum_label(&report.action.status)?;
+    let command = match &report.shell_command {
+        Some(command) if command.ended.is_some() => {
+            format!(", command exit={}", optional_display(command.exit_code))
+        }
+        Some(_) => ", command running".to_owned(),
+        None => String::new(),
+    };
 
     return Ok(format!(
-        "Last action: status={status}, bytes={}, changed={} cells across {} rows, warnings={}\n",
+        "Last action: status={status}, bytes={}, changed={} cells across {} rows{command}, warnings={}\n",
         report.action.bytes_written,
         report.cells_changed,
         report.rows_changed.len(),

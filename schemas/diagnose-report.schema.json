@@ -37,6 +37,11 @@
           "const": "query_loop",
           "description": "Repeated equal query/response exchanges.",
           "type": "string"
+        },
+        {
+          "const": "effects",
+          "description": "Control strings the semantic engine ignored and processing errors it reported.",
+          "type": "string"
         }
       ]
     },

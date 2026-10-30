@@ -18,4 +18,4 @@ mod terminal;
 
 pub use input::encode_focus;
 pub use state::Format;
-pub use terminal::GhosttyVt;
+pub use terminal::{GhosttyVt, OutputStep, RenderHold};

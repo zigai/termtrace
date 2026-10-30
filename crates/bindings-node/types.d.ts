@@ -96,6 +96,18 @@ export interface ActionPostconditionResultScreen {
   state_hash?: string | null
 }
 
+/** First shell command that OSC 133 marks report after the action's input intent. */
+export interface ActionShellCommand {
+  /** Decoded command line when the shell sent one. */
+  command?: Base64Bytes | null
+  /** Mark where the command finished, absent while it still runs. */
+  ended?: CommandMark | null
+  /** Exit code the shell reported with the end mark. */
+  exit_code?: number | null
+  /** Mark where the command started running, absent when the shell skipped it. */
+  started?: CommandMark | null
+}
+
 /** One bounded warning derived from canonical action evidence. */
 export interface ActionWarning {
   /** Stable warning code. */
@@ -524,6 +536,17 @@ export interface ChangeVisualization {
   source: ChangeSource
 }
 
+/** One MIME representation of a clipboard write. */
+export interface ClipboardRepresentation {
+  /** Digest of the decoded representation data. */
+  data: PayloadDigest
+  /** MIME type of the representation. */
+  mime: string
+}
+
+/** Clipboard a program asked to write. */
+export type ClipboardTarget = "standard" | "selection" | "primary" | "other"
+
 /** A system monotonic clock bracket around a session-relative clock sample. */
 export interface ClockSample {
   /** Session-relative time sampled inside the system clock bracket. */
@@ -567,6 +590,14 @@ export interface ColorState {
   foreground: Rgb
   /** Active 256-color palette. */
   palette: Array<Rgb>
+}
+
+/** Canonical output byte that carried an OSC 133 mark. */
+export interface CommandMark {
+  /** Offset of that byte within the event. */
+  event_byte_offset: bigint
+  /** Canonical output event holding the mark's completing byte. */
+  event_seq: bigint
 }
 
 /** Outcome of one control command step. */
@@ -697,7 +728,7 @@ export interface DiagnoseReport {
 }
 
 /** Stable detector selectable by `diagnose --check`. */
-export type DiagnosticCheck = "full_redraw" | "transient" | "dirty" | "cursor" | "modes" | "palette" | "query_loop"
+export type DiagnosticCheck = "full_redraw" | "transient" | "dirty" | "cursor" | "modes" | "palette" | "query_loop" | "effects"
 
 /** One conservative session-wide diagnostic finding. */
 export interface DiagnosticFinding {
@@ -1648,6 +1679,8 @@ export interface LastActionReport {
   rows_changed: Array<number>
   /** Canonical session identity. */
   session_id: string
+  /** Shell command boundaries after the action, when the shell sent OSC 133 marks. */
+  shell_command?: ActionShellCommand | null
   /** Final canonical source hash. */
   source_final_event_hash: string
   /** Later semantic state identifier. */
@@ -2264,6 +2297,14 @@ export interface PageSource {
   session_path_display: string
 }
 
+/** Length and short hash of a payload that may hold a secret, without the payload. */
+export interface PayloadDigest {
+  /** Leading hex characters of the payload's BLAKE3 hash. */
+  blake3: string
+  /** Payload length in bytes. */
+  byte_length: bigint
+}
+
 /** Serializable uncertain-operation summary. */
 export interface PendingOperationReport {
   /** Intended input byte count. */
@@ -2581,6 +2622,9 @@ export interface PreviewOptions {
 /** Safely supported process-group signals. */
 export type ProcessSignal = "interrupt" | "terminate" | "hangup" | "user1" | "user2"
 
+/** State of an OSC 9;4 progress report. */
+export type ProgressState = "remove" | "set" | "error" | "indeterminate" | "pause" | "other"
+
 /** Bounded projected canonical events. `has_more` concerns this finite snapshot only. */
 export interface ProjectedEventPage {
   /** Next scanned position. Filters may advance an empty page. */
@@ -2600,6 +2644,9 @@ export interface ProjectionSpec {
   /** Exact half-open region; the complete viewport when absent. */
   region?: ScreenRegion | null
 }
+
+/** Which prompt an OSC 133 prompt start draws. */
+export type PromptKind = "primary" | "right" | "continuation" | "secondary" | "other"
 
 /** How one selected provenance value is represented. */
 export type ProvenanceCapture = "value" | "hash" | "name" | "not_captured"
@@ -4141,6 +4188,111 @@ export interface SurvivingPathRecord {
   path: Base64Bytes
 }
 
+/** A side effect the program asked the terminal for, as libghostty-vt reported it. */
+export type TerminalEffect = TerminalEffectBell | TerminalEffectTitleChanged | TerminalEffectWorkingDirectoryChanged | TerminalEffectClipboardWrite | TerminalEffectDesktopNotification | TerminalEffectProgressReport | TerminalEffectFullReset | TerminalEffectWindowResizeRequest | TerminalEffectPromptStart | TerminalEffectInputStart | TerminalEffectCommandStart | TerminalEffectCommandEnd | TerminalEffectUnknownSequence | TerminalEffectProcessingError
+
+/** BEL outside any control string. */
+export interface TerminalEffectBell {
+  type: "bell"
+}
+
+/** OSC 52, OSC 1337, or OSC 5522 asked to write the clipboard. */
+export interface TerminalEffectClipboardWrite {
+  /** Representations of the written value; empty clears the clipboard. */
+  representations: Array<ClipboardRepresentation>
+  /** Destination clipboard. */
+  target: ClipboardTarget
+  type: "clipboard_write"
+}
+
+/** OSC 133 marked the command finishing. */
+export interface TerminalEffectCommandEnd {
+  /** Error description when the shell sent one. */
+  error?: Base64Bytes | null
+  /** Exit code when the shell reported one. */
+  exit_code?: number | null
+  type: "command_end"
+}
+
+/** OSC 133 marked the submitted command starting to run. */
+export interface TerminalEffectCommandStart {
+  /** Decoded command line when the shell sent one. */
+  command?: Base64Bytes | null
+  type: "command_start"
+}
+
+/** OSC 9 or OSC 777 asked for a desktop notification. */
+export interface TerminalEffectDesktopNotification {
+  /** Digest of the notification body. */
+  body: PayloadDigest
+  /** Digest of the notification title. */
+  title: PayloadDigest
+  type: "desktop_notification"
+}
+
+/** RIS reset the terminal. */
+export interface TerminalEffectFullReset {
+  type: "full_reset"
+}
+
+/** OSC 133 marked the end of the prompt and the start of command input. */
+export interface TerminalEffectInputStart {
+  type: "input_start"
+}
+
+/** libghostty-vt hit an error that may have prevented a semantic update. */
+export interface TerminalEffectProcessingError {
+  type: "processing_error"
+}
+
+/** OSC 9;4 reported progress. */
+export interface TerminalEffectProgressReport {
+  /** Percentage from 0 through 100 when the program sent one. */
+  percent?: number | null
+  /** Reported state. */
+  state: ProgressState
+  type: "progress_report"
+}
+
+/** OSC 133 started drawing a prompt. */
+export interface TerminalEffectPromptStart {
+  /** Which prompt started. */
+  prompt: PromptKind
+  type: "prompt_start"
+}
+
+/** OSC 0 or OSC 2 set the window title. */
+export interface TerminalEffectTitleChanged {
+  /** New title bytes. */
+  title: Base64Bytes
+  type: "title_changed"
+}
+
+/** The program sent an APC or OSC string that the semantic engine ignored. */
+export interface TerminalEffectUnknownSequence {
+  /** Leading command name or number: at most 16 ASCII alphanumeric, `-`, `_`, or `.` bytes. */
+  identifier: Base64Bytes
+  /** Control string family. */
+  kind: UnknownSequenceKind
+  type: "unknown_sequence"
+}
+
+/** CSI 8 t asked to resize the window; the terminal itself is not resized. */
+export interface TerminalEffectWindowResizeRequest {
+  /** Requested columns, absent to keep the current width. */
+  columns?: number | null
+  /** Requested rows, absent to keep the current height. */
+  rows?: number | null
+  type: "window_resize_request"
+}
+
+/** OSC 7, OSC 9, or OSC 1337 reported the working directory. */
+export interface TerminalEffectWorkingDirectoryChanged {
+  /** Reported location, usually a `file://` URI; empty clears it. */
+  location: Base64Bytes
+  type: "working_directory_changed"
+}
+
 /** Geometry reported by a live terminal through XTWINOPS queries. */
 export interface TerminalGeometryReport {
   /** Height of one rendered cell in pixels. */
@@ -4205,7 +4357,7 @@ export interface TimelineEntry {
 }
 
 /** Concise canonical or semantic item in a diagnostic timeline. */
-export type TimelineItem = TimelineItemSemanticState | TimelineItemCanonicalEvent | TimelineItemVtToken
+export type TimelineItem = TimelineItemSemanticState | TimelineItemTerminalEffect | TimelineItemCanonicalEvent | TimelineItemVtToken
 
 /** A non-output canonical event retained verbatim. */
 export interface TimelineItemCanonicalEvent {
@@ -4237,6 +4389,15 @@ export interface TimelineItemSemanticState {
   state_hash: string
   /** Dense semantic state identifier. */
   state_id: bigint
+}
+
+/** A side effect libghostty-vt reported while replaying output. */
+export interface TimelineItemTerminalEffect {
+  /** Reported effect. */
+  effect: TerminalEffect
+  /** Offset of the completing byte within the responsible output event. */
+  event_byte_offset: bigint
+  kind: "terminal_effect"
 }
 
 /** One lossless explanatory VT frame. */
@@ -4904,6 +5065,9 @@ export interface TmuxTrackCatalogEntry {
 
 /** Rendering truth represented by an observation. */
 export type TruthLayer = "semantic" | "native"
+
+/** Family of a control string the semantic engine does not implement. */
+export type UnknownSequenceKind = "apc" | "osc"
 
 /** Before/after values for one changed semantic property. */
 export interface ValueChange {

@@ -1,6 +1,7 @@
 use super::*;
 use crate::replay::{reset_test_replay_output_bytes, test_replay_output_bytes, write_cataloged};
 use termtrace_model::execution::event::{EventLogHeader, EventRecord};
+use termtrace_model::terminal::effect::{ProgressState, PromptKind, TerminalEffect};
 use termtrace_model::value::ByteString;
 use uuid::Uuid;
 
@@ -351,4 +352,206 @@ fn late_page_uses_checkpoint_and_retains_only_requested_entries() {
         page.entries,
         full.into_iter().skip(1_090).take(3).collect::<Vec<_>>()
     );
+}
+
+fn output_log(outputs: &[&[u8]], source_path: Option<PathBuf>) -> EventLog {
+    let events = outputs
+        .iter()
+        .enumerate()
+        .map(|(index, data)| {
+            let seq = u64::try_from(index).expect("event sequence");
+
+            return EventRecord {
+                observed_monotonic_ns: None,
+                seq,
+                monotonic_ns: seq.saturating_add(1),
+                prev_hash: format!("{seq:064x}"),
+                hash: format!("{:064x}", seq.saturating_add(1)),
+                event: Event::Output {
+                    data: ByteString::from(*data),
+                },
+            };
+        })
+        .collect();
+
+    return EventLog {
+        header: EventLogHeader::new(
+            Uuid::now_v7(),
+            "0".repeat(64),
+            0,
+            80,
+            24,
+            800,
+            480,
+            "xterm-ghostty",
+        ),
+        events,
+        pending_operations: Vec::new(),
+        source_path,
+    };
+}
+
+fn effects(entries: &[TimelineEntry]) -> Vec<(u64, u64, TerminalEffect)> {
+    return entries
+        .iter()
+        .filter_map(|entry| match &entry.item {
+            TimelineItem::TerminalEffect {
+                event_byte_offset,
+                effect,
+            } => return Some((entry.event_seq?, *event_byte_offset, effect.clone())),
+            _ => return None,
+        })
+        .collect();
+}
+
+#[test]
+fn timeline_reports_effects_at_the_byte_that_completes_them() {
+    let log = output_log(
+        &[
+            b"\x1b]133;A\x07$ \x1b]133;B\x07",
+            b"\x1b]133;C\x07out\x1b]2;t\x07\x07\x1b]133;D;",
+            b"3\x07\x1b[?2026hhidden\x1b]133;D\x07\x1b]9;4;3\x07\x1b[?2026l",
+        ],
+        None,
+    );
+
+    let timeline = build_timeline(&log, false, false, None).expect("timeline");
+    assert_eq!(
+        effects(&timeline),
+        vec![
+            (
+                0,
+                7,
+                TerminalEffect::PromptStart {
+                    prompt: PromptKind::Primary
+                }
+            ),
+            (0, 17, TerminalEffect::InputStart),
+            (1, 7, TerminalEffect::CommandStart { command: None }),
+            (
+                1,
+                16,
+                TerminalEffect::TitleChanged {
+                    title: ByteString::from(b"t".as_slice())
+                }
+            ),
+            (1, 17, TerminalEffect::Bell),
+            (
+                2,
+                1,
+                TerminalEffect::CommandEnd {
+                    exit_code: Some(3),
+                    error: None
+                }
+            ),
+            (
+                2,
+                23,
+                TerminalEffect::CommandEnd {
+                    exit_code: None,
+                    error: None
+                }
+            ),
+            (
+                2,
+                31,
+                TerminalEffect::ProgressReport {
+                    state: ProgressState::Indeterminate,
+                    percent: None
+                }
+            ),
+        ]
+    );
+    assert!(timeline
+        .windows(2)
+        .all(|pair| return timeline_key(&pair[0]) <= timeline_key(&pair[1])));
+
+    // The title's state follows its effect, which shares the state's timeline key.
+    let title = timeline
+        .iter()
+        .position(|entry| {
+            return matches!(
+                entry.item,
+                TimelineItem::TerminalEffect {
+                    effect: TerminalEffect::TitleChanged { .. },
+                    ..
+                }
+            );
+        })
+        .expect("title effect");
+    assert!(matches!(
+        timeline[title + 1].item,
+        TimelineItem::SemanticState {
+            event_byte_offset: Some(16),
+            metadata_changed: true,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn checkpointed_pages_report_the_same_effects_as_full_replay() {
+    let temporary = tempfile::TempDir::new().expect("temporary directory");
+    let outputs = (0..300_u32)
+        .map(|seq| {
+            // Every third event leaves an unknown OSC open for the next one to finish.
+            let tail: &[u8] = if seq % 3 == 0 { b"\x1b]7400;a" } else { b"" };
+            let mut bytes = format!("{seq:04}\x07\x1b]133;D;{seq}\x07").into_bytes();
+            if seq % 3 == 1 {
+                bytes.splice(0..0, *b"b\x07");
+            }
+
+            bytes.extend_from_slice(tail);
+
+            return bytes;
+        })
+        .collect::<Vec<_>>();
+
+    let slices = outputs.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    let mut log = output_log(&slices, Some(temporary.path().join("events.jsonl")));
+    write_cataloged(temporary.path(), &log).expect("checkpointed index");
+    let indexed = log.clone();
+    log.source_path = None;
+    let full = build_timeline(&log, true, false, None).expect("full timeline");
+    assert_eq!(
+        effects(&full)
+            .iter()
+            .filter(|(_, _, effect)| return matches!(
+                effect,
+                TerminalEffect::UnknownSequence { .. }
+            ))
+            .count(),
+        100
+    );
+
+    for offset in [0, 700, 1_000, 1_597, full.len() - 3] {
+        reset_test_replay_output_bytes();
+
+        let page = build_timeline_page(
+            &indexed,
+            true,
+            false,
+            None,
+            u64::try_from(offset).expect("offset"),
+            3,
+        )
+        .expect("checkpointed page");
+
+        if offset >= 1_000 {
+            assert!(
+                test_replay_output_bytes() < 4_000,
+                "page at {offset} did not start from a checkpoint"
+            );
+        }
+
+        assert_eq!(
+            page.entries,
+            full.iter()
+                .skip(offset)
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>(),
+            "page at {offset}"
+        );
+    }
 }

@@ -1,29 +1,30 @@
 //! Terminal presentation parsing and semantic-state tracking.
 
-use super::{control::MutationHistory, input::apply_query_response, model::TerminalGeometry};
+use super::{input::apply_query_response, model::TerminalGeometry};
 use crate::{Error, Result};
 use std::{cell::RefCell, io::Write, mem::take};
 use termtrace_evidence::event_log::EventLogWriter;
 use termtrace_model::{execution::event::Event, terminal::state::SemanticState, value::ByteString};
-use termtrace_terminal::{
-    GhosttyVt, PresentationAction, PresentationTracker, PresentationTransition, QueryTracker,
-};
+use termtrace_terminal::{GhosttyVt, RenderHold};
 use uuid::Uuid;
+
+// Longer control sequences are never queries, so they reach the mirror without waiting.
+const MAX_QUERY_SEQUENCE_BYTES: usize = 64 * 1024;
 
 pub(super) struct LiveTerminal {
     pub(super) semantic: GhosttyVt,
     pub(super) presented: SemanticState,
     /// The VT changed since `presented` was last refreshed.
     pub(super) presented_stale: bool,
-    pub(super) presentation_tracker: PresentationTracker,
-    pub(super) query_tracker: QueryTracker,
-    pub(super) pending_query_responses: Vec<Vec<u8>>,
     pub(super) geometry: TerminalGeometry,
     pub(super) source_event_seq: Option<u64>,
-    pub(super) source_byte_offset: Option<u64>,
     pub(super) suppress_mirrored_queries: bool,
     pub(super) mirror_output: Vec<u8>,
-    pub(super) mirror_sequence: Vec<u8>,
+    /// Bytes of a control sequence that has not ended, up to `MAX_QUERY_SEQUENCE_BYTES`.
+    pub(super) open_sequence: Vec<u8>,
+    /// The open sequence outgrew its buffer and was already mirrored.
+    pub(super) open_sequence_mirrored: bool,
+    pub(super) pending_query_responses: Vec<Vec<u8>>,
     pub(super) row_hashes: RefCell<Vec<Option<blake3::Hash>>>,
     pub(super) cached_state_hash: RefCell<Option<String>>,
 }
@@ -74,6 +75,34 @@ impl LiveTerminal {
         return Ok(());
     }
 
+    /// Mirror the bytes of a sequence the child left open when its output closed.
+    pub(super) fn close_output(&mut self) {
+        if self.suppress_mirrored_queries && !self.open_sequence_mirrored {
+            self.mirror_output.append(&mut self.open_sequence);
+        }
+
+        self.open_sequence.clear();
+        self.open_sequence_mirrored = false;
+    }
+
+    fn buffer_open_sequence(&mut self, bytes: &[u8]) {
+        if !self.open_sequence_mirrored
+            && self.open_sequence.len().saturating_add(bytes.len()) > MAX_QUERY_SEQUENCE_BYTES
+        {
+            self.open_sequence_mirrored = true;
+
+            if self.suppress_mirrored_queries {
+                self.mirror_output.extend_from_slice(&self.open_sequence);
+            }
+        }
+
+        if !self.open_sequence_mirrored {
+            self.open_sequence.extend_from_slice(bytes);
+        } else if self.suppress_mirrored_queries {
+            self.mirror_output.extend_from_slice(bytes);
+        }
+    }
+
     pub(super) fn replace_presented(&mut self, presented: SemanticState) {
         let row_hashes = self.row_hashes.get_mut();
         row_hashes.resize(presented.grid.len(), None);
@@ -95,212 +124,56 @@ pub(super) fn process_semantic_output(
     live: &mut LiveTerminal,
     writer: &mut dyn Write,
     event_log: &mut EventLogWriter,
-    mutation_history: &mut MutationHistory,
     data: &[u8],
 ) -> Result<()> {
-    let mut immediate_start: Option<usize> = None;
-
     let mut offset = 0;
-    while offset < data.len() {
-        let remaining = data.get(offset..).unwrap_or(&[]);
-        let (immediate, action) = live.presentation_tracker.push_slice(remaining);
+    while let Some(rest) = data.get(offset..)
+        && !rest.is_empty()
+    {
+        let step = live.semantic.write_step(rest);
+        let plain = rest.get(..step.plain).unwrap_or_default();
+        let sequence = rest.get(step.plain..step.consumed).unwrap_or_default();
+        offset = offset.saturating_add(step.consumed);
+        live.presented_stale = true;
 
-        if !immediate.is_empty() {
-            if immediate_start.is_none() {
-                immediate_start = Some(offset);
+        // Without changes since the last refresh, the kept frame equals `presented`.
+        for hold in live.semantic.take_render_holds()? {
+            if let RenderHold::Began(frame) = hold {
+                live.replace_presented(*frame);
             }
+        }
 
-            offset += immediate.len();
+        live.pending_query_responses
+            .extend(live.semantic.take_responses());
+
+        if live.suppress_mirrored_queries {
+            live.mirror_output.extend_from_slice(plain);
+        }
+
+        live.buffer_open_sequence(sequence);
+
+        if step.open {
             continue;
         }
 
-        let Some(action) = action else {
-            break;
-        };
+        let responses = take(&mut live.pending_query_responses);
 
-        let current_offset = offset;
-        offset += 1;
-
-        match action {
-            PresentationAction::Immediate => {
-                if immediate_start.is_none() {
-                    immediate_start = Some(current_offset);
-                }
-            }
-            PresentationAction::Buffered => {
-                if let Some(start) = immediate_start.take() {
-                    let end = current_offset.max(start);
-                    live.source_byte_offset = Some(u64::try_from(start).unwrap_or(u64::MAX));
-                    process_semantic_bytes(
-                        live,
-                        writer,
-                        event_log,
-                        mutation_history,
-                        data.get(start..end).unwrap_or(&[]),
-                    )?;
-                }
-
-                live.source_byte_offset = Some(u64::try_from(current_offset).unwrap_or(u64::MAX));
-            }
-            PresentationAction::Sequence { bytes, command } => {
-                let seq_start = current_offset.saturating_add(1).saturating_sub(bytes.len());
-                if let Some(start) = immediate_start.take() {
-                    let end = seq_start.max(start);
-                    live.source_byte_offset = Some(u64::try_from(start).unwrap_or(u64::MAX));
-                    process_semantic_bytes(
-                        live,
-                        writer,
-                        event_log,
-                        mutation_history,
-                        data.get(start..end).unwrap_or(&[]),
-                    )?;
-                }
-
-                live.source_byte_offset = Some(u64::try_from(current_offset).unwrap_or(u64::MAX));
-
-                let before_command = if command == Some(true) && live.presented_stale {
-                    Some(live.semantic.snapshot()?)
-                } else {
-                    None
-                };
-                process_semantic_bytes(live, writer, event_log, mutation_history, &bytes)?;
-
-                // Leaving a synchronized update needs no snapshot: the bytes just written
-                // marked `presented` stale, and it refreshes when next observed.
-                if command.is_some()
-                    && live
-                        .presentation_tracker
-                        .reconcile(live.semantic.synchronized_output()?)
-                        == Some(PresentationTransition::EnterSynchronizedOutput)
-                    && let Some(before_command) = before_command
-                {
-                    live.replace_presented(before_command);
-                }
-            }
-        }
-    }
-
-    if let Some(start) = immediate_start.take() {
-        live.source_byte_offset = Some(u64::try_from(start).unwrap_or(u64::MAX));
-        process_semantic_bytes(
-            live,
-            writer,
-            event_log,
-            mutation_history,
-            data.get(start..).unwrap_or(&[]),
-        )?;
-    }
-
-    return Ok(());
-}
-
-fn is_query_start_byte(byte: u8) -> bool {
-    return matches!(byte, 0x05 | 0x1b | 0x90 | 0x98 | 0x9b | 0x9d | 0x9e | 0x9f);
-}
-
-pub(super) fn process_semantic_bytes(
-    live: &mut LiveTerminal,
-    writer: &mut dyn Write,
-    event_log: &mut EventLogWriter,
-    _mutation_history: &mut MutationHistory,
-    data: &[u8],
-) -> Result<()> {
-    if data.is_empty() {
-        return Ok(());
-    }
-
-    live.presented_stale = true;
-
-    let is_sequence = matches!(data.first(), Some(0x1b | 0x9b));
-    let base_offset = live.source_byte_offset;
-    let mut unwritten: Option<usize> = None;
-
-    let mut index = 0;
-    while index < data.len() {
-        if !live.query_tracker.is_tracking() && live.pending_query_responses.is_empty() {
-            let start = index;
-            while index < data.len()
-                && data
-                    .get(index)
-                    .is_some_and(|&b| return !is_query_start_byte(b))
-            {
-                index += 1;
-            }
-
-            if index > start {
-                let chunk = data.get(start..index).unwrap_or(&[]);
-                live.query_tracker.observe_plain_bytes(chunk);
-                live.semantic.write(chunk);
-
-                if live.suppress_mirrored_queries {
-                    live.mirror_output.extend_from_slice(chunk);
-                }
-
-                continue;
-            }
+        // A query answered by the pinned VT must not reach the outer terminal,
+        // whose reply would otherwise be forwarded as input.
+        if live.suppress_mirrored_queries && !live.open_sequence_mirrored && responses.is_empty() {
+            live.mirror_output.extend_from_slice(&live.open_sequence);
         }
 
-        let Some(&byte) = data.get(index) else {
-            break;
-        };
+        if !responses.is_empty() {
+            let query = ByteString::from(live.open_sequence.as_slice());
+            let source_byte_offset = u64::try_from(offset.saturating_sub(1)).unwrap_or(u64::MAX);
 
-        if !is_sequence {
-            let offset_delta = u64::try_from(index).unwrap_or(u64::MAX);
-            live.source_byte_offset =
-                base_offset.map(|base| return base.saturating_add(offset_delta));
-        }
-
-        index += 1;
-
-        let was_tracking = live.query_tracker.is_tracking();
-        let complete = live.query_tracker.push(byte);
-        // Bytes of an open control sequence reach the VT in one write once the sequence
-        // ends; the parser state is the same as for byte-wise writes, at far lower FFI cost.
-        let start = *unwritten.get_or_insert(index - 1);
-
-        if complete || !live.query_tracker.is_tracking() {
-            live.semantic.write(data.get(start..index).unwrap_or(&[]));
-            unwritten = None;
-
-            if was_tracking
-                || complete
-                || live.query_tracker.is_tracking()
-                || !live.pending_query_responses.is_empty()
-            {
-                live.pending_query_responses
-                    .extend(live.semantic.take_responses());
-            }
-        }
-
-        if live.suppress_mirrored_queries {
-            if was_tracking || complete || live.query_tracker.is_tracking() {
-                live.mirror_sequence.push(byte);
-            } else {
-                live.mirror_output.push(byte);
-            }
-
-            if complete || !live.query_tracker.is_tracking() {
-                if live.pending_query_responses.is_empty() {
-                    live.mirror_output.append(&mut live.mirror_sequence);
-                } else {
-                    // A query answered by the pinned VT must not reach the outer
-                    // terminal, whose reply would otherwise be forwarded as input.
-                    live.mirror_sequence.clear();
-                }
-            }
-        }
-
-        if complete
-            || (!live.query_tracker.is_tracking() && !live.pending_query_responses.is_empty())
-        {
-            let query = ByteString::from(live.query_tracker.bytes());
-
-            for response in take(&mut live.pending_query_responses) {
+            for response in responses {
                 let operation_id = Uuid::now_v7();
 
                 event_log.append_deferred(Event::QueryResponse {
                     source_event_seq: live.source_event_seq,
-                    source_byte_offset: live.source_byte_offset,
+                    source_byte_offset: Some(source_byte_offset),
                     query: query.clone(),
                     response: ByteString::from(response.as_slice()),
                     responder: "pinned-libghostty-vt".to_owned(),
@@ -309,15 +182,8 @@ pub(super) fn process_semantic_bytes(
             }
         }
 
-        if complete {
-            live.query_tracker.clear();
-        }
-    }
-
-    if let Some(start) = unwritten {
-        live.semantic.write(data.get(start..).unwrap_or(&[]));
-        live.pending_query_responses
-            .extend(live.semantic.take_responses());
+        live.open_sequence.clear();
+        live.open_sequence_mirrored = false;
     }
 
     return Ok(());
@@ -391,7 +257,275 @@ pub(super) fn find_text_regions(state: &SemanticState, needle: &str) -> Vec<Text
 #[cfg(test)]
 mod tests {
     use super::*;
-    use termtrace_terminal::semantic_state_hash;
+    use std::path::{Path, PathBuf};
+    use tempfile::TempDir;
+    use termtrace_evidence::{
+        artifact::create_private_directory,
+        event_log::{EventLog, SessionClock},
+    };
+    use termtrace_model::execution::event::EventLogHeader;
+    use termtrace_terminal::{semantic_state_hash, semantic_viewport_text};
+
+    struct Recording {
+        live: LiveTerminal,
+        event_log: EventLogWriter,
+        child_input: Vec<u8>,
+        path: PathBuf,
+        _directory: TempDir,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct Response {
+        source_event_seq: Option<u64>,
+        source_byte_offset: Option<u64>,
+        query: Vec<u8>,
+        response: Vec<u8>,
+    }
+
+    impl Recording {
+        fn new(cols: u16, rows: u16) -> Self {
+            let directory = tempfile::tempdir().expect("temporary directory");
+            let session = directory.path().join("session");
+            create_private_directory(&session).expect("private session");
+            let path = session.join("events.jsonl");
+            let clock = SessionClock::now().expect("clock");
+            let header = EventLogHeader::new(
+                Uuid::now_v7(),
+                "0".repeat(64),
+                clock.started_unix_ns(),
+                cols,
+                rows,
+                cols * 10,
+                rows * 20,
+                "xterm-ghostty",
+            );
+
+            let event_log = EventLogWriter::create(&path, &header, clock).expect("event log");
+            let mut semantic = GhosttyVt::new(cols, rows, 10_000).expect("terminal");
+            semantic.capture_render_holds().expect("render holds");
+            let presented = semantic.snapshot().expect("snapshot");
+            let live = LiveTerminal {
+                semantic,
+                presented,
+                presented_stale: false,
+                pending_query_responses: Vec::new(),
+                source_event_seq: None,
+                suppress_mirrored_queries: true,
+                mirror_output: Vec::new(),
+                open_sequence: Vec::new(),
+                open_sequence_mirrored: false,
+                row_hashes: RefCell::new(Vec::new()),
+                cached_state_hash: RefCell::new(None),
+                geometry: TerminalGeometry {
+                    cols,
+                    rows,
+                    pixel_width: cols * 10,
+                    pixel_height: rows * 20,
+                },
+            };
+
+            return Self {
+                live,
+                event_log,
+                child_input: Vec::new(),
+                path,
+                _directory: directory,
+            };
+        }
+
+        fn read(&mut self, seq: u64, data: &[u8]) {
+            self.live.source_event_seq = Some(seq);
+            process_semantic_output(
+                &mut self.live,
+                &mut self.child_input,
+                &mut self.event_log,
+                data,
+            )
+            .expect("process output");
+        }
+
+        fn presented_text(&mut self) -> String {
+            self.live
+                .ensure_presented()
+                .expect("refresh presented state");
+
+            return semantic_viewport_text(&self.live.presented);
+        }
+
+        fn responses(self) -> Vec<Response> {
+            drop(self.event_log);
+
+            return read_responses(&self.path);
+        }
+    }
+
+    fn read_responses(path: &Path) -> Vec<Response> {
+        return EventLog::read(path)
+            .expect("event log")
+            .events
+            .into_iter()
+            .filter_map(|record| match record.event {
+                Event::QueryResponse {
+                    source_event_seq,
+                    source_byte_offset,
+                    query,
+                    response,
+                    ..
+                } => {
+                    return Some(Response {
+                        source_event_seq,
+                        source_byte_offset,
+                        query: query.as_bytes().to_vec(),
+                        response: response.as_bytes().to_vec(),
+                    });
+                }
+                _ => return None,
+            })
+            .collect();
+    }
+
+    #[test]
+    fn answers_back_to_back_queries_with_their_own_bytes_and_offsets() {
+        let mut recording = Recording::new(20, 4);
+        recording.read(7, b"ab\x1b[6n\x1b[5ncd");
+
+        assert_eq!(recording.child_input, b"\x1b[1;3R\x1b[0n");
+        assert_eq!(recording.live.mirror_output, b"abcd");
+        assert_eq!(
+            recording.responses(),
+            vec![
+                Response {
+                    source_event_seq: Some(7),
+                    source_byte_offset: Some(5),
+                    query: b"\x1b[6n".to_vec(),
+                    response: b"\x1b[1;3R".to_vec(),
+                },
+                Response {
+                    source_event_seq: Some(7),
+                    source_byte_offset: Some(9),
+                    query: b"\x1b[5n".to_vec(),
+                    response: b"\x1b[0n".to_vec(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn attributes_a_query_split_across_reads_to_the_read_that_ends_it() {
+        let mut recording = Recording::new(20, 4);
+        recording.read(1, b"x\x1b[");
+
+        assert!(recording.child_input.is_empty());
+        assert_eq!(recording.live.mirror_output, b"x");
+
+        recording.read(2, b"6");
+        recording.read(3, b"ny");
+
+        assert_eq!(recording.live.mirror_output, b"xy");
+        assert_eq!(
+            recording.responses(),
+            vec![Response {
+                source_event_seq: Some(3),
+                source_byte_offset: Some(0),
+                query: b"\x1b[6n".to_vec(),
+                response: b"\x1b[1;2R".to_vec(),
+            }]
+        );
+    }
+
+    #[test]
+    fn leaves_cancelled_and_c1_queries_unanswered() {
+        let mut recording = Recording::new(20, 4);
+        let output = b"\x1b[6\x18n\x1b[\x1a\x9b6n\xc4";
+        recording.read(1, output);
+        recording.read(2, b"\x9b5n");
+
+        assert!(recording.child_input.is_empty());
+        assert_eq!(
+            recording.live.mirror_output,
+            b"\x1b[6\x18n\x1b[\x1a\x9b6n\xc4\x9b5n"
+        );
+        assert_eq!(
+            recording.presented_text().trim_end(),
+            "n\u{fffd}6n\u{11b}5n"
+        );
+        assert!(recording.responses().is_empty());
+    }
+
+    #[test]
+    fn answers_queries_inside_synchronized_output_without_presenting_it() {
+        let mut recording = Recording::new(20, 4);
+        recording.read(1, b"before");
+        recording.read(2, b"\x1b[?2026h\x1b[2Jhidden\x1b[6n");
+
+        assert_eq!(recording.child_input, b"\x1b[1;13R");
+        assert_eq!(recording.presented_text().trim_end(), "before");
+
+        recording.read(3, b"\x1b[?2026l");
+
+        assert_eq!(recording.presented_text().trim(), "hidden");
+        assert_eq!(recording.responses().len(), 1);
+    }
+
+    #[test]
+    fn keeps_the_frame_from_the_start_of_a_hold_that_also_switches_screens() {
+        let mut recording = Recording::new(20, 4);
+        recording.read(1, b"primary\x1b[?2026;1049halternate");
+        let presented = recording.live.presented.clone();
+        assert!(!presented.modes.synchronized_output);
+        assert!(!presented.modes.alternate_screen);
+        assert_eq!(recording.presented_text().trim_end(), "primary");
+
+        recording.read(2, b"\x1b[?2026l");
+
+        assert_eq!(recording.presented_text().trim(), "alternate");
+        assert!(recording.live.presented.modes.alternate_screen);
+    }
+
+    #[test]
+    fn presents_again_when_a_reset_or_resize_ends_a_hold() {
+        let mut recording = Recording::new(20, 4);
+        recording.read(1, b"kept\x1b[?2026hlost");
+
+        assert_eq!(recording.presented_text().trim_end(), "kept");
+
+        recording.read(2, b"\x1bcafter reset");
+
+        assert_eq!(recording.presented_text().trim_end(), "after reset");
+
+        recording.read(3, b"\x1b[?2026h\r\x1b[Kresized");
+
+        assert_eq!(recording.presented_text().trim_end(), "after reset");
+
+        let geometry = TerminalGeometry {
+            cols: 30,
+            rows: 4,
+            pixel_width: 300,
+            pixel_height: 80,
+        };
+        resize_semantic(&mut recording.live.semantic, geometry).expect("resize");
+        recording.live.presented_stale = true;
+
+        assert_eq!(recording.presented_text().trim_end(), "resized");
+    }
+
+    #[test]
+    fn mirrors_long_control_strings_without_holding_them_back() {
+        let mut recording = Recording::new(20, 4);
+        let payload = vec![b'a'; MAX_QUERY_SEQUENCE_BYTES * 2];
+        let mut output = b"\x1bP1$t".to_vec();
+        output.extend_from_slice(&payload);
+        recording.read(1, &output);
+
+        assert_eq!(recording.live.mirror_output, output);
+        assert!(recording.live.open_sequence.len() <= MAX_QUERY_SEQUENCE_BYTES);
+
+        recording.read(2, b"\x1b\\done");
+        output.extend_from_slice(b"\x1b\\done");
+
+        assert_eq!(recording.live.mirror_output, output);
+        assert!(recording.live.open_sequence.is_empty());
+    }
 
     #[test]
     fn test_live_terminal_incremental_state_hash() {
@@ -399,16 +533,14 @@ mod tests {
         let presented = semantic.snapshot().expect("snapshot");
         let mut live = LiveTerminal {
             semantic,
-            presentation_tracker: PresentationTracker::new(presented.modes.synchronized_output),
             presented,
             presented_stale: false,
-            query_tracker: QueryTracker::default(),
             pending_query_responses: Vec::new(),
             source_event_seq: None,
-            source_byte_offset: None,
             suppress_mirrored_queries: false,
             mirror_output: Vec::new(),
-            mirror_sequence: Vec::new(),
+            open_sequence: Vec::new(),
+            open_sequence_mirrored: false,
             row_hashes: RefCell::new(Vec::new()),
             cached_state_hash: RefCell::new(None),
             geometry: TerminalGeometry {

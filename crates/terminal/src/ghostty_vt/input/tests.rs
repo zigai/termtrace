@@ -186,16 +186,11 @@ fn assert_supported_encoding(
             );
         });
 
-    let uses_extended_fallback = matches!(key, NamedKey::Function(13..=24)) && mode_bits & 8 == 0;
-    let expected_encoder = if uses_extended_fallback {
-        "termtrace-xterm-extended-function-key-v1"
-    } else {
-        "libghostty-key-encoder-v1"
-    };
+    assert_eq!(encoded.encoder, "libghostty-key-encoder-v1");
 
-    assert_eq!(encoded.encoder, expected_encoder);
+    let legacy_extended_function = matches!(key, NamedKey::Function(13..=24)) && mode_bits & 8 == 0;
 
-    if uses_extended_fallback
+    if legacy_extended_function
         && let NamedKey::Function(number) = key
         && let Some((_, _, expected)) = EXTENDED_FUNCTION_FIXTURES
             .iter()

@@ -6,7 +6,7 @@ use super::{
     input::{apply, apply_resize},
     model::{RuntimeMessage, TerminalGeometry},
     outer_resize::{OuterResize, ResizeAuthority},
-    presentation::{process_semantic_bytes, process_semantic_output, resize_semantic},
+    presentation::{process_semantic_output, resize_semantic},
     process::RuntimeWorkers,
     support::{finish_with_cleanup, terminal_error},
     termination::{Effect, Fact, Tick},
@@ -438,7 +438,6 @@ impl SessionActor<'_> {
                     &mut self.live,
                     self.spawned.writer.as_mut(),
                     &mut self.event_log,
-                    &mut self.mutation_history,
                     &data,
                 )?;
                 let mirrored = if self.live.suppress_mirrored_queries {
@@ -452,23 +451,9 @@ impl SessionActor<'_> {
                 }
             }
             RuntimeMessage::OutputClosed => {
-                let pending = self.live.presentation_tracker.finish();
-                if !pending.is_empty() {
-                    process_semantic_bytes(
-                        &mut self.live,
-                        self.spawned.writer.as_mut(),
-                        &mut self.event_log,
-                        &mut self.mutation_history,
-                        &pending,
-                    )?;
-                }
-
                 self.live.ensure_presented()?;
-
+                self.live.close_output();
                 if self.live.suppress_mirrored_queries {
-                    self.live
-                        .mirror_output
-                        .append(&mut self.live.mirror_sequence);
                     let mirrored = take(&mut self.live.mirror_output);
                     self.mirror_bytes(&mirrored)?;
                 }

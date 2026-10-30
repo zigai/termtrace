@@ -5,7 +5,8 @@ mod stream;
 use crate::{
     observation::state_selector_for_session,
     replay::{
-        inspect_session_stream, replay, visit_session_states_while, visit_states, ValidatedSession,
+        inspect_session_stream, replay, visit_replay_range_while, visit_session_states_while,
+        ReplayVisit, ValidatedSession,
     },
     timeline::stream::TokenCursor,
     Error, Result,
@@ -25,14 +26,18 @@ use termtrace_model::{
         DiagnoseReport, DiagnosticCheck, DiagnosticFinding, ExplainFinding, ExplainReport,
         FindingConfidence, NativeCorrelation, NativeEvidenceLevel,
     },
+    terminal::effect::{TerminalEffect, TerminalEffectRecord, UnknownSequenceKind},
     terminal::observation::StatePoint,
     terminal::replay::{ReplayEndpoint, StateRecord},
     terminal::state::{CursorState, DirtyState},
     terminal::timeline::TimelineItem,
     terminal::vt::VtToken,
+    value::ByteString,
 };
 use termtrace_terminal::frame_event_records;
 use uuid::Uuid;
+
+const MAX_REPORTED_UNKNOWN_SEQUENCES: usize = 4;
 
 fn analysis_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
@@ -212,10 +217,14 @@ pub fn diagnose(
     visual_evidence: &[ValidatedVisualManifest],
 ) -> Result<DiagnoseReport> {
     let mut states = Vec::new();
-    visit_states(log, |record, _| {
-        states.push(record.clone());
+    let mut effects = EffectEvidence::default();
+    visit_replay_range_while(log, None, |visit| {
+        match visit {
+            ReplayVisit::State(record, _) => states.push(record),
+            ReplayVisit::Effect(record) => effects.record(&record),
+        }
 
-        return Ok(());
+        return Ok(true);
     })?;
 
     let tokens = frame_event_records(&log.events)?;
@@ -227,7 +236,91 @@ pub fn diagnose(
         visual_evidence,
         &states,
         &tokens,
+        &effects,
     ));
+}
+
+/// Bounded summary of effects that mean replay may not match what the program intended.
+#[derive(Debug, Default)]
+pub(super) struct EffectEvidence {
+    unknown_count: u64,
+    unknown_first: Option<(u64, u64)>,
+    unknown_kinds: Vec<(UnknownSequenceKind, ByteString)>,
+    processing_error: Option<(u64, u64)>,
+}
+
+impl EffectEvidence {
+    pub(super) fn record(&mut self, record: &TerminalEffectRecord) {
+        let source = (record.event_seq, record.event_byte_offset);
+
+        match &record.effect {
+            TerminalEffect::UnknownSequence { kind, identifier } => {
+                self.unknown_count = self.unknown_count.saturating_add(1);
+                self.unknown_first.get_or_insert(source);
+
+                let seen = self
+                    .unknown_kinds
+                    .iter()
+                    .any(|(seen_kind, seen)| return seen_kind == kind && seen == identifier);
+
+                if !seen && self.unknown_kinds.len() < MAX_REPORTED_UNKNOWN_SEQUENCES {
+                    self.unknown_kinds.push((*kind, identifier.clone()));
+                }
+            }
+            TerminalEffect::ProcessingError => {
+                self.processing_error.get_or_insert(source);
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn findings(&self, findings: &mut Vec<DiagnosticFinding>) {
+        if let Some((event_seq, offset)) = self.unknown_first {
+            let kinds = self
+                .unknown_kinds
+                .iter()
+                .map(|(kind, identifier)| {
+                    let kind = match kind {
+                        UnknownSequenceKind::Apc => "APC",
+                        UnknownSequenceKind::Osc => "OSC",
+                    };
+
+                    return format!("{kind} {}", String::from_utf8_lossy(identifier.as_bytes()));
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            findings.push(DiagnosticFinding {
+                code: "ignored_control_strings".to_owned(),
+                confidence: FindingConfidence::High,
+                state_ids: Vec::new(),
+                token_ids: Vec::new(),
+                facts: vec![
+                    format!(
+                        "the program sent {} APC or OSC strings that libghostty-vt does not implement, first at event {event_seq} byte {offset}",
+                        self.unknown_count
+                    ),
+                    format!("first kinds: {kinds}"),
+                    "reconstructed screens do not include whatever these strings would have done"
+                        .to_owned(),
+                ],
+                native_correlations: Vec::new(),
+            });
+        }
+
+        if let Some((event_seq, offset)) = self.processing_error {
+            findings.push(DiagnosticFinding {
+                code: "vt_processing_error".to_owned(),
+                confidence: FindingConfidence::High,
+                state_ids: Vec::new(),
+                token_ids: Vec::new(),
+                facts: vec![
+                    format!("libghostty-vt reported a processing error at event {event_seq} byte {offset}"),
+                    format!("reconstructed screens may be wrong after event {event_seq} byte {offset}"),
+                ],
+                native_correlations: Vec::new(),
+            });
+        }
+    }
 }
 
 pub(super) fn diagnose_states(
@@ -237,6 +330,7 @@ pub(super) fn diagnose_states(
     visual_evidence: &[ValidatedVisualManifest],
     states: &[StateRecord],
     tokens: &[VtToken],
+    effects: &EffectEvidence,
 ) -> DiagnoseReport {
     checks.sort_unstable();
     checks.dedup();
@@ -275,6 +369,10 @@ pub(super) fn diagnose_states(
 
     if checks.contains(&DiagnosticCheck::QueryLoop) {
         detect_query_loops(log, &mut detected);
+    }
+
+    if checks.contains(&DiagnosticCheck::Effects) {
+        effects.findings(&mut detected);
     }
 
     let native = native_correlations(log, visual_evidence);

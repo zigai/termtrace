@@ -167,32 +167,6 @@ impl<'engine> Snapshot<'engine> {
 }
 
 pub(super) fn format(terminal: sys::GhosttyTerminal, format: Format) -> Result<Vec<u8>> {
-    return format_with_unwrap(terminal, format, false);
-}
-
-pub(super) fn format_replay_seed(terminal: sys::GhosttyTerminal) -> Result<Option<Vec<u8>>> {
-    let mut pending_wrap = false;
-    // SAFETY: `terminal` is the live handle owned by `GhosttyVt`, and the selected key writes one
-    // initialized `bool` through the non-null, correctly aligned output pointer.
-    check("get cursor pending-wrap state", unsafe {
-        sys::ghostty_terminal_get(
-            terminal,
-            sys::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP,
-            (&raw mut pending_wrap).cast::<c_void>(),
-        )
-    })?;
-
-    if pending_wrap {
-        return Ok(None);
-    }
-    return format_with_unwrap(terminal, Format::Vt, true).map(Some);
-}
-
-fn format_with_unwrap(
-    terminal: sys::GhosttyTerminal,
-    format: Format,
-    unwrap: bool,
-) -> Result<Vec<u8>> {
     let emit = match format {
         Format::Plain => sys::GhosttyFormatterFormat_GHOSTTY_FORMATTER_FORMAT_PLAIN,
         Format::Vt => sys::GhosttyFormatterFormat_GHOSTTY_FORMATTER_FORMAT_VT,
@@ -221,7 +195,7 @@ fn format_with_unwrap(
     let options = sys::GhosttyFormatterTerminalOptions {
         size: size_of::<sys::GhosttyFormatterTerminalOptions>(),
         emit,
-        unwrap,
+        unwrap: false,
         trim: true,
         extra,
         selection: ptr::null(),
@@ -232,7 +206,11 @@ fn format_with_unwrap(
 }
 
 impl Snapshot<'_> {
-    fn render_get<T: Default>(&self, operation: &'static str, key: u32) -> Result<T> {
+    fn render_get<T: Default>(
+        &self,
+        operation: &'static str,
+        key: sys::GhosttyRenderStateData,
+    ) -> Result<T> {
         let mut value = T::default();
         check(operation, unsafe {
             sys::ghostty_render_state_get(self.render, key, (&raw mut value).cast::<c_void>())
@@ -270,7 +248,11 @@ impl Snapshot<'_> {
         });
     }
 
-    fn terminal_string(&self, operation: &'static str, key: u32) -> Result<Vec<u8>> {
+    fn terminal_string(
+        &self,
+        operation: &'static str,
+        key: sys::GhosttyTerminalData,
+    ) -> Result<Vec<u8>> {
         let mut value = sys::GhosttyString::default();
         check(operation, unsafe {
             sys::ghostty_terminal_get(self.terminal, key, (&raw mut value).cast::<c_void>())
@@ -367,7 +349,7 @@ impl Snapshot<'_> {
     }
 
     fn dirty_state(&self) -> Result<DirtyState> {
-        let dirty: u32 = self.render_get(
+        let dirty: sys::GhosttyRenderStateDirty = self.render_get(
             "get dirty state",
             sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_DIRTY,
         )?;
@@ -385,7 +367,7 @@ impl Snapshot<'_> {
             result => {
                 return Err(Error::GhosttyVt {
                     operation: "decode dirty state",
-                    result: i32::try_from(result).unwrap_or(i32::MAX),
+                    result,
                 });
             }
         }
@@ -424,7 +406,7 @@ impl Snapshot<'_> {
             (None, None, None)
         };
 
-        let raw_style: u32 = self.render_get(
+        let raw_style: sys::GhosttyRenderStateCursorVisualStyle = self.render_get(
             "get cursor style",
             sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE,
         )?;
@@ -448,7 +430,11 @@ impl Snapshot<'_> {
             ..Default::default()
         };
         check("get render colors", unsafe {
-            sys::ghostty_render_state_colors_get(self.render, &raw mut colors)
+            sys::ghostty_render_state_get(
+                self.render,
+                sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_COLORS,
+                (&raw mut colors).cast::<c_void>(),
+            )
         })?;
 
         return Ok(ColorState {
@@ -479,7 +465,6 @@ impl Snapshot<'_> {
             return Ok(grid);
         }
 
-        let read_all = dirty == DirtyState::Full || reusable.is_none();
         let mut handles = RenderIterators::new()?;
         check("populate row iterator", unsafe {
             sys::ghostty_render_state_get(
@@ -488,102 +473,48 @@ impl Snapshot<'_> {
                 (&raw mut handles.row).cast::<c_void>(),
             )
         })?;
-
-        let mut grid = Vec::with_capacity(usize::from(rows));
-        while unsafe { sys::ghostty_render_state_row_iterator_next(handles.row) } {
-            let row = u16::try_from(grid.len()).unwrap_or(u16::MAX);
-            let row_dirty = row_get(
-                handles.row,
-                "get row dirty state",
-                sys::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_DIRTY,
-            )?;
-            let mut row_state = if read_all || row_dirty {
-                let raw_row: sys::GhosttyRow = row_get(
-                    handles.row,
-                    "get raw row",
-                    sys::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_RAW,
-                )?;
-
-                let soft_wrapped = raw_row_get(
-                    raw_row,
-                    "get row wrap",
-                    sys::GhosttyRowData_GHOSTTY_ROW_DATA_WRAP,
-                )?;
-
-                let wrap_continuation = raw_row_get(
-                    raw_row,
-                    "get row wrap continuation",
-                    sys::GhosttyRowData_GHOSTTY_ROW_DATA_WRAP_CONTINUATION,
-                )?;
-
-                check("populate row cells", unsafe {
-                    sys::ghostty_render_state_row_get(
-                        handles.row,
-                        sys::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_CELLS,
-                        (&raw mut handles.cells).cast::<c_void>(),
-                    )
-                })?;
-
-                let mut selection = sys::GhosttyRenderStateRowSelection {
-                    size: size_of::<sys::GhosttyRenderStateRowSelection>(),
-                    ..Default::default()
-                };
-                let has_selection = unsafe {
-                    sys::ghostty_render_state_row_get(
-                        handles.row,
-                        sys::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION,
-                        (&raw mut selection).cast::<c_void>(),
-                    ) == sys::GhosttyResult_GHOSTTY_SUCCESS
-                };
-
-                let mut cells = Vec::with_capacity(usize::from(cols));
-                for column in 0..cols {
-                    if !unsafe { sys::ghostty_render_state_row_cells_next(handles.cells) } {
-                        return Err(Error::GhosttyVt {
-                            operation: "iterate row cells",
-                            result: sys::GhosttyResult_GHOSTTY_NO_VALUE,
-                        });
-                    }
-
-                    let selected =
-                        has_selection && column >= selection.start_x && column <= selection.end_x;
-                    cells.push(read_cell(handles.cells, column, selected)?);
+        let grid = match reusable {
+            Some(previous) if dirty == DirtyState::Partial => {
+                let mut grid = previous.grid.clone();
+                for row in &mut grid {
+                    row.dirty = false;
                 }
 
-                RowState {
-                    row,
-                    soft_wrapped,
-                    wrap_continuation,
-                    dirty: row_dirty,
-                    cells: cells.into(),
+                // Partial dirtiness lets Ghostty skip clean rows, which keep their previous value.
+                let mut y = 0_u16;
+                while unsafe {
+                    sys::ghostty_render_state_row_iterator_next_dirty(handles.row, &raw mut y)
+                } {
+                    let row_state = handles.read_row(y, cols)?;
+                    let slot = grid.get_mut(usize::from(y)).ok_or_else(|| {
+                        return invalid_snapshot("dirty row is outside the viewport");
+                    })?;
+                    *slot = row_state;
                 }
-            } else {
-                reusable
-                    .and_then(|state| return state.grid.get(usize::from(row)))
-                    .filter(|state| return state.row == row)
-                    .cloned()
-                    .ok_or_else(|| {
-                        return invalid_snapshot("clean row is absent from previous snapshot");
-                    })?
-            };
-            row_state.dirty = row_dirty;
-            let clean = false;
-            check("reset row dirty state", unsafe {
-                sys::ghostty_render_state_row_set(
-                    handles.row,
-                    sys::GhosttyRenderStateRowOption_GHOSTTY_RENDER_STATE_ROW_OPTION_DIRTY,
-                    (&raw const clean).cast::<c_void>(),
-                )
-            })?;
 
-            grid.push(row_state);
-        }
+                grid
+            }
+            _ => {
+                let mut grid = Vec::with_capacity(usize::from(rows));
+                while unsafe { sys::ghostty_render_state_row_iterator_next(handles.row) } {
+                    let row = u16::try_from(grid.len()).unwrap_or(u16::MAX);
+                    grid.push(handles.read_row(row, cols)?);
+                }
+
+                grid
+            }
+        };
 
         if grid.len() != usize::from(rows) {
             return Err(invalid_snapshot(
                 "render row count differs from terminal rows",
             ));
         }
+
+        check("clean render state", unsafe {
+            sys::ghostty_render_state_clean(self.render)
+        })?;
+
         return Ok(grid);
     }
 
@@ -621,6 +552,74 @@ impl RenderIterators {
             return Err(error);
         }
         return Ok(Self { row, cells });
+    }
+
+    fn read_row(&mut self, row: u16, cols: u16) -> Result<RowState> {
+        let dirty = row_get(
+            self.row,
+            "get row dirty state",
+            sys::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_DIRTY,
+        )?;
+
+        let raw_row: sys::GhosttyRow = row_get(
+            self.row,
+            "get raw row",
+            sys::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_RAW,
+        )?;
+
+        let soft_wrapped = raw_row_get(
+            raw_row,
+            "get row wrap",
+            sys::GhosttyRowData_GHOSTTY_ROW_DATA_WRAP,
+        )?;
+
+        let wrap_continuation = raw_row_get(
+            raw_row,
+            "get row wrap continuation",
+            sys::GhosttyRowData_GHOSTTY_ROW_DATA_WRAP_CONTINUATION,
+        )?;
+
+        check("populate row cells", unsafe {
+            sys::ghostty_render_state_row_get(
+                self.row,
+                sys::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_CELLS,
+                (&raw mut self.cells).cast::<c_void>(),
+            )
+        })?;
+
+        let mut selection = sys::GhosttyRenderStateRowSelection {
+            size: size_of::<sys::GhosttyRenderStateRowSelection>(),
+            ..Default::default()
+        };
+        let has_selection = unsafe {
+            sys::ghostty_render_state_row_get(
+                self.row,
+                sys::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION,
+                (&raw mut selection).cast::<c_void>(),
+            ) == sys::GhosttyResult_GHOSTTY_SUCCESS
+        };
+
+        let mut cells = Vec::with_capacity(usize::from(cols));
+        for column in 0..cols {
+            if !unsafe { sys::ghostty_render_state_row_cells_next(self.cells) } {
+                return Err(Error::GhosttyVt {
+                    operation: "iterate row cells",
+                    result: sys::GhosttyResult_GHOSTTY_NO_VALUE,
+                });
+            }
+
+            let selected =
+                has_selection && column >= selection.start_x && column <= selection.end_x;
+            cells.push(read_cell(self.cells, column, selected)?);
+        }
+
+        return Ok(RowState {
+            row,
+            soft_wrapped,
+            wrap_continuation,
+            dirty,
+            cells: cells.into(),
+        });
     }
 }
 
@@ -690,7 +689,7 @@ impl Drop for Formatter {
 fn row_get<T: Default>(
     row: sys::GhosttyRenderStateRowIterator,
     operation: &'static str,
-    key: u32,
+    key: sys::GhosttyRenderStateRowData,
 ) -> Result<T> {
     let mut value = T::default();
     check(operation, unsafe {
@@ -703,7 +702,7 @@ fn row_get<T: Default>(
 fn cell_get<T: Default>(
     cells: sys::GhosttyRenderStateRowCells,
     operation: &'static str,
-    key: u32,
+    key: sys::GhosttyRenderStateRowCellsData,
 ) -> Result<T> {
     let mut value = T::default();
     check(operation, unsafe {
@@ -713,7 +712,11 @@ fn cell_get<T: Default>(
     return Ok(value);
 }
 
-fn raw_row_get<T: Default>(row: sys::GhosttyRow, operation: &'static str, key: u32) -> Result<T> {
+fn raw_row_get<T: Default>(
+    row: sys::GhosttyRow,
+    operation: &'static str,
+    key: sys::GhosttyRowData,
+) -> Result<T> {
     let mut value = T::default();
     check(operation, unsafe {
         sys::ghostty_row_get(row, key, (&raw mut value).cast::<c_void>())
@@ -725,7 +728,7 @@ fn raw_row_get<T: Default>(row: sys::GhosttyRow, operation: &'static str, key: u
 fn raw_cell_get<T: Default>(
     cell: sys::GhosttyCell,
     operation: &'static str,
-    key: u32,
+    key: sys::GhosttyCellData,
 ) -> Result<T> {
     let mut value = T::default();
     check(operation, unsafe {
@@ -794,7 +797,7 @@ fn decode_wide_kind(wide: sys::GhosttyCellWide) -> Result<WideKind> {
         result => {
             return Err(Error::GhosttyVt {
                 operation: "decode cell wide kind",
-                result: i32::try_from(result).unwrap_or(i32::MAX),
+                result,
             });
         }
     }
@@ -860,7 +863,10 @@ fn read_grapheme(cells: sys::GhosttyRenderStateRowCells) -> Result<CompactString
     return Ok(CompactString::new(text));
 }
 
-fn optional_cell_color(cells: sys::GhosttyRenderStateRowCells, key: u32) -> Result<Option<Rgb>> {
+fn optional_cell_color(
+    cells: sys::GhosttyRenderStateRowCells,
+    key: sys::GhosttyRenderStateRowCellsData,
+) -> Result<Option<Rgb>> {
     let mut color = sys::GhosttyColorRgb::default();
     let result = unsafe {
         sys::ghostty_render_state_row_cells_get(cells, key, (&raw mut color).cast::<c_void>())
@@ -907,13 +913,13 @@ fn decode_color(color: sys::GhosttyStyleColor) -> Result<ColorSpec> {
         result => {
             return Err(Error::GhosttyVt {
                 operation: "decode style color",
-                result: i32::try_from(result).unwrap_or(i32::MAX),
+                result,
             });
         }
     }
 }
 
-fn decode_cursor_style(style: u32) -> Result<CursorStyle> {
+fn decode_cursor_style(style: sys::GhosttyRenderStateCursorVisualStyle) -> Result<CursorStyle> {
     match style {
         sys::GhosttyRenderStateCursorVisualStyle_GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR => {
             return Ok(CursorStyle::Bar);
@@ -930,7 +936,7 @@ fn decode_cursor_style(style: u32) -> Result<CursorStyle> {
         result => {
             return Err(Error::GhosttyVt {
                 operation: "decode cursor style",
-                result: i32::try_from(result).unwrap_or(i32::MAX),
+                result,
             });
         }
     }
@@ -975,13 +981,19 @@ pub(super) fn terminal_mode(
     value: u16,
     ansi: bool,
 ) -> Result<bool> {
-    let mut enabled = false;
-    let packed = (value & 0x7fff) | (u16::from(ansi) << 15);
+    let mut mode = sys::GhosttyTerminalModeConfig {
+        mode: (value & 0x7fff) | (u16::from(ansi) << 15),
+        value: false,
+    };
     check("get terminal mode", unsafe {
-        sys::ghostty_terminal_mode_get(terminal, packed, &raw mut enabled)
+        sys::ghostty_terminal_get(
+            terminal,
+            sys::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_MODE,
+            (&raw mut mode).cast::<c_void>(),
+        )
     })?;
 
-    return Ok(enabled);
+    return Ok(mode.value);
 }
 
 #[cfg(test)]

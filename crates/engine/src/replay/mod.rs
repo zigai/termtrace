@@ -27,8 +27,8 @@ pub use engine::{
 pub(crate) use engine::{
     inspect_latest_presented_prefix, inspect_latest_presented_stream, inspect_prefix_stream,
     inspect_session_stream, inspect_session_stream_with_formats,
-    visit_recording_states_range_while, visit_states_range, visit_states_range_while,
-    visit_states_seeded_while, ReplaySeed,
+    visit_recording_replay_range_while, visit_replay_range_while, visit_replay_seeded_while,
+    ReplaySeed, ReplayVisit,
 };
 #[cfg(test)]
 use engine::{

@@ -188,11 +188,6 @@ pub enum Error {
         /// Lower-level failure that exposed the violation, when one exists.
         source: Option<Box<dyn StdError + Send + Sync>>,
     },
-    /// A checkpoint VT seed cannot reconstruct its committed semantic state.
-    CheckpointReconstruction {
-        /// Semantic fields that differ after restoring the checkpoint seed.
-        mismatched_fields: Vec<&'static str>,
-    },
     /// A required runtime capability is unavailable.
     CapabilityBlocked {
         /// Capability identifier.
@@ -343,13 +338,6 @@ impl fmt::Display for Error {
             }
             Self::InvalidReplay { reason, .. } => {
                 return write!(f, "invalid replay input: {reason}");
-            }
-            Self::CheckpointReconstruction { mismatched_fields } => {
-                return write!(
-                    f,
-                    "replay checkpoint VT seed does not reconstruct semantic fields: {}",
-                    mismatched_fields.join(", ")
-                );
             }
             Self::CapabilityBlocked {
                 id, code, detail, ..

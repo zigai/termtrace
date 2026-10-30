@@ -575,6 +575,7 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
     for file in [
         "states.jsonl.zst",
         "checkpoints.jsonl.zst",
+        "checkpoints.bin",
         "state-index.jsonl",
         "final.txt",
         "final.vt",

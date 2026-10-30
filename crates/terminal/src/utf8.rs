@@ -33,14 +33,4 @@ impl Utf8Prefix {
 
         return continuation;
     }
-
-    pub(crate) fn observe_slice(&mut self, bytes: &[u8]) {
-        if bytes.len() >= 4 {
-            self.bytes.clear();
-        }
-
-        for byte in bytes.iter().skip(bytes.len().saturating_sub(4)) {
-            self.push(*byte);
-        }
-    }
 }

@@ -1,9 +1,9 @@
 //! Task-oriented analysis of the most recent canonical input action.
 
 use crate::{
-    analysis::diagnostics::diagnose_states,
+    analysis::diagnostics::{diagnose_states, EffectEvidence},
     diff::diff_inspections_with_semantic_states,
-    replay::{visit_states, StateInspection},
+    replay::{visit_replay_range_while, ReplayVisit, StateInspection},
     Error, Result,
 };
 use std::{
@@ -16,11 +16,12 @@ use termtrace_model::{
     execution::layout::SessionLayout,
     execution::request_journal::MutationJournalRecord,
     terminal::analysis::{
-        ActionModeChange, ActionOutputSummary, ActionWarning, DiagnosticCheck, DiagnosticFinding,
-        FindingConfidence, LastActionAnalysis, LastActionBoundary, LastActionDiagnosticsReport,
-        LastActionReport,
+        ActionModeChange, ActionOutputSummary, ActionShellCommand, ActionWarning, CommandMark,
+        DiagnosticCheck, DiagnosticFinding, FindingConfidence, LastActionAnalysis,
+        LastActionBoundary, LastActionDiagnosticsReport, LastActionReport,
     },
     terminal::diff::{RowChange, SemanticDiff, ValueChange},
+    terminal::effect::{TerminalEffect, TerminalEffectRecord},
     terminal::observation::StatePoint,
     terminal::state::{ModeState, SemanticState, TerminalMode},
 };
@@ -69,8 +70,20 @@ pub fn analyze(
     let mut after_inspection: Option<StateInspection> = None;
     let mut presentation_eligible_states = 0_u64;
     let mut states = Vec::new();
+    let mut effects = EffectEvidence::default();
+    let mut shell_command = ShellCommandTracker::after(action.intent_event_seq);
 
-    visit_states(log, |record, state| {
+    visit_replay_range_while(log, None, |visit| {
+        let (record, state) = match visit {
+            ReplayVisit::State(record, state) => (record, state),
+            ReplayVisit::Effect(record) => {
+                effects.record(&record);
+                shell_command.record(&record);
+
+                return Ok(true);
+            }
+        };
+
         if record
             .event_seq
             .is_none_or(|event| return event <= action.request_event_start_seq)
@@ -88,9 +101,9 @@ pub fn analyze(
             state: state.clone(),
         });
 
-        states.push(record.clone());
+        states.push(record);
 
-        return Ok(());
+        return Ok(true);
     })?;
 
     let from_inspection = before_inspection
@@ -114,6 +127,7 @@ pub fn analyze(
         &[],
         &states,
         &tokens,
+        &effects,
     );
 
     let action_token_ids = tokens
@@ -150,10 +164,66 @@ pub fn analyze(
         after,
         output_generated,
         presentation_eligible_states,
+        shell_command: shell_command.finish(),
         broad_change_percent,
         findings,
         findings_truncated,
     }));
+}
+
+/// Follows OSC 133 marks to the first command that starts or ends after an input intent.
+struct ShellCommandTracker {
+    intent_event_seq: u64,
+    command: Option<ActionShellCommand>,
+}
+
+impl ShellCommandTracker {
+    fn after(intent_event_seq: u64) -> Self {
+        return Self {
+            intent_event_seq,
+            command: None,
+        };
+    }
+
+    fn record(&mut self, record: &TerminalEffectRecord) {
+        if record.event_seq <= self.intent_event_seq {
+            return;
+        }
+
+        let mark = CommandMark {
+            event_seq: record.event_seq,
+            event_byte_offset: record.event_byte_offset,
+        };
+
+        match &record.effect {
+            TerminalEffect::CommandStart { command } if self.command.is_none() => {
+                self.command = Some(ActionShellCommand {
+                    command: command.clone(),
+                    started: Some(mark),
+                    ended: None,
+                    exit_code: None,
+                });
+            }
+            TerminalEffect::CommandEnd { exit_code, .. } => {
+                let tracked = self.command.get_or_insert(ActionShellCommand {
+                    command: None,
+                    started: None,
+                    ended: None,
+                    exit_code: None,
+                });
+
+                if tracked.ended.is_none() {
+                    tracked.ended = Some(mark);
+                    tracked.exit_code = *exit_code;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn finish(self) -> Option<ActionShellCommand> {
+        return self.command;
+    }
 }
 
 struct ActionAnalysisInputs {
@@ -165,6 +235,7 @@ struct ActionAnalysisInputs {
     after: SemanticState,
     output_generated: ActionOutputSummary,
     presentation_eligible_states: u64,
+    shell_command: Option<ActionShellCommand>,
     broad_change_percent: u8,
     findings: Vec<DiagnosticFinding>,
     findings_truncated: bool,
@@ -180,6 +251,7 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
         after,
         output_generated,
         presentation_eligible_states,
+        shell_command,
         broad_change_percent,
         findings,
         findings_truncated,
@@ -190,6 +262,7 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
         &after,
         &output_generated,
         presentation_eligible_states,
+        shell_command.as_ref(),
         broad_change_percent,
         &findings,
     );
@@ -203,7 +276,7 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
 
     let inspection = LastActionReport {
         format: "termtrace-last-action".to_owned(),
-        version: 1,
+        version: 2,
         session_id,
         source_final_event_hash: source_final_event_hash.clone(),
         action: action.clone(),
@@ -216,6 +289,7 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
         output_generated,
         presentation_eligible: difference.to.presented,
         presentation_eligible_states,
+        shell_command,
         warnings,
         warnings_truncated,
     };
@@ -469,6 +543,7 @@ fn action_warnings(
     after: &SemanticState,
     output: &ActionOutputSummary,
     presentation_eligible_states: u64,
+    shell_command: Option<&ActionShellCommand>,
     broad_change_percent: u8,
     findings: &[DiagnosticFinding],
 ) -> (Vec<ActionWarning>, bool) {
@@ -511,6 +586,27 @@ fn action_warnings(
             confidence: FindingConfidence::High,
             facts: vec!["resulting cursor is outside the viewport".to_owned()],
         });
+    }
+
+    if let Some(command) = shell_command {
+        match command.exit_code {
+            Some(code) if code != 0 => warnings.push(ActionWarning {
+                code: "shell_command_failed".to_owned(),
+                confidence: FindingConfidence::High,
+                facts: vec![format!(
+                    "the shell reported exit code {code} through OSC 133"
+                )],
+            }),
+            _ if command.ended.is_none() => warnings.push(ActionWarning {
+                code: "shell_command_unfinished".to_owned(),
+                confidence: FindingConfidence::Medium,
+                facts: vec![
+                    "OSC 133 marked a command running after the action but never marked it finished"
+                        .to_owned(),
+                ],
+            }),
+            _ => {}
+        }
     }
 
     if after.modes.synchronized_output {

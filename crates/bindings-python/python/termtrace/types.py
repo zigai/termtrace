@@ -83,6 +83,15 @@ class ActionPostconditionResultScreen(TypedDict):
     state_hash: NotRequired[str | None]
 
 
+class ActionShellCommand(TypedDict):
+    "First shell command that OSC 133 marks report after the action's input intent."
+
+    command: Base64Bytes | None
+    ended: CommandMark | None
+    exit_code: int | None
+    started: CommandMark | None
+
+
 class ActionWarning(TypedDict):
     "One bounded warning derived from canonical action evidence."
 
@@ -488,6 +497,16 @@ class ChangeVisualizationInput(TypedDict):
     source: ChangeSource
 
 
+class ClipboardRepresentation(TypedDict):
+    "One MIME representation of a clipboard write."
+
+    data: PayloadDigest
+    mime: str
+
+
+ClipboardTarget: TypeAlias = "Literal['standard', 'selection', 'primary', 'other']"
+
+
 class ClockSample(TypedDict):
     "A system monotonic clock bracket around a session-relative clock sample."
 
@@ -529,6 +548,13 @@ class ColorState(TypedDict):
     cursor: Rgb | None
     foreground: Rgb
     palette: list[Rgb]
+
+
+class CommandMark(TypedDict):
+    "Canonical output byte that carried an OSC 133 mark."
+
+    event_byte_offset: int
+    event_seq: int
 
 
 CommandOutcome: TypeAlias = "ControlOutcome | PointerOutcome"
@@ -675,7 +701,7 @@ class DiagnoseReport(TypedDict):
     version: int
 
 
-DiagnosticCheck: TypeAlias = "Literal['full_redraw', 'transient', 'dirty', 'cursor', 'modes', 'palette', 'query_loop']"
+DiagnosticCheck: TypeAlias = "Literal['full_redraw', 'transient', 'dirty', 'cursor', 'modes', 'palette', 'query_loop', 'effects']"
 
 
 class DiagnosticFinding(TypedDict):
@@ -1461,6 +1487,7 @@ class LastActionReport(TypedDict):
     presentation_eligible_states: int
     rows_changed: list[int]
     session_id: str
+    shell_command: ActionShellCommand | None
     source_final_event_hash: str
     to_state_id: int
     version: int
@@ -1965,6 +1992,13 @@ class PageSource(TypedDict):
     session_path_display: str
 
 
+class PayloadDigest(TypedDict):
+    "Length and short hash of a payload that may hold a secret, without the payload."
+
+    blake3: str
+    byte_length: int
+
+
 class PendingOperationReport(TypedDict):
     "Serializable uncertain-operation summary."
 
@@ -2278,6 +2312,11 @@ ProcessSignal: TypeAlias = (
 )
 
 
+ProgressState: TypeAlias = (
+    "Literal['remove', 'set', 'error', 'indeterminate', 'pause', 'other']"
+)
+
+
 class ProjectedEventPage(TypedDict):
     "Bounded projected canonical events. `has_more` concerns this finite snapshot only."
 
@@ -2292,6 +2331,11 @@ class ProjectionSpec(TypedDict):
 
     detail: FrameDetail | None
     region: ScreenRegion | None
+
+
+PromptKind: TypeAlias = (
+    "Literal['primary', 'right', 'continuation', 'secondary', 'other']"
+)
 
 
 ProvenanceCapture: TypeAlias = "Literal['value', 'hash', 'name', 'not_captured']"
@@ -3752,6 +3796,109 @@ class SurvivingPathRecord(TypedDict):
     path: Base64Bytes
 
 
+TerminalEffect: TypeAlias = "TerminalEffectBell | TerminalEffectTitleChanged | TerminalEffectWorkingDirectoryChanged | TerminalEffectClipboardWrite | TerminalEffectDesktopNotification | TerminalEffectProgressReport | TerminalEffectFullReset | TerminalEffectWindowResizeRequest | TerminalEffectPromptStart | TerminalEffectInputStart | TerminalEffectCommandStart | TerminalEffectCommandEnd | TerminalEffectUnknownSequence | TerminalEffectProcessingError"
+
+
+class TerminalEffectBell(TypedDict):
+    "BEL outside any control string."
+
+    type: Literal["bell"]
+
+
+class TerminalEffectClipboardWrite(TypedDict):
+    "OSC 52, OSC 1337, or OSC 5522 asked to write the clipboard."
+
+    representations: list[ClipboardRepresentation]
+    target: ClipboardTarget
+    type: Literal["clipboard_write"]
+
+
+class TerminalEffectCommandEnd(TypedDict):
+    "OSC 133 marked the command finishing."
+
+    error: Base64Bytes | None
+    exit_code: int | None
+    type: Literal["command_end"]
+
+
+class TerminalEffectCommandStart(TypedDict):
+    "OSC 133 marked the submitted command starting to run."
+
+    command: Base64Bytes | None
+    type: Literal["command_start"]
+
+
+class TerminalEffectDesktopNotification(TypedDict):
+    "OSC 9 or OSC 777 asked for a desktop notification."
+
+    body: PayloadDigest
+    title: PayloadDigest
+    type: Literal["desktop_notification"]
+
+
+class TerminalEffectFullReset(TypedDict):
+    "RIS reset the terminal."
+
+    type: Literal["full_reset"]
+
+
+class TerminalEffectInputStart(TypedDict):
+    "OSC 133 marked the end of the prompt and the start of command input."
+
+    type: Literal["input_start"]
+
+
+class TerminalEffectProcessingError(TypedDict):
+    "libghostty-vt hit an error that may have prevented a semantic update."
+
+    type: Literal["processing_error"]
+
+
+class TerminalEffectProgressReport(TypedDict):
+    "OSC 9;4 reported progress."
+
+    percent: int | None
+    state: ProgressState
+    type: Literal["progress_report"]
+
+
+class TerminalEffectPromptStart(TypedDict):
+    "OSC 133 started drawing a prompt."
+
+    prompt: PromptKind
+    type: Literal["prompt_start"]
+
+
+class TerminalEffectTitleChanged(TypedDict):
+    "OSC 0 or OSC 2 set the window title."
+
+    title: Base64Bytes
+    type: Literal["title_changed"]
+
+
+class TerminalEffectUnknownSequence(TypedDict):
+    "The program sent an APC or OSC string that the semantic engine ignored."
+
+    identifier: Base64Bytes
+    kind: UnknownSequenceKind
+    type: Literal["unknown_sequence"]
+
+
+class TerminalEffectWindowResizeRequest(TypedDict):
+    "CSI 8 t asked to resize the window; the terminal itself is not resized."
+
+    columns: int | None
+    rows: int | None
+    type: Literal["window_resize_request"]
+
+
+class TerminalEffectWorkingDirectoryChanged(TypedDict):
+    "OSC 7, OSC 9, or OSC 1337 reported the working directory."
+
+    location: Base64Bytes
+    type: Literal["working_directory_changed"]
+
+
 class TerminalGeometryReport(TypedDict):
     "Geometry reported by a live terminal through XTWINOPS queries."
 
@@ -3813,9 +3960,7 @@ class TimelineEntry(TypedDict):
     monotonic_ns: int
 
 
-TimelineItem: TypeAlias = (
-    "TimelineItemSemanticState | TimelineItemCanonicalEvent | TimelineItemVtToken"
-)
+TimelineItem: TypeAlias = "TimelineItemSemanticState | TimelineItemTerminalEffect | TimelineItemCanonicalEvent | TimelineItemVtToken"
 
 
 class TimelineItemCanonicalEvent(TypedDict):
@@ -3839,6 +3984,14 @@ class TimelineItemSemanticState(TypedDict):
     presented: bool
     state_hash: str
     state_id: int
+
+
+class TimelineItemTerminalEffect(TypedDict):
+    "A side effect libghostty-vt reported while replaying output."
+
+    effect: TerminalEffect
+    event_byte_offset: int
+    kind: Literal["terminal_effect"]
 
 
 class TimelineItemVtToken(TypedDict):
@@ -4369,6 +4522,9 @@ class TmuxTrackCatalogEntry(TypedDict):
 
 
 TruthLayer: TypeAlias = "Literal['semantic', 'native']"
+
+
+UnknownSequenceKind: TypeAlias = "Literal['apc', 'osc']"
 
 
 class ValueChange(TypedDict):

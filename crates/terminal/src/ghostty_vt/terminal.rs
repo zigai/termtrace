@@ -11,299 +11,102 @@ use super::{
 use crate::{Error, Result};
 use std::{ffi::c_void, mem::take, ptr, slice};
 use termtrace_model::execution::event::TerminalColors;
+use termtrace_model::terminal::effect::TerminalEffect;
 use termtrace_model::value::ByteString;
 
 // Keep allocating control strings below the same ceiling as explanation framing.
 const MAX_OSC_SEQUENCE_BYTES: usize = 1024 * 1024;
 const MAX_APC_SEQUENCE_BYTES: usize = 1024 * 1024;
-const TERMINAL_WRITE_CHUNK_BYTES: usize = 4 * 1024;
+// Unfinished input that checkpoints must carry is bounded by the largest buffered control.
+const MAX_CONTINUATION_BYTES: usize = MAX_APC_SEQUENCE_BYTES;
+const ESC: u8 = 0x1b;
+const CAN: u8 = 0x18;
+const GROUND: u32 = sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_GROUND.cast_unsigned();
+const OSC_START: u32 =
+    sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_OSC_START.cast_unsigned();
+const OSC_END: u32 = sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_OSC_END.cast_unsigned();
+
+mod checkpoint;
+mod effects;
 
 /// Owned semantic engine and render snapshot state.
 pub struct GhosttyVt {
     terminal: sys::GhosttyTerminal,
-    render: sys::GhosttyRenderState,
-    last_snapshot: Option<SemanticState>,
-    responses: Box<ResponseState>,
-    input_limiter: VtInputLimiter,
+    effects: Box<Effects>,
+    sequence: Sequence,
+    render_holds: bool,
+    captures_effects: bool,
+    processing_error: bool,
 }
 
-#[derive(Default)]
-struct ResponseState {
-    pending: Vec<Vec<u8>>,
+/// Bytes consumed by one [`GhosttyVt::write_step`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OutputStep {
+    /// Input bytes consumed, always at least one for non-empty input.
+    pub consumed: usize,
+    /// Leading consumed bytes that were text outside any control sequence.
+    pub plain: usize,
+    /// The control sequence in the consumed bytes has not ended yet.
+    pub open: bool,
+}
+
+/// A synchronized-output (DEC mode 2026) hold change reported by Ghostty.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RenderHold {
+    /// A hold began, with the frame the program left on screen at that moment.
+    Began(Box<SemanticState>),
+    /// The hold ended through DECRST 2026, a full reset, or a resize.
+    Ended,
+}
+
+// Shared with Ghostty callbacks, which run synchronously inside VT writes.
+struct Effects {
+    render: sys::GhosttyRenderState,
+    last_snapshot: Option<SemanticState>,
+    responses: Vec<Vec<u8>>,
+    holds: Vec<RenderHold>,
+    hold_error: Option<Error>,
+    reported: Vec<TerminalEffect>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum VtInputState {
+enum Sequence {
     #[default]
     Ground,
-    Escape,
-    Osc,
-    OscEscape,
+    Open,
+    Osc {
+        length: usize,
+    },
+    DiscardOsc {
+        escape: bool,
+    },
 }
 
-#[derive(Debug)]
-struct VtInputLimiter {
-    state: VtInputState,
-    sequence: Vec<u8>,
-    discarding: bool,
-    max_osc_bytes: usize,
-    utf8_continuations: u8,
-    output: Vec<u8>,
-}
-
-impl Default for VtInputLimiter {
-    fn default() -> Self {
-        return Self::new(MAX_OSC_SEQUENCE_BYTES);
-    }
-}
-
-impl VtInputLimiter {
-    fn new(max_osc_bytes: usize) -> Self {
-        return Self {
-            state: VtInputState::Ground,
-            sequence: Vec::new(),
-            discarding: false,
-            max_osc_bytes,
-            utf8_continuations: 0,
-            output: Vec::with_capacity(TERMINAL_WRITE_CHUNK_BYTES),
-        };
-    }
-
-    fn write(&mut self, bytes: &[u8], mut emit: impl FnMut(&[u8])) {
-        // A reused buffer: zeroing a fresh chunk per call dominated byte-wise writes.
-        let mut output = take(&mut self.output);
-        self.write_buffered(bytes, &mut output, &mut emit);
-        self.output = output;
-    }
-
-    fn write_buffered(&mut self, bytes: &[u8], output: &mut Vec<u8>, mut emit: impl FnMut(&[u8])) {
-        let mut offset = 0;
-        while offset < bytes.len() {
-            if self.state == VtInputState::Ground && self.utf8_continuations == 0 {
-                let remaining = bytes.get(offset..).unwrap_or(&[]);
-                match memchr::memchr2(0x1b, 0x9d, remaining) {
-                    None => {
-                        flush_output(output, &mut emit);
-                        self.utf8_continuations = tail_utf8_continuations(remaining);
-                        emit(remaining);
-
-                        return;
-                    }
-                    Some(0) => {
-                        // Byte at offset is 0x1b or 0x9d, handle below
-                    }
-                    Some(pos) => {
-                        flush_output(output, &mut emit);
-
-                        let prefix = remaining.get(..pos).unwrap_or(&[]);
-                        self.utf8_continuations = tail_utf8_continuations(prefix);
-                        emit(prefix);
-                        offset += pos;
-                    }
-                }
-            }
-
-            let Some(&byte) = bytes.get(offset) else {
-                break;
-            };
-
-            offset += 1;
-
-            if self.state == VtInputState::Ground && self.utf8_continuations > 0 {
-                if (0x80..=0xbf).contains(&byte) {
-                    self.utf8_continuations -= 1;
-                    push_output(byte, output, &mut emit);
-                    continue;
-                }
-
-                self.utf8_continuations = 0;
-            }
-
-            match self.state {
-                VtInputState::Ground => match byte {
-                    0x1b => {
-                        flush_output(output, &mut emit);
-                        self.sequence.clear();
-                        self.discarding = false;
-                        let _ = self.push_sequence(byte);
-                        self.state = VtInputState::Escape;
-                    }
-                    0x9d => {
-                        flush_output(output, &mut emit);
-                        self.begin_osc(byte);
-                    }
-                    value => {
-                        self.utf8_continuations = match value {
-                            0xc2..=0xdf => 1,
-                            0xe0..=0xef => 2,
-                            0xf0..=0xf4 => 3,
-                            _ => 0,
-                        };
-
-                        push_output(byte, output, &mut emit);
-                    }
-                },
-                VtInputState::Escape => match byte {
-                    b']' => {
-                        let _ = self.push_sequence(byte);
-                        self.state = VtInputState::Osc;
-                    }
-                    0x1b => {
-                        self.sequence.clear();
-                        self.discarding = false;
-                        push_output(0x1b, output, &mut emit);
-
-                        let _ = self.push_sequence(byte);
-                    }
-                    _ => {
-                        self.sequence.clear();
-                        self.discarding = false;
-                        push_output(0x1b, output, &mut emit);
-                        push_output(byte, output, &mut emit);
-                        self.state = VtInputState::Ground;
-                    }
-                },
-                VtInputState::Osc | VtInputState::OscEscape => {
-                    self.consume_osc(byte, &mut emit);
-                }
-            }
-        }
-
-        flush_output(output, &mut emit);
-    }
-
-    fn begin_osc(&mut self, introducer: u8) {
-        self.sequence.clear();
-        self.discarding = false;
-        let _ = self.push_sequence(introducer);
-        self.state = VtInputState::Osc;
-    }
-
-    fn consume_osc(&mut self, byte: u8, emit: &mut impl FnMut(&[u8])) {
-        let terminated =
-            matches!(byte, 0x07 | 0x9c) || (self.state == VtInputState::OscEscape && byte == b'\\');
-
-        let canceled = matches!(byte, 0x18 | 0x1a);
-        let was_discarding = self.discarding;
-        let overflowed = self.push_sequence(byte);
-
-        if overflowed {
-            // Ghostty may be inside an earlier partial control. CAN returns its
-            // parser to ground without executing the discarded OSC payload.
-            emit(&[0x18]);
-        }
-
-        if terminated {
-            if !self.discarding {
-                emit(&self.sequence);
-            }
-
-            self.reset();
-        } else if canceled {
-            if !was_discarding && !overflowed {
-                emit(&[byte]);
-            }
-
-            self.reset();
+impl Sequence {
+    fn osc(introducer: sys::GhosttyTerminalStringIntroducer) -> Self {
+        // The cap counts a 7-bit introducer's ESC, which the stop excludes.
+        let length = if introducer
+            == sys::GhosttyTerminalStringIntroducer_GHOSTTY_TERMINAL_STRING_INTRODUCER_ESC
+        {
+            2
         } else {
-            self.state = if byte == 0x1b { VtInputState::OscEscape } else { VtInputState::Osc };
-        }
-    }
-
-    fn push_sequence(&mut self, byte: u8) -> bool {
-        if self.discarding {
-            return false;
-        }
-
-        if self.sequence.len() >= self.max_osc_bytes {
-            self.sequence.clear();
-            self.discarding = true;
-
-            return true;
-        }
-
-        self.sequence.push(byte);
-
-        return false;
-    }
-
-    fn reset(&mut self) {
-        self.state = VtInputState::Ground;
-        self.sequence.clear();
-        self.discarding = false;
-        self.utf8_continuations = 0;
-    }
-}
-
-fn push_output(byte: u8, output: &mut Vec<u8>, emit: &mut impl FnMut(&[u8])) {
-    if output.len() == TERMINAL_WRITE_CHUNK_BYTES {
-        flush_output(output, emit);
-    }
-
-    output.push(byte);
-}
-
-fn flush_output(output: &mut Vec<u8>, emit: &mut impl FnMut(&[u8])) {
-    if output.is_empty() {
-        return;
-    }
-
-    emit(output);
-    output.clear();
-}
-
-fn tail_utf8_continuations(bytes: &[u8]) -> u8 {
-    let len = bytes.len();
-    if len == 0 {
-        return 0;
-    }
-
-    let Some(&b0) = bytes.get(len.saturating_sub(1)) else {
-        return 0;
-    };
-
-    match b0 {
-        0xc2..=0xdf => return 1,
-        0xe0..=0xef => return 2,
-        0xf0..=0xf4 => return 3,
-        _ => {}
-    }
-
-    if (0x80..=0xbf).contains(&b0) && len >= 2 {
-        let Some(&b1) = bytes.get(len.saturating_sub(2)) else {
-            return 0;
+            1
         };
 
-        match b1 {
-            0xc2..=0xdf => return 0,
-            0xe0..=0xef => return 1,
-            0xf0..=0xf4 => return 2,
-            _ => {}
-        }
-
-        if (0x80..=0xbf).contains(&b1) && len >= 3 {
-            let Some(&b2) = bytes.get(len.saturating_sub(3)) else {
-                return 0;
-            };
-
-            match b2 {
-                0xe0..=0xef => return 0,
-                0xf0..=0xf4 => return 1,
-                _ => {}
-            }
-
-            if (0x80..=0xbf).contains(&b2) && len >= 4 {
-                let Some(&b3) = bytes.get(len.saturating_sub(4)) else {
-                    return 0;
-                };
-                if (0xf0..=0xf4).contains(&b3) {
-                    return 0;
-                }
-            }
-        }
+        return Self::Osc { length };
     }
+}
 
-    return 0;
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct Callbacks {
+    render_holds: bool,
+    effects: bool,
+}
+
+struct WriteStop {
+    consumed: usize,
+    reached: u32,
+    introducer: sys::GhosttyTerminalStringIntroducer,
 }
 
 impl GhosttyVt {
@@ -322,51 +125,18 @@ impl GhosttyVt {
 
         let mut terminal = ptr::null_mut();
         check("create terminal", unsafe {
-            sys::ghostty_terminal_new(
-                ptr::null(),
-                &raw mut terminal,
-                sys::GhosttyTerminalOptions {
-                    cols,
-                    rows,
-                    max_scrollback,
-                },
-            )
+            sys::ghostty_terminal_new(ptr::null(), &raw mut terminal, cols, rows)
         })?;
 
-        if let Err(error) = configure_terminal_resource_policy(terminal) {
-            unsafe { sys::ghostty_terminal_free(terminal) };
+        return Self::from_terminal(terminal, max_scrollback, Callbacks::default());
+    }
 
-            return Err(error);
-        }
-
-        let mut responses = Box::<ResponseState>::default();
-        let userdata = (&raw mut *responses).cast::<c_void>();
-
-        if let Err(error) = check("set terminal callback userdata", unsafe {
-            sys::ghostty_terminal_set(
-                terminal,
-                sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_USERDATA,
-                userdata,
-            )
-        }) {
-            unsafe { sys::ghostty_terminal_free(terminal) };
-
-            return Err(error);
-        }
-
-        #[allow(
-            clippy::fn_to_numeric_cast_any,
-            reason = "Ghostty's generic C option setter accepts callback pointers as void pointers"
-        )]
-        let callback = (write_pty_callback as *const ()).cast::<c_void>();
-
-        if let Err(error) = check("set terminal write callback", unsafe {
-            sys::ghostty_terminal_set(
-                terminal,
-                sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_WRITE_PTY,
-                callback,
-            )
-        }) {
+    fn from_terminal(
+        terminal: sys::GhosttyTerminal,
+        max_scrollback: usize,
+        callbacks: Callbacks,
+    ) -> Result<Self> {
+        if let Err(error) = configure_terminal_resource_policy(terminal, max_scrollback) {
             unsafe { sys::ghostty_terminal_free(terminal) };
 
             return Err(error);
@@ -380,23 +150,305 @@ impl GhosttyVt {
 
             return Err(error);
         }
-        return Ok(Self {
+
+        // Dropping the engine frees both handles from here on.
+        let mut engine = Self {
             terminal,
-            render,
-            last_snapshot: None,
-            responses,
-            input_limiter: VtInputLimiter::default(),
-        });
+            effects: Box::new(Effects {
+                render,
+                last_snapshot: None,
+                responses: Vec::new(),
+                holds: Vec::new(),
+                hold_error: None,
+                reported: Vec::new(),
+            }),
+            sequence: Sequence::Ground,
+            render_holds: false,
+            captures_effects: false,
+            processing_error: false,
+        };
+        let userdata = (&raw mut *engine.effects).cast::<c_void>();
+
+        check("set terminal callback userdata", unsafe {
+            sys::ghostty_terminal_set(
+                terminal,
+                sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_USERDATA,
+                userdata,
+            )
+        })?;
+
+        #[allow(
+            clippy::fn_to_numeric_cast_any,
+            reason = "Ghostty's generic C option setter accepts callback pointers as void pointers"
+        )]
+        let callback = (write_pty_callback as *const ()).cast::<c_void>();
+
+        check("set terminal write callback", unsafe {
+            sys::ghostty_terminal_set(
+                terminal,
+                sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_WRITE_PTY,
+                callback,
+            )
+        })?;
+
+        if callbacks.render_holds {
+            engine.capture_render_holds()?;
+        }
+
+        if callbacks.effects {
+            engine.capture_effects()?;
+        }
+
+        return Ok(engine);
     }
 
-    /// Feed PTY output through the bounded host policy and Ghostty's VT parser.
+    /// Feed PTY output through Ghostty's VT parser under the OSC size policy.
+    pub fn write(&mut self, mut bytes: &[u8]) {
+        while !bytes.is_empty() {
+            let consumed = match self.sequence {
+                Sequence::Ground | Sequence::Open => {
+                    let stop = self.write_until(bytes, OSC_START);
+
+                    // Without asking for ground, the parser may or may not be inside a sequence.
+                    self.sequence = if stop.reached & OSC_START != 0 {
+                        Sequence::osc(stop.introducer)
+                    } else {
+                        Sequence::Open
+                    };
+
+                    stop.consumed
+                }
+                Sequence::Osc { length } => self.write_osc(bytes, length),
+                Sequence::DiscardOsc { escape } => self.discard_osc(bytes, escape),
+            };
+            bytes = bytes.get(consumed..).unwrap_or_default();
+        }
+    }
+
+    /// Feed text up to and including the end of the next control sequence.
     ///
-    /// Oversized OSC strings are ignored before crossing the FFI boundary.
-    pub fn write(&mut self, bytes: &[u8]) {
-        let terminal = self.terminal;
-        self.input_limiter.write(bytes, |bounded| unsafe {
-            sys::ghostty_terminal_vt_write(terminal, bounded.as_ptr(), bounded.len());
-        });
+    /// Ghostty's own parser decides where the sequence ends, so query
+    /// responses and render holds taken after the step belong to it. A
+    /// sequence split across calls continues in the next call. An OSC longer
+    /// than 1 MiB is cancelled, and the rest of it is dropped.
+    pub fn write_step(&mut self, bytes: &[u8]) -> OutputStep {
+        let mut plain = 0;
+        let mut consumed = 0;
+
+        while let Some(rest) = bytes.get(consumed..)
+            && !rest.is_empty()
+        {
+            let written = match self.sequence {
+                Sequence::Ground => {
+                    // C1 bytes at ground are UTF-8 to Ghostty, so only ESC starts a sequence.
+                    let Some(escape) = memchr::memchr(ESC, rest) else {
+                        self.vt_write(rest);
+
+                        return OutputStep {
+                            consumed: bytes.len(),
+                            plain: bytes.len(),
+                            open: false,
+                        };
+                    };
+                    self.vt_write(rest.get(..=escape).unwrap_or_default());
+                    plain = escape;
+                    self.sequence = Sequence::Open;
+
+                    escape.saturating_add(1)
+                }
+                Sequence::Open => {
+                    let stop = self.write_until(rest, GROUND | OSC_START);
+
+                    if stop.reached & GROUND != 0 {
+                        self.sequence = Sequence::Ground;
+                    } else if stop.reached & OSC_START != 0 {
+                        self.sequence = Sequence::osc(stop.introducer);
+                    }
+
+                    stop.consumed
+                }
+                Sequence::Osc { length } => self.write_osc(rest, length),
+                Sequence::DiscardOsc { escape } => self.discard_osc(rest, escape),
+            };
+            consumed = consumed.saturating_add(written);
+
+            if self.sequence == Sequence::Ground && consumed > plain {
+                break;
+            }
+        }
+
+        return OutputStep {
+            consumed,
+            plain,
+            open: self.sequence != Sequence::Ground,
+        };
+    }
+
+    /// Report synchronized-output holds through [`Self::take_render_holds`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when libghostty-vt rejects the callback.
+    pub fn capture_render_holds(&mut self) -> Result<()> {
+        #[allow(
+            clippy::fn_to_numeric_cast_any,
+            reason = "Ghostty's generic C option setter accepts callback pointers as void pointers"
+        )]
+        let callback = (render_hold_callback as *const ()).cast::<c_void>();
+
+        check("set render hold callback", unsafe {
+            sys::ghostty_terminal_set(
+                self.terminal,
+                sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_RENDER_HOLD,
+                callback,
+            )
+        })?;
+
+        self.render_holds = true;
+
+        return Ok(());
+    }
+
+    /// Report side effects such as bells, titles, OSC 133 marks, and ignored
+    /// control strings through [`Self::take_effects`].
+    ///
+    /// Observation only: no query is answered that was not answered before.
+    /// Kitty clipboard (OSC 5522) writes are still refused with ENOSYS, but
+    /// when they complete rather than when they begin.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when libghostty-vt rejects a callback.
+    pub fn capture_effects(&mut self) -> Result<()> {
+        effects::register(self.terminal)?;
+        self.captures_effects = true;
+
+        return Ok(());
+    }
+
+    /// Drain effects reported since the last call, oldest first.
+    ///
+    /// Ghostty reports an effect when the byte that completes its sequence is
+    /// written, so effects drained after a [`Self::write_step`] belong to the
+    /// step's last byte. The first time Ghostty records a processing error,
+    /// [`TerminalEffect::ProcessingError`] follows the step's other effects.
+    pub fn take_effects(&mut self) -> Vec<TerminalEffect> {
+        let mut effects = take(&mut self.effects.reported);
+
+        if self.captures_effects && !self.processing_error && self.ghostty_processing_error() {
+            self.processing_error = true;
+            effects.push(TerminalEffect::ProcessingError);
+        }
+
+        return effects;
+    }
+
+    fn ghostty_processing_error(&self) -> bool {
+        let mut error = false;
+        let result = unsafe {
+            sys::ghostty_terminal_get(
+                self.terminal,
+                sys::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_VT_PROCESSING_ERROR,
+                (&raw mut error).cast::<c_void>(),
+            )
+        };
+
+        return result == sys::GhosttyResult_GHOSTTY_SUCCESS && error;
+    }
+
+    /// Drain render holds reported since the last call, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when capturing the frame at the start of a hold failed.
+    pub fn take_render_holds(&mut self) -> Result<Vec<RenderHold>> {
+        let holds = take(&mut self.effects.holds);
+
+        if let Some(error) = self.effects.hold_error.take() {
+            return Err(error);
+        }
+        return Ok(holds);
+    }
+
+    fn write_osc(&mut self, bytes: &[u8], length: usize) -> usize {
+        let budget = MAX_OSC_SEQUENCE_BYTES.saturating_sub(length);
+        let mut limit = bytes.len().min(budget);
+
+        // Ghostty ends an OSC at the ESC of ST, but the byte after it would exceed the cap.
+        if limit == budget && bytes.get(limit.saturating_sub(1)) == Some(&ESC) {
+            limit = limit.saturating_sub(1);
+        }
+
+        if limit == 0 {
+            // CAN makes Ghostty discard the partial OSC without running it.
+            self.vt_write(&[CAN]);
+            self.sequence = Sequence::DiscardOsc { escape: false };
+
+            return 0;
+        }
+
+        let stop = self.write_until(bytes.get(..limit).unwrap_or_default(), GROUND | OSC_END);
+        self.sequence = if stop.reached & GROUND != 0 {
+            Sequence::Ground
+        } else if stop.reached & OSC_END != 0 {
+            Sequence::Open
+        } else {
+            Sequence::Osc {
+                length: length.saturating_add(stop.consumed),
+            }
+        };
+
+        return stop.consumed;
+    }
+
+    fn discard_osc(&mut self, bytes: &[u8], mut escape: bool) -> usize {
+        for (index, &byte) in bytes.iter().enumerate() {
+            if matches!(byte, 0x07 | 0x9c | CAN | 0x1a) || (escape && byte == b'\\') {
+                self.sequence = Sequence::Ground;
+
+                return index.saturating_add(1);
+            }
+
+            escape = byte == ESC;
+        }
+
+        self.sequence = Sequence::DiscardOsc { escape };
+
+        return bytes.len();
+    }
+
+    fn vt_write(&mut self, bytes: &[u8]) {
+        unsafe { sys::ghostty_terminal_vt_write(self.terminal, bytes.as_ptr(), bytes.len()) };
+    }
+
+    fn write_until(&mut self, bytes: &[u8], boundaries: u32) -> WriteStop {
+        let mut stop = sys::GhosttyTerminalWriteStop {
+            size: size_of::<sys::GhosttyTerminalWriteStop>(),
+            ..sys::GhosttyTerminalWriteStop::default()
+        };
+        let result = unsafe {
+            sys::ghostty_terminal_vt_write_until(
+                self.terminal,
+                bytes.as_ptr(),
+                bytes.len(),
+                boundaries,
+                &raw mut stop,
+            )
+        };
+
+        // Ghostty rejects only null or malformed arguments, which are never passed here.
+        if result != sys::GhosttyResult_GHOSTTY_SUCCESS {
+            return WriteStop {
+                consumed: bytes.len(),
+                reached: 0,
+                introducer: 0,
+            };
+        }
+        return WriteStop {
+            consumed: stop.consumed,
+            reached: stop.reached,
+            introducer: stop.introducer,
+        };
     }
 
     /// Encode a typed key using the terminal's current keyboard protocol modes.
@@ -446,7 +498,7 @@ impl GhosttyVt {
 
     /// Drain terminal query responses emitted synchronously by the VT engine.
     pub fn take_responses(&mut self) -> Vec<Vec<u8>> {
-        return take(&mut self.responses.pending);
+        return take(&mut self.effects.responses);
     }
 
     /// Apply captured host defaults before processing terminal output.
@@ -503,6 +555,27 @@ impl GhosttyVt {
         return Ok(());
     }
 
+    /// Set the terminfo name reported for XTGETTCAP `TN` queries.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when libghostty rejects the name, such as one longer
+    /// than 128 bytes.
+    pub fn set_terminfo_name(&mut self, name: &str) -> Result<()> {
+        let name = sys::GhosttyString {
+            ptr: name.as_ptr(),
+            len: name.len(),
+        };
+
+        return check("set terminfo name", unsafe {
+            sys::ghostty_terminal_set(
+                self.terminal,
+                sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_TERMINFO_NAME,
+                (&raw const name).cast::<c_void>(),
+            )
+        });
+    }
+
     /// Resize the semantic terminal.
     ///
     /// # Errors
@@ -532,10 +605,10 @@ impl GhosttyVt {
     ///
     /// Returns an error when any libghostty-vt snapshot query fails.
     pub fn snapshot(&mut self) -> Result<SemanticState> {
-        let terminal = self.terminal;
-        let render = self.render;
+        let effects = &mut *self.effects;
 
-        return snapshot::Snapshot::new(terminal, render, &mut self.last_snapshot).snapshot();
+        return snapshot::Snapshot::new(self.terminal, effects.render, &mut effects.last_snapshot)
+            .snapshot();
     }
 
     /// Whether synchronized output (DEC private mode 2026) is enabled, without a snapshot.
@@ -556,10 +629,9 @@ impl GhosttyVt {
     ///
     /// Returns an error when any libghostty-vt snapshot query fails.
     pub fn snapshot_if_changed(&mut self) -> Result<Option<SemanticState>> {
-        let terminal = self.terminal;
-        let render = self.render;
+        let effects = &mut *self.effects;
 
-        return snapshot::Snapshot::new(terminal, render, &mut self.last_snapshot)
+        return snapshot::Snapshot::new(self.terminal, effects.render, &mut effects.last_snapshot)
             .snapshot_if_changed();
     }
 
@@ -571,26 +643,12 @@ impl GhosttyVt {
     pub fn format(&self, format: Format) -> Result<Vec<u8>> {
         return snapshot::format(self.terminal, format);
     }
-
-    /// Format a VT stream that reconstructs the current terminal as a replay seed.
-    ///
-    /// Soft-wrapped rows are unwrapped so replay can apply the seed at a
-    /// different terminal width without preserving incidental line breaks. Returns `None` while
-    /// the cursor has a pending wrap because that behaviorally relevant state has no lossless VT
-    /// serialization.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when formatter creation, state inspection, or output fails.
-    pub fn format_replay_seed(&self) -> Result<Option<Vec<u8>>> {
-        return snapshot::format_replay_seed(self.terminal);
-    }
 }
 
 impl Drop for GhosttyVt {
     fn drop(&mut self) {
         unsafe {
-            sys::ghostty_render_state_free(self.render);
+            sys::ghostty_render_state_free(self.effects.render);
 
             sys::ghostty_terminal_free(self.terminal);
         }
@@ -604,7 +662,18 @@ pub(super) fn check(operation: &'static str, result: sys::GhosttyResult) -> Resu
     return Err(Error::GhosttyVt { operation, result });
 }
 
-fn configure_terminal_resource_policy(terminal: sys::GhosttyTerminal) -> Result<()> {
+fn configure_terminal_resource_policy(
+    terminal: sys::GhosttyTerminal,
+    max_scrollback_bytes: usize,
+) -> Result<()> {
+    check("limit scrollback bytes", unsafe {
+        sys::ghostty_terminal_set(
+            terminal,
+            sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES,
+            (&raw const max_scrollback_bytes).cast::<c_void>(),
+        )
+    })?;
+
     let kitty_storage_bytes = 0_u64;
     check("disable Kitty graphics storage", unsafe {
         sys::ghostty_terminal_set(
@@ -615,12 +684,21 @@ fn configure_terminal_resource_policy(terminal: sys::GhosttyTerminal) -> Result<
     })?;
 
     let apc_max_bytes = MAX_APC_SEQUENCE_BYTES;
-
-    return check("limit APC sequence buffering", unsafe {
+    check("limit APC sequence buffering", unsafe {
         sys::ghostty_terminal_set(
             terminal,
             sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_APC_MAX_BYTES,
             (&raw const apc_max_bytes).cast::<c_void>(),
+        )
+    })?;
+
+    let continuation_max_bytes = MAX_CONTINUATION_BYTES;
+
+    return check("track unfinished VT input", unsafe {
+        sys::ghostty_terminal_set(
+            terminal,
+            sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_CONTINUATION_MAX_BYTES,
+            (&raw const continuation_max_bytes).cast::<c_void>(),
         )
     });
 }
@@ -658,15 +736,56 @@ unsafe extern "C" fn write_pty_callback(
         unsafe { slice::from_raw_parts(data, len) }.to_vec()
     };
 
-    let responses = unsafe { &mut *userdata.cast::<ResponseState>() };
-    responses.pending.push(bytes);
+    let effects = unsafe { &mut *userdata.cast::<Effects>() };
+    effects.responses.push(bytes);
+}
+
+unsafe extern "C" fn render_hold_callback(
+    terminal: sys::GhosttyTerminal,
+    userdata: *mut c_void,
+    held: bool,
+) {
+    if userdata.is_null() {
+        return;
+    }
+
+    let effects = unsafe { &mut *userdata.cast::<Effects>() };
+    if !held {
+        effects.holds.push(RenderHold::Ended);
+
+        return;
+    }
+
+    match snapshot::Snapshot::new(terminal, effects.render, &mut effects.last_snapshot).snapshot() {
+        Ok(mut frame) => {
+            // Ghostty sets mode 2026 before reporting the hold; the kept frame predates it.
+            frame.modes.synchronized_output = false;
+
+            for mode in &mut frame.modes.values {
+                if mode.number == 2026 && !mode.ansi {
+                    mode.enabled = false;
+                }
+            }
+
+            effects.holds.push(RenderHold::Began(Box::new(frame)));
+        }
+        Err(error) => {
+            effects.hold_error.get_or_insert(error);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ghostty_vt::Format;
-    use termtrace_model::terminal::state::MAX_TERMINAL_COLUMNS;
+    use termtrace_model::terminal::{
+        effect::{
+            ClipboardRepresentation, ClipboardTarget, PayloadDigest, ProgressState, PromptKind,
+            UnknownSequenceKind,
+        },
+        state::MAX_TERMINAL_COLUMNS,
+    };
 
     #[test]
     fn rejects_impractical_terminal_geometry_before_ffi_allocation() {
@@ -678,36 +797,6 @@ mod tests {
         assert!(terminal
             .resize(MAX_TERMINAL_COLUMNS.saturating_add(1), 1, 1, 1)
             .is_err());
-    }
-
-    #[test]
-    fn bounds_osc_strings_before_the_ffi_boundary() {
-        let mut limiter = VtInputLimiter::new(12);
-        let mut forwarded = Vec::new();
-
-        for chunk in [
-            b"before\x1b]52;0123456789abcdef".as_slice(),
-            b"\x07after\x1b".as_slice(),
-            b"]2;ok\x07".as_slice(),
-        ] {
-            limiter.write(chunk, |bytes| forwarded.extend_from_slice(bytes));
-        }
-
-        assert_eq!(forwarded, b"before\x18after\x1b]2;ok\x07");
-    }
-
-    #[test]
-    fn preserves_utf8_continuations_that_match_c1_controls() {
-        let mut limiter = VtInputLimiter::new(12);
-        let mut forwarded = Vec::new();
-
-        for byte in "ѝ".as_bytes() {
-            limiter.write(slice::from_ref(byte), |bytes| {
-                forwarded.extend_from_slice(bytes);
-            });
-        }
-
-        assert_eq!(forwarded, "ѝ".as_bytes());
     }
 
     #[test]
@@ -740,39 +829,6 @@ mod tests {
     }
 
     #[test]
-    fn replay_seed_refuses_unserialized_pending_wrap_state() {
-        let mut terminal = GhosttyVt::new(2, 2, 0).expect("create terminal");
-        assert!(terminal
-            .format_replay_seed()
-            .expect("initial replay seed")
-            .is_some());
-
-        terminal.write(b"ab");
-
-        assert!(terminal
-            .format_replay_seed()
-            .expect("pending-wrap replay seed")
-            .is_none());
-
-        terminal.write(b"c");
-
-        assert!(terminal
-            .format_replay_seed()
-            .expect("post-wrap replay seed")
-            .is_some());
-    }
-
-    #[test]
-    fn oversized_osc_cancels_partial_parser_state() {
-        let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
-        terminal.input_limiter = VtInputLimiter::new(12);
-        terminal.write(b"\x1b(");
-        terminal.write(b"\x1b]52;0123456789abcdef\x07ok");
-        let plain = terminal.format(Format::Plain).expect("plain format");
-        assert!(plain.windows(2).any(|window| return window == b"ok"));
-    }
-
-    #[test]
     fn emits_terminal_query_responses() {
         let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
         terminal.write(b"\x1b[3;5H\x1b[6n");
@@ -781,47 +837,285 @@ mod tests {
     }
 
     #[test]
-    fn tail_utf8_continuations_calculates_exact_incomplete_counts() {
-        assert_eq!(tail_utf8_continuations(b""), 0);
-        assert_eq!(tail_utf8_continuations(b"hello"), 0);
-        assert_eq!(tail_utf8_continuations(&[0xc2]), 1);
-        assert_eq!(tail_utf8_continuations(&[0xc2, 0xa0]), 0);
-        assert_eq!(tail_utf8_continuations(&[0xe2]), 2);
-        assert_eq!(tail_utf8_continuations(&[0xe2, 0x82]), 1);
-        assert_eq!(tail_utf8_continuations(&[0xe2, 0x82, 0xac]), 0);
-        assert_eq!(tail_utf8_continuations(&[0xf0]), 3);
-        assert_eq!(tail_utf8_continuations(&[0xf0, 0x9f]), 2);
-        assert_eq!(tail_utf8_continuations(&[0xf0, 0x9f, 0x98]), 1);
-        assert_eq!(tail_utf8_continuations(&[0xf0, 0x9f, 0x98, 0x80]), 0);
-        assert_eq!(tail_utf8_continuations(&[0x80]), 0);
-        assert_eq!(tail_utf8_continuations(b"prefix\xc2"), 1);
-        assert_eq!(tail_utf8_continuations(b"prefix\xe2\x82"), 1);
-        assert_eq!(tail_utf8_continuations(b"prefix\xf0\x9f\x98"), 1);
+    fn write_steps_end_after_one_sequence_as_ghostty_parses_it() {
+        let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
+        let input = b"ab\x1b[31mcd\x1b]2;t\x1b\\\x9b6n\xc4\x9b";
+        let mut steps = Vec::new();
+
+        let mut offset = 0;
+        while offset < input.len() {
+            let step = terminal.write_step(&input[offset..]);
+            steps.push(step);
+            offset += step.consumed;
+        }
+
+        let step = |consumed, plain| {
+            return OutputStep {
+                consumed,
+                plain,
+                open: false,
+            };
+        };
+
+        assert_eq!(steps, vec![step(7, 2), step(9, 2), step(5, 5)]);
+        assert!(terminal.take_responses().is_empty());
+        assert_eq!(
+            terminal
+                .snapshot()
+                .expect("snapshot")
+                .metadata
+                .title
+                .as_bytes(),
+            b"t"
+        );
+
+        let open = terminal.write_step(b"\x1b[6");
+        assert_eq!(
+            open,
+            OutputStep {
+                consumed: 3,
+                plain: 0,
+                open: true
+            }
+        );
+        assert!(terminal.take_responses().is_empty());
+        assert_eq!(terminal.write_step(b"nz"), step(1, 0));
+        assert_eq!(terminal.take_responses().len(), 1);
     }
 
     #[test]
-    fn simd_fast_path_handles_large_and_mixed_buffers_losslessly() {
-        let mut limiter = VtInputLimiter::new(1024);
-        let mut emitted = Vec::new();
+    fn drops_the_rest_of_an_oversized_osc_until_its_terminator() {
+        let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
+        let filler = vec![b'a'; MAX_OSC_SEQUENCE_BYTES];
 
-        // Pure ASCII large buffer
-        let large_ascii = vec![b'a'; 65536];
-        limiter.write(&large_ascii, |chunk| emitted.extend_from_slice(chunk));
+        terminal.write(b"\x1b]2;");
 
-        assert_eq!(emitted, large_ascii);
+        for chunk in filler.chunks(4096) {
+            terminal.write(chunk);
+        }
 
-        // Buffer with ESC and normal text
-        emitted.clear();
-        let mixed = b"hello\x1b[31mworld\x1b[0m!\n";
-        limiter.write(mixed, |chunk| emitted.extend_from_slice(chunk));
+        // Ghostty keeps 0x9C as OSC content; only the dropped tail ends at it.
+        terminal.write(b"\x9cvisible\x1b]2;bounded\x07");
+        let state = terminal.snapshot().expect("snapshot");
+        assert_eq!(state.metadata.title.as_bytes(), b"bounded");
 
-        assert_eq!(emitted, mixed);
+        let plain = terminal.format(Format::Plain).expect("plain format");
+        assert!(plain.starts_with(b"visible"));
+    }
 
-        // Buffer split on UTF-8 continuation
-        emitted.clear();
-        limiter.write(&[0xd0], |chunk| emitted.extend_from_slice(chunk));
-        limiter.write(&[0x9d], |chunk| emitted.extend_from_slice(chunk));
+    fn effects_of(chunks: &[&[u8]]) -> Vec<TerminalEffect> {
+        let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
+        terminal.capture_effects().expect("capture effects");
 
-        assert_eq!(emitted, &[0xd0, 0x9d]);
+        let mut effects = Vec::new();
+        for chunk in chunks {
+            let mut offset = 0;
+
+            while offset < chunk.len() {
+                offset += terminal.write_step(&chunk[offset..]).consumed;
+                effects.extend(terminal.take_effects());
+            }
+        }
+
+        return effects;
+    }
+
+    #[test]
+    fn reports_shell_integration_marks_with_and_without_exit_codes() {
+        let effects = effects_of(&[
+            b"\x1b]133;A\x07$ \x1b]133;B\x07ls\r\n\x1b]133;C;cmdline_url=ls%20-l\x07",
+            b"out\r\n\x1b]133;D;2\x07\x1b]133;A;k=s\x1b\\\x1b]133;D\x07",
+        ]);
+        assert_eq!(
+            effects,
+            vec![
+                TerminalEffect::PromptStart {
+                    prompt: PromptKind::Primary
+                },
+                TerminalEffect::InputStart,
+                TerminalEffect::CommandStart {
+                    command: Some(ByteString::from(&b"ls -l"[..]))
+                },
+                TerminalEffect::CommandEnd {
+                    exit_code: Some(2),
+                    error: None
+                },
+                TerminalEffect::PromptStart {
+                    prompt: PromptKind::Secondary
+                },
+                TerminalEffect::CommandEnd {
+                    exit_code: None,
+                    error: None
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_bel_terminating_an_osc_is_not_a_bell() {
+        let effects = effects_of(&[b"\x1b]2;title\x07\x07\x1b]2;", b"split\x07"]);
+        assert_eq!(
+            effects,
+            vec![
+                TerminalEffect::TitleChanged {
+                    title: ByteString::from(&b"title"[..])
+                },
+                TerminalEffect::Bell,
+                TerminalEffect::TitleChanged {
+                    title: ByteString::from(&b"split"[..])
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn effects_split_across_writes_are_reported_once_when_their_sequence_completes() {
+        let input = b"\x1b]7;file://host/tmp\x1b\\\x1b]9;4;1;40\x07\x1b[8;30;100t\x1bc";
+        let whole = effects_of(&[input]);
+        let bytes = input.iter().map(slice::from_ref).collect::<Vec<_>>();
+        let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
+        terminal.capture_effects().expect("capture effects");
+
+        let mut completing = Vec::new();
+        for (offset, byte) in bytes.iter().enumerate() {
+            terminal.write(byte);
+            completing.extend(terminal.take_effects().into_iter().map(|_| return offset));
+        }
+
+        assert_eq!(
+            whole,
+            vec![
+                TerminalEffect::WorkingDirectoryChanged {
+                    location: ByteString::from(&b"file://host/tmp"[..])
+                },
+                TerminalEffect::ProgressReport {
+                    state: ProgressState::Set,
+                    percent: Some(40)
+                },
+                TerminalEffect::WindowResizeRequest {
+                    rows: Some(30),
+                    columns: Some(100)
+                },
+                // A full reset clears progress before Ghostty reports the reset itself.
+                TerminalEffect::ProgressReport {
+                    state: ProgressState::Remove,
+                    percent: None
+                },
+                TerminalEffect::FullReset,
+            ]
+        );
+        assert_eq!(effects_of(&bytes), whole);
+        // Ghostty completes an OSC at the ESC of its ST, before the backslash.
+        assert_eq!(completing, vec![19, 31, 42, 44, 44]);
+    }
+
+    #[test]
+    fn clipboard_and_notification_payloads_are_only_digested() {
+        let effects = effects_of(&[b"\x1b]52;c;c2VjcmV0\x07\x1b]777;notify;Title;hunter2\x07"]);
+        assert_eq!(
+            effects,
+            vec![
+                TerminalEffect::ClipboardWrite {
+                    target: ClipboardTarget::Standard,
+                    representations: vec![ClipboardRepresentation {
+                        mime: "text/plain".to_owned(),
+                        data: PayloadDigest::of(b"secret"),
+                    }],
+                },
+                TerminalEffect::DesktopNotification {
+                    title: PayloadDigest::of(b"Title"),
+                    body: PayloadDigest::of(b"hunter2"),
+                },
+            ]
+        );
+
+        let json = serde_json::to_string(&effects).expect("serialize effects");
+        assert!(!json.contains("secret") && !json.contains("c2VjcmV0"));
+        assert!(!json.contains("hunter2") && !json.contains("aHVudGVyMg"));
+    }
+
+    #[test]
+    fn unknown_control_strings_keep_only_a_bounded_identifier() {
+        let long_parameter = [b'x'; 8192];
+        let mut osc = b"\x1b]7400;token=abc".to_vec();
+        osc.extend_from_slice(&long_parameter);
+        osc.push(0x07);
+        let effects = effects_of(&[
+            &osc,
+            b"\x1b_Zcustom;secret\x1b\\",
+            b"\x1b_abcdefghijklmnopqrstuvwxyz\x1b\\",
+        ]);
+
+        let identifiers = effects
+            .iter()
+            .map(|effect| match effect {
+                TerminalEffect::UnknownSequence { kind, identifier } => {
+                    return (*kind, identifier.as_bytes().to_vec());
+                }
+                other => panic!("expected an unknown sequence, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            identifiers,
+            vec![
+                (UnknownSequenceKind::Osc, b"7400".to_vec()),
+                (UnknownSequenceKind::Apc, b"Zcustom".to_vec()),
+                (UnknownSequenceKind::Apc, b"abcdefghijklmnop".to_vec()),
+            ]
+        );
+    }
+
+    #[test]
+    fn engines_without_effect_capture_report_nothing_and_answer_as_before() {
+        let input = b"\x07\x1b]2;t\x07\x1b]52;c;?\x07\x1b]7501;?\x07\x1b[6n";
+        let mut plain = GhosttyVt::new(80, 24, 0).expect("create terminal");
+        let mut capturing = GhosttyVt::new(80, 24, 0).expect("create terminal");
+        capturing.capture_effects().expect("capture effects");
+
+        plain.write(input);
+        capturing.write(input);
+
+        assert!(plain.take_effects().is_empty());
+        assert_eq!(capturing.take_effects().len(), 2);
+        assert_eq!(plain.take_responses(), capturing.take_responses());
+    }
+
+    #[test]
+    fn reports_render_holds_with_the_frame_left_on_screen() {
+        let mut terminal = GhosttyVt::new(20, 4, 0).expect("create terminal");
+        terminal.capture_render_holds().expect("capture holds");
+        terminal.write(b"shown");
+        terminal.write(b"\x1b[?2026;1049h");
+        let holds = terminal.take_render_holds().expect("hold start");
+        let [RenderHold::Began(frame)] = holds.as_slice() else {
+            panic!("expected one hold start, got {holds:?}");
+        };
+
+        assert!(!frame.modes.synchronized_output);
+        assert!(!frame.modes.alternate_screen);
+        assert_eq!(frame.grid[0].cells[0].grapheme, "s");
+        assert!(terminal.synchronized_output().expect("mode"));
+
+        terminal.write(b"\x1b[?2026h\x1b[?2026l\x1b[?2026l");
+
+        assert_eq!(
+            terminal.take_render_holds().expect("hold end"),
+            vec![RenderHold::Ended]
+        );
+
+        terminal.write(b"\x1b[?2026h");
+        terminal.resize(30, 4, 1, 1).expect("resize");
+        terminal.write(b"\x1b[?2026h\x1bc");
+        let holds = terminal.take_render_holds().expect("resize and reset");
+        assert!(matches!(
+            holds.as_slice(),
+            [
+                RenderHold::Began(_),
+                RenderHold::Ended,
+                RenderHold::Began(_),
+                RenderHold::Ended
+            ]
+        ));
+        assert!(!terminal.synchronized_output().expect("mode"));
     }
 }

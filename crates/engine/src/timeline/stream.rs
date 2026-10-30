@@ -1,10 +1,10 @@
 use super::{
-    build::{semantic_timeline_entry, timeline_key},
+    build::{replay_timeline_entry, timeline_key},
     selection::range_error,
 };
 use crate::{
     replay::{
-        timeline_event, trust::SourceIdentity, visit_recording_states_range_while, ValidatedSession,
+        timeline_event, trust::SourceIdentity, visit_recording_replay_range_while, ValidatedSession,
     },
     Result,
 };
@@ -116,17 +116,15 @@ fn visit_recording_timeline_while(
     };
     let mut pending = auxiliary()?;
 
-    visit_recording_states_range_while(
+    visit_recording_replay_range_while(
         session,
         completed,
         range,
         &AtomicBool::new(false),
-        |record, _| {
-            if !include_hidden && !record.presented {
+        |visit| {
+            let Some(semantic) = replay_timeline_entry(visit, include_hidden) else {
                 return Ok(true);
-            }
-
-            let semantic = semantic_timeline_entry(record);
+            };
 
             while pending
                 .as_ref()

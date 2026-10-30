@@ -7,7 +7,6 @@ use crate::{
         CellState, CellStyle, ColorState, CursorState, DirtyState, ModeState, SemanticState,
         TerminalMetadata,
     },
-    value::ByteString,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -15,9 +14,9 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Pinned Ghostty source revision used by the semantic adapter.
-pub const GHOSTTY_REVISION: &str = "55a3e33ab26a23d75b274b23c7f76d837db00578";
+pub const GHOSTTY_REVISION: &str = "9781c0afc8225510e33127466f0815eb51086d7d";
 /// Derived artifact format version.
-pub const STATE_FORMAT_VERSION: u32 = 5;
+pub const STATE_FORMAT_VERSION: u32 = 7;
 /// Replay-index member listing every semantic state.
 pub const STATE_INDEX: &str = "state-index.jsonl";
 
@@ -197,10 +196,10 @@ pub struct StateIndexEntry {
     pub monotonic_ns: u64,
     /// Whether a native renderer could present this state.
     pub presented: bool,
-    /// Whether the checkpoint stream contains a full-state replay seed here.
+    /// Whether the checkpoint stream contains an engine checkpoint here.
     #[serde(default)]
     pub checkpoint: bool,
-    /// Combined semantic/canonical/control timeline rank for this checkpoint.
+    /// Combined semantic/effect/canonical/control timeline rank for this checkpoint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeline_rank: Option<u64>,
     /// Byte offset of the first control-index entry at or after this checkpoint.
@@ -221,14 +220,22 @@ pub struct ControlSourceIndexEntry {
     pub control_index_offset: u64,
 }
 
-/// Periodic full-state replay seed addressable from the compact state index.
+/// Catalog entry locating one periodic engine checkpoint in the binary checkpoint member.
+///
+/// The frame holds the checkpointed state's record and an exact libghostty-vt engine snapshot.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SemanticReplayCheckpoint {
-    /// Canonical state boundary represented by this seed.
-    pub inspection: StateInspection,
-    /// Ghostty VT reconstruction validated against the semantic state hash before use.
-    pub engine_vt: ByteString,
+    /// Checkpointed state identifier.
+    pub state_id: u64,
+    /// Canonical event responsible for the checkpointed state.
+    pub event_seq: Option<u64>,
+    /// Monotonic timestamp of the checkpointed state in nanoseconds.
+    pub monotonic_ns: u64,
+    /// Byte offset of the checkpoint's zstd frame in the binary checkpoint member.
+    pub offset: u64,
+    /// Compressed byte length of that frame.
+    pub length: u64,
 }
 
 /// Summary of one deterministic replay.

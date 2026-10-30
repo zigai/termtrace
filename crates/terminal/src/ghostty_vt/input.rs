@@ -96,9 +96,6 @@ pub(super) fn encode_key(
     }
 
     if required == 0 {
-        if let Some(encoded) = extended_function_key_fallback(key, modifiers) {
-            return Ok(encoded);
-        }
         return Ok(EncodedKey {
             data: ByteString::new(Vec::new()),
             encoder: "libghostty-key-encoder-v1".to_owned(),
@@ -273,14 +270,14 @@ fn physical_key(key: NamedKey) -> Result<(sys::GhosttyKey, Option<[u8; 1]>)> {
         NamedKey::ArrowLeft => sys::GhosttyKey_GHOSTTY_KEY_ARROW_LEFT,
         NamedKey::ArrowRight => sys::GhosttyKey_GHOSTTY_KEY_ARROW_RIGHT,
         NamedKey::Function(number) if (1..=24).contains(&number) => {
-            return Ok((sys::GhosttyKey_GHOSTTY_KEY_F1 + u32::from(number - 1), None));
+            return Ok((sys::GhosttyKey_GHOSTTY_KEY_F1 + i32::from(number - 1), None));
         }
         NamedKey::Letter(letter) => {
             if let Ok(byte) = u8::try_from(letter)
                 && byte.is_ascii_alphabetic()
             {
                 let lower = byte.to_ascii_lowercase();
-                let index = u32::from(lower - b'a');
+                let index = i32::from(lower - b'a');
 
                 return Ok((sys::GhosttyKey_GHOSTTY_KEY_A + index, Some([lower])));
             }
@@ -321,44 +318,6 @@ fn modifier_bits(modifiers: KeyModifiers) -> sys::GhosttyMods {
     }
 
     return bits;
-}
-
-fn extended_function_key_fallback(key: NamedKey, modifiers: KeyModifiers) -> Option<EncodedKey> {
-    let NamedKey::Function(number) = key else {
-        return None;
-    };
-    let parameter = match number {
-        13 => 25,
-        14 => 26,
-        15 => 28,
-        16 => 29,
-        17 => 31,
-        18 => 32,
-        19 => 33,
-        20 => 34,
-        21 => 42,
-        22 => 43,
-        23 => 44,
-        24 => 45,
-        _ => return None,
-    };
-
-    let modifier = 1_u8
-        .saturating_add(u8::from(modifiers.shift))
-        .saturating_add(u8::from(modifiers.alt).saturating_mul(2))
-        .saturating_add(u8::from(modifiers.control).saturating_mul(4))
-        .saturating_add(u8::from(modifiers.super_key).saturating_mul(8));
-
-    let sequence = if modifier == 1 {
-        format!("\x1b[{parameter}~")
-    } else {
-        format!("\x1b[{parameter};{modifier}~")
-    };
-
-    return Some(EncodedKey {
-        data: ByteString::new(sequence.into_bytes()),
-        encoder: "termtrace-xterm-extended-function-key-v1".to_owned(),
-    });
 }
 
 #[cfg(test)]

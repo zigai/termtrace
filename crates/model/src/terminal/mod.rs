@@ -2,6 +2,7 @@
 
 pub mod analysis;
 pub mod diff;
+pub mod effect;
 pub mod inspection;
 pub mod observation;
 pub mod replay;

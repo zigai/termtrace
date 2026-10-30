@@ -1,8 +1,10 @@
-use super::{bounded_action_findings, finish_analysis, task_error, ActionAnalysisInputs};
+use super::{
+    bounded_action_findings, finish_analysis, task_error, ActionAnalysisInputs, ShellCommandTracker,
+};
 use crate::{
     analysis::diagnostics::diagnose_session,
     diff::diff_inspections_with_semantic_states,
-    replay::{visit_session_states_while, StateInspection, ValidatedSession},
+    replay::{visit_recording_replay_range_while, ReplayVisit, StateInspection, ValidatedSession},
     timeline::stream::TokenCursor,
     Result,
 };
@@ -38,8 +40,18 @@ pub fn analyze_session(session: &Path, broad_change_percent: u8) -> Result<LastA
     let mut before = None;
     let mut after = None;
     let mut presentation_eligible_states = 0_u64;
+    let mut shell_command = ShellCommandTracker::after(action.intent_event_seq);
 
-    visit_session_states_while(session, &AtomicBool::new(false), |record, state| {
+    visit_recording_replay_range_while(session, true, None, &AtomicBool::new(false), |visit| {
+        let (record, state) = match visit {
+            ReplayVisit::State(record, state) => (record, state),
+            ReplayVisit::Effect(record) => {
+                shell_command.record(&record);
+
+                return Ok(true);
+            }
+        };
+
         if record
             .event_seq
             .is_none_or(|seq| return seq <= action.request_event_start_seq)
@@ -53,7 +65,7 @@ pub fn analyze_session(session: &Path, broad_change_percent: u8) -> Result<LastA
         }
 
         after = Some(StateInspection {
-            record: record.clone(),
+            record,
             state: state.clone(),
         });
 
@@ -126,6 +138,7 @@ pub fn analyze_session(session: &Path, broad_change_percent: u8) -> Result<LastA
         after,
         output_generated,
         presentation_eligible_states,
+        shell_command: shell_command.finish(),
         broad_change_percent,
         findings,
         findings_truncated,

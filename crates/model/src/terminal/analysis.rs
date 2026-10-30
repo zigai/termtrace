@@ -3,7 +3,7 @@
 use crate::{
     execution::event::OperationStatus, terminal::diff::ValueChange,
     terminal::observation::StatePoint, terminal::replay::StateRecord, terminal::state::CursorState,
-    terminal::vt::VtToken, value::pagination::OutputPage,
+    terminal::vt::VtToken, value::pagination::OutputPage, value::ByteString,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -46,6 +46,30 @@ pub struct ActionOutputSummary {
     pub event_count: u64,
     /// Exact output byte count without the output bytes themselves.
     pub byte_count: u64,
+}
+
+/// Canonical output byte that carried an OSC 133 mark.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommandMark {
+    /// Canonical output event holding the mark's completing byte.
+    pub event_seq: u64,
+    /// Offset of that byte within the event.
+    pub event_byte_offset: u64,
+}
+
+/// First shell command that OSC 133 marks report after the action's input intent.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ActionShellCommand {
+    /// Decoded command line when the shell sent one.
+    pub command: Option<ByteString>,
+    /// Mark where the command started running, absent when the shell skipped it.
+    pub started: Option<CommandMark>,
+    /// Mark where the command finished, absent while it still runs.
+    pub ended: Option<CommandMark>,
+    /// Exit code the shell reported with the end mark.
+    pub exit_code: Option<i32>,
 }
 
 /// One changed ANSI or DEC terminal mode.
@@ -106,6 +130,8 @@ pub struct LastActionReport {
     pub presentation_eligible: bool,
     /// Number of presentation-eligible semantic boundaries after the action.
     pub presentation_eligible_states: u64,
+    /// Shell command boundaries after the action, when the shell sent OSC 133 marks.
+    pub shell_command: Option<ActionShellCommand>,
     /// Bounded conservative warnings.
     pub warnings: Vec<ActionWarning>,
     /// Whether additional warnings were omitted.
@@ -229,6 +255,8 @@ pub enum DiagnosticCheck {
     Palette,
     /// Repeated equal query/response exchanges.
     QueryLoop,
+    /// Control strings the semantic engine ignored and processing errors it reported.
+    Effects,
 }
 
 impl DiagnosticCheck {
@@ -243,6 +271,7 @@ impl DiagnosticCheck {
             Self::Modes,
             Self::Palette,
             Self::QueryLoop,
+            Self::Effects,
         ];
     }
 }

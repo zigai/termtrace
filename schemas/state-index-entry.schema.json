@@ -5,7 +5,7 @@
   "properties": {
     "checkpoint": {
       "default": false,
-      "description": "Whether the checkpoint stream contains a full-state replay seed here.",
+      "description": "Whether the checkpoint stream contains an engine checkpoint here.",
       "type": "boolean"
     },
     "control_index_offset": {
@@ -65,7 +65,7 @@
       "type": "integer"
     },
     "timeline_rank": {
-      "description": "Combined semantic/canonical/control timeline rank for this checkpoint.",
+      "description": "Combined semantic/effect/canonical/control timeline rank for this checkpoint.",
       "format": "uint64",
       "minimum": 0,
       "type": [
