@@ -57,14 +57,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let prefix = ghostty_prefix(&repository_root, &ghostty_revision)?;
 
     println!(
-        "cargo:rerun-if-changed={}",
-        prefix.join("include/ghostty/vt.h").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        prefix.join("lib/libghostty-vt.a").display()
-    );
-    println!(
         "cargo:rustc-link-search=native={}",
         prefix.join("lib").display()
     );
@@ -99,17 +91,32 @@ fn check_submodule_pin(repository_root: &Path, revision: &str) -> Result<(), Box
     return Ok(());
 }
 
+// The bootstrap writes the Ghostty revision it built next to the library, so a prefix left
+// behind by an earlier submodule pin is never linked against the current bindings.
+const REVISION_STAMP: &str = "ghostty-revision";
+
 fn ghostty_prefix(repository_root: &Path, revision: &str) -> Result<PathBuf, Box<dyn Error>> {
     if let Some(prefix) = env::var_os("TERMTRACE_GHOSTTY_PREFIX") {
         let prefix = PathBuf::from(prefix);
-        if contains_ghostty_build(&prefix) {
-            return Ok(prefix);
-        }
-        return Err(format!(
-            "TERMTRACE_GHOSTTY_PREFIX does not contain a compatible libghostty-vt: {}",
-            prefix.display()
-        )
-        .into());
+        watch_prefix(&prefix);
+
+        return match prefix_build(&prefix, revision) {
+            PrefixBuild::Ready => Ok(prefix),
+            PrefixBuild::Missing => Err(format!(
+                "TERMTRACE_GHOSTTY_PREFIX does not contain libghostty-vt: {}\nrun `scripts/bootstrap.sh` with the same TERMTRACE_GHOSTTY_PREFIX",
+                prefix.display()
+            )
+            .into()),
+            PrefixBuild::Stale(found) => Err(format!(
+                "TERMTRACE_GHOSTTY_PREFIX {} {}, but crates/terminal/ghostty-revision pins {revision}\nrun `scripts/bootstrap.sh` with the same TERMTRACE_GHOSTTY_PREFIX",
+                prefix.display(),
+                found.as_deref().map_or_else(
+                    || return "has no revision stamp".to_owned(),
+                    |found| return format!("was built from Ghostty {found}"),
+                ),
+            )
+            .into()),
+        };
     }
 
     let mut candidates = vec![repository_root.join("vendor/ghostty/zig-out")];
@@ -118,23 +125,62 @@ fn ghostty_prefix(repository_root: &Path, revision: &str) -> Result<PathBuf, Box
         candidates.push(cache);
     }
 
-    if let Some(prefix) = candidates
-        .iter()
-        .find(|candidate| return contains_ghostty_build(candidate))
-    {
-        return Ok(prefix.clone());
+    let mut searched = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        watch_prefix(&candidate);
+
+        match prefix_build(&candidate, revision) {
+            PrefixBuild::Ready => return Ok(candidate),
+            PrefixBuild::Missing => searched.push(format!("  {} (missing)", candidate.display())),
+            PrefixBuild::Stale(found) => searched.push(format!(
+                "  {} ({})",
+                candidate.display(),
+                found.map_or_else(
+                    || return "no revision stamp".to_owned(),
+                    |found| return format!("built from {found}"),
+                ),
+            )),
+        }
     }
 
-    let searched = candidates
-        .iter()
-        .map(|candidate| return format!("  {}", candidate.display()))
-        .collect::<Vec<_>>()
-        .join("\n");
-
     return Err(format!(
-        "pinned libghostty-vt {revision} is not ready\nrun `scripts/bootstrap.sh` in any Termtrace checkout\nsearched:\n{searched}"
+        "pinned libghostty-vt {revision} is not ready\nrun `scripts/bootstrap.sh` in any Termtrace checkout\nsearched:\n{}",
+        searched.join("\n")
     )
     .into());
+}
+
+enum PrefixBuild {
+    Ready,
+    Missing,
+    Stale(Option<String>),
+}
+
+fn prefix_build(prefix: &Path, revision: &str) -> PrefixBuild {
+    if !prefix.join("include/ghostty/vt.h").is_file()
+        || !prefix.join("lib/libghostty-vt.a").is_file()
+    {
+        return PrefixBuild::Missing;
+    }
+    return match fs::read_to_string(prefix.join(REVISION_STAMP)) {
+        Ok(stamp) if stamp.trim() == revision => PrefixBuild::Ready,
+        Ok(stamp) => PrefixBuild::Stale(Some(stamp.trim().to_owned())),
+        Err(_) => PrefixBuild::Stale(None),
+    };
+}
+
+// Cargo treats a missing rerun-if-changed path as always changed, so only existing files are watched.
+fn watch_prefix(prefix: &Path) {
+    for file in [
+        REVISION_STAMP,
+        "include/ghostty/vt.h",
+        "lib/libghostty-vt.a",
+    ] {
+        let path = prefix.join(file);
+        if path.is_file() {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
 }
 
 fn shared_cache(revision: &str) -> Option<PathBuf> {
@@ -146,9 +192,4 @@ fn shared_cache(revision: &str) -> Option<PathBuf> {
         })?;
 
     return Some(cache_home.join("termtrace/libghostty-vt").join(revision));
-}
-
-fn contains_ghostty_build(prefix: &Path) -> bool {
-    return prefix.join("include/ghostty/vt.h").is_file()
-        && prefix.join("lib/libghostty-vt.a").is_file();
 }

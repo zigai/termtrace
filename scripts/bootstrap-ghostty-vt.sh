@@ -78,6 +78,9 @@ readonly output="${TERMTRACE_GHOSTTY_PREFIX:-$ghostty/zig-out}"
 test -f "$output/lib/libghostty-vt.a"
 test -f "$output/include/ghostty/vt.h"
 
+# crates/terminal/build.rs links only a prefix whose stamp matches the pinned revision.
+git -C "$ghostty" rev-parse HEAD >"$output/ghostty-revision"
+
 printf 'libghostty-vt ready at %s\n' "$output"
 
 if [[ "$optimize_mode" != ReleaseFast || ${#target_args[@]} -gt 0 || ${#extra_args[@]} -gt 0 ]]; then
@@ -92,7 +95,7 @@ fi
 readonly cache="${XDG_CACHE_HOME:-$HOME/.cache}/termtrace/libghostty-vt/$revision"
 mkdir -p "$(dirname "$cache")"
 staging="$(mktemp -d "$cache.XXXXXX")"
-cp -R "$output/lib" "$output/include" "$staging/"
+cp -R "$output/lib" "$output/include" "$output/ghostty-revision" "$staging/"
 rm -rf "$cache"
 mv "$staging" "$cache"
 
