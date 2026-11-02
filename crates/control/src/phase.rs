@@ -253,8 +253,186 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::{collections::BTreeMap, fs};
     use tempfile::TempDir;
+    use termtrace_model::{
+        execution::{
+            environment::ChildEnvironmentPolicy,
+            event_log::{DurabilityPolicy, DurabilityRecord},
+            layout,
+            provenance::{
+                ContentIdentityStatus, ExecutionProvenance, FileProvenance, KernelProvenance,
+                ProvenancePolicy, RecorderProvenance, RuntimeProvenance,
+            },
+            session::{
+                GeometryProvenance, ResourceLimits, SessionGeometry, COMPLETION_VALIDATION_VERSION,
+                SESSION_COMPLETION_FORMAT, SESSION_COMPLETION_VERSION, SESSION_MANIFEST_FORMAT,
+                SESSION_MANIFEST_VERSION,
+            },
+        },
+        value::ByteString,
+    };
+    use uuid::Uuid;
+
+    const SESSION_ID: Uuid = Uuid::from_u128(0x0001);
+    const OTHER_SESSION_ID: Uuid = Uuid::from_u128(0x0002);
+
+    fn file(requested: &[u8]) -> FileProvenance {
+        return FileProvenance {
+            requested: ByteString::from(requested),
+            resolved: None,
+            content_hash: None,
+            content_identity: ContentIdentityStatus::NotRequested,
+        };
+    }
+
+    fn write_manifest(session: &Path, session_id: Uuid) {
+        let manifest = SessionManifest {
+            failure_policy: Default::default(),
+            format: SESSION_MANIFEST_FORMAT.to_owned(),
+            version: SESSION_MANIFEST_VERSION,
+            session_id,
+            creation_alias: None,
+            lineage: None,
+            import_provenance: None,
+            tmux_pane: None,
+            started_unix_ns: 1_000_000,
+            command: vec![ByteString::from(&b"true"[..])],
+            working_directory: None,
+            geometry: SessionGeometry {
+                cols: 80,
+                rows: 24,
+                pixel_width: 720,
+                pixel_height: 432,
+            },
+            geometry_provenance: GeometryProvenance::default(),
+            ghostty_visual: None,
+            visual_profile: None,
+            child_environment: ChildEnvironmentPolicy::default(),
+            execution_provenance: ExecutionProvenance {
+                policy: ProvenancePolicy::default(),
+                environment: BTreeMap::new(),
+                executable: file(b"true"),
+                invoked_file: None,
+                runtime: RuntimeProvenance {
+                    uid: 1000,
+                    effective_uid: 1000,
+                    gid: 1000,
+                    effective_gid: 1000,
+                    privileged: false,
+                    umask: None,
+                    kernel: KernelProvenance {
+                        system: "Linux".to_owned(),
+                        release: "test".to_owned(),
+                        version: "test".to_owned(),
+                        machine: "test".to_owned(),
+                    },
+                    recorder: RecorderProvenance {
+                        version: "test".to_owned(),
+                        source_revision: "test".to_owned(),
+                        semantic_engine_revision: "test".to_owned(),
+                        binary: file(b"termtrace"),
+                    },
+                },
+            },
+            termtrace_version: "test".to_owned(),
+            operating_system: "linux".to_owned(),
+            architecture: "test".to_owned(),
+            event_log: layout::EVENT_LOG.to_owned(),
+            control_socket: format!("termtrace-control-{session_id}"),
+            request_journal: layout::MUTATION_JOURNAL.to_owned(),
+            contains_sensitive_terminal_data: true,
+            durability_policy: DurabilityPolicy::default(),
+            resource_limits: ResourceLimits::default(),
+        };
+        fs::write(
+            SessionLayout::new(session).manifest(),
+            serde_json::to_vec(&manifest).expect("encode manifest"),
+        )
+        .expect("write manifest");
+    }
+
+    fn write_completion(session: &Path, session_id: Uuid) {
+        let completion = SessionCompletion {
+            format: SESSION_COMPLETION_FORMAT.to_owned(),
+            version: SESSION_COMPLETION_VERSION,
+            validation_version: COMPLETION_VALIDATION_VERSION,
+            session_id,
+            session_manifest_hash: "0".repeat(64),
+            event_header_hash: "0".repeat(64),
+            exit_code: Some(0),
+            signal_name: None,
+            output_bytes: 0,
+            final_event_hash: "0".repeat(64),
+            event_count: 2,
+            terminal_event_seq: 1,
+            durability: DurabilityRecord {
+                policy: DurabilityPolicy::default(),
+                maximum_observed_uncommitted_bytes: 0,
+                maximum_observed_uncommitted_ns: 0,
+                sync_count: 0,
+                final_sync_completed: true,
+            },
+            resource_limit: None,
+            failure: None,
+        };
+        fs::write(
+            SessionLayout::new(session).completion(),
+            serde_json::to_vec(&completion).expect("encode completion"),
+        )
+        .expect("write completion");
+    }
+
+    fn evidence_phase(session: &Path) -> Option<SessionPhase> {
+        return decided_by_evidence(session).map(|observation| return observation.phase);
+    }
+
+    #[test]
+    fn completion_naming_the_manifest_session_is_completed() {
+        let temporary = TempDir::new().expect("temporary directory");
+        write_manifest(temporary.path(), SESSION_ID);
+        write_completion(temporary.path(), SESSION_ID);
+
+        assert_eq!(
+            evidence_phase(temporary.path()),
+            Some(SessionPhase::Completed)
+        );
+    }
+
+    #[test]
+    fn completion_naming_another_session_is_an_identity_mismatch() {
+        let temporary = TempDir::new().expect("temporary directory");
+        write_manifest(temporary.path(), SESSION_ID);
+        write_completion(temporary.path(), OTHER_SESSION_ID);
+
+        assert_eq!(
+            evidence_phase(temporary.path()),
+            Some(SessionPhase::IdentityMismatch)
+        );
+    }
+
+    #[test]
+    fn corrupt_manifest_is_missing_evidence() {
+        let temporary = TempDir::new().expect("temporary directory");
+        fs::write(SessionLayout::new(temporary.path()).manifest(), b"{").expect("write");
+
+        assert_eq!(
+            evidence_phase(temporary.path()),
+            Some(SessionPhase::MissingEvidence)
+        );
+    }
+
+    #[test]
+    fn published_manifest_without_completion_is_left_to_the_recorder() {
+        let temporary = TempDir::new().expect("temporary directory");
+        write_manifest(temporary.path(), SESSION_ID);
+
+        assert_eq!(evidence_phase(temporary.path()), None);
+        assert_eq!(
+            observe_evidence(temporary.path()),
+            observed(SessionPhase::Incomplete, None)
+        );
+    }
 
     #[test]
     fn missing_directory_is_missing_evidence() {

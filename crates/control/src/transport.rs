@@ -593,8 +593,251 @@ fn validate_response_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
+    use std::{sync::mpsc, thread};
     use tempfile::TempDir;
+    use uuid::Uuid;
+
+    const GENEROUS_DEADLINE: Duration = Duration::from_secs(30);
+
+    fn rejection(version: u32, request_id: Uuid, message: &str) -> ControlResponse {
+        return ControlResponse {
+            version,
+            request_id,
+            result: ControlResult::Error {
+                code: "busy".to_owned(),
+                message: message.to_owned(),
+                effect: MutationEffect::NotApplied,
+                details: None,
+            },
+        };
+    }
+
+    fn line(response: &ControlResponse) -> Vec<u8> {
+        let mut encoded = serde_json::to_vec(response).expect("encode response");
+        encoded.push(b'\n');
+        return encoded;
+    }
+
+    fn exchange_with_peer(
+        request: &ControlRequest,
+        reply: Vec<u8>,
+    ) -> (Result<ControlResponse>, Vec<u8>) {
+        let (client, mut server) = UnixStream::pair().expect("socket pair");
+        let peer = thread::spawn(move || {
+            let mut received = Vec::new();
+            server.read_to_end(&mut received).expect("read request");
+            server.write_all(&reply).expect("write reply");
+            return received;
+        });
+
+        let result = exchange_stream(
+            Path::new("/session"),
+            client,
+            request,
+            &ExchangeTiming::deadline(GENEROUS_DEADLINE).expect("deadline"),
+        );
+        let received = peer.join().expect("peer thread");
+        return (result, received);
+    }
+
+    #[test]
+    fn response_for_another_request_is_rejected_with_the_commands_unanswered_effect() {
+        for (command, expected_effect) in [
+            (ControlCommand::Stop, MutationEffect::Unknown),
+            (ControlCommand::Ping, MutationEffect::NotApplied),
+        ] {
+            let request = ControlRequest::new(command);
+            let other = Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef);
+            assert_ne!(other, request.request_id);
+
+            let (result, _) = exchange_with_peer(
+                &request,
+                line(&rejection(CONTROL_PROTOCOL_VERSION, other, "busy")),
+            );
+
+            let error = result.expect_err("uncorrelated response");
+            assert!(
+                matches!(error, Error::InvalidResponse { effect, .. } if effect == expected_effect),
+                "{error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn response_with_another_protocol_version_is_rejected() {
+        let request = ControlRequest::new(ControlCommand::Stop);
+
+        let (result, _) = exchange_with_peer(
+            &request,
+            line(&rejection(
+                CONTROL_PROTOCOL_VERSION + 1,
+                request.request_id,
+                "busy",
+            )),
+        );
+
+        let error = result.expect_err("foreign protocol version");
+        assert!(
+            matches!(
+                error,
+                Error::InvalidResponse {
+                    effect: MutationEffect::Unknown,
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn response_ending_without_newline_is_invalid_not_a_timeout() {
+        let request = ControlRequest::new(ControlCommand::Stop);
+        let mut unterminated = line(&rejection(
+            CONTROL_PROTOCOL_VERSION,
+            request.request_id,
+            "busy",
+        ));
+        unterminated.pop();
+
+        let (result, _) = exchange_with_peer(&request, unterminated);
+
+        let error = result.expect_err("unterminated response");
+        assert!(
+            matches!(
+                error,
+                Error::InvalidResponse {
+                    effect: MutationEffect::Unknown,
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn response_larger_than_the_frame_limit_is_rejected_while_the_peer_stays_connected() {
+        let request = ControlRequest::new(ControlCommand::Stop);
+        let limit = usize::try_from(MAX_CONTROL_MESSAGE_BYTES).expect("limit fits usize");
+        let (client, mut server) = UnixStream::pair().expect("socket pair");
+        let (release, released) = mpsc::channel::<()>();
+        let peer = thread::spawn(move || {
+            let mut received = Vec::new();
+            server.read_to_end(&mut received).expect("read request");
+            // The client stops reading once the reply exceeds the frame limit.
+            let _written = server.write_all(&vec![b'x'; limit + 1]);
+            released
+                .recv()
+                .expect_err("released by dropping the sender");
+        });
+
+        let result = exchange_stream(
+            Path::new("/session"),
+            client,
+            &request,
+            &ExchangeTiming::deadline(GENEROUS_DEADLINE).expect("deadline"),
+        );
+        drop(release);
+        peer.join().expect("peer thread");
+
+        let error = result.expect_err("oversized response");
+        assert!(
+            matches!(
+                error,
+                Error::InvalidResponse {
+                    effect: MutationEffect::Unknown,
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn bytes_after_the_first_newline_are_ignored() {
+        let request = ControlRequest::new(ControlCommand::Ping);
+        let expected = rejection(CONTROL_PROTOCOL_VERSION, request.request_id, "busy");
+        let mut reply = line(&expected);
+        reply.extend_from_slice(b"{not json}\n");
+
+        let (result, _) = exchange_with_peer(&request, reply);
+
+        assert_eq!(result.expect("first line is the response"), expected);
+    }
+
+    #[test]
+    fn response_spanning_several_reads_is_reassembled() {
+        let request = ControlRequest::new(ControlCommand::Ping);
+        let long_message = "m".repeat(20_000);
+        let expected = rejection(CONTROL_PROTOCOL_VERSION, request.request_id, &long_message);
+
+        let (result, _) = exchange_with_peer(&request, line(&expected));
+
+        assert_eq!(result.expect("multi-chunk response"), expected);
+    }
+
+    #[test]
+    fn malformed_json_response_is_invalid() {
+        let request = ControlRequest::new(ControlCommand::Stop);
+
+        let (result, _) = exchange_with_peer(&request, b"{\"version\":\n".to_vec());
+
+        let error = result.expect_err("malformed response");
+        assert!(
+            matches!(
+                error,
+                Error::InvalidResponse {
+                    effect: MutationEffect::Unknown,
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn request_larger_than_the_frame_limit_is_rejected_before_writing() {
+        let limit = usize::try_from(MAX_CONTROL_MESSAGE_BYTES).expect("limit fits usize");
+        let request = ControlRequest::new(ControlCommand::Mark {
+            label: "l".repeat(limit),
+        });
+
+        let (result, received) = exchange_with_peer(&request, Vec::new());
+
+        let error = result.expect_err("oversized request");
+        assert!(matches!(error, Error::InvalidRequest { .. }), "{error:?}");
+        assert_eq!(error.effect(), MutationEffect::NotApplied);
+        assert!(
+            received.is_empty(),
+            "peer received {} bytes",
+            received.len()
+        );
+    }
+
+    #[test]
+    fn peer_closed_before_reading_fails_the_request_write() {
+        let (client, server) = UnixStream::pair().expect("socket pair");
+        drop(server);
+        let request = ControlRequest::new(ControlCommand::Ping);
+
+        let error = exchange_stream(
+            Path::new("/session"),
+            client,
+            &request,
+            &ExchangeTiming::deadline(GENEROUS_DEADLINE).expect("deadline"),
+        )
+        .expect_err("closed peer");
+
+        assert!(
+            matches!(
+                error,
+                Error::Transport {
+                    step: "write request",
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
 
     #[test]
     fn stop_request_obeys_the_supplied_deadline() {

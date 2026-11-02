@@ -3467,6 +3467,7 @@ dependencies = [
  "termtrace-model",
  "termtrace-process",
  "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]
