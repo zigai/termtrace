@@ -280,3 +280,6 @@ fn check_version(boundary: &TmuxJournalBoundary) -> Result<()> {
     }
     return Ok(());
 }
+
+#[cfg(test)]
+mod tests;
