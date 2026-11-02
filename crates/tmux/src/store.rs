@@ -14,6 +14,7 @@ use std::{
     ffi::OsStr,
     fs::{OpenOptions, Permissions},
     io::{self, Write as _},
+    ops::ControlFlow,
     os::unix::{
         ffi::OsStrExt as _,
         fs::{OpenOptionsExt as _, PermissionsExt as _},
@@ -217,19 +218,24 @@ impl RecordingStore {
         };
 
         let mut bytes = 0_usize;
-        for sequence in from_sequence.max(1)..=manifest.lifecycle_journal.sequence {
-            let event = catalog.event(sequence)?;
+        catalog.visit_events(from_sequence, limit, |event| {
             let encoded = serde_json::to_vec(&event)
                 .map_err(|error| return Error::json(self.journal_path(), error))?;
-            if page.events.len() >= usize::from(limit)
-                || bytes.saturating_add(encoded.len()) > MAX_EVENT_PAGE_BYTES
-            {
-                page.next_sequence = Some(sequence);
-                break;
+            if bytes.saturating_add(encoded.len()) > MAX_EVENT_PAGE_BYTES {
+                page.next_sequence = Some(event.sequence);
+                return Ok(ControlFlow::Break(()));
             }
 
             bytes = bytes.saturating_add(encoded.len());
             page.events.push(event);
+            return Ok(ControlFlow::Continue(()));
+        })?;
+
+        if page.next_sequence.is_none() && page.events.len() == usize::from(limit) {
+            let following = from_sequence.max(1).saturating_add(u64::from(limit));
+            if following <= manifest.lifecycle_journal.sequence {
+                page.next_sequence = Some(following);
+            }
         }
 
         return Ok(page);

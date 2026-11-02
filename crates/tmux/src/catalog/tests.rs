@@ -235,3 +235,45 @@ fn a_released_recording_frees_its_name() {
 
     store(&temporary);
 }
+
+#[test]
+fn an_event_page_rejects_a_tampered_record_inside_it() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let store = store(&temporary);
+    let events = (0..5_u64)
+        .map(|index| {
+            return TmuxEvent::PaneTrackLinked {
+                track: TmuxPaneTrack {
+                    pane_id: "%1".to_owned(),
+                    session_id: Uuid::now_v7(),
+                    session: ByteString::from(format!("/private/source-{index}").as_bytes()),
+                    linked_unix_ns: index + 1,
+                },
+            };
+        })
+        .collect();
+    store.initialize(manifest(), events, 2).expect("history");
+    let snapshot = store.read().expect("snapshot");
+
+    let page = store.events(&snapshot, 1, 3).expect("intact page");
+    assert_eq!(page.events.len(), 3);
+    assert_eq!(page.next_sequence, Some(4));
+
+    let journal = fs::read_to_string(store.journal_path()).expect("journal");
+    assert_eq!(journal.matches("\"linked_unix_ns\":3}").count(), 1);
+    fs::write(
+        store.journal_path(),
+        journal.replace("\"linked_unix_ns\":3}", "\"linked_unix_ns\":9}"),
+    )
+    .expect("tamper with the third record");
+
+    assert!(store.events(&snapshot, 1, 3).is_err());
+    assert_eq!(
+        store
+            .events(&snapshot, 4, 3)
+            .expect("records after the tampered one")
+            .events
+            .len(),
+        2
+    );
+}

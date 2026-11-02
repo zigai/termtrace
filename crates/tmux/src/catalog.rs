@@ -17,6 +17,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     io::{self, Read as _, Seek as _, SeekFrom},
+    ops::ControlFlow,
     os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
     time::Duration,
@@ -366,17 +367,72 @@ impl TmuxCatalog {
             )
             .map_err(|error| return sql_error(&self.path, error))?;
 
-        if length > MAX_RECORD_BYTES
-            || offset
-                .checked_add(length)
-                .is_none_or(|end| return end > self.head.bytes)
-        {
-            return Err(Error::invalid(
-                "tmux catalog points outside its committed prefix",
-            ));
+        let mut journal = self.open_journal()?;
+
+        return self.read_event(&mut journal, sequence, offset, length, &hash);
+    }
+
+    /// Visit at most `limit` consecutive committed lifecycle events from `from_sequence`,
+    /// checking each like [`Self::event`]. The visitor stops the walk by returning
+    /// [`ControlFlow::Break`].
+    ///
+    /// # Errors
+    /// Returns missing events, invalid positions, source mismatches, or visitor failures.
+    pub fn visit_events(
+        &self,
+        from_sequence: u64,
+        limit: u16,
+        mut visit: impl FnMut(TmuxEventRecord) -> Result<ControlFlow<()>>,
+    ) -> Result<()> {
+        let first = from_sequence.max(1);
+        if limit == 0 || first > self.head.sequence {
+            return Ok(());
         }
 
-        let mut file = OpenOptions::new()
+        let last = first
+            .saturating_add(u64::from(limit) - 1)
+            .min(self.head.sequence);
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT sequence,offset,length,hash FROM events WHERE sequence>=?1 AND sequence<=?2 ORDER BY sequence",
+            )
+            .map_err(|error| return sql_error(&self.path, error))?;
+        let rows = statement
+            .query_map(params![first, last], |row| {
+                return Ok((
+                    row.get::<_, u64>(0)?,
+                    row.get::<_, u64>(1)?,
+                    row.get::<_, u64>(2)?,
+                    row.get::<_, String>(3)?,
+                ));
+            })
+            .map_err(|error| return sql_error(&self.path, error))?;
+
+        let mut journal = self.open_journal()?;
+        let mut expected = first;
+        for row in rows {
+            let (sequence, offset, length, hash) =
+                row.map_err(|error| return sql_error(&self.path, error))?;
+            if sequence != expected {
+                return Err(missing_event());
+            }
+
+            let event = self.read_event(&mut journal, sequence, offset, length, &hash)?;
+            if visit(event)?.is_break() {
+                return Ok(());
+            }
+            expected = sequence.saturating_add(1);
+        }
+
+        if expected <= last {
+            return Err(missing_event());
+        }
+        return Ok(());
+    }
+
+    fn open_journal(&self) -> Result<File> {
+        let file = OpenOptions::new()
             .read(true)
             .custom_flags(O_NOFOLLOW | O_NONBLOCK)
             .open(&self.journal)
@@ -389,11 +445,33 @@ impl TmuxCatalog {
         {
             return Err(Error::invalid("tmux journal is not a regular file"));
         }
+        return Ok(file);
+    }
 
-        file.seek(SeekFrom::Start(offset))
+    fn read_event(
+        &self,
+        journal: &mut File,
+        sequence: u64,
+        offset: u64,
+        length: u64,
+        hash: &str,
+    ) -> Result<TmuxEventRecord> {
+        if length > MAX_RECORD_BYTES
+            || offset
+                .checked_add(length)
+                .is_none_or(|end| return end > self.head.bytes)
+        {
+            return Err(Error::invalid(
+                "tmux catalog points outside its committed prefix",
+            ));
+        }
+
+        journal
+            .seek(SeekFrom::Start(offset))
             .map_err(|error| return Error::filesystem(&self.journal, error))?;
         let mut bytes = Vec::new();
-        file.take(length)
+        journal
+            .take(length)
             .read_to_end(&mut bytes)
             .map_err(|error| return Error::filesystem(&self.journal, error))?;
         let record: Record = serde_json::from_slice(&bytes)
@@ -541,6 +619,10 @@ fn apply_record(
     }
 
     return Ok(());
+}
+
+fn missing_event() -> Error {
+    return Error::invalid("tmux catalog is missing a committed lifecycle event");
 }
 
 fn checked_index_file(path: &Path, create: bool) -> Result<File> {
