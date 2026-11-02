@@ -30,7 +30,8 @@ pub struct EventPage {
 /// Service for bounded canonical event reading.
 pub struct EventsService;
 
-const EVENT_TYPES: &[&str] = &[
+/// Canonical event type names accepted by event filters.
+pub const EVENT_TYPES: &[&str] = &[
     "output",
     "input_intent",
     "input_result",

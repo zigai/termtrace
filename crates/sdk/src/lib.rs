@@ -82,7 +82,7 @@ pub mod events {
     };
     pub use termtrace_model::execution::paging::{EventPageCursor, PageSource, ProjectedEventPage};
     pub use termtrace_service::client::{Events, FollowPosition};
-    pub use termtrace_service::events::{EventCursor, EventPage, EventsService};
+    pub use termtrace_service::events::{EventCursor, EventPage, EventsService, EVENT_TYPES};
 }
 
 /// Forensic timeline, semantic diff, and rendering diagnostics.

@@ -6,7 +6,7 @@ use termtrace_model::{
     execution::visual_profile::VisualProfile, protocol::control::ScreenPredicate,
     terminal::analysis::DiagnosticCheck, terminal::screen::ScreenRegion,
 };
-use termtrace_sdk::defaults;
+use termtrace_sdk::{defaults, events::EVENT_TYPES};
 
 pub(super) fn parse_row_predicate(value: &str) -> Result<(u16, String)> {
     let (row, text) = value
@@ -83,21 +83,6 @@ pub(super) fn parse_state_hash(value: &str) -> StdResult<String, String> {
 }
 
 pub(super) fn parse_event_type(value: &str) -> StdResult<String, String> {
-    const EVENT_TYPES: &[&str] = &[
-        "output",
-        "input_intent",
-        "input_result",
-        "resize_intent",
-        "resize_result",
-        "signal_intent",
-        "signal_result",
-        "marker",
-        "query_response",
-        "lifecycle",
-        "exit",
-        "host_error",
-    ];
-
     if EVENT_TYPES.contains(&value) {
         return Ok(value.to_owned());
     }
