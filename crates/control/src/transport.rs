@@ -615,6 +615,7 @@ mod tests {
     fn line(response: &ControlResponse) -> Vec<u8> {
         let mut encoded = serde_json::to_vec(response).expect("encode response");
         encoded.push(b'\n');
+
         return encoded;
     }
 
@@ -627,6 +628,7 @@ mod tests {
             let mut received = Vec::new();
             server.read_to_end(&mut received).expect("read request");
             server.write_all(&reply).expect("write reply");
+
             return received;
         });
 
@@ -636,7 +638,9 @@ mod tests {
             request,
             &ExchangeTiming::deadline(GENEROUS_DEADLINE).expect("deadline"),
         );
+
         let received = peer.join().expect("peer thread");
+
         return (result, received);
     }
 
@@ -649,7 +653,6 @@ mod tests {
             let request = ControlRequest::new(command);
             let other = Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef);
             assert_ne!(other, request.request_id);
-
             let (result, _) = exchange_with_peer(
                 &request,
                 line(&rejection(CONTROL_PROTOCOL_VERSION, other, "busy")),
@@ -698,9 +701,7 @@ mod tests {
             "busy",
         ));
         unterminated.pop();
-
         let (result, _) = exchange_with_peer(&request, unterminated);
-
         let error = result.expect_err("unterminated response");
         assert!(
             matches!(
@@ -736,7 +737,9 @@ mod tests {
             &request,
             &ExchangeTiming::deadline(GENEROUS_DEADLINE).expect("deadline"),
         );
+
         drop(release);
+
         peer.join().expect("peer thread");
 
         let error = result.expect_err("oversized response");
@@ -758,9 +761,7 @@ mod tests {
         let expected = rejection(CONTROL_PROTOCOL_VERSION, request.request_id, "busy");
         let mut reply = line(&expected);
         reply.extend_from_slice(b"{not json}\n");
-
         let (result, _) = exchange_with_peer(&request, reply);
-
         assert_eq!(result.expect("first line is the response"), expected);
     }
 
@@ -769,18 +770,14 @@ mod tests {
         let request = ControlRequest::new(ControlCommand::Ping);
         let long_message = "m".repeat(20_000);
         let expected = rejection(CONTROL_PROTOCOL_VERSION, request.request_id, &long_message);
-
         let (result, _) = exchange_with_peer(&request, line(&expected));
-
         assert_eq!(result.expect("multi-chunk response"), expected);
     }
 
     #[test]
     fn malformed_json_response_is_invalid() {
         let request = ControlRequest::new(ControlCommand::Stop);
-
         let (result, _) = exchange_with_peer(&request, b"{\"version\":\n".to_vec());
-
         let error = result.expect_err("malformed response");
         assert!(
             matches!(
@@ -802,7 +799,6 @@ mod tests {
         });
 
         let (result, received) = exchange_with_peer(&request, Vec::new());
-
         let error = result.expect_err("oversized request");
         assert!(matches!(error, Error::InvalidRequest { .. }), "{error:?}");
         assert_eq!(error.effect(), MutationEffect::NotApplied);
@@ -826,7 +822,6 @@ mod tests {
             &ExchangeTiming::deadline(GENEROUS_DEADLINE).expect("deadline"),
         )
         .expect_err("closed peer");
-
         assert!(
             matches!(
                 error,

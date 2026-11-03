@@ -223,11 +223,13 @@ impl RecordingStore {
                 .map_err(|error| return Error::json(self.journal_path(), error))?;
             if bytes.saturating_add(encoded.len()) > MAX_EVENT_PAGE_BYTES {
                 page.next_sequence = Some(event.sequence);
+
                 return Ok(ControlFlow::Break(()));
             }
 
             bytes = bytes.saturating_add(encoded.len());
             page.events.push(event);
+
             return Ok(ControlFlow::Continue(()));
         })?;
 

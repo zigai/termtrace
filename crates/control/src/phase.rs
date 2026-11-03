@@ -345,6 +345,7 @@ mod tests {
             durability_policy: DurabilityPolicy::default(),
             resource_limits: ResourceLimits::default(),
         };
+
         fs::write(
             SessionLayout::new(session).manifest(),
             serde_json::to_vec(&manifest).expect("encode manifest"),
@@ -376,6 +377,7 @@ mod tests {
             resource_limit: None,
             failure: None,
         };
+
         fs::write(
             SessionLayout::new(session).completion(),
             serde_json::to_vec(&completion).expect("encode completion"),
@@ -392,7 +394,6 @@ mod tests {
         let temporary = TempDir::new().expect("temporary directory");
         write_manifest(temporary.path(), SESSION_ID);
         write_completion(temporary.path(), SESSION_ID);
-
         assert_eq!(
             evidence_phase(temporary.path()),
             Some(SessionPhase::Completed)
@@ -404,7 +405,6 @@ mod tests {
         let temporary = TempDir::new().expect("temporary directory");
         write_manifest(temporary.path(), SESSION_ID);
         write_completion(temporary.path(), OTHER_SESSION_ID);
-
         assert_eq!(
             evidence_phase(temporary.path()),
             Some(SessionPhase::IdentityMismatch)
@@ -415,7 +415,6 @@ mod tests {
     fn corrupt_manifest_is_missing_evidence() {
         let temporary = TempDir::new().expect("temporary directory");
         fs::write(SessionLayout::new(temporary.path()).manifest(), b"{").expect("write");
-
         assert_eq!(
             evidence_phase(temporary.path()),
             Some(SessionPhase::MissingEvidence)
@@ -426,7 +425,6 @@ mod tests {
     fn published_manifest_without_completion_is_left_to_the_recorder() {
         let temporary = TempDir::new().expect("temporary directory");
         write_manifest(temporary.path(), SESSION_ID);
-
         assert_eq!(evidence_phase(temporary.path()), None);
         assert_eq!(
             observe_evidence(temporary.path()),

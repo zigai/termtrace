@@ -366,7 +366,6 @@ impl TmuxCatalog {
                 },
             )
             .map_err(|error| return sql_error(&self.path, error))?;
-
         let mut journal = self.open_journal()?;
 
         return self.read_event(&mut journal, sequence, offset, length, &hash);
@@ -392,6 +391,7 @@ impl TmuxCatalog {
         let last = first
             .saturating_add(u64::from(limit) - 1)
             .min(self.head.sequence);
+
         let mut statement = self
             .connection
             .prepare(
@@ -411,6 +411,7 @@ impl TmuxCatalog {
 
         let mut journal = self.open_journal()?;
         let mut expected = first;
+
         for row in rows {
             let (sequence, offset, length, hash) =
                 row.map_err(|error| return sql_error(&self.path, error))?;
@@ -422,6 +423,7 @@ impl TmuxCatalog {
             if visit(event)?.is_break() {
                 return Ok(());
             }
+
             expected = sequence.saturating_add(1);
         }
 

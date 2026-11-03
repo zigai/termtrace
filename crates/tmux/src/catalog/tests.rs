@@ -252,9 +252,9 @@ fn an_event_page_rejects_a_tampered_record_inside_it() {
             };
         })
         .collect();
+
     store.initialize(manifest(), events, 2).expect("history");
     let snapshot = store.read().expect("snapshot");
-
     let page = store.events(&snapshot, 1, 3).expect("intact page");
     assert_eq!(page.events.len(), 3);
     assert_eq!(page.next_sequence, Some(4));

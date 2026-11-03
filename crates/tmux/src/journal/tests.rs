@@ -19,6 +19,7 @@ fn append_events(
     events: Vec<TmuxEvent>,
 ) -> TmuxJournalBoundary {
     let (_, next) = append(path, boundary, events, 7).expect("journal append");
+
     return next;
 }
 
@@ -26,8 +27,10 @@ fn committed(path: &Path, boundary: &TmuxJournalBoundary) -> Result<Vec<TmuxEven
     let mut records = Vec::new();
     visit(path, boundary, |record| {
         records.push(record.clone());
+
         return Ok(());
     })?;
+
     return Ok(records);
 }
 
@@ -48,6 +51,7 @@ fn frame(previous_hash: &str, event: TmuxEventRecord) -> (Vec<u8>, String) {
     })
     .expect("record encoding");
     bytes.push(b'\n');
+
     return (bytes, hash);
 }
 
@@ -87,15 +91,16 @@ fn appends_continue_the_sequence_and_visit_returns_every_committed_event() {
 
     let (first_written, first) =
         append(&path, &TmuxJournalBoundary::empty(), vec![session("$1")], 7).expect("append");
+
     let (second_written, second) =
         append(&path, &first, vec![session("$2"), session("$3")], 7).expect("append");
-
     assert_eq!(
         committed(&path, &second).expect("valid journal"),
         vec![record(1, "$1"), record(2, "$2"), record(3, "$3")]
     );
     assert_eq!(second.sequence, 3);
     assert_eq!(second.bytes, len(&path));
+
     let positions: Vec<(u64, u64)> = first_written
         .iter()
         .chain(&second_written)
@@ -121,7 +126,6 @@ fn append_after_a_crash_discards_the_uncommitted_suffix_and_keeps_the_chain() {
     fs::write(&path, &contents).expect("crash suffix");
 
     let second = append_events(&path, &first, vec![session("$2")]);
-
     assert_eq!(len(&path), second.bytes);
     assert_eq!(
         committed(&path, &second).expect("valid journal"),
@@ -154,9 +158,11 @@ fn visit_rejects_an_event_changed_after_it_was_committed() {
         &TmuxJournalBoundary::empty(),
         vec![session("$1"), session("$2")],
     );
+
     let contents = String::from_utf8(fs::read(&path).expect("journal")).expect("utf-8 journal");
     let tampered = contents.replacen("\"$1\"", "\"$9\"", 1);
     assert_ne!(tampered, contents);
+
     fs::write(&path, tampered).expect("tampered journal");
 
     assert_eq!(
@@ -168,19 +174,21 @@ fn visit_rejects_an_event_changed_after_it_was_committed() {
 #[test]
 fn visit_rejects_sequences_that_skip_repeat_or_do_not_start_at_one() {
     let cases: [&[u64]; 3] = [&[2], &[1, 3], &[1, 1]];
+
     for sequences in cases {
         let directory = TempDir::new().expect("temporary directory");
         let path = journal(&directory);
         let mut contents = Vec::new();
         let mut hash = String::new();
+
         for &sequence in sequences {
             let (bytes, next) = frame(&hash, record(sequence, "$1"));
             contents.extend_from_slice(&bytes);
             hash = next;
         }
+
         fs::write(&path, &contents).expect("journal");
         let last = *sequences.last().expect("sequence");
-
         assert_eq!(
             invalid_reason(committed(&path, &boundary_of(&contents, last, &hash))),
             "tmux lifecycle journal chain differs",
@@ -221,10 +229,12 @@ fn visit_rejects_a_boundary_whose_sequence_or_hash_differs_from_the_journal() {
         &TmuxJournalBoundary::empty(),
         vec![session("$1"), session("$2")],
     );
+
     let wrong_sequence = TmuxJournalBoundary {
         sequence: 3,
         ..boundary.clone()
     };
+
     let wrong_hash = TmuxJournalBoundary {
         hash: "0".repeat(boundary.hash.len()),
         ..boundary
@@ -275,6 +285,7 @@ fn frames_up_to_the_size_limit_round_trip_and_larger_ones_are_rejected() {
     );
 
     let oversized = format!("{largest}x");
+
     assert_eq!(
         invalid_reason(append(&path, &boundary, vec![session(&oversized)], 7)),
         "tmux lifecycle record exceeds its frame limit"
@@ -282,6 +293,7 @@ fn frames_up_to_the_size_limit_round_trip_and_larger_ones_are_rejected() {
 
     let (bytes, hash) = frame("", record(1, &oversized));
     fs::write(&path, &bytes).expect("oversized journal");
+
     assert_eq!(
         invalid_reason(committed(&path, &boundary_of(&bytes, 1, &hash))),
         "tmux lifecycle journal has an invalid frame"
@@ -339,10 +351,12 @@ fn every_entry_point_rejects_an_unsupported_journal_version() {
         version: TMUX_JOURNAL_VERSION + 1,
         ..boundary
     };
+
     let expected = format!(
         "unsupported tmux lifecycle journal version {}",
         TMUX_JOURNAL_VERSION + 1
     );
+
     let copy = directory.path().join("copy.jsonl");
 
     assert_eq!(invalid_reason(committed(&path, &future)), expected);
@@ -365,7 +379,6 @@ fn copy_committed_copies_exactly_the_committed_prefix() {
     let first = append_events(&path, &TmuxJournalBoundary::empty(), vec![session("$1")]);
     append_events(&path, &first, vec![session("$2")]);
     let copy = directory.path().join("copy.jsonl");
-
     copy_committed(&path, &copy, &first).expect("copy");
 
     let source = fs::read(&path).expect("journal");
@@ -400,7 +413,6 @@ fn copy_committed_refuses_a_tampered_source_without_creating_the_copy() {
     let contents = String::from_utf8(fs::read(&path).expect("journal")).expect("utf-8 journal");
     fs::write(&path, contents.replacen("\"$1\"", "\"$9\"", 1)).expect("tampered journal");
     let copy = directory.path().join("copy.jsonl");
-
     assert_eq!(
         invalid_reason(copy_committed(&path, &copy, &boundary)),
         "tmux lifecycle journal chain differs"
@@ -427,6 +439,7 @@ fn every_entry_point_refuses_a_symlinked_journal() {
     for refusal in refusals {
         assert_eq!(refusal.raw_os_error(), Some(ELOOP), "{refusal}");
     }
+
     assert_eq!(fs::read(&target).expect("journal"), contents);
     assert!(!copy.exists());
 }
