@@ -1,0 +1,3 @@
+- Runs just validate, test, and integration on a clean checkout on 1.99.1: all pass.
+- Runs just lint, bindings-test, and native-test on 1.99.0 and 1.99.1: same 50 spacing findings, same 2 Python SDK failures, and same native restart failure on both.
+- Leaves the Node bindings and later native steps unrun on 1.99.1.
