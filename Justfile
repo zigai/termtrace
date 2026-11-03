@@ -50,12 +50,12 @@ bindings-build:
 # Test native Python language bindings and pytest consumer suite
 test-python:
   uv run --project tests/consumers/python_native pytest -v tests/consumers/python_native
-  uv run --project tests/consumers/python_native pytest -v examples/sdk/python
+  TERMTRACE_BIN={{justfile_directory()}}/target/debug/termtrace uv run --project tests/consumers/python_native pytest -v examples/sdk/python
 
 # Test native Node.js/TypeScript bindings, the type-checked examples, and consumer suite
 test-node:
   node --test crates/bindings-node/test/*.test.js
-  npm --prefix tests/consumers/node_native test
+  TERMTRACE_BIN={{justfile_directory()}}/target/debug/termtrace npm --prefix tests/consumers/node_native test
 
 # Type-check and lint the native Python bindings
 bindings-lint:
