@@ -1,0 +1,2 @@
+- Runs the Python and Node SDK examples against the older termtrace on PATH: 2 fail in each. Against the built binary, all pass.
+- Runs just test-python and just test-node on 1.99.1 from a clean rebuild: 200 Python consumer tests, the 2 Python examples, 14 Node binding tests, and 112 Node consumer tests pass.
