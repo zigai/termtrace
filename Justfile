@@ -122,30 +122,30 @@ coverage:
   cargo llvm-cov --locked --workspace --html
 
 
-# Replay native Ghostty VT seeds; pass libFuzzer arguments to explore (requires cargo-fuzz and nightly-2026-08-25 with rust-src)
+# Replay native Ghostty VT seeds; pass libFuzzer arguments to explore (requires cargo-fuzz and nightly-2026-08-20 with rust-src)
 [positional-arguments]
 fuzz-vt *args="-runs=0":
-  cargo +nightly-2026-08-25 fuzz run ghostty_vt fuzz/corpus/ghostty_vt -- -timeout=5 -max_len=4096 "$@"
+  cargo +nightly-2026-08-20 fuzz run ghostty_vt fuzz/corpus/ghostty_vt -- -timeout=5 -max_len=4096 "$@"
 
-# Run one-minute fuzz campaigns and replay native VT seeds (requires cargo-fuzz and nightly-2026-08-25 with rust-src)
+# Run one-minute fuzz campaigns and replay native VT seeds (requires cargo-fuzz and nightly-2026-08-20 with rust-src)
 fuzz: fuzz-vt
-  cargo +nightly-2026-08-25 fuzz run output_projection fuzz/corpus/output_projection -- -max_total_time=60 -timeout=5 -max_len=4096
-  cargo +nightly-2026-08-25 fuzz run control_protocol fuzz/corpus/control_protocol -- -max_total_time=60 -timeout=5 -max_len=16384
-  cargo +nightly-2026-08-25 fuzz run event_log fuzz/corpus/event_log -- -max_total_time=60 -timeout=5 -max_len=262144
-  cargo +nightly-2026-08-25 fuzz run bundle_archive fuzz/corpus/bundle_archive -- -max_total_time=60 -timeout=5 -max_len=262144
+  cargo +nightly-2026-08-20 fuzz run output_projection fuzz/corpus/output_projection -- -max_total_time=60 -timeout=5 -max_len=4096
+  cargo +nightly-2026-08-20 fuzz run control_protocol fuzz/corpus/control_protocol -- -max_total_time=60 -timeout=5 -max_len=16384
+  cargo +nightly-2026-08-20 fuzz run event_log fuzz/corpus/event_log -- -max_total_time=60 -timeout=5 -max_len=262144
+  cargo +nightly-2026-08-20 fuzz run bundle_archive fuzz/corpus/bundle_archive -- -max_total_time=60 -timeout=5 -max_len=262144
 
-# Check model undefined behavior under Miri (requires nightly-2026-08-25 with miri)
+# Check model undefined behavior under Miri (requires nightly-2026-08-20 with miri)
 miri:
-  cargo +nightly-2026-08-25 miri test --locked -p termtrace-model --lib
+  cargo +nightly-2026-08-20 miri test --locked -p termtrace-model --lib
 
-# Run the terminal boundary under AddressSanitizer against a sanitized libghostty-vt (requires nightly-2026-08-25 with rust-src)
+# Run the terminal boundary under AddressSanitizer against a sanitized libghostty-vt (requires nightly-2026-08-20 with rust-src)
 sanitize:
   TERMTRACE_SANITIZE=address TERMTRACE_GHOSTTY_PREFIX={{justfile_directory()}}/target/ghostty-asan scripts/bootstrap-ghostty-vt.sh
-  ASAN_OPTIONS=detect_leaks=1 RUSTFLAGS=-Zsanitizer=address TERMTRACE_GHOSTTY_PREFIX={{justfile_directory()}}/target/ghostty-asan cargo +nightly-2026-08-25 test --locked -Zbuild-std --target x86_64-unknown-linux-gnu -p termtrace-terminal --lib
+  ASAN_OPTIONS=detect_leaks=1 RUSTFLAGS=-Zsanitizer=address TERMTRACE_GHOSTTY_PREFIX={{justfile_directory()}}/target/ghostty-asan cargo +nightly-2026-08-20 test --locked -Zbuild-std --target x86_64-unknown-linux-gnu -p termtrace-terminal --lib
 
-# Run concurrency checks under ThreadSanitizer (requires nightly-2026-08-25 with rust-src)
+# Run concurrency checks under ThreadSanitizer (requires nightly-2026-08-20 with rust-src)
 race:
-  RUSTFLAGS="-Zsanitizer=thread" cargo +nightly-2026-08-25 test --locked -Zbuild-std --target x86_64-unknown-linux-gnu -p termtrace-engine connection_limiter
+  RUSTFLAGS="-Zsanitizer=thread" cargo +nightly-2026-08-20 test --locked -Zbuild-std --target x86_64-unknown-linux-gnu -p termtrace-engine connection_limiter
 
 # Audit Rust dependencies for security advisories
 audit:
