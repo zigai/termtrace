@@ -1,0 +1,8 @@
+- `just --justfile Justfile --dry-run clean` parses the cleanup recipe without removing files.
+- `just --justfile Justfile --list` lists public recipes and hides the private remove helper.
+- `git ls-files -- <each removal path and pattern>` returns no tracked files.
+- The helper at the end of Justfile matches /home/zigai/.cache/just-clean-check/remove.just byte for byte.
+- Full checks and stamp are skipped as requested; no manual lint, tests, builds, or real clean run.
+- Installed post-commit skill sync is a no-op: read-only itemized rsync preview returns no changes; target exists and SKILLS_CATALOG_DIR is unset.
+- Cargo/Gradle removal sizes are not included in helper totals.
+- `git ls-files -- zig-out .zig-cache **/__pycache__` inside vendor/ghostty returns no tracked files.
