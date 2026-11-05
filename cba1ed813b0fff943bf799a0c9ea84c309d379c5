@@ -6,3 +6,4 @@
 - Installed post-commit skill sync is a no-op: read-only itemized rsync preview returns no changes; target exists and SKILLS_CATALOG_DIR is unset.
 - Cargo/Gradle removal sizes are not included in helper totals.
 - `git ls-files -- zig-out .zig-cache **/__pycache__` inside vendor/ghostty returns no tracked files.
+- `just --justfile Justfile --show clean` confirms every quoted removal argument; just 1.59.0 dry-run displays the helper body, not bound positional arguments.
