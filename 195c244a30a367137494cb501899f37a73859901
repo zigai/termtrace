@@ -1,0 +1,1 @@
+Verified just --list and just --dry-run install resolve for changed concrete Justfiles and Sprout-generated template samples; report-install/restart-services hidden where present. Supplied report helper byte-for-byte; no real-home installs or service changes.  Full stamp check skipped as requested.
