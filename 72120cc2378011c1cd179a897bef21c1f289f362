@@ -1,0 +1,4 @@
+- git ls-files returns no tracked files for every retained clean path, glob, find pattern, and Cargo/Gradle output path.
+- just --justfile /home/zigai/Projects/termtrace/Justfile --dry-run clean expands the explicit cleanup commands without executing them.
+- just --justfile /home/zigai/Projects/termtrace/Justfile --list parses the Justfile and lists clean.
+- Full project checks and real cleanup are intentionally skipped in this main checkout under the task instructions; nothing is pushed.
