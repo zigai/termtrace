@@ -1,0 +1,4 @@
+- just 1.59.0 --dry-run in Justfile selects only just --list.
+- just --list includes help and excludes _ and default in each concrete changed Justfile.
+- just --fmt --check passes for each concrete changed Justfile.
+- Only help/default recipe changes, declaration placement, required Justfile formatting and their direct callers are committed; concurrent source changes and staged hunks are preserved. No push or registered worktree is used.
