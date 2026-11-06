@@ -52,7 +52,7 @@ pub struct ReviewSummary {
     #[serde(with = "crate::value::exact_path")]
     #[schemars(with = "crate::value::ExactPath")]
     pub canonical_session: PathBuf,
-    /// Number of distinct semantic states.
+    /// Number of semantic boundary states.
     pub state_count: u64,
     /// Number of presentation-eligible states.
     pub presented_state_count: u64,

@@ -7,7 +7,7 @@
   "renderer": "semantic",
   "fps": 30,
   "edit": {
-    "version": 1,
+    "version": 2,
     "clips": [
       {
         "from": {"marker": "intro"},
@@ -70,7 +70,7 @@
     ],
     "render_config": null
   },
-  "edit_plan_hash": "74323cc4e6e2ca2b4f60d014bd44fbc6a1b4ca017680474b22d41b3661770a26",
+  "edit_plan_hash": "45deba43e79b4c7db1b292b43f5720aa349d18548eee78ceeaa09fac16bb1d33",
   "speeds": {
     "from_ns": 0,
     "to_ns": 1000000000,
@@ -88,98 +88,98 @@
   "negative": [
     {
       "name": "two_selector_fields",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "intro", "monotonicNs": 1}, "to": {"marker": "middle"}, "caption": null}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "intro", "monotonicNs": 1}, "to": {"marker": "middle"}, "caption": null}], "change_visualization": null},
       "code": "invalid_selector",
       "facts": {"field": "clips[0].from", "clip_index": 0, "marker": null}
     },
     {
       "name": "absent_marker",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "absent"}, "to": {"marker": "middle"}, "caption": null}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "absent"}, "to": {"marker": "middle"}, "caption": null}], "change_visualization": null},
       "code": "marker_not_found",
       "facts": {"field": "clips[0].from", "clip_index": 0, "marker": "absent"}
     },
     {
       "name": "non_unique_marker",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "repeat"}, "to": {"marker": "outro"}, "caption": null}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "repeat"}, "to": {"marker": "outro"}, "caption": null}], "change_visualization": null},
       "code": "marker_not_unique",
       "facts": {"field": "clips[0].from", "clip_index": 0, "marker": "repeat"}
     },
     {
       "name": "overlapping_clips",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "outro"}, "caption": null}, {"from": {"marker": "middle"}, "to": {"marker": "outro"}, "caption": null}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "outro"}, "caption": null}, {"from": {"marker": "middle"}, "to": {"marker": "outro"}, "caption": null}], "change_visualization": null},
       "code": "overlapping_clips",
       "facts": {"field": "clips[1]", "clip_index": 1, "marker": null}
     },
     {
       "name": "reversed_clip",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "middle"}, "to": {"marker": "intro"}, "caption": null}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "middle"}, "to": {"marker": "intro"}, "caption": null}], "change_visualization": null},
       "code": "clip_out_of_range",
       "facts": {"field": "clips[0]", "clip_index": 0, "marker": null}
     },
     {
       "name": "empty_clip",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "intro"}, "caption": null}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "intro"}, "caption": null}], "change_visualization": null},
       "code": "clip_out_of_range",
       "facts": {"field": "clips[0]", "clip_index": 0, "marker": null}
     },
     {
       "name": "start_after_session",
-      "edit": {"version": 1, "clips": [{"from": {"monotonicNs": 3600000000000}, "to": {"monotonicNs": 3601000000000}, "caption": null}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"monotonicNs": 3600000000000}, "to": {"monotonicNs": 3601000000000}, "caption": null}], "change_visualization": null},
       "code": "selector_out_of_range",
       "facts": {"field": "clips[0].from", "clip_index": 0, "marker": null}
     },
     {
       "name": "end_after_session",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "intro"}, "to": {"monotonicNs": 3600000000000}, "caption": null}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "intro"}, "to": {"monotonicNs": 3600000000000}, "caption": null}], "change_visualization": null},
       "code": "selector_out_of_range",
       "facts": {"field": "clips[0].to", "clip_index": 0, "marker": null}
     },
     {
       "name": "absent_state",
-      "edit": {"version": 1, "clips": [{"from": {"stateId": 999999}, "to": {"marker": "outro"}, "caption": null}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"stateId": 999999}, "to": {"marker": "outro"}, "caption": null}], "change_visualization": null},
       "code": "selector_out_of_range",
       "facts": {"field": "clips[0].from", "clip_index": 0, "marker": null}
     },
     {
       "name": "annotation_clip_out_of_range",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "caption": null}], "annotations": [{"text": "x", "template": null, "scope": {"scope": "clip", "clip_index": 3}}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "caption": null}], "annotations": [{"text": "x", "template": null, "scope": {"scope": "clip", "clip_index": 3}}], "change_visualization": null},
       "code": "invalid_annotation",
       "facts": {"field": "annotations[0].scope", "clip_index": null, "marker": null}
     },
     {
       "name": "odd_resize",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "caption": null}], "transforms": [{"transform": "resize", "width": 101, "height": 100}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "caption": null}], "transforms": [{"transform": "resize", "width": 101, "height": 100}], "change_visualization": null},
       "code": "invalid_transform",
       "facts": {"field": "transforms[0]", "clip_index": null, "marker": null}
     },
     {
       "name": "crop_outside_source",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "caption": null}], "transforms": [{"transform": "crop", "x": 0, "y": 0, "width": 5000, "height": 10}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "caption": null}], "transforms": [{"transform": "crop", "x": 0, "y": 0, "width": 5000, "height": 10}], "change_visualization": null},
       "code": "invalid_transform",
       "facts": {"field": "transforms[0]", "clip_index": null, "marker": null}
     },
     {
       "name": "invalid_ass",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "caption": null}], "subtitles": [{"ass": "invalid.ass"}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "caption": null}], "subtitles": [{"ass": "invalid.ass"}], "change_visualization": null},
       "files": {"invalid.ass": "plain text without sections\n"},
       "code": "invalid_subtitle",
       "facts": {"field": "subtitles[0].ass", "clip_index": null, "marker": null}
     },
     {
       "name": "empty_caption",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "caption": ""}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "caption": ""}], "change_visualization": null},
       "code": "invalid_caption",
       "facts": {"field": "clips[0].caption", "clip_index": 0, "marker": null}
     },
     {
       "name": "zero_speed",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "speed": {"numerator": 0, "denominator": 1}, "caption": null}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "speed": {"numerator": 0, "denominator": 1}, "caption": null}], "change_visualization": null},
       "code": "invalid_speed",
       "facts": {"field": "clips[0].speed", "clip_index": 0, "marker": null}
     },
     {
       "name": "speed_above_64",
-      "edit": {"version": 1, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "speed": {"numerator": 65, "denominator": 1}, "caption": null}], "change_visualization": null},
+      "edit": {"version": 2, "clips": [{"from": {"marker": "intro"}, "to": {"marker": "middle"}, "speed": {"numerator": 65, "denominator": 1}, "caption": null}], "change_visualization": null},
       "code": "invalid_speed",
       "facts": {"field": "clips[0].speed", "clip_index": 0, "marker": null}
     }

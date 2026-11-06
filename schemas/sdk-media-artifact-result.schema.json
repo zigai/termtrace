@@ -14,7 +14,10 @@
           "description": "Normalized relative filename."
         }
       },
-      "required": ["path", "blake3"],
+      "required": [
+        "path",
+        "blake3"
+      ],
       "type": "object"
     },
     "ArtifactProductKind": {
@@ -59,7 +62,9 @@
               "type": "string"
             }
           },
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "type": "object"
         },
         {
@@ -71,7 +76,9 @@
               "type": "string"
             }
           },
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "type": "object"
         },
         {
@@ -83,7 +90,9 @@
               "type": "string"
             }
           },
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "type": "object"
         },
         {
@@ -99,7 +108,10 @@
               "description": "Truth of the input to presentation."
             }
           },
-          "required": ["kind", "source_kind"],
+          "required": [
+            "kind",
+            "source_kind"
+          ],
           "type": "object"
         }
       ]
@@ -165,7 +177,11 @@
           "type": "string"
         }
       },
-      "required": ["session_id", "session_manifest_hash", "boundary"],
+      "required": [
+        "session_id",
+        "session_manifest_hash",
+        "boundary"
+      ],
       "type": "object"
     },
     "Base64Bytes": {
@@ -180,7 +196,10 @@
       "x-termtrace-native-integer": "uint64"
     },
     "NullableString": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "SdkArtifactMember": {
       "additionalProperties": false,
@@ -245,7 +264,11 @@
           "description": "Canonical PTY bytes through this boundary."
         }
       },
-      "required": ["next_event_seq", "event_hash", "output_bytes"],
+      "required": [
+        "next_event_seq",
+        "event_hash",
+        "output_bytes"
+      ],
       "type": "object"
     }
   },

@@ -106,7 +106,7 @@ pub(super) fn validate_edit_plan(plan: &EditPlan) -> Result<()> {
         return Err(edit_error(
             EditFailureCode::InvalidEditPlan,
             if plan.version == EDIT_PLAN_VERSION { "clips" } else { "version" },
-            "edit plan must use version 1 and contain at least one clip",
+            "edit plan must use version 2 and contain at least one clip",
         ));
     }
 

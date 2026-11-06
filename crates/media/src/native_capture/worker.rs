@@ -383,7 +383,7 @@ impl NativeReplayWorker {
             write_json(
                 &staging.join("batch-manifest.json"),
                 &serde_json::json!({
-                    "version": 1, "kind": "native_replay_screenshot_batch", "entries": entries,
+                    "version": 2, "kind": "native_replay_screenshot_batch", "entries": entries,
                     "members": collect_artifact_members(&staging)?,
                 }),
             )?;
@@ -627,7 +627,7 @@ impl NativeReplayWorker {
             screenshot_probe: probe_screenshot(&screenshot, width, height)?,
             members: collect_artifact_members(staging)?,
             capture_kind: "screenshot".to_owned(),
-            selected_state_id: endpoint.state_id,
+            selected_state_id: Some(endpoint.state_id),
             selected_state_hash: Some(endpoint.state_hash.clone()),
             endpoint_event_seq: endpoint.event_seq,
             endpoint_event_byte_offset: endpoint.event_byte_offset,

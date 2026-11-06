@@ -7,6 +7,8 @@
 use blake3::Hasher;
 use nix::libc::O_NOFOLLOW;
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::{cell::Cell, thread, time::Duration};
 use std::{
     fs::{self, File, Metadata, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
@@ -16,6 +18,13 @@ use std::{
 use zstd::stream::{read::Decoder, write::Encoder};
 
 const DEFAULT_SEGMENT_BYTES: u64 = 16 * 1024 * 1024;
+
+// Tests model a congested filesystem by delaying every data synchronization of the writers
+// created on the current thread.
+#[cfg(test)]
+thread_local! {
+    pub(super) static SYNC_DELAY: Cell<Duration> = const { Cell::new(Duration::ZERO) };
+}
 const MAX_SEGMENT_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -129,6 +138,8 @@ pub(super) struct SegmentWriter {
     index: u64,
     bytes: u64,
     hash: Hasher,
+    #[cfg(test)]
+    sync_delay: Duration,
 }
 
 impl SegmentWriter {
@@ -148,6 +159,8 @@ impl SegmentWriter {
             index: 0,
             bytes: 0,
             hash: Hasher::new(),
+            #[cfg(test)]
+            sync_delay: SYNC_DELAY.get(),
         });
     }
 
@@ -156,6 +169,9 @@ impl SegmentWriter {
     }
 
     pub(super) fn sync_data(&self) -> io::Result<()> {
+        #[cfg(test)]
+        thread::sleep(self.sync_delay);
+
         return self.active.sync_data();
     }
 

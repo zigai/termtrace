@@ -149,10 +149,7 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
         .success();
 
     assert!(
-        fs_err::read_dir(canonical.join("derived-cache"))
-            .expect("scenario replay checkpoints")
-            .next()
-            .is_some(),
+        !replay_checkpoints(&canonical).is_empty(),
         "closure must checkpoint an asserted endpoint"
     );
 }
@@ -902,7 +899,7 @@ fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
             "--",
             "/bin/sh",
             "-c",
-            "printf '\\033[?2026habc\\033[?2026l'; printf '%0120dTARGET' 0",
+            "printf '\\033[?2026habc'; sleep 0.08; printf '\\033[?2026l'; printf '%0120dTARGET' 0",
         ])
         .assert()
         .success();
@@ -933,13 +930,24 @@ fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
     assert_eq!(selected.event_byte_offset, hidden.event_byte_offset);
     assert!(!selected.presented);
 
-    for (left, right) in page.entries.iter().zip(page.entries.iter().skip(1)) {
-        assert_eq!(
-            left.state_id + 1,
-            right.state_id,
-            "pages cannot sample away hidden states"
-        );
-    }
+    let page_ids = page
+        .entries
+        .iter()
+        .map(|entry| return entry.state_id)
+        .collect::<Vec<_>>();
+
+    let first = states
+        .iter()
+        .position(|state| return Some(&state.state_id) == page_ids.first())
+        .expect("page starts at a replayed state");
+    assert_eq!(
+        page_ids,
+        states[first..first + page_ids.len()]
+            .iter()
+            .map(|state| return state.state_id)
+            .collect::<Vec<_>>(),
+        "pages cannot sample away hidden states"
+    );
 
     let next_presented = states
         .iter()

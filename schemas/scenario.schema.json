@@ -140,7 +140,9 @@
               "type": "integer"
             }
           },
-          "required": ["function"],
+          "required": [
+            "function"
+          ],
           "type": "object"
         },
         {
@@ -153,7 +155,9 @@
               "type": "string"
             }
           },
-          "required": ["letter"],
+          "required": [
+            "letter"
+          ],
           "type": "object"
         }
       ]
@@ -167,7 +171,9 @@
           "description": "Exact environment bytes."
         }
       },
-      "required": ["base64"],
+      "required": [
+        "base64"
+      ],
       "type": "object"
     },
     "ScenarioEnvironment": {
@@ -240,7 +246,10 @@
           "type": "integer"
         }
       },
-      "required": ["cols", "rows"],
+      "required": [
+        "cols",
+        "rows"
+      ],
       "type": "object"
     },
     "ScenarioInput": {
@@ -265,7 +274,9 @@
           "description": "Named key encoded against the actor's live modes."
         }
       },
-      "required": ["key"],
+      "required": [
+        "key"
+      ],
       "type": "object"
     },
     "ScenarioLaunch": {
@@ -303,7 +314,10 @@
           "description": "Soft output budget; all observed bytes remain canonical evidence.",
           "format": "uint64",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "timeoutMs": {
           "default": 10000,
@@ -325,7 +339,9 @@
           "description": "Optional child working directory."
         }
       },
-      "required": ["command"],
+      "required": [
+        "command"
+      ],
       "type": "object"
     },
     "ScenarioScreenWait": {
@@ -334,11 +350,17 @@
       "properties": {
         "absent": {
           "description": "Exact substring that must be absent.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "contains": {
           "description": "Required exact visible substring.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "stableForMs": {
           "default": 0,
@@ -351,7 +373,10 @@
           "description": "Per-step deadline overriding the launch default.",
           "format": "uint64",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -375,10 +400,15 @@
           "description": "Per-step deadline overriding the launch default.",
           "format": "uint64",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "type": "object"
     },
     "ScenarioStep": {
@@ -392,7 +422,9 @@
               "$ref": "#/$defs/ScenarioScreenWait"
             }
           },
-          "required": ["waitScreen"],
+          "required": [
+            "waitScreen"
+          ],
           "type": "object"
         },
         {
@@ -406,7 +438,9 @@
               "type": "array"
             }
           },
-          "required": ["send"],
+          "required": [
+            "send"
+          ],
           "type": "object"
         },
         {
@@ -417,7 +451,9 @@
               "type": "string"
             }
           },
-          "required": ["mark"],
+          "required": [
+            "mark"
+          ],
           "type": "object"
         },
         {
@@ -428,7 +464,9 @@
               "$ref": "#/$defs/ScenarioSnapshot"
             }
           },
-          "required": ["matchScreenSnapshot"],
+          "required": [
+            "matchScreenSnapshot"
+          ],
           "type": "object"
         },
         {
@@ -439,7 +477,9 @@
               "$ref": "#/$defs/ScenarioTimelineAssertion"
             }
           },
-          "required": ["assertTimeline"],
+          "required": [
+            "assertTimeline"
+          ],
           "type": "object"
         },
         {
@@ -450,7 +490,9 @@
               "type": "object"
             }
           },
-          "required": ["stop"],
+          "required": [
+            "stop"
+          ],
           "type": "object"
         }
       ]
@@ -464,7 +506,9 @@
           "type": "string"
         }
       },
-      "required": ["text"],
+      "required": [
+        "text"
+      ],
       "type": "object"
     },
     "ScenarioTimelineAssertion": {
@@ -480,14 +524,22 @@
         },
         "noFinding": {
           "description": "Stable diagnose finding code that must not overlap the range.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "noPresentedScreenContains": {
           "description": "Text that must not appear in any presentation-eligible state in the range.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
-      "required": ["betweenMarkers"],
+      "required": [
+        "betweenMarkers"
+      ],
       "type": "object"
     }
   },
@@ -530,7 +582,12 @@
       "type": "integer"
     }
   },
-  "required": ["version", "name", "launch", "steps"],
+  "required": [
+    "version",
+    "name",
+    "launch",
+    "steps"
+  ],
   "title": "Scenario",
   "type": "object"
 }

@@ -44,13 +44,19 @@
           "description": "Requested maximum, or none when every remaining item was requested.",
           "format": "uint",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "next_offset": {
           "description": "Offset for the next page when more items remain.",
           "format": "uint",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "offset": {
           "description": "Effective zero-based offset, clamped to the collection length.",
@@ -68,14 +74,21 @@
           "description": "Complete matching collection length when pagination reaches closure.",
           "format": "uint",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "truncated": {
           "description": "Whether more matching items remain after this page.",
           "type": "boolean"
         }
       },
-      "required": ["offset", "returned", "truncated"],
+      "required": [
+        "offset",
+        "returned",
+        "truncated"
+      ],
       "type": "object"
     },
     "VerificationFinding": {
@@ -91,7 +104,10 @@
           "type": "string"
         }
       },
-      "required": ["code", "message"],
+      "required": [
+        "code",
+        "message"
+      ],
       "type": "object"
     },
     "VerificationLevel": {
@@ -137,7 +153,10 @@
     },
     "final_event_hash": {
       "description": "Final canonical event hash, when readable.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "findings": {
       "description": "Stable findings; empty when verification succeeds.",
@@ -156,7 +175,10 @@
     },
     "mutation_journal_error": {
       "description": "Journal-only diagnostic when acceleration is invalid.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "mutation_journal_records_verified": {
       "description": "Number of mutation outcomes verified against canonical ranges.",
@@ -190,11 +212,17 @@
     "session_id": {
       "description": "Immutable session identifier, when readable.",
       "format": "uuid",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "session_manifest_hash": {
       "description": "Exact session-manifest hash, when readable.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "signature_cryptographic_valid": {
       "description": "Whether the detached signature matches the exact receipt payload.",
@@ -206,7 +234,10 @@
     },
     "signature_signer_key_id": {
       "description": "Signer identity asserted by the detached receipt.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "signature_signer_trusted": {
       "description": "Whether the configured trust policy accepts the signer identity/key.",

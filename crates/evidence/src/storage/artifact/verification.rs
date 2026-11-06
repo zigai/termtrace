@@ -454,7 +454,6 @@ fn member_relationship(path: &str) -> &'static str {
         .and_then(|value| return value.to_str())
         .unwrap_or(path)
     {
-        "states.jsonl.zst" => return "semantic_state_stream",
         STATE_INDEX => return "semantic_state_index",
         "final.txt" | "final.vt" | "final.html" => return "semantic_final_state",
         "session.mkv" => return "native_capture_master",

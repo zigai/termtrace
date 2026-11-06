@@ -12,7 +12,7 @@ fn pane_recording_path_cannot_introduce_a_forged_pane() {
     let server = PrivateTmux::unmanaged(&temporary, "/bin/sh");
     let client = TmuxClient::new(
         server.binary.clone(),
-        TmuxSocket::Name(ByteString::from(server.socket.as_bytes())),
+        TmuxSocket::Path(server.socket_path()),
     );
 
     let value = b"/state/a\x1e\n0\x1f%99\x1f1\x1f\x1f\x1f\x1f$0\x1fexisting\x1f@0\x1f0\x1ffake\x1flayout\x1f1\x1f0\x1f1\x1f0\x1f\x1fsleep\x1f";
@@ -38,7 +38,7 @@ fn pane_recording_paths_preserve_literal_percent_sequences() {
     let server = PrivateTmux::unmanaged(&temporary, "/bin/sh");
     let client = TmuxClient::new(
         server.binary.clone(),
-        TmuxSocket::Name(ByteString::from(server.socket.as_bytes())),
+        TmuxSocket::Path(server.socket_path()),
     );
 
     for value in [b"%Y".as_slice(), b"\r!\t\xa8\xe2#%\x1fj".as_slice()] {
@@ -59,7 +59,7 @@ fn option_values_preserve_literal_trailing_semicolons() {
     let server = PrivateTmux::unmanaged(&temporary, "/bin/sh");
     let client = TmuxClient::new(
         server.binary.clone(),
-        TmuxSocket::Name(ByteString::from(server.socket.as_bytes())),
+        TmuxSocket::Path(server.socket_path()),
     );
 
     for value in [";", "path;", "\\;", "path\\;", ";;"] {
@@ -86,7 +86,7 @@ fn pane_fields_round_trip_through_tmux_without_changing_topology() {
     let server = PrivateTmux::unmanaged(&temporary, "/bin/sh");
     let client = TmuxClient::new(
         server.binary.clone(),
-        TmuxSocket::Name(ByteString::from(server.socket.as_bytes())),
+        TmuxSocket::Path(server.socket_path()),
     );
 
     let expected_ids = client

@@ -17,7 +17,10 @@
           "type": "integer"
         }
       },
-      "required": ["start_monotonic_ns", "end_monotonic_ns"],
+      "required": [
+        "start_monotonic_ns",
+        "end_monotonic_ns"
+      ],
       "type": "object"
     },
     "CanonicalBoundary": {
@@ -41,7 +44,11 @@
           "type": "integer"
         }
       },
-      "required": ["next_event_seq", "event_hash", "output_bytes"],
+      "required": [
+        "next_event_seq",
+        "event_hash",
+        "output_bytes"
+      ],
       "type": "object"
     }
   },
@@ -91,7 +98,10 @@
     },
     "source_event_hash": {
       "description": "Source event boundary used by the derivation.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "source_prefix": {
       "anyOf": [

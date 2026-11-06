@@ -48,13 +48,19 @@
     },
     "semantic_state_hash": {
       "description": "Complete hash of the associated semantic state.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "semantic_state_id": {
       "description": "Latest presentation-eligible semantic state at or before the marker.",
       "format": "uint64",
       "minimum": 0,
-      "type": ["integer", "null"]
+      "type": [
+        "integer",
+        "null"
+      ]
     }
   },
   "required": [

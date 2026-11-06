@@ -8,7 +8,9 @@
       "type": "string"
     }
   },
-  "required": ["message"],
+  "required": [
+    "message"
+  ],
   "title": "PlaybackFailure",
   "type": "object"
 }

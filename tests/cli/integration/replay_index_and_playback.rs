@@ -1,8 +1,9 @@
 //! replay index and playback CLI integration tests.
 
 use crate::support::*;
-use std::sync::mpsc;
-use termtrace_model::terminal::replay::StateIndexEntry;
+use std::sync::{atomic::AtomicBool, mpsc};
+use termtrace_engine::replay::inspect;
+use termtrace_model::terminal::replay::{StateIndexEntry, StateInspection};
 
 #[test]
 fn asciicast_preserves_utf8_split_between_output_and_input_events() {
@@ -102,7 +103,7 @@ fn index_replays_every_distinct_state_deterministically() {
             "--",
             "/bin/sh",
             "-c",
-            r"printf '\033[?2026hA\033[38;2;1;2;3mB\033[?2026l界\n\033[?1049hALT\033[?1049l'",
+            r"printf '\033[?2026hA\033[38;2;1;2;3mB'; sleep 0.08; printf '\033[?2026l界\n\033[?1049hALT\033[?1049l'",
         ])
         .assert()
         .success();
@@ -140,17 +141,20 @@ fn index_replays_every_distinct_state_deterministically() {
     let first = replay(&event_log).expect("first replay");
     let second = replay(&event_log).expect("second replay");
     assert_eq!(first, second, "replay must be deterministic");
-    assert!(first.states.iter().any(|state| return !state.presented));
-    assert!(first.states.iter().any(|state| {
-        return state
-            .delta
+    assert!(!state_after(&event_log, b"\x1b[?2026hA").record.presented);
+    assert!(
+        state_after(&event_log, b"\x1b[?1049hALT")
+            .state
             .modes
-            .as_ref()
-            .is_some_and(|modes| return modes.alternate_screen);
-    }));
+            .alternate_screen
+    );
     assert!(first.states.array_windows().all(|[before, after]| {
-        return before.state_hash != after.state_hash;
+        return before.state_id < after.state_id;
     }));
+    assert_eq!(
+        first.states.last().map(|state| return state.state_id),
+        Some(first.artifacts.final_state_id)
+    );
 
     let mut index = Command::cargo_bin("termtrace").expect("binary should build");
     index
@@ -159,7 +163,11 @@ fn index_replays_every_distinct_state_deterministically() {
         .assert()
         .success();
 
-    assert_replay_artifacts(&session, first.artifacts.state_count);
+    let manifest = assert_replay_artifacts(&session, first.artifacts.final_state_id);
+    assert_eq!(
+        u64::try_from(first.states.len()).ok(),
+        Some(manifest.state_count)
+    );
 
     let mut presented = Command::cargo_bin("termtrace").expect("binary should build");
     presented
@@ -178,25 +186,33 @@ fn index_replays_every_distinct_state_deterministically() {
         StateSelection::Presented
     );
     assert!(
-        presented_manifest.state_count < presented_manifest.semantic_state_count,
+        presented_manifest.state_count < manifest.state_count,
         "fixture should suppress synchronized-output internals"
     );
 
-    let presented_states = read_zstd_text(&presented_directory.join("states.jsonl.zst"));
-    let presented_states = presented_states
+    let presented_states = fs_err::read_to_string(presented_directory.join("state-index.jsonl"))
+        .expect("presented state index")
         .lines()
-        .map(|line| return serde_json::from_str::<StateRecord>(line).expect("presented state"))
+        .map(|line| {
+            return serde_json::from_str::<StateIndexEntry>(line).expect("presented state");
+        })
         .collect::<Vec<_>>();
+    assert_eq!(
+        u64::try_from(presented_states.len()).ok(),
+        Some(presented_manifest.state_count)
+    );
     assert!(presented_states.iter().all(|state| return state.presented));
-    assert!(presented_states.iter().enumerate().all(|(index, state)| {
-        return state.state_id == u64::try_from(index).unwrap_or(u64::MAX);
-    }));
     assert_eq!(
         presented_states
-            .first()
-            .and_then(|state| return state.delta.geometry),
-        Some((160, 45)),
-        "first retained state must be independently reconstructable"
+            .iter()
+            .map(|state| return (state.state_id, state.state_hash.clone()))
+            .collect::<Vec<_>>(),
+        first
+            .states
+            .iter()
+            .filter(|state| return state.presented)
+            .map(|state| return (state.state_id, state.state_hash.clone()))
+            .collect::<Vec<_>>()
     );
 
     let mut inspect_text = Command::cargo_bin("termtrace").expect("binary should build");
@@ -333,28 +349,48 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
         &derived.join("manifest.json"),
     );
 
-    validate_json_lines_text(
-        "state-record.schema.json",
-        &read_zstd_text(&derived.join("states.jsonl.zst")),
-    );
-
     validate_json_lines(
         "state-index-entry.schema.json",
         &derived.join("state-index.jsonl"),
     );
 
-    let states = read_zstd_text(&derived.join("states.jsonl.zst"))
+    let states = fs_err::read_to_string(derived.join("state-index.jsonl"))
+        .expect("range state index")
         .lines()
-        .map(|line| return serde_json::from_str::<StateRecord>(line).expect("state JSON"))
+        .map(|line| return serde_json::from_str::<StateIndexEntry>(line).expect("state JSON"))
         .collect::<Vec<_>>();
     assert!(!states.is_empty(), "range must include a baseline");
-    assert_eq!(states[0].state_id, 0);
+    assert_eq!(
+        states[0].state_id,
+        state_after(&event_log, b"BEFORE").record.state_id
+    );
     assert_eq!(states[0].event_seq, None);
     assert_eq!(states[0].monotonic_ns, range_start);
     assert!(states.iter().all(|state| {
         return state.monotonic_ns >= range_start && state.monotonic_ns < range_end;
     }));
-    assert!(states.iter().any(|state| return !state.presented));
+
+    let mut replayed = Vec::new();
+    visit_session_states_range_while(
+        &session,
+        Some(source_range),
+        &AtomicBool::new(false),
+        |record, _| {
+            replayed.push(record.clone());
+
+            return Ok(true);
+        },
+    )
+    .expect("ranged replay");
+
+    assert_eq!(
+        u64::try_from(replayed.len()).ok(),
+        Some(manifest.state_count)
+    );
+    assert!(replayed.iter().all(|state| {
+        return state.monotonic_ns >= range_start && state.monotonic_ns < range_end;
+    }));
+    assert!(!state_after(&event_log, b"\x1b[?2026hRA").record.presented);
 
     let final_text = fs_err::read_to_string(derived.join("final.txt")).expect("range final text");
     assert!(final_text.contains("BEFORERANGE"));
@@ -416,7 +452,7 @@ fn indexed_inspection_returns_the_same_states_as_canonical_replay() {
             "--",
             "/bin/sh",
             "-c",
-            r"for pass in 1 2 3; do printf '\033[H\033[2J'; i=0; while [ $i -lt 120 ]; do printf x; i=$((i+1)); done; sleep 0.05; done",
+            r"for pass in 1 2 3; do printf '\033[H\033[2J\033[3J'; head -c 120000 /dev/zero | tr '\0' x; sleep 0.05; done",
         ])
         .assert()
         .success();
@@ -532,6 +568,42 @@ fn inspect_exits_cleanly_when_downstream_closes_the_pipe() {
     assert!(output.stderr.is_empty(), "unexpected panic: {output:?}");
 }
 
+// The state after the first output bytes that end with `needle`, at its stream position.
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helper should stop when its recording fixture is invalid"
+)]
+fn state_after(event_log: &EventLog, needle: &[u8]) -> StateInspection {
+    let mut position = 0_u64;
+    for record in &event_log.events {
+        match &record.event {
+            Event::Output { data } => {
+                let bytes = data.as_bytes();
+
+                if let Some(start) = bytes
+                    .windows(needle.len())
+                    .position(|part| return part == needle)
+                {
+                    let end = u64::try_from(start + needle.len()).expect("offset");
+
+                    return inspect(event_log, StateSelector::StateId(position + end))
+                        .expect("state after needle");
+                }
+
+                position += u64::try_from(bytes.len()).expect("length");
+            }
+            Event::ResizeResult {
+                status: OperationStatus::Applied,
+                ..
+            } => position += 1,
+            _ => {}
+        }
+    }
+
+    panic!("fixture output must contain the needle");
+}
+
 #[allow(
     clippy::expect_used,
     reason = "test helper should stop when its recording fixture is invalid"
@@ -559,7 +631,7 @@ fn output_timestamp_containing(event_log: &EventLog, needle: &[u8]) -> u64 {
     clippy::unwrap_used,
     reason = "test helper failures should stop at the failed artifact assertion"
 )]
-fn assert_replay_artifacts(session: &Path, expected_states: u64) {
+fn assert_replay_artifacts(session: &Path, final_state_id: u64) -> ReplayManifest {
     use std::os::unix::fs::PermissionsExt as _;
 
     let derived = session.join("derived");
@@ -573,7 +645,6 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
     );
 
     for file in [
-        "states.jsonl.zst",
         "checkpoints.jsonl.zst",
         "checkpoints.bin",
         "state-index.jsonl",
@@ -594,10 +665,19 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
         );
     }
 
-    let states = read_zstd_text(&derived.join("states.jsonl.zst"));
-    let lines = states.lines().count();
-
-    assert_eq!(u64::try_from(lines).unwrap(), expected_states);
+    let manifest: ReplayManifest =
+        serde_json::from_slice(&fs_err::read(derived.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest.final_state_id, final_state_id);
+    assert_eq!(
+        u64::try_from(
+            fs_err::read_to_string(derived.join("state-index.jsonl"))
+                .unwrap()
+                .lines()
+                .count()
+        )
+        .unwrap(),
+        manifest.state_count
+    );
 
     let text = fs_err::read_to_string(derived.join("final.txt")).expect("final text");
     assert!(text.contains("AB界"));
@@ -614,8 +694,6 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
         "replay-manifest.schema.json",
         &derived.join("manifest.json"),
     );
-
-    validate_json_lines_text("state-record.schema.json", &states);
 
     validate_json_lines(
         "state-index-entry.schema.json",
@@ -643,6 +721,8 @@ fn assert_replay_artifacts(session: &Path, expected_states: u64) {
             &serde_json::from_str(line).expect("event JSON"),
         );
     }
+
+    return manifest;
 }
 
 #[test]

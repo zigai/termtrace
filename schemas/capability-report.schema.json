@@ -18,14 +18,22 @@
         },
         "remediation": {
           "description": "Focused remediation when blocked.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "status": {
           "$ref": "#/$defs/CapabilityStatus",
           "description": "Readiness result."
         }
       },
-      "required": ["id", "status", "code", "detail"],
+      "required": [
+        "id",
+        "status",
+        "code",
+        "detail"
+      ],
       "type": "object"
     },
     "CapabilityStatus": {

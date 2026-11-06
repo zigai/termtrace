@@ -371,7 +371,7 @@
           ]
         },
         "stateId": {
-          "description": "Exact semantic state identifier.",
+          "description": "Stream position of the state: output bytes and applied resizes before it.",
           "format": "uint64",
           "minimum": 0,
           "type": [

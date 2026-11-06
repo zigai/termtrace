@@ -34,7 +34,12 @@
           "type": "integer"
         }
       },
-      "required": ["event_seq", "start_byte_offset", "end_byte_offset", "monotonic_ns"],
+      "required": [
+        "event_seq",
+        "start_byte_offset",
+        "end_byte_offset",
+        "monotonic_ns"
+      ],
       "type": "object"
     },
     "VtTokenKind": {
@@ -128,7 +133,14 @@
       "type": "integer"
     }
   },
-  "required": ["token_id", "kind", "raw", "source", "description", "timing_resolution"],
+  "required": [
+    "token_id",
+    "kind",
+    "raw",
+    "source",
+    "description",
+    "timing_resolution"
+  ],
   "title": "VtToken",
   "type": "object"
 }

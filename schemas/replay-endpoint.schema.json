@@ -97,13 +97,10 @@
       "type": "string"
     },
     "state_id": {
-      "description": "Dense state identifier when the resolver calculated it.",
+      "description": "Stream position of the endpoint state.",
       "format": "uint64",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": "integer"
     }
   },
   "required": [
@@ -111,6 +108,7 @@
     "session_manifest_hash",
     "source_complete",
     "boundary",
+    "state_id",
     "state_hash",
     "cols",
     "rows"

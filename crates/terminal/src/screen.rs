@@ -29,32 +29,32 @@ pub fn semantic_state_hash(state: &SemanticState) -> Result<String, ScreenFrameE
     return Ok(hash.finalize().to_hex().to_string());
 }
 
-fn hash_color_spec(hasher: &mut blake3::Hasher, spec: ColorSpec) {
+fn hash_color_spec(hasher: &mut Vec<u8>, spec: ColorSpec) {
     match spec {
-        ColorSpec::None => hasher.update(&[0, 0, 0, 0]),
-        ColorSpec::Palette(idx) => hasher.update(&[1, idx, 0, 0]),
-        ColorSpec::Rgb(rgb) => hasher.update(&[2, rgb.r, rgb.g, rgb.b]),
+        ColorSpec::None => hasher.extend_from_slice(&[0, 0, 0, 0]),
+        ColorSpec::Palette(idx) => hasher.extend_from_slice(&[1, idx, 0, 0]),
+        ColorSpec::Rgb(rgb) => hasher.extend_from_slice(&[2, rgb.r, rgb.g, rgb.b]),
     };
 }
 
-fn hash_cell(hasher: &mut blake3::Hasher, cell: &CellState) {
-    hasher.update(&cell.column.to_le_bytes());
+fn hash_cell(hasher: &mut Vec<u8>, cell: &CellState) {
+    hasher.extend_from_slice(&cell.column.to_le_bytes());
     let wide_byte = match cell.wide_kind {
         WideKind::Narrow => 0,
         WideKind::Wide => 1,
         WideKind::SpacerTail => 2,
         WideKind::SpacerHead => 3,
     };
-    hasher.update(&[wide_byte, u8::from(cell.selected)]);
+    hasher.extend_from_slice(&[wide_byte, u8::from(cell.selected)]);
 
     match cell.resolved_foreground {
-        Some(rgb) => hasher.update(&[1, rgb.r, rgb.g, rgb.b]),
-        None => hasher.update(&[0, 0, 0, 0]),
+        Some(rgb) => hasher.extend_from_slice(&[1, rgb.r, rgb.g, rgb.b]),
+        None => hasher.extend_from_slice(&[0, 0, 0, 0]),
     };
 
     match cell.resolved_background {
-        Some(rgb) => hasher.update(&[1, rgb.r, rgb.g, rgb.b]),
-        None => hasher.update(&[0, 0, 0, 0]),
+        Some(rgb) => hasher.extend_from_slice(&[1, rgb.r, rgb.g, rgb.b]),
+        None => hasher.extend_from_slice(&[0, 0, 0, 0]),
     };
 
     let mut bits = 0_u16;
@@ -90,16 +90,16 @@ fn hash_cell(hasher: &mut blake3::Hasher, cell: &CellState) {
         bits |= 1 << 7;
     }
 
-    hasher.update(&bits.to_le_bytes());
-    hasher.update(&cell.style.underline.to_le_bytes());
+    hasher.extend_from_slice(&bits.to_le_bytes());
+    hasher.extend_from_slice(&cell.style.underline.to_le_bytes());
     hash_color_spec(hasher, cell.style.foreground);
     hash_color_spec(hasher, cell.style.background);
     hash_color_spec(hasher, cell.style.underline_color);
 
     let bytes = cell.grapheme.as_bytes();
     let len = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
-    hasher.update(&len.to_le_bytes());
-    hasher.update(bytes);
+    hasher.extend_from_slice(&len.to_le_bytes());
+    hasher.extend_from_slice(bytes);
 }
 
 /// Hash one semantic row, excluding transient renderer dirtiness.
@@ -108,18 +108,19 @@ fn hash_cell(hasher: &mut blake3::Hasher, cell: &CellState) {
 ///
 /// Currently infallible; the `ScreenFrameError` result is part of the stable hashing signature.
 pub fn hash_semantic_row(row: &RowState) -> Result<blake3::Hash, ScreenFrameError> {
-    let mut hash = blake3::Hasher::new();
-    hash.update(SEMANTIC_ROW_HASH_DOMAIN);
-    hash.update(&row.row.to_le_bytes());
-    hash.update(&[u8::from(row.soft_wrapped), u8::from(row.wrap_continuation)]);
+    // One update over a buffer: blake3 is slow on many tiny updates and hashes the same bytes.
+    let mut hash = Vec::with_capacity(row.cells.len().saturating_mul(32).saturating_add(64));
+    hash.extend_from_slice(SEMANTIC_ROW_HASH_DOMAIN);
+    hash.extend_from_slice(&row.row.to_le_bytes());
+    hash.extend_from_slice(&[u8::from(row.soft_wrapped), u8::from(row.wrap_continuation)]);
     let cell_count = u32::try_from(row.cells.len()).unwrap_or(u32::MAX);
-    hash.update(&cell_count.to_le_bytes());
+    hash.extend_from_slice(&cell_count.to_le_bytes());
 
     for cell in row.cells.iter() {
         hash_cell(&mut hash, cell);
     }
 
-    return Ok(hash.finalize());
+    return Ok(blake3::hash(&hash));
 }
 
 /// Compose a v3 state hash from metadata and cached row hashes in grid order.
@@ -142,66 +143,73 @@ pub fn semantic_state_hash_from_row_hashes(
 }
 
 fn semantic_state_metadata_hasher(state: &SemanticState) -> blake3::Hasher {
-    let mut hash = blake3::Hasher::new();
-    hash.update(SEMANTIC_STATE_HASH_DOMAIN);
-    hash.update(&state.cols.to_le_bytes());
-    hash.update(&state.rows.to_le_bytes());
+    let mut hash = Vec::with_capacity(
+        state
+            .colors
+            .palette
+            .len()
+            .saturating_mul(3)
+            .saturating_add(256),
+    );
+    hash.extend_from_slice(SEMANTIC_STATE_HASH_DOMAIN);
+    hash.extend_from_slice(&state.cols.to_le_bytes());
+    hash.extend_from_slice(&state.rows.to_le_bytes());
 
     // Cursor
-    hash.update(&[
+    hash.extend_from_slice(&[
         u8::from(state.cursor.visible),
         u8::from(state.cursor.blinking),
         u8::from(state.cursor.in_viewport),
     ]);
-    hash.update(&state.cursor.column.unwrap_or(u16::MAX).to_le_bytes());
-    hash.update(&state.cursor.row.unwrap_or(u16::MAX).to_le_bytes());
-    hash.update(&[state.cursor.wide_tail.map_or(2, |v| return u8::from(v))]);
+    hash.extend_from_slice(&state.cursor.column.unwrap_or(u16::MAX).to_le_bytes());
+    hash.extend_from_slice(&state.cursor.row.unwrap_or(u16::MAX).to_le_bytes());
+    hash.extend_from_slice(&[state.cursor.wide_tail.map_or(2, |v| return u8::from(v))]);
     let style_id = match state.cursor.style {
         CursorStyle::Bar => 0,
         CursorStyle::Block => 1,
         CursorStyle::Underline => 2,
         CursorStyle::HollowBlock => 3,
     };
-    hash.update(&[style_id]);
+    hash.extend_from_slice(&[style_id]);
 
     // Modes
-    hash.update(&[
+    hash.extend_from_slice(&[
         u8::from(state.modes.synchronized_output),
         u8::from(state.modes.alternate_screen),
         u8::from(state.modes.wraparound),
         u8::from(state.modes.bracketed_paste),
     ]);
     let mode_count = u32::try_from(state.modes.values.len()).unwrap_or(u32::MAX);
-    hash.update(&mode_count.to_le_bytes());
+    hash.extend_from_slice(&mode_count.to_le_bytes());
 
     for mode in &state.modes.values {
-        hash.update(&mode.number.to_le_bytes());
-        hash.update(&[u8::from(mode.enabled)]);
+        hash.extend_from_slice(&mode.number.to_le_bytes());
+        hash.extend_from_slice(&[u8::from(mode.enabled)]);
     }
 
     // Colors
-    hash.update(&[
+    hash.extend_from_slice(&[
         state.colors.background.r,
         state.colors.background.g,
         state.colors.background.b,
     ]);
-    hash.update(&[
+    hash.extend_from_slice(&[
         state.colors.foreground.r,
         state.colors.foreground.g,
         state.colors.foreground.b,
     ]);
 
     if let Some(cursor_col) = state.colors.cursor {
-        hash.update(&[1, cursor_col.r, cursor_col.g, cursor_col.b]);
+        hash.extend_from_slice(&[1, cursor_col.r, cursor_col.g, cursor_col.b]);
     } else {
-        hash.update(&[0, 0, 0, 0]);
+        hash.extend_from_slice(&[0, 0, 0, 0]);
     }
 
     let palette_count = u32::try_from(state.colors.palette.len()).unwrap_or(u32::MAX);
-    hash.update(&palette_count.to_le_bytes());
+    hash.extend_from_slice(&palette_count.to_le_bytes());
 
     for col in &state.colors.palette {
-        hash.update(&[col.r, col.g, col.b]);
+        hash.extend_from_slice(&[col.r, col.g, col.b]);
     }
 
     // Active style
@@ -238,8 +246,8 @@ fn semantic_state_metadata_hasher(state: &SemanticState) -> blake3::Hasher {
         active_bits |= 1 << 7;
     }
 
-    hash.update(&active_bits.to_le_bytes());
-    hash.update(&state.active_style.underline.to_le_bytes());
+    hash.extend_from_slice(&active_bits.to_le_bytes());
+    hash.extend_from_slice(&state.active_style.underline.to_le_bytes());
     hash_color_spec(&mut hash, state.active_style.foreground);
     hash_color_spec(&mut hash, state.active_style.background);
     hash_color_spec(&mut hash, state.active_style.underline_color);
@@ -247,15 +255,18 @@ fn semantic_state_metadata_hasher(state: &SemanticState) -> blake3::Hasher {
     // Metadata
     let title_bytes = state.metadata.title.as_bytes();
     let title_len = u32::try_from(title_bytes.len()).unwrap_or(u32::MAX);
-    hash.update(&title_len.to_le_bytes());
-    hash.update(title_bytes);
+    hash.extend_from_slice(&title_len.to_le_bytes());
+    hash.extend_from_slice(title_bytes);
 
     let pwd_bytes = state.metadata.working_directory.as_bytes();
     let pwd_len = u32::try_from(pwd_bytes.len()).unwrap_or(u32::MAX);
-    hash.update(&pwd_len.to_le_bytes());
-    hash.update(pwd_bytes);
+    hash.extend_from_slice(&pwd_len.to_le_bytes());
+    hash.extend_from_slice(pwd_bytes);
 
-    return hash;
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&hash);
+
+    return hasher;
 }
 
 /// Project viewport rows as text, replacing empty cells with spaces and

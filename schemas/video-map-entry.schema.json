@@ -7,17 +7,26 @@
       "description": "Actual X11 acquisition timestamp of the correlated frame, when available.",
       "format": "uint128",
       "minimum": 0,
-      "type": ["integer", "null"]
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "correlation": {
       "description": "Correlation is based on clocks; it does not prove terminal presentation.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "frame": {
       "description": "Approximate zero-based video frame; absent for suppressed states.",
       "format": "uint64",
       "minimum": 0,
-      "type": ["integer", "null"]
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "monotonic_ns": {
       "description": "Absolute canonical monotonic semantic timestamp.",
@@ -40,7 +49,12 @@
       "type": "integer"
     }
   },
-  "required": ["state_id", "state_hash", "monotonic_ns", "presented"],
+  "required": [
+    "state_id",
+    "state_hash",
+    "monotonic_ns",
+    "presented"
+  ],
   "title": "VideoMapEntry",
   "type": "object"
 }

@@ -4,10 +4,13 @@ use std::{borrow::Cow, iter::from_fn, path::Path};
 #[cfg(test)]
 use termtrace_evidence::event_log::EventLog;
 use termtrace_evidence::event_log::{EventLogCursor, EventLogSummary};
-use termtrace_model::execution::event::{EventLogHeader, EventRecord};
+use termtrace_model::execution::event::{EventLogHeader, EventLogPosition, EventRecord};
 
 pub(super) type Records<'source> =
     Box<dyn Iterator<Item = Result<Cow<'source, EventRecord>>> + 'source>;
+type PositionedRecord<'source> = (Cow<'source, EventRecord>, Option<EventLogPosition>);
+pub(super) type PositionedRecords<'source> =
+    Box<dyn Iterator<Item = Result<PositionedRecord<'source>>> + 'source>;
 
 pub(super) enum IndexSource<'source> {
     #[cfg(test)]
@@ -35,15 +38,23 @@ impl IndexSource<'_> {
         };
     }
 
-    /// Each pass must end at the same validated prefix, even while the live file grows.
     pub(super) fn records(&self) -> Result<Records<'_>> {
+        return Ok(Box::new(
+            self.positioned_records()?
+                .map(|record| return record.map(|(record, _)| return record)),
+        ));
+    }
+
+    /// Each pass must end at the same validated prefix, even while the live file grows.
+    /// File records carry the log position just before them.
+    pub(super) fn positioned_records(&self) -> Result<PositionedRecords<'_>> {
         match self {
             #[cfg(test)]
             Self::Memory(log) => {
                 return Ok(Box::new(
                     log.events
                         .iter()
-                        .map(|record| return Ok(Cow::Borrowed(record))),
+                        .map(|record| return Ok((Cow::Borrowed(record), None))),
                 ));
             }
             Self::File(path, summary) => {
@@ -73,11 +84,13 @@ impl IndexSource<'_> {
                         return validation.err().map(|error| return Err(Error::from(error)));
                     }
 
+                    let position = cursor.position();
+
                     match cursor.next_record() {
                         Ok(Some(record)) => {
                             read += 1;
 
-                            return Some(Ok(Cow::Owned(record)));
+                            return Some(Ok((Cow::Owned(record), Some(position))));
                         }
                         Ok(None) => {
                             finished = true;

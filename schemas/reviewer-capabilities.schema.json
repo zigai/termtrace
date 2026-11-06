@@ -22,7 +22,11 @@
       "type": "integer"
     }
   },
-  "required": ["version", "commands", "rendering_policy"],
+  "required": [
+    "version",
+    "commands",
+    "rendering_policy"
+  ],
   "title": "ReviewerCapabilities",
   "type": "object"
 }

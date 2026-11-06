@@ -1,5 +1,5 @@
 {
- "version": 1,
+ "version": 2,
  "state_hash": "parity-state-v1",
  "frame_hash": "parity-frame-v1",
  "presented": true,
@@ -19,7 +19,8 @@
     "output_bytes": 52
    }
   },
-  "observed_monotonic_ns": 18446744073709551615
+  "observed_monotonic_ns": 18446744073709551615,
+  "state_id": 52
  },
  "geometry": {
   "cols": 16,

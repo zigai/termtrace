@@ -70,7 +70,7 @@ fn native_live_prefix_excludes_hidden_bytes_and_remains_verifiable_after_complet
     )
     .expect("endpoint JSON");
     assert!(!endpoint.source_complete);
-    assert_eq!(endpoint.event_byte_offset, Some(2));
+    assert_eq!(endpoint.event_byte_offset, Some(9));
 
     let validated =
         replay_endpoint_for_prefix(&session, &endpoint.boundary, &AtomicBool::new(false))
@@ -86,10 +86,10 @@ fn native_live_prefix_excludes_hidden_bytes_and_remains_verifiable_after_complet
         .expect("live artifact catalog remains valid"),
         1
     );
-    let native = validated_visual_manifests_for_state(&session, 3, &AtomicBool::new(false))
+    let native = validated_visual_manifests_for_state(&session, 10, &AtomicBool::new(false))
         .expect("live screenshot discovered for completed state");
     assert_eq!(
-        native_correlations_for_state(endpoint.session_id, 3, &native).len(),
+        native_correlations_for_state(endpoint.session_id, 10, &native).len(),
         1
     );
     assert_eq!(
@@ -178,7 +178,7 @@ fn native_replay_batch_orders_endpoints_and_reuses_one_terminal() {
             validate_replay_screenshot(&session, &artifact, &AtomicBool::new(false))
                 .expect("source-bound native screenshot")
         );
-        assert_eq!(endpoint.state_id, Some(expected_state));
+        assert_eq!(endpoint.state_id, expected_state);
 
         let resources: serde_json::Value = serde_json::from_slice(
             &fs::read(artifact.join("native-resources.json")).expect("resources"),

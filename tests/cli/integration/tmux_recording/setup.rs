@@ -40,7 +40,7 @@ fn watchdog_keeps_tmux_format_expressions_in_executable_paths() {
 
     let client = TmuxClient::new(
         server.binary.clone(),
-        TmuxSocket::Name(ByteString::from(server.socket.as_bytes())),
+        TmuxSocket::Path(server.socket_path()),
     );
 
     let command = setup.watchdog_command();

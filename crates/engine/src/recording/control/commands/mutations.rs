@@ -1,12 +1,11 @@
 use super::{
     actor_boundaries, apply, apply_resize, control_rejected, encode_focus, find_text_regions,
     finish_with_cleanup, interpolate_cell, mode_hash, mouse_button_name, prepare_bytes,
-    prepare_key, prepare_paste, presented_state_hash, resize_semantic,
-    supported_geometry_cell_count, terminal_error, validate_control_input, ByteString,
-    ControlCommand, ControlPayload, Errno, Error, Event, EventLogWriter, Fact, FocusEvent,
-    InputDescriptor, InputKind, InputSource, Instant, MouseAction, MouseButton, OperationStatus,
-    PointerOperation, ProcessSignal, Result, SessionActor, TerminalGeometry, Uuid,
-    ValidatedCommand,
+    prepare_key, prepare_paste, presented_state_hash, supported_geometry_cell_count,
+    terminal_error, validate_control_input, ByteString, ControlCommand, ControlPayload, Errno,
+    Error, Event, EventLogWriter, Fact, FocusEvent, InputDescriptor, InputKind, InputSource,
+    Instant, MouseAction, MouseButton, OperationStatus, PointerOperation, ProcessSignal, Result,
+    SessionActor, TerminalGeometry, Uuid, ValidatedCommand,
 };
 use crate::recording::process::host_signal;
 use termtrace_process::ProcessGroup;
@@ -617,9 +616,7 @@ impl SessionActor<'_> {
                     geometry,
                 )?;
 
-                resize_semantic(&mut self.live.semantic, geometry)?;
-                self.live.geometry = geometry;
-                self.live.presented_stale = true;
+                self.live.apply_resize(geometry)?;
 
                 return Ok(ControlPayload::Acknowledged {
                     boundaries: actor_boundaries(&self.event_log),

@@ -436,7 +436,7 @@ fn semantic_preview_accepts_a_relative_directory() {
     fs::write(
         temporary.path().join("edit.json"),
         serde_json::to_vec(&serde_json::json!({
-            "version": 1,
+            "version": 2,
             "clips": [{ "from": { "monotonicNs": 0 }, "to": { "monotonicNs": end } }]
         }))
         .expect("edit JSON"),
@@ -479,7 +479,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
     fs::write(
         &edit,
         serde_json::to_vec(&serde_json::json!({
-            "version": 1,
+            "version": 2,
             "clips": [{
                 "from": { "monotonicNs": 0 },
                 "to": { "monotonicNs": end },
@@ -1261,7 +1261,7 @@ fn edit_files_keep_their_identity_and_resolve_subtitles_beside_the_file() {
     fs::write(
         &edit,
         serde_json::to_vec(&serde_json::json!({
-            "version": 1,
+            "version": 2,
             "clips": [
                 { "from": { "stateId": 1 }, "to": { "stateId": 14 }, "caption": null },
                 {
@@ -1282,10 +1282,10 @@ fn edit_files_keep_their_identity_and_resolve_subtitles_beside_the_file() {
 
     let plan = edit_plan_json(&session, &edit, "semantic");
 
-    // Recorded from this edit before the editing-API change; the identity must not move.
+    // Recorded from this edit at plan version 2; the identity must not move.
     assert_eq!(
         plan["edit_plan_hash"],
-        "e2baeb6d6ef1685f79ccadc8e0663532017a62734df8030aecf4a874e8391450"
+        "a5d77c97241c51880b6658ebd9685ef6d3cdab3f3750e0b8fbaf9dc20ceb9063"
     );
     assert_eq!(
         plan["subtitles"][0]["source_path"],
@@ -1319,7 +1319,7 @@ fn native_frame_edits_start_at_the_frame_they_name() {
     let markers = temporary.path().join("markers.json");
     fs::write(
         &markers,
-        br#"{"version":1,"clips":[{"from":{"marker":"first"},"to":{"marker":"third"},"caption":null}],"change_visualization":null}"#,
+        br#"{"version":2,"clips":[{"from":{"marker":"first"},"to":{"marker":"third"},"caption":null}],"change_visualization":null}"#,
     )
     .expect("marker edit");
 
@@ -1340,7 +1340,7 @@ fn native_frame_edits_start_at_the_frame_they_name() {
     fs::write(
         &edit,
         serde_json::to_vec(&serde_json::json!({
-            "version": 1,
+            "version": 2,
             "clips": [
                 { "from": { "nativeFrame": frames[0] }, "to": { "nativeFrame": frames[1] }, "caption": null },
                 { "from": { "nativeFrame": frames[1] }, "to": { "nativeFrame": frames[2] }, "caption": null }

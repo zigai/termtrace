@@ -11,7 +11,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 use termtrace_evidence::{
-    artifact::{secure_file, sync_directory},
+    artifact::{create_private_directory, secure_file, sync_directory, write_secure},
     event_log::canonical_source_fingerprint,
     session::{read_manifest, validate_completed_session_with_check},
 };
@@ -19,6 +19,15 @@ use termtrace_model::execution::{layout::SessionLayout, session::SessionCompleti
 
 /// Owner-only key authenticating the local verification cache, kept outside session evidence.
 const VERIFICATION_CACHE_KEY: &str = "verification-cache.key";
+const VALIDATION_RECORD: &str = "validation.json";
+const VALIDATION_RECORD_VERSION: u32 = 1;
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ValidationRecord {
+    version: u32,
+    completion: SessionCompletion,
+}
 
 pub(crate) fn check_cancelled(cancelled: Option<&AtomicBool>) -> Result<()> {
     if cancelled.is_some_and(|flag| return flag.load(Ordering::Relaxed)) {
@@ -55,6 +64,10 @@ impl ValidatedSession {
             });
         }
 
+        if let Some(validated) = Self::from_record(session) {
+            return Ok(validated);
+        }
+
         let source = SourceIdentity::capture(session)?;
         let completion = validate_completed_session_with_check(session, || {
             return check_cancelled(cancelled).map_err(|error| {
@@ -67,11 +80,86 @@ impl ValidatedSession {
 
         source.check(session)?;
 
-        return Ok(Self {
+        let validated = Self {
             root: session.to_path_buf(),
             completion,
             source,
-        });
+        };
+
+        if let Err(error) = validated.publish_record() {
+            tracing::warn!(session = %session.display(), %error, "could not record session validation");
+        }
+
+        return Ok(validated);
+    }
+
+    // A record is only minted after full validation, and `decode` accepts it only while every
+    // canonical file keeps the identity it had then, so unchanged bytes are not rehashed.
+    fn from_record(session: &Path) -> Option<Self> {
+        let path = SessionLayout::new(session)
+            .derived_cache()
+            .join(VALIDATION_RECORD);
+
+        let bytes = match read_private_file(&path) {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => return None,
+            Err(error) => {
+                tracing::warn!(path = %path.display(), %error, "ignored session validation record");
+
+                return None;
+            }
+        };
+
+        let validated = authenticate::<ValidationRecord>(session, &bytes)
+            .and_then(|(source, record)| {
+                if record.version != VALIDATION_RECORD_VERSION {
+                    return Err(invalid_replay("session validation record version differs"));
+                }
+                return Ok(Self {
+                    root: session.to_path_buf(),
+                    completion: record.completion,
+                    source,
+                });
+            })
+            .and_then(|validated| {
+                validated.check()?;
+
+                return Ok(validated);
+            });
+
+        return match validated {
+            Ok(validated) => Some(validated),
+            Err(error) => {
+                tracing::debug!(path = %path.display(), %error, "session validation record is stale");
+
+                return None;
+            }
+        };
+    }
+
+    fn publish_record(&self) -> Result<()> {
+        let directory = SessionLayout::new(&self.root).derived_cache();
+        ensure_private_cache_directory(&directory)?;
+
+        let bytes = encode(
+            self,
+            ValidationRecord {
+                version: VALIDATION_RECORD_VERSION,
+                completion: self.completion.clone(),
+            },
+        )?;
+
+        let path = directory.join(VALIDATION_RECORD);
+
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(source) => return Err(Error::Filesystem { path, source }),
+        }
+
+        write_secure(&path, &bytes)?;
+
+        return Ok(sync_directory(&directory)?);
     }
 
     /// The validated session directory.
@@ -209,6 +297,13 @@ pub(crate) fn encode<T: Serialize>(validated: &ValidatedSession, payload: T) -> 
 
 /// Accept a local trust record only when it was minted for the session's current source identity.
 pub(crate) fn decode<T: Serialize + DeserializeOwned>(session: &Path, bytes: &[u8]) -> Result<T> {
+    return authenticate(session, bytes).map(|(_, payload)| return payload);
+}
+
+fn authenticate<T: Serialize + DeserializeOwned>(
+    session: &Path,
+    bytes: &[u8],
+) -> Result<(SourceIdentity, T)> {
     let authenticated: Authenticated<T> = serde_json::from_slice(bytes)
         .map_err(|error| return json_error(PathBuf::from("<verified-cache>"), error))?;
 
@@ -231,7 +326,76 @@ pub(crate) fn decode<T: Serialize + DeserializeOwned>(session: &Path, bytes: &[u
 
     authenticated.source.check(session)?;
 
-    return Ok(authenticated.payload);
+    return Ok((authenticated.source, authenticated.payload));
+}
+
+fn read_private_file(path: &Path) -> Result<Option<Vec<u8>>> {
+    let mut file = match OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NOFOLLOW)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+
+    let metadata = file.metadata().map_err(|source| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        };
+    })?;
+
+    if !metadata.is_file() || metadata.mode() & 0o077 != 0 || metadata.uid() != geteuid().as_raw() {
+        return Err(invalid_replay(
+            "local verification record must be an owner-only regular file",
+        ));
+    }
+
+    let length = usize::try_from(metadata.len()).map_err(|source| {
+        return Error::InvalidReplay {
+            reason: "local verification record does not fit in memory".to_owned(),
+            source: Some(Box::new(source)),
+        };
+    })?;
+
+    let mut bytes = vec![0; length];
+    file.read_exact(&mut bytes).map_err(|source| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        };
+    })?;
+
+    return Ok(Some(bytes));
+}
+
+pub(crate) fn ensure_private_cache_directory(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_dir() || metadata.mode() & 0o077 != 0 {
+                return Err(invalid_replay(
+                    "local verification cache must be a real owner-only directory",
+                ));
+            }
+            return Ok(());
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Ok(create_private_directory(path)?);
+        }
+        Err(source) => {
+            return Err(Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    }
 }
 
 fn verification_key(session: &Path) -> Result<[u8; 32]> {

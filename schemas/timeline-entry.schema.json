@@ -1437,7 +1437,7 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "A distinct Ghostty semantic state transition.",
+          "description": "A Ghostty semantic boundary state.",
           "properties": {
             "changed_cells": {
               "description": "Number of complete semantic cell values changed.",
@@ -1493,7 +1493,7 @@
               "type": "string"
             },
             "state_id": {
-              "description": "Dense semantic state identifier.",
+              "description": "Stream position of the state.",
               "format": "uint64",
               "minimum": 0,
               "type": "integer"

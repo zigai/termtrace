@@ -684,6 +684,8 @@ fn initialize_live_terminal(
         semantic,
         presented,
         presented_stale: false,
+        position: 0,
+        presented_position: 0,
         row_hashes: RefCell::new(Vec::new()),
         cached_state_hash: RefCell::new(None),
         pending_query_responses: Vec::new(),

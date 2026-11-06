@@ -24,7 +24,11 @@
           "description": "File and session identity."
         }
       },
-      "required": ["source", "next_event_seq", "event_hash"],
+      "required": [
+        "source",
+        "next_event_seq",
+        "event_hash"
+      ],
       "type": "object"
     },
     "OutputPageCursor": {
@@ -42,7 +46,10 @@
           "description": "Chain endpoint through the event containing the last returned byte."
         }
       },
-      "required": ["events", "byte_offset"],
+      "required": [
+        "events",
+        "byte_offset"
+      ],
       "type": "object"
     },
     "PageSource": {
@@ -112,7 +119,12 @@
       "type": "boolean"
     }
   },
-  "required": ["bytes", "cursor", "has_more", "incomplete_tail"],
+  "required": [
+    "bytes",
+    "cursor",
+    "has_more",
+    "incomplete_tail"
+  ],
   "title": "ByteOutputPage",
   "type": "object"
 }

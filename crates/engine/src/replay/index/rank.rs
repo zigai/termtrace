@@ -1,11 +1,11 @@
 use super::{
     super::{invalid_replay, json_error, timeline_event},
+    seekable::{open_seekable, SeekableReader},
     source::Records,
 };
 use crate::{Error, Result};
 use std::{
-    fs::File,
-    io::{BufRead as _, BufReader},
+    io::BufRead as _,
     path::{Path, PathBuf},
 };
 use termtrace_model::terminal::{replay::SourceRange, vt::VtToken};
@@ -17,7 +17,7 @@ pub(super) struct TimelineRanks<'source> {
     canonical: Records<'source>,
     canonical_next: Option<TimelineKey>,
     canonical_count: u64,
-    controls: BufReader<File>,
+    controls: SeekableReader,
     controls_path: PathBuf,
     control_next: Option<(TimelineKey, u64)>,
     control_count: u64,
@@ -32,18 +32,13 @@ impl<'source> TimelineRanks<'source> {
         source_range: Option<SourceRange>,
     ) -> Result<Self> {
         let path = directory.join(super::CONTROL_INDEX);
-        let file = File::open(&path).map_err(|source| {
-            return Error::Filesystem {
-                path: path.clone(),
-                source,
-            };
-        })?;
+        let controls = open_seekable(&path, 0)?;
 
         let mut ranks = Self {
             canonical,
             canonical_next: None,
             canonical_count: 0,
-            controls: BufReader::new(file),
+            controls,
             controls_path: path,
             control_next: None,
             control_count: 0,

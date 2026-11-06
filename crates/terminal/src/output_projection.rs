@@ -1,44 +1,64 @@
 //! Explicitly lossy, streaming-safe child-output projections.
 
-use crate::utf8::Utf8Prefix;
+use crate::{
+    ghostty_vt::{ScanKind, SequenceScanner},
+    Result,
+};
 pub use termtrace_model::protocol::output_projection::{
     OutputProjectionQuality, OutputProjectionReport,
 };
 
 /// Streaming control stripper retaining printable bytes, line breaks, carriage returns, and tabs.
-#[derive(Debug, Default)]
+///
+/// Ghostty's parser decides which bytes belong to control sequences. Bytes
+/// outside them pass through unless they are C0 controls or DEL.
 pub struct ControlStripper {
-    state: StripState,
-    control: Vec<u8>,
-    utf8_prefix: Utf8Prefix,
+    scanner: SequenceScanner,
     source_byte_count: u64,
     output_byte_count: u64,
     alternate_screen_observed: bool,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum StripState {
-    #[default]
-    Ground,
-    Escape,
-    Csi,
-    Osc,
-    String,
-    OscEscape,
-    StringEscape,
-}
-
 impl ControlStripper {
+    /// Create a stripper outside any control sequence.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when libghostty-vt cannot allocate its parser.
+    pub fn new() -> Result<Self> {
+        return Ok(Self {
+            scanner: SequenceScanner::new()?,
+            source_byte_count: 0,
+            output_byte_count: 0,
+            alternate_screen_observed: false,
+        });
+    }
+
     /// Consume one arbitrary byte chunk without requiring control boundaries to align.
     #[must_use]
-    pub fn feed(&mut self, bytes: &[u8]) -> Vec<u8> {
+    pub fn feed(&mut self, mut bytes: &[u8]) -> Vec<u8> {
         self.source_byte_count = self
             .source_byte_count
             .saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
         let mut output = Vec::with_capacity(bytes.len());
 
-        for byte in bytes.iter().copied() {
-            self.consume(byte, &mut output);
+        while !bytes.is_empty() {
+            let step = self.scanner.scan_to_ground(bytes);
+            let (consumed, rest) = bytes.split_at(step.consumed.min(bytes.len()));
+
+            match step.kind {
+                ScanKind::Text => output.extend(consumed.iter().copied().filter(|byte| {
+                    return matches!(byte, b'\n' | b'\r' | b'\t')
+                        || !matches!(byte, 0x00..=0x1f | 0x7f);
+                })),
+                ScanKind::Sequence { ground, .. } => {
+                    if ground && !self.alternate_screen_observed {
+                        self.alternate_screen_observed = self.scanner.alternate_screen();
+                    }
+                }
+            }
+
+            bytes = rest;
         }
 
         self.output_byte_count = self
@@ -48,7 +68,7 @@ impl ControlStripper {
         return output;
     }
 
-    /// Whether a recognized alternate-screen transition was observed.
+    /// Whether the program switched to the alternate screen at some point.
     #[must_use]
     pub fn has_observed_alternate_screen(&self) -> bool {
         return self.alternate_screen_observed;
@@ -65,131 +85,16 @@ impl ControlStripper {
     pub fn output_byte_count(&self) -> u64 {
         return self.output_byte_count;
     }
-
-    fn consume(&mut self, byte: u8, output: &mut Vec<u8>) {
-        let continuation = self.utf8_prefix.push(byte);
-        if continuation && self.state == StripState::Ground {
-            output.push(byte);
-            return;
-        }
-
-        match self.state {
-            StripState::Ground => match byte {
-                0x1b => self.begin(StripState::Escape, byte),
-                0x9b => self.begin(StripState::Csi, byte),
-                0x9d => self.begin(StripState::Osc, byte),
-                0x90 | 0x98 | 0x9e | 0x9f => self.begin(StripState::String, byte),
-                b'\n' | b'\r' | b'\t' => output.push(byte),
-                0x00..=0x1f | 0x7f | 0x80..=0x9f => {}
-                _ => output.push(byte),
-            },
-            StripState::Escape => {
-                self.push_control(byte);
-                self.state = match byte {
-                    b'[' => StripState::Csi,
-                    b']' => StripState::Osc,
-                    b'P' | b'_' | b'^' | b'X' => StripState::String,
-                    0x18 | 0x1a => {
-                        self.finish_control();
-                        StripState::Ground
-                    }
-                    0x30..=0x7e => {
-                        self.finish_control();
-                        StripState::Ground
-                    }
-                    _ => StripState::Escape,
-                };
-            }
-            StripState::Csi => {
-                self.push_control(byte);
-
-                if byte == 0x18 || byte == 0x1a || (0x40..=0x7e).contains(&byte) {
-                    self.finish_control();
-                    self.state = StripState::Ground;
-                }
-            }
-            StripState::Osc => {
-                self.push_control(byte);
-
-                match byte {
-                    0x07 | 0x9c if !continuation => {
-                        self.finish_control();
-                        self.state = StripState::Ground;
-                    }
-                    0x18 | 0x1a => {
-                        self.finish_control();
-                        self.state = StripState::Ground;
-                    }
-                    0x1b => self.state = StripState::OscEscape,
-                    _ => {}
-                }
-            }
-            StripState::String => {
-                self.push_control(byte);
-
-                match byte {
-                    0x07 | 0x9c => {
-                        self.finish_control();
-                        self.state = StripState::Ground;
-                    }
-                    0x18 | 0x1a => {
-                        self.finish_control();
-                        self.state = StripState::Ground;
-                    }
-                    0x1b => self.state = StripState::StringEscape,
-                    _ => {}
-                }
-            }
-            StripState::OscEscape | StripState::StringEscape => {
-                self.push_control(byte);
-
-                if byte == b'\\' || byte == 0x18 || byte == 0x1a {
-                    self.finish_control();
-                    self.state = StripState::Ground;
-                } else {
-                    self.state = if self.state == StripState::OscEscape {
-                        StripState::Osc
-                    } else {
-                        StripState::String
-                    };
-                }
-            }
-        }
-    }
-
-    fn begin(&mut self, state: StripState, byte: u8) {
-        self.control.clear();
-        self.control.push(byte);
-        self.state = state;
-    }
-
-    fn push_control(&mut self, byte: u8) {
-        if self.control.len() < 4096 {
-            self.control.push(byte);
-        }
-    }
-
-    fn finish_control(&mut self) {
-        if self.control.ends_with(b"?47h")
-            || self.control.ends_with(b"?1047h")
-            || self.control.ends_with(b"?1049h")
-        {
-            self.alternate_screen_observed = true;
-        }
-
-        self.control.clear();
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::{collection, prelude::*};
-    use std::iter;
 
     #[test]
     fn strips_controls_across_chunks_and_flags_alternate_screen() {
-        let mut stripper = ControlStripper::default();
+        let mut stripper = ControlStripper::new().expect("stripper");
         let mut output = stripper.feed(b"before\n\x1b[?104");
         output.extend(stripper.feed(b"9h\x1b[31mred\x1b[0m\n"));
 
@@ -200,24 +105,30 @@ mod tests {
     }
 
     #[test]
-    fn strips_c0_and_eight_bit_control_families() {
-        let mut stripper = ControlStripper::default();
-        let output = stripper
-            .feed(b"\x01\x7f\x80\x9b31mA\x9d0;title\x07B\x90payload\x1b\\C\x9fpayload\x1b\\D");
-        assert_eq!(output, b"ABCD");
+    fn keeps_eight_bit_bytes_outside_sequences_as_text() {
+        let mut stripper = ControlStripper::new().expect("stripper");
+        let output = stripper.feed(b"\x01\x7f\x80\x9b31mA\x9d0;title\x07B");
+        assert_eq!(output, b"\x80\x9b31mA\x9d0;titleB");
         assert!(!stripper.has_observed_alternate_screen());
     }
 
     #[test]
-    fn strips_dcs_with_raw_st_after_a_utf8_lead_byte() {
-        let mut stripper = ControlStripper::default();
-        let output = stripper.feed(b"\x1bPq\xc4\x9cTAIL");
-        assert_eq!(output, b"TAIL");
+    fn strips_eight_bit_introducers_inside_sequences() {
+        let mut stripper = ControlStripper::new().expect("stripper");
+        let output = stripper.feed(b"\x1b[1\x9d0;title\x07A\x1b_app\x90payload\x1b\\B");
+        assert_eq!(output, b"AB");
+    }
+
+    #[test]
+    fn dcs_payload_ends_only_at_esc_can_or_sub() {
+        let mut stripper = ControlStripper::new().expect("stripper");
+        let output = stripper.feed(b"\x1bPq\xc4\x9cTAIL\x9c\x07\x1b\\after");
+        assert_eq!(output, b"after");
     }
 
     #[test]
     fn strips_seven_bit_control_families_and_recovers_from_false_string_escapes() {
-        let mut stripper = ControlStripper::default();
+        let mut stripper = ControlStripper::new().expect("stripper");
         let output = stripper
             .feed(b"\x1b]0;title\x07A\x1bPdata\x1b\\B\x1bcC\x1b]0;title\x1b\\D\x1b]0;a\x1bx\x07E");
         assert_eq!(output, b"ABCDE");
@@ -241,7 +152,7 @@ mod tests {
                 input.extend_from_slice(b"after\n");
 
                 for split in 0..=input.len() {
-                    let mut stripper = ControlStripper::default();
+                    let mut stripper = ControlStripper::new().expect("stripper");
                     let mut output = stripper.feed(&input[..split]);
                     output.extend(stripper.feed(&input[split..]));
                     assert_eq!(
@@ -255,46 +166,53 @@ mod tests {
 
     #[test]
     fn utf8_continuation_in_osc_does_not_leak_title_text_across_chunk_boundaries() {
-        for input in [
-            b"before\x1b]0;\xc4\x9cprivate title\x07after\n".as_slice(),
-            b"before\x1b]0;prefix\x1bx\xc4\x9cprivate title\x07after\n",
-        ] {
-            for split in 0..=input.len() {
-                let mut stripper = ControlStripper::default();
-                let mut output = stripper.feed(&input[..split]);
-                output.extend(stripper.feed(&input[split..]));
-                assert_eq!(output, b"beforeafter\n", "split {split}");
-            }
+        let input = b"before\x1b]0;\xc4\x9cprivate title\x07after\n";
+
+        for split in 0..=input.len() {
+            let mut stripper = ControlStripper::new().expect("stripper");
+            let mut output = stripper.feed(&input[..split]);
+            output.extend(stripper.feed(&input[split..]));
+            assert_eq!(output, b"beforeafter\n", "split {split}");
         }
     }
 
     #[test]
+    fn esc_inside_osc_ends_the_string_and_starts_an_escape_sequence() {
+        let mut stripper = ControlStripper::new().expect("stripper");
+        let output = stripper.feed(b"before\x1b]0;prefix\x1bxshown\x07after\n");
+        assert_eq!(output, b"beforeshownafter\n");
+    }
+
+    #[test]
     fn recognizes_each_supported_alternate_screen_sequence() {
-        let untouched = ControlStripper::default();
+        let untouched = ControlStripper::new().expect("stripper");
         assert!(!untouched.has_observed_alternate_screen());
 
-        for sequence in [b"\x1b[?47h".as_slice(), b"\x1b[?1047h", b"\x1b[?1049h"] {
-            let mut stripper = ControlStripper::default();
+        for sequence in [
+            b"\x1b[?47h".as_slice(),
+            b"\x1b[?1047h",
+            b"\x1b[?1049h",
+            b"\x1b[?25;1049h",
+        ] {
+            let mut stripper = ControlStripper::new().expect("stripper");
             assert!(stripper.feed(sequence).is_empty());
             assert!(stripper.has_observed_alternate_screen());
         }
     }
 
     #[test]
-    fn bounded_control_retention_does_not_classify_truncated_sequences() {
-        let mut sequence = b"\x1b[".to_vec();
-        sequence.extend(iter::repeat_n(b'0', 4_091));
-        sequence.extend_from_slice(b"?47h");
-
-        let mut stripper = ControlStripper::default();
-        assert!(stripper.feed(&sequence).is_empty());
-        assert!(!stripper.has_observed_alternate_screen());
+    fn alternate_screen_text_outside_a_mode_set_does_not_count() {
+        for sequence in [b"\x1b]0;?1049h\x07".as_slice(), b"\x1b[?1049l", b"?1049h"] {
+            let mut stripper = ControlStripper::new().expect("stripper");
+            let output = stripper.feed(sequence);
+            assert!(!stripper.has_observed_alternate_screen(), "{output:?}");
+        }
     }
 
     #[test]
     fn recognizes_eight_bit_st_and_cancel_controls() {
-        let mut stripper = ControlStripper::default();
-        let output = stripper.feed(b"\x9d0;title\x9cHello\x1b[31\x18World\x1bXsos\x9cDone");
+        let mut stripper = ControlStripper::new().expect("stripper");
+        let output = stripper.feed(b"\x1b_app\x9cHello\x1b[31\x18World\x1bXsos\x9cDone");
         assert_eq!(output, b"HelloWorldDone");
     }
 
@@ -306,11 +224,11 @@ mod tests {
             bytes in collection::vec(any::<u8>(), 0..512),
             chunk_size in 1_usize..64,
         ) {
-            let mut contiguous = ControlStripper::default();
+            let mut contiguous = ControlStripper::new().expect("stripper");
             let expected = contiguous.feed(&bytes);
             let expected_alternate_screen = contiguous.has_observed_alternate_screen();
 
-            let mut chunked = ControlStripper::default();
+            let mut chunked = ControlStripper::new().expect("stripper");
             let mut actual = Vec::new();
             for chunk in bytes.chunks(chunk_size) {
                 actual.extend(chunked.feed(chunk));

@@ -523,14 +523,14 @@
         },
         {
           "additionalProperties": false,
-          "description": "Exact semantic state identifier.",
+          "description": "Stream position of the state: output bytes and applied resizes before it.",
           "properties": {
             "selector": {
               "const": "state_id",
               "type": "string"
             },
             "state_id": {
-              "description": "Exact semantic state identifier.",
+              "description": "Stream position of the state: output bytes and applied resizes before it.",
               "format": "uint64",
               "minimum": 0,
               "type": "integer"
@@ -544,7 +544,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Exact content-addressed semantic state hash.",
+          "description": "Latest state with this content hash.",
           "properties": {
             "selector": {
               "const": "state_hash",
@@ -761,13 +761,10 @@
       "type": "string"
     },
     "state_id": {
-      "description": "Dense canonical state identifier when byte-granular replay established it.",
+      "description": "Stream position of the state.",
       "format": "uint64",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": "integer"
     },
     "state_point": {
       "$ref": "#/$defs/StatePoint",
@@ -787,6 +784,7 @@
     "state_point",
     "completion_blake3",
     "final_event_hash",
+    "state_id",
     "state_hash",
     "presented",
     "state",

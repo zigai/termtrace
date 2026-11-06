@@ -124,12 +124,12 @@
       "oneOf": [
         {
           "const": "all",
-          "description": "Retain every distinct state, including synchronized-output internals.",
+          "description": "List every boundary state, including those inside synchronized output.",
           "type": "string"
         },
         {
           "const": "presented",
-          "description": "Retain only states eligible for presentation by a native terminal.",
+          "description": "List every boundary state eligible for presentation by a native terminal.",
           "type": "string"
         }
       ]

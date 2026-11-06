@@ -1,4 +1,4 @@
-"""Asynchronous Termtrace wrappers. Generated from the native stub; run scripts/sdk-aio.py."""
+"""Asynchronous Termtrace wrappers. Generated from the native stub; run `just generate`."""
 
 from __future__ import annotations
 

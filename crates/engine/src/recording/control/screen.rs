@@ -86,6 +86,8 @@ impl SessionActor<'_> {
         let mut viewport_text: Option<String> = None;
         let observed_monotonic_ns = self.event_log.elapsed_ns();
         let now = Instant::now();
+        // A delayed actor must not mistake output still queued from the PTY for quiet.
+        let output_pending = self.progress.output_pending();
 
         let mut index = 0;
         while index < self.screen_waiters.len() {
@@ -101,6 +103,7 @@ impl SessionActor<'_> {
                 });
 
             let unchanged = !reacted
+                && !output_pending
                 && waiter
                     .reaction
                     .as_ref()
@@ -133,10 +136,11 @@ impl SessionActor<'_> {
                 waiter.matching_state = None;
             }
 
-            let stable = waiter
-                .matching_state
-                .as_ref()
-                .is_some_and(|(_, since, _)| return since.elapsed() >= waiter.stable_for);
+            let stable = !output_pending
+                && waiter
+                    .matching_state
+                    .as_ref()
+                    .is_some_and(|(_, since, _)| return since.elapsed() >= waiter.stable_for);
 
             let child_completed = child_exited && output_closed;
             let deadline = now >= waiter.deadline;
@@ -161,6 +165,7 @@ impl SessionActor<'_> {
                 session_id: self.session_id,
                 boundaries: boundaries.clone(),
                 observed_monotonic_ns,
+                state_id: self.live.presented_position,
             };
             let frame = match project_screen_frame(
                 &self.live.presented,

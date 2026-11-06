@@ -65,11 +65,9 @@ pub fn validate_replay_screenshot(
     )?;
 
     let actual = if endpoint.source_complete {
-        let point = endpoint
-            .state_id
-            .map_or(StatePoint::LatestPresented, |state_id| {
-                return StatePoint::StateId { state_id };
-            });
+        let point = StatePoint::StateId {
+            state_id: endpoint.state_id,
+        };
 
         replay_endpoint_for_session(session, &point, cancelled)?
     } else {
@@ -80,7 +78,7 @@ pub fn validate_replay_screenshot(
         || manifest.capture_kind != "screenshot"
         || manifest.session_id != endpoint.session_id
         || manifest.source_event_hash.as_deref() != Some(endpoint.boundary.event_hash.as_str())
-        || manifest.selected_state_id != endpoint.state_id
+        || manifest.selected_state_id != Some(endpoint.state_id)
         || manifest.selected_state_hash.as_deref() != Some(endpoint.state_hash.as_str())
         || manifest.endpoint_event_seq != endpoint.event_seq
         || manifest.endpoint_event_byte_offset != endpoint.event_byte_offset

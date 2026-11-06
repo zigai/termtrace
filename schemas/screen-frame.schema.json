@@ -687,13 +687,20 @@
             "source": {
               "const": "actor",
               "type": "string"
+            },
+            "state_id": {
+              "description": "Stream position of the presented state, as replay of the session numbers it.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
             }
           },
           "required": [
             "source",
             "session_id",
             "boundaries",
-            "observed_monotonic_ns"
+            "observed_monotonic_ns",
+            "state_id"
           ],
           "type": "object"
         },
@@ -752,7 +759,7 @@
               "description": "Source category."
             },
             "state_id": {
-              "description": "Dense semantic state identity when assigned.",
+              "description": "Stream position of the state when known.",
               "format": "uint64",
               "minimum": 0,
               "type": [
@@ -1005,14 +1012,14 @@
         },
         {
           "additionalProperties": false,
-          "description": "Exact semantic state identifier.",
+          "description": "Stream position of the state: output bytes and applied resizes before it.",
           "properties": {
             "selector": {
               "const": "state_id",
               "type": "string"
             },
             "state_id": {
-              "description": "Exact semantic state identifier.",
+              "description": "Stream position of the state: output bytes and applied resizes before it.",
               "format": "uint64",
               "minimum": 0,
               "type": "integer"
@@ -1026,7 +1033,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Exact content-addressed semantic state hash.",
+          "description": "Latest state with this content hash.",
           "properties": {
             "selector": {
               "const": "state_hash",

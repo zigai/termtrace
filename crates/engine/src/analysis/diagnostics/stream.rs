@@ -1,6 +1,7 @@
 use super::{
     analysis_error, detect_cursor_jumps, detect_dirty_discrepancies, detect_redundant_full_redraw,
-    detect_transients, native_correlations_for_state, EffectEvidence, ValidatedVisualManifest,
+    detect_transients, native_correlations_for_state, BoundedFindings, EffectEvidence, IdSample,
+    ValidatedVisualManifest,
 };
 use crate::{
     replay::{
@@ -36,8 +37,9 @@ use termtrace_model::{
 
 /// Diagnose a completed source with a disk-backed intermediate index.
 ///
-/// Replay history and VT tokens are not retained in memory. The returned findings
-/// and their evidence references grow with the requested report itself.
+/// Every state, effect, and VT token is checked. Replay history and VT tokens are not
+/// retained in memory. Each finding code lists at most 100 findings and each finding
+/// at most 100 state or token IDs; the report counts what it does not list.
 ///
 /// # Errors
 /// Rejects incomplete or changing sources and replay, framing, or temporary storage errors.
@@ -84,21 +86,20 @@ fn diagnose_recording(
     }
 
     let store = DiagnosticStore::new()?;
-    let mut findings = Vec::new();
+    let mut findings = BoundedFindings::default();
 
     store.connection.execute_batch("BEGIN").map_err(sql_error)?;
 
     let mut presented = VecDeque::<StateRecord>::new();
     let mut previous_cursor = None;
-    let mut hidden = Vec::new();
-    let mut modes = Vec::new();
-    let mut palette = Vec::new();
+    let mut hidden = IdSample::default();
+    let mut modes = IdSample::default();
+    let mut palette = IdSample::default();
     let mut state_insert = store
         .connection
         .prepare("INSERT INTO states VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)")
         .map_err(sql_error)?;
-    const MAX_DIAGNOSTIC_STATES: usize = 2_000;
-    let mut state_count = 0_usize;
+
     let mut effects = EffectEvidence::default();
 
     visit_recording_replay_range_while(
@@ -117,22 +118,19 @@ fn diagnose_recording(
             };
 
             let record = &record;
-
-            state_count = state_count.saturating_add(1);
-
-            if state_count > MAX_DIAGNOSTIC_STATES {
-                return Ok(false);
-            }
-
             DiagnosticStore::insert_state(&mut state_insert, record)?;
 
             if checks.contains(&DiagnosticCheck::Dirty) {
-                detect_dirty_discrepancies(slice::from_ref(record), &mut findings);
+                findings.detect(|found| {
+                    detect_dirty_discrepancies(slice::from_ref(record), found);
+                });
             }
 
             if checks.contains(&DiagnosticCheck::Cursor) && record.delta.cursor.is_some() {
                 if let Some(previous) = previous_cursor.take() {
-                    detect_cursor_jumps(&[previous, record.clone()], &mut findings);
+                    findings.detect(|found| {
+                        detect_cursor_jumps(&[previous, record.clone()], found);
+                    });
                 }
 
                 previous_cursor = Some(record.clone());
@@ -153,23 +151,27 @@ fn diagnose_recording(
                 palette.push(record.state_id);
             }
 
-            if record.presented {
+            if record.presented
+                && (checks.contains(&DiagnosticCheck::FullRedraw)
+                    || checks.contains(&DiagnosticCheck::Transient))
+            {
                 presented.push_back(record.clone());
                 let recent = presented.make_contiguous();
 
                 if checks.contains(&DiagnosticCheck::FullRedraw) {
-                    let mut candidates = Vec::new();
-                    detect_redundant_full_redraw(recent, &mut candidates);
-                    findings.extend(candidates.into_iter().filter(|finding| {
-                        return finding.state_ids.last() == Some(&record.state_id);
-                    }));
+                    findings.detect(|found| {
+                        detect_redundant_full_redraw(recent, found);
+                        found.retain(|finding| {
+                            return finding.state_ids.last() == Some(&record.state_id);
+                        });
+                    });
                 }
 
                 if checks.contains(&DiagnosticCheck::Transient)
                     && recent.len() >= 3
                     && let Some(last_three) = recent.get(recent.len().saturating_sub(3)..)
                 {
-                    detect_transients(last_three, &mut findings);
+                    findings.detect(|found| detect_transients(last_three, found));
                 }
 
                 if presented.len() > 8 {
@@ -184,31 +186,35 @@ fn diagnose_recording(
     drop(state_insert);
 
     if checks.contains(&DiagnosticCheck::Effects) {
-        effects.findings(&mut findings);
+        findings.detect(|found| effects.findings(found));
     }
 
-    if !hidden.is_empty() {
-        let count = hidden.len();
+    if hidden.count > 0 {
+        let count = hidden.count;
+        let mut facts = vec![format!(
+            "{count} cell-changing states were not presentation eligible"
+        )];
+        let state_ids = hidden.listed("state", &mut facts);
         findings.push(finding(
             "hidden_transient",
             FindingConfidence::High,
-            hidden,
+            state_ids,
             Vec::new(),
-            vec![format!(
-                "{count} cell-changing states were not presentation eligible"
-            )],
+            facts,
         ));
     }
 
     for (code, ids) in [("mode_churn", modes), ("palette_churn", palette)] {
-        if ids.len() >= 3 {
-            let count = ids.len();
+        if ids.count >= 3 {
+            let count = ids.count;
+            let mut facts = vec![format!("{count} related semantic mutations occurred")];
+            let state_ids = ids.listed("state", &mut facts);
             findings.push(finding(
                 code,
                 FindingConfidence::Medium,
-                ids,
+                state_ids,
                 Vec::new(),
-                vec![format!("{count} related semantic mutations occurred")],
+                facts,
             ));
         }
     }
@@ -251,6 +257,11 @@ fn diagnose_recording(
 
     if checks.contains(&DiagnosticCheck::FullRedraw) {
         let mut tokens = TokenCursor::new(session, None)?;
+        let mut token_insert = store
+            .connection
+            .prepare("INSERT INTO tokens VALUES (?1, ?2, ?3, ?4)")
+            .map_err(sql_error)?;
+
         while let Some(entry) = tokens.next()? {
             if let TimelineItem::VtToken { token } = entry.item {
                 let kind = match token.description.as_str() {
@@ -266,16 +277,13 @@ fn diagnose_recording(
                     .iter()
                     .map(|segment| return segment.start_byte_offset)
                     .min();
-
-                store
-                    .connection
-                    .execute(
-                        "INSERT INTO tokens VALUES (?1, ?2, ?3, ?4)",
-                        params![token.token_id, kind, event, offset],
-                    )
+                token_insert
+                    .execute(params![token.token_id, kind, event, offset])
                     .map_err(sql_error)?;
             }
         }
+
+        drop(token_insert);
 
         store.full_redraw(
             initial_cols,
@@ -290,6 +298,7 @@ fn diagnose_recording(
         .execute_batch("COMMIT")
         .map_err(sql_error)?;
 
+    let (mut findings, omitted_findings) = findings.finish();
     for finding in &mut findings {
         for state_id in &finding.state_ids {
             let correlations = native_correlations_for_state(
@@ -336,7 +345,7 @@ fn diagnose_recording(
     }
     return Ok(DiagnoseReport {
         format: "termtrace-diagnose".to_owned(),
-        version: 1,
+        version: 3,
         session_id: summary.header.session_id,
         source_final_event_hash: summary.terminal.map_or_else(
             || return summary.header.session_manifest_hash.clone(),
@@ -346,6 +355,7 @@ fn diagnose_recording(
         checks,
         broad_change_fraction: format!("{broad_change_percent}/100"),
         findings,
+        omitted_findings,
         output_page: None,
     });
 }
@@ -365,7 +375,7 @@ impl DiagnosticStore {
 
         connection.execute_batch("PRAGMA cache_size=-8192; PRAGMA temp_store=FILE;
             CREATE TABLE states (id INTEGER PRIMARY KEY, event INTEGER, offset INTEGER, presented INTEGER NOT NULL, changed INTEGER NOT NULL, cols INTEGER, rows INTEGER);
-            CREATE INDEX states_event ON states(event, id);
+            CREATE INDEX states_event ON states(event, offset, id);
             CREATE TABLE tokens (id INTEGER PRIMARY KEY, kind INTEGER NOT NULL, event INTEGER, offset INTEGER);
             CREATE INDEX tokens_kind ON tokens(kind, id);
             CREATE TABLE queries (query BLOB NOT NULL, response BLOB NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(query,response)) WITHOUT ROWID;").map_err(sql_error)?;
@@ -403,25 +413,36 @@ impl DiagnosticStore {
         initial_cols: u16,
         initial_rows: u16,
         percent: u8,
-        findings: &mut Vec<DiagnosticFinding>,
+        findings: &mut BoundedFindings,
     ) -> Result<()> {
         let mut statement = self
             .connection
             .prepare("SELECT id, event, offset FROM tokens WHERE kind=1 ORDER BY id")
             .map_err(sql_error)?;
+        let mut clear_state = self
+            .connection
+            .prepare(
+                "SELECT id FROM states WHERE event=?1 AND offset>=?2 ORDER BY offset, id LIMIT 1",
+            )
+            .map_err(sql_error)?;
+        let mut repaint_statement = self
+            .connection
+            .prepare("SELECT id, changed, cols, rows FROM states WHERE event>=?1 AND event<=?2 ORDER BY event, offset, id")
+            .map_err(sql_error)?;
+        let mut printable = self
+            .connection
+            .prepare("SELECT id FROM tokens WHERE kind=2 AND id>=?1 ORDER BY id LIMIT 32")
+            .map_err(sql_error)?;
+
         let mut clears = statement.query([]).map_err(sql_error)?;
+        let mut repaint: Option<(u64, Repaint)> = None;
 
         while let Some(clear) = clears.next().map_err(sql_error)? {
             let token_id: u64 = clear.get(0).map_err(sql_error)?;
             let event: Option<u64> = clear.get(1).map_err(sql_error)?;
             let offset: Option<u64> = clear.get(2).map_err(sql_error)?;
-            let state_id: Option<u64> = self
-                .connection
-                .query_row(
-                    "SELECT id FROM states WHERE event=?1 AND offset>=?2 ORDER BY id LIMIT 1",
-                    params![event, offset],
-                    |row| return row.get(0),
-                )
+            let state_id: Option<u64> = clear_state
+                .query_row(params![event, offset], |row| return row.get(0))
                 .optional()
                 .map_err(sql_error)?;
             findings.push(finding(
@@ -439,56 +460,50 @@ impl DiagnosticStore {
                 continue;
             };
 
-            let mut cols = initial_cols;
-            let mut rows = initial_rows;
-            let mut changed = 0_u64;
-            let mut ids = Vec::new();
-            let mut repaint_statement = self.connection.prepare("SELECT id, changed, cols, rows FROM states WHERE event>=?1 AND event<=?2 ORDER BY id").map_err(sql_error)?;
-            let mut repaint = repaint_statement
-                .query(params![event, event.saturating_add(2)])
-                .map_err(sql_error)?;
-
-            while let Some(state) = repaint.next().map_err(sql_error)? {
-                if let (Some(new_cols), Some(new_rows)) = (
-                    state.get::<_, Option<u16>>(2).map_err(sql_error)?,
-                    state.get::<_, Option<u16>>(3).map_err(sql_error)?,
-                ) {
-                    cols = new_cols;
-                    rows = new_rows;
-                }
-
-                let candidate: u64 = state.get(1).map_err(sql_error)?;
-
-                if candidate > 0 {
-                    changed = changed.saturating_add(candidate);
-                    ids.push(state.get(0).map_err(sql_error)?);
-                }
+            // Consecutive clears in one event share the same repaint window.
+            if repaint
+                .as_ref()
+                .is_none_or(|(cached, _)| return *cached != event)
+            {
+                repaint = Some((
+                    event,
+                    Repaint::read(&mut repaint_statement, event, initial_cols, initial_rows)?,
+                ));
             }
 
-            let cells = u64::from(cols).saturating_mul(u64::from(rows)).max(1);
+            let Some((
+                _,
+                Repaint {
+                    changed,
+                    cells,
+                    ids,
+                },
+            )) = repaint.as_ref()
+            else {
+                continue;
+            };
 
             if changed.saturating_mul(100) >= cells.saturating_mul(u64::from(percent)) {
-                let mut printable = self
-                    .connection
-                    .prepare("SELECT id FROM tokens WHERE kind=2 AND id>=?1 ORDER BY id LIMIT 32")
-                    .map_err(sql_error)?;
                 let mut token_ids = printable
                     .query_map([token_id], |row| return row.get::<_, u64>(0))
                     .map_err(sql_error)?
                     .collect::<rusqlite::Result<Vec<_>>>()
                     .map_err(sql_error)?;
                 token_ids.push(token_id);
+
+                let mut facts = vec![
+                    format!("at least {changed} cell updates followed ED 2 within two events"),
+                    format!("broad-change threshold was {percent}% of {cells} cells"),
+                    "ordered semantic repaint evidence is not a pixel-level flicker claim"
+                        .to_owned(),
+                ];
+                let state_ids = ids.listed("state", &mut facts);
                 findings.push(finding(
                     "clear_then_repaint",
                     FindingConfidence::High,
-                    ids,
+                    state_ids,
                     token_ids,
-                    vec![
-                        format!("at least {changed} cell updates followed ED 2 within two events"),
-                        format!("broad-change threshold was {percent}% of {cells} cells"),
-                        "ordered semantic repaint evidence is not a pixel-level flicker claim"
-                            .to_owned(),
-                    ],
+                    facts,
                 ));
             }
         }
@@ -497,23 +512,72 @@ impl DiagnosticStore {
             .connection
             .prepare("SELECT id FROM tokens WHERE kind=3 ORDER BY id")
             .map_err(sql_error)?;
-        let ids = scrollback
-            .query_map([], |row| return row.get::<_, u64>(0))
-            .map_err(sql_error)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(sql_error)?;
+        let mut rows = scrollback.query([]).map_err(sql_error)?;
+        let mut ids = IdSample::default();
 
-        if !ids.is_empty() {
+        while let Some(row) = rows.next().map_err(sql_error)? {
+            ids.push(row.get(0).map_err(sql_error)?);
+        }
+
+        if ids.count > 0 {
+            let mut facts = vec!["ED 3 occurred in canonical output".to_owned()];
+            let token_ids = ids.listed("token", &mut facts);
             findings.push(finding(
                 "clear_scrollback",
                 FindingConfidence::High,
                 Vec::new(),
-                ids,
-                vec!["ED 3 occurred in canonical output".to_owned()],
+                token_ids,
+                facts,
             ));
         }
 
         return Ok(());
+    }
+}
+
+struct Repaint {
+    changed: u64,
+    cells: u64,
+    ids: IdSample,
+}
+
+impl Repaint {
+    fn read(
+        statement: &mut Statement<'_>,
+        event: u64,
+        initial_cols: u16,
+        initial_rows: u16,
+    ) -> Result<Self> {
+        let mut cols = initial_cols;
+        let mut rows = initial_rows;
+        let mut changed = 0_u64;
+        let mut ids = IdSample::default();
+        let mut states = statement
+            .query(params![event, event.saturating_add(2)])
+            .map_err(sql_error)?;
+
+        while let Some(state) = states.next().map_err(sql_error)? {
+            if let (Some(new_cols), Some(new_rows)) = (
+                state.get::<_, Option<u16>>(2).map_err(sql_error)?,
+                state.get::<_, Option<u16>>(3).map_err(sql_error)?,
+            ) {
+                cols = new_cols;
+                rows = new_rows;
+            }
+
+            let candidate: u64 = state.get(1).map_err(sql_error)?;
+
+            if candidate > 0 {
+                changed = changed.saturating_add(candidate);
+                ids.push(state.get(0).map_err(sql_error)?);
+            }
+        }
+
+        return Ok(Self {
+            changed,
+            cells: u64::from(cols).saturating_mul(u64::from(rows)).max(1),
+            ids,
+        });
     }
 }
 

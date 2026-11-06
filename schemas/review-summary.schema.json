@@ -53,7 +53,7 @@
       "type": "string"
     },
     "state_count": {
-      "description": "Number of distinct semantic states.",
+      "description": "Number of semantic boundary states.",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"

@@ -70,7 +70,11 @@
       "description": "File and session identity."
     }
   },
-  "required": ["source", "next_event_seq", "event_hash"],
+  "required": [
+    "source",
+    "next_event_seq",
+    "event_hash"
+  ],
   "title": "EventPageCursor",
   "type": "object"
 }

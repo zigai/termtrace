@@ -9,7 +9,6 @@ pub mod ghostty_vt;
 pub mod output_projection;
 /// Pure semantic-screen projection and hashing.
 pub mod screen;
-mod utf8;
 /// Lossless framing of canonical output into VT tokens.
 pub mod vt_framer;
 

@@ -16,7 +16,7 @@ pub mod artifact {
         commit_directory, create_private_directory, finish_writer, hash_regular_file,
         member_media_type, member_schema_type, open_regular_file_nofollow, open_verified_artifact,
         read_artifact_roots, secure_file, secure_writer, sync_directory, verify_artifact_members,
-        verify_session_artifacts, write_secure, BudgetWriter,
+        verify_session_artifacts, write_secure, write_secure_unsynced, BudgetWriter,
     };
 }
 

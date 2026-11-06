@@ -1,7 +1,7 @@
 {
   "version": 1,
   "frame": {
-    "version": 1,
+    "version": 2,
     "state_hash": "fixture-state-v1",
     "frame_hash": "fixture-frame-v1",
     "presented": false,
@@ -13,7 +13,8 @@
         "durable": { "event_hash": "durable", "next_event_seq": 9, "output_bytes": 48 },
         "observed": { "event_hash": "observed", "next_event_seq": 10, "output_bytes": 52 }
       },
-      "observed_monotonic_ns": 1234
+      "observed_monotonic_ns": 1234,
+      "state_id": 52
     },
     "geometry": { "cols": 12, "rows": 5 },
     "requested_region": { "top": 0, "left": 0, "right": 12, "bottom": 5 },

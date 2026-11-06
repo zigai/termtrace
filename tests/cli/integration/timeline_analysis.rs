@@ -1,13 +1,15 @@
 //! timeline analysis CLI integration tests.
 
 use crate::support::*;
+use std::sync::atomic::AtomicBool;
 use termtrace_engine::analysis::diagnostics::{
     diagnose, diagnose_session, diagnose_snapshot, explain, explain_session,
 };
+use termtrace_engine::replay::visit_session_states_while;
 use termtrace_engine::timeline::visit_snapshot_timeline_while;
 use termtrace_engine::timeline::{build_session_timeline_page, build_timeline};
 use termtrace_evidence::session::SessionSnapshot;
-use termtrace_model::terminal::analysis::DiagnosticCheck;
+use termtrace_model::terminal::analysis::{DiagnosticCheck, OmittedFindings};
 
 #[test]
 fn streamed_diagnostic_detectors_match_materialized_reports() {
@@ -59,6 +61,61 @@ fn streamed_diagnostic_detectors_match_materialized_reports() {
 
         assert_eq!(actual, expected);
     }
+}
+
+#[test]
+fn streamed_diagnosis_checks_late_states_and_counts_unlisted_findings() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("long");
+    let script = concat!(
+        "printf '%*s' 3000 '' | tr ' ' X;",
+        "i=0; while [ $i -lt 150 ]; do printf '\\033[2J'; i=$((i+1)); done;",
+        "printf '\\033]7400;late\\007'",
+    );
+
+    let mut record = Command::cargo_bin("termtrace").expect("binary");
+    record
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args(["--", "/bin/sh", "-c", script])
+        .assert()
+        .success();
+
+    let mut final_state_id = 0_u64;
+    visit_session_states_while(&session, &AtomicBool::new(false), |record, _| {
+        final_state_id = record.state_id;
+
+        return Ok(true);
+    })
+    .expect("replay states");
+
+    assert!(final_state_id > 3000, "only {final_state_id} positions");
+
+    let report = diagnose_session(
+        &session,
+        vec![DiagnosticCheck::Effects, DiagnosticCheck::FullRedraw],
+        100,
+        &[],
+    )
+    .expect("streamed diagnostics");
+
+    let codes = report
+        .findings
+        .iter()
+        .map(|finding| return finding.code.as_str())
+        .collect::<Vec<_>>();
+    assert!(codes.contains(&"ignored_control_strings"), "{codes:?}");
+    assert_eq!(
+        codes
+            .iter()
+            .filter(|code| return **code == "full_viewport_clear")
+            .count(),
+        100
+    );
+    assert!(report.omitted_findings.contains(&OmittedFindings {
+        code: "full_viewport_clear".to_owned(),
+        count: 50,
+    }));
 }
 
 #[test]
@@ -180,7 +237,7 @@ fn timeline_streams_presented_states_and_canonical_operations() {
             "--",
             "/bin/sh",
             "-c",
-            "printf '\\033[?2026hHIDDEN\\033[?2026lVISIBLE'",
+            "printf '\\033[?2026hHIDDEN'; sleep 0.08; printf '\\033[?2026lVISIBLE'",
         ])
         .assert()
         .success();

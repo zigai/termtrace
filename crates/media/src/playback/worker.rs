@@ -1,5 +1,5 @@
 use super::{
-    runtime::{emit_endpoint, emit_event, write_create_new_json},
+    runtime::{emit_endpoint, emit_event, write_handoff_json},
     terminal::{query, RawTerminalGuard, ReplayTerminal},
 };
 use crate::{error::finish_with_cleanup, Error, Result};
@@ -19,7 +19,6 @@ use std::{
     time::{Duration, Instant},
 };
 use termtrace_evidence::{
-    artifact::write_secure,
     event_log::EventLogCursor,
     session::{canonical_manifest_bytes, manifest_hash, read_manifest},
 };
@@ -84,7 +83,7 @@ pub fn playback_worker(
         message: error.to_string(),
     };
 
-    if let Err(cleanup) = write_create_new_json(error_file, &failure) {
+    if let Err(cleanup) = write_handoff_json(error_file, &failure) {
         return Err(Error::CleanupFailed {
             primary: Box::new(error),
             cleanup: Box::new(cleanup),
@@ -119,11 +118,7 @@ fn run_worker(
         .set_nonblocking(true)
         .map_err(|source| return filesystem(socket, source))?;
 
-    write_secure(
-        geometry_file,
-        &serde_json::to_vec(&reported)
-            .map_err(|source| return json_error(geometry_file, source))?,
-    )?;
+    write_handoff_json(geometry_file, &reported)?;
 
     let stream = poll_until(
         Instant::now() + Duration::from_secs(20),

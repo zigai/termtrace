@@ -21,7 +21,7 @@ use termtrace_model::{
     terminal::{replay::StateRecord, state::SemanticState},
 };
 
-/// Maximum distinct semantic entries retained by a reviewer page.
+/// Maximum semantic boundary entries retained by a reviewer page.
 pub const REVIEW_PAGE_STATES: usize = 64;
 const MAX_PAGE_TEXT_BYTES: usize = 16 * 1024 * 1024;
 
@@ -53,7 +53,7 @@ impl ReviewViewport {
 /// One exact semantic boundary with a bounded viewport projection.
 #[derive(Clone, Debug)]
 pub struct ReviewEntry {
-    /// Dense semantic ordinal, never an event ordinal.
+    /// Stream position of the boundary state.
     pub state_id: u64,
     /// Canonical source event, absent for the initial state.
     pub event_seq: Option<u64>,
@@ -94,7 +94,7 @@ impl ReviewEntry {
 pub struct ReviewPage {
     /// At most `REVIEW_PAGE_STATES` consecutive entries.
     pub entries: VecDeque<ReviewEntry>,
-    /// Exact selected semantic ordinal.
+    /// Selected stream position.
     pub selected: u64,
 }
 
@@ -103,22 +103,22 @@ pub struct ReviewPage {
 pub enum ReviewQuery {
     /// The final exact semantic boundary and its preceding page.
     Final,
-    /// Page around an exact semantic ordinal.
+    /// Page around the boundary state at an exact stream position.
     State(u64),
     /// Adjacent eligible semantic state in the requested direction.
     Move {
-        /// Semantic ordinal excluded from the adjacent-state lookup.
+        /// Stream position excluded from the adjacent-state lookup.
         from: u64,
-        /// Select a later ordinal when true, or an earlier ordinal when false.
+        /// Select a later position when true, or an earlier position when false.
         forward: bool,
         /// Restrict eligible states to presented boundaries when true.
         presented_only: bool,
     },
     /// Next/previous matching semantic viewport, wrapping at the source ends.
     Search {
-        /// Start strictly beyond this ordinal; `None` starts at the directional source end.
+        /// Start strictly beyond this position; `None` starts at the directional source end.
         from: Option<u64>,
-        /// Search later ordinals when true, or earlier ordinals when false, wrapping if needed.
+        /// Search later positions when true, or earlier positions when false, wrapping if needed.
         forward: bool,
         /// Case-sensitive literal viewport substring containing 1 through 4096 UTF-8 bytes.
         query: String,
@@ -268,22 +268,21 @@ pub fn load_review_page(
         }
     };
 
-    let start = target.map(|id| return id.saturating_sub(31));
-    let end = target.map(|id| return id.saturating_add(32));
     let mut entries = VecDeque::<ReviewEntry>::new();
     let mut retained_bytes = 0_usize;
+    let mut after_target = 0_usize;
 
     visit_session_states_while(session, cancelled, |record, state| {
         if cancelled.load(Ordering::Relaxed) {
             return Ok(false);
         }
 
-        if start.is_some_and(|start| return record.state_id < start) {
-            return Ok(true);
-        }
+        if target.is_some_and(|target| return record.state_id > target) {
+            if after_target == REVIEW_PAGE_STATES / 2 {
+                return Ok(false);
+            }
 
-        if end.is_some_and(|end| return record.state_id > end) {
-            return Ok(false);
+            after_target = after_target.saturating_add(1);
         }
 
         let entry = ReviewEntry::new(record, state);

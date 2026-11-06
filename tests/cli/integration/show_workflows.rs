@@ -118,12 +118,10 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
         .expect("stored session entry")
         .path();
 
-    let cache = fs_err::read_dir(session_path.join("derived-cache"))
-        .expect("checkpoint directory")
+    let cache = replay_checkpoints(&session_path)
+        .into_iter()
         .next()
-        .expect("checkpoint entry")
-        .expect("checkpoint path")
-        .path();
+        .expect("checkpoint entry");
     assert_eq!(
         cache.extension().and_then(|value| return value.to_str()),
         Some("zst")
@@ -197,12 +195,10 @@ fn completed_cache_rejects_forged_state_and_same_length_source_tampering() {
             .clone();
     };
     let original: serde_json::Value = serde_json::from_slice(&observe()).expect("observation");
-    let cache = fs_err::read_dir(session.join("derived-cache"))
-        .expect("cache")
+    let cache = replay_checkpoints(&session)
+        .into_iter()
         .next()
-        .expect("cache entry")
-        .expect("cache path")
-        .path();
+        .expect("cache entry");
 
     let compressed = fs_err::read(&cache).expect("checkpoint");
     let decoded = decode_all(compressed.as_slice()).expect("decode cache");
@@ -328,6 +324,71 @@ fn show_requires_explicit_permission_for_hidden_states() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("presentation eligible"));
+}
+
+#[test]
+fn completed_screen_preserves_output_when_an_osc_precedes_a_synchronized_update() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("osc-before-hold");
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            r"printf '\033]0;t\007\033[?2026hhidden\033[?2026lafter'",
+        ])
+        .assert()
+        .success();
+
+    let final_state = inspect_session(&session, StateSelector::Final).expect("final state");
+    assert_eq!(final_state.state.metadata.title.as_bytes(), b"t");
+    assert!(final_state.record.presented);
+
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .arg("screen")
+        .arg(&session)
+        .args(["--format", "text"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("hiddenafter"));
+}
+
+#[test]
+fn completed_screen_keeps_the_presented_frame_after_a_repeated_hold_enable() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("repeated-hold");
+    Command::cargo_bin("termtrace")
+        .expect("binary")
+        .args(["record", "--no-input", "--out"])
+        .arg(&session)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            r"printf 'shown\033[?2026h\033[2J\033[Hhidden\033[?2026h'",
+        ])
+        .assert()
+        .success();
+
+    let final_state = inspect_session(&session, StateSelector::Final).expect("hidden final state");
+    assert!(!final_state.record.presented);
+
+    // Check canonical endpoint replay, then reuse of its authenticated checkpoint.
+    for _ in 0..2 {
+        Command::cargo_bin("termtrace")
+            .expect("binary")
+            .arg("screen")
+            .arg(&session)
+            .args(["--format", "text"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("shown"))
+            .stdout(predicate::str::contains("hidden").not());
+    }
 }
 
 #[test]

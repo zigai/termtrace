@@ -1,4 +1,4 @@
-/** SDK model types generated from the Rust type catalog. Do not edit; run scripts/sdk-types.py. */
+/** SDK model types generated from the Rust type catalog. Do not edit; run `just generate`. */
 import type { ScreenFrame as FrameHandle } from './index'
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 /** A native method result: the inner model type. */
@@ -715,6 +715,8 @@ export interface DiagnoseReport {
   findings: Array<DiagnosticFinding>
   /** Stable report format. */
   format: string
+  /** Findings that were detected but not listed because their code reached the listing bound. */
+  omitted_findings: Array<OmittedFindings>
   /** Page coordinates when CLI output intentionally contains a bounded subset. */
   output_page?: OutputPage | null
   /** Canonical session identity. */
@@ -762,7 +764,7 @@ export interface DiffEndpoint {
   presented: boolean
   /** Complete semantic state hash. */
   state_hash: string
-  /** Dense semantic state identifier. */
+  /** Stream position of the state. */
   state_id: bigint
 }
 
@@ -859,7 +861,7 @@ export interface EditSelector {
   monotonicNs?: bigint | null
   /** Exact native source frame. */
   nativeFrame?: bigint | null
-  /** Exact semantic state identifier. */
+  /** Stream position of the state: output bytes and applied resizes before it. */
   stateId?: bigint | null
 }
 
@@ -2130,6 +2132,14 @@ export interface Observers {
   watchdog?: number | null
 }
 
+/** Count of detected findings of one code that a report does not list. */
+export interface OmittedFindings {
+  /** Stable machine-readable finding code. */
+  code: string
+  /** Detected findings with this code beyond the listed ones. */
+  count: bigint
+}
+
 /** Result of a state-changing operation. */
 export type OperationStatus = "applied" | "failed"
 
@@ -3015,7 +3025,7 @@ export interface ReviewSummary {
   presented_state_count: bigint
   /** Safety boundary used for viewport rendering. */
   rendering_policy: string
-  /** Number of distinct semantic states. */
+  /** Number of semantic boundary states. */
   state_count: bigint
 }
 
@@ -3374,6 +3384,8 @@ export interface ScreenFrameSourceActor {
   /** Canonical session identity. */
   session_id: string
   source: "actor"
+  /** Stream position of the presented state, as replay of the session numbers it. */
+  state_id: bigint
 }
 
 /** State selected through a completed or explicit semantic resolution. */
@@ -3395,7 +3407,7 @@ export interface ScreenFrameSourceResolved {
   source_completed: boolean
   /** Source category. */
   source_kind: ObservationSourceKind
-  /** Dense semantic state identity when assigned. */
+  /** Stream position of the state when known. */
   state_id?: bigint | null
   /** Requested state selector. */
   state_point: StatePoint
@@ -4025,7 +4037,7 @@ export interface StableScreenCapture {
   frame: FrameHandle
 }
 
-/** Delta from the previous distinct state. */
+/** Delta from the previous state of the same replay. */
 export interface StateDelta {
   /** New active SGR style when it changed. */
   active_style?: CellStyle | null
@@ -4075,23 +4087,23 @@ export interface StatePointMonotonicNs {
   selector: "monotonic_ns"
 }
 
-/** Exact content-addressed semantic state hash. */
+/** Latest state with this content hash. */
 export interface StatePointStateHash {
   selector: "state_hash"
   /** BLAKE3 hash of the complete normalized semantic state. */
   state_hash: string
 }
 
-/** Exact semantic state identifier. */
+/** Stream position of the state: output bytes and applied resizes before it. */
 export interface StatePointStateId {
   selector: "state_id"
-  /** Exact semantic state identifier. */
+  /** Stream position of the state: output bytes and applied resizes before it. */
   state_id: bigint
 }
 
-/** One distinct semantic state boundary. */
+/** The semantic state at one stream position. */
 export interface StateRecord {
-  /** Stable delta from the preceding distinct state. */
+  /** Stable delta from the preceding state of the same replay. */
   delta: StateDelta
   /** Zero-based byte offset inside an output event. */
   event_byte_offset?: bigint | null
@@ -4107,7 +4119,7 @@ export interface StateRecord {
   presented: boolean
   /** BLAKE3 of the complete normalized semantic state. */
   state_hash: string
-  /** Dense zero-based state identifier. */
+  /** Stream position: the output bytes and applied resizes that produced this state. */
   state_id: bigint
 }
 
@@ -4366,7 +4378,7 @@ export interface TimelineItemCanonicalEvent {
   kind: "canonical_event"
 }
 
-/** A distinct Ghostty semantic state transition. */
+/** A Ghostty semantic boundary state. */
 export interface TimelineItemSemanticState {
   /** Number of complete semantic cell values changed. */
   changed_cells: bigint
@@ -4387,7 +4399,7 @@ export interface TimelineItemSemanticState {
   presented: boolean
   /** Complete normalized semantic state hash. */
   state_hash: string
-  /** Dense semantic state identifier. */
+  /** Stream position of the state. */
   state_id: bigint
 }
 

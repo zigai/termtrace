@@ -1,9 +1,67 @@
 {
+  "$defs": {
+    "EventLogPosition": {
+      "additionalProperties": false,
+      "description": "Validated position immediately before a canonical record (or after the header).",
+      "properties": {
+        "event_hash": {
+          "description": "Hash of the preceding record or header.",
+          "type": "string"
+        },
+        "file_offset": {
+          "description": "Byte offset of the next record in the canonical stream.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "monotonic_ns": {
+          "description": "Timestamp of the preceding record, or zero at the header.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_event_seq": {
+          "description": "Sequence of the next record.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "next_event_seq",
+        "file_offset",
+        "event_hash",
+        "monotonic_ns"
+      ],
+      "type": "object"
+    }
+  },
   "$id": "https://github.com/zigai/termtrace/schemas/semantic-replay-checkpoint.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Catalog entry locating one periodic engine checkpoint in the binary checkpoint member.\n\nThe frame holds the checkpointed state's record and an exact libghostty-vt engine snapshot.",
+  "description": "Catalog entry for one engine checkpoint.\n\nThe frame holds the checkpointed state's record and an exact libghostty-vt engine snapshot,\nso any later position can be rebuilt by restoring it and replaying up to that position.",
   "properties": {
+    "control_index_offset": {
+      "description": "Byte offset of the first control-index entry at or after the checkpointed state.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "control_rank": {
+      "description": "Number of control entries ordered before the checkpointed state.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "event_byte_offset": {
+      "description": "Inclusive output byte offset of the checkpointed state inside its event.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "event_seq": {
       "description": "Canonical event responsible for the checkpointed state.",
       "format": "uint64",
@@ -12,6 +70,12 @@
         "integer",
         "null"
       ]
+    },
+    "hidden_before": {
+      "description": "Number of hidden boundary states before the checkpointed state.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
     },
     "length": {
       "description": "Compressed byte length of that frame.",
@@ -31,8 +95,35 @@
       "minimum": 0,
       "type": "integer"
     },
+    "presented": {
+      "description": "Whether the checkpointed state was eligible for presentation.",
+      "type": "boolean"
+    },
+    "source_position": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EventLogPosition"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Event-log position of the checkpointed state's event, where replay can resume."
+    },
     "state_id": {
-      "description": "Checkpointed state identifier.",
+      "description": "Stream position of the checkpointed state.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "state_rank": {
+      "description": "Number of boundary states before the checkpointed state.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "timeline_rank": {
+      "description": "Combined semantic/effect/canonical/control timeline rank of the checkpointed state.",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
@@ -41,6 +132,12 @@
   "required": [
     "state_id",
     "monotonic_ns",
+    "presented",
+    "state_rank",
+    "hidden_before",
+    "timeline_rank",
+    "control_index_offset",
+    "control_rank",
     "offset",
     "length"
   ],

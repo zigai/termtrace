@@ -15,7 +15,7 @@ use std::{error::Error as StdError, fmt};
 use uuid::Uuid;
 
 /// Rich screen projection format version.
-pub const SCREEN_FRAME_VERSION: u32 = 1;
+pub const SCREEN_FRAME_VERSION: u32 = 2;
 /// Absolute runaway safety cap for malicious input (supporting dual-4K/ultrawide viewports).
 pub const CANVAS_MAX_CELLS: u32 = 262_144;
 /// Default maximum serialized bytes in one rich projection.
@@ -128,6 +128,8 @@ pub enum ScreenFrameSource {
         boundaries: ActorBoundaries,
         /// Actor observation time in session-monotonic nanoseconds.
         observed_monotonic_ns: u64,
+        /// Stream position of the presented state, as replay of the session numbers it.
+        state_id: u64,
     },
     /// State selected through a completed or explicit semantic resolution.
     Resolved {
@@ -139,7 +141,7 @@ pub enum ScreenFrameSource {
         source_completed: bool,
         /// Requested state selector.
         state_point: StatePoint,
-        /// Dense semantic state identity when assigned.
+        /// Stream position of the state when known.
         state_id: Option<u64>,
         /// Responsible canonical event sequence when known.
         event_seq: Option<u64>,

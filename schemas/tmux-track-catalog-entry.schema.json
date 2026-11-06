@@ -28,7 +28,12 @@
           "type": "string"
         }
       },
-      "required": ["pane_id", "session_id", "session", "linked_unix_ns"],
+      "required": [
+        "pane_id",
+        "session_id",
+        "session",
+        "linked_unix_ns"
+      ],
       "type": "object"
     }
   },
@@ -51,7 +56,11 @@
       "description": "Immutable pane recording identity and path."
     }
   },
-  "required": ["sequence", "track", "completed"],
+  "required": [
+    "sequence",
+    "track",
+    "completed"
+  ],
   "title": "TmuxTrackCatalogEntry",
   "type": "object"
 }

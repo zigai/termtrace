@@ -21,6 +21,7 @@ fn source(boundary: u64) -> ScreenFrameSource {
             observed: position,
         },
         observed_monotonic_ns: boundary,
+        state_id: boundary,
     };
 }
 
@@ -699,7 +700,7 @@ fn snapshot_normalizers_preserve_payload_and_only_requested_optional_fields() {
             ),
         ] {
             let mut expected = serde_json::json!({
-                "version": 1,
+                "version": 2,
                 "geometry": {"cols": 6, "rows": 2},
                 "requested_region": {"top": 0, "left": 0, "right": 1, "bottom": 1},
                 "returned_region": {"top": 0, "left": 0, "right": 1, "bottom": 1},

@@ -14,7 +14,7 @@ use uuid::Uuid;
 /// Native visual artifact directory name.
 pub const VISUAL_DIRECTORY: &str = "visual";
 /// Current native visual manifest schema version.
-pub const VISUAL_MANIFEST_VERSION: u32 = 5;
+pub const VISUAL_MANIFEST_VERSION: u32 = 6;
 /// Exact effective Ghostty configuration captured as native visual evidence.
 pub const GHOSTTY_EFFECTIVE_CONFIG_NAME: &str = "ghostty-effective-config.txt";
 

@@ -38,7 +38,7 @@ struct PrivateTmux {
     binary: PathBuf,
     socket: String,
     session: String,
-    tmux_tmpdir: Option<PathBuf>,
+    tmux_tmpdir: PathBuf,
 }
 
 #[allow(
@@ -51,11 +51,22 @@ impl PrivateTmux {
         return Self::new_with_config_args(temporary, shell, &[]);
     }
 
-    fn new_with_config_args(temporary: &TempDir, shell: &str, config_arguments: &[&str]) -> Self {
-        let binary = tmux_binary();
-
+    fn socket_root(temporary: &TempDir) -> PathBuf {
         fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
             .expect("secure tmux test root");
+        // tmux never unlinks its socket, so a server in the shared socket directory leaks a
+        // file there on every test run.
+        let tmux_tmpdir = temporary.path().join("tmux-sockets");
+        fs::create_dir_all(&tmux_tmpdir).expect("create isolated tmux socket root");
+        fs::set_permissions(&tmux_tmpdir, Permissions::from_mode(0o700))
+            .expect("secure isolated tmux socket root");
+
+        return tmux_tmpdir;
+    }
+
+    fn new_with_config_args(temporary: &TempDir, shell: &str, config_arguments: &[&str]) -> Self {
+        let binary = tmux_binary();
+        let tmux_tmpdir = Self::socket_root(temporary);
 
         let socket = format!("termtrace-test-{}", uuid::Uuid::now_v7());
         let config = temporary.path().join("termtrace.tmux.conf");
@@ -100,6 +111,7 @@ impl PrivateTmux {
                 "-s",
                 "recorded",
             ])
+            .env("TMUX_TMPDIR", &tmux_tmpdir)
             .env("SHELL", shell)
             .status()
             .expect("start private tmux server");
@@ -110,15 +122,13 @@ impl PrivateTmux {
             binary,
             socket,
             session: "recorded".to_owned(),
-            tmux_tmpdir: None,
+            tmux_tmpdir,
         };
     }
 
     fn unmanaged(temporary: &TempDir, shell: &str) -> Self {
         let binary = tmux_binary();
-
-        fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
-            .expect("secure tmux test root");
+        let tmux_tmpdir = Self::socket_root(temporary);
 
         let socket = format!("termtrace-test-{}", uuid::Uuid::now_v7());
         let status = StdCommand::new(&binary)
@@ -138,6 +148,7 @@ impl PrivateTmux {
                 "/bin/sleep",
                 "30",
             ])
+            .env("TMUX_TMPDIR", &tmux_tmpdir)
             .env("SHELL", shell)
             .status()
             .expect("start unmanaged private tmux server");
@@ -148,19 +159,13 @@ impl PrivateTmux {
             binary,
             socket,
             session: "existing".to_owned(),
-            tmux_tmpdir: None,
+            tmux_tmpdir,
         };
     }
 
     fn unmanaged_default(temporary: &TempDir, shell: &str) -> Self {
         let binary = tmux_binary();
-
-        fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
-            .expect("secure isolated tmux test root");
-        let tmux_tmpdir = temporary.path().join("tmux-sockets");
-        fs::create_dir_all(&tmux_tmpdir).expect("create isolated tmux socket root");
-        fs::set_permissions(&tmux_tmpdir, Permissions::from_mode(0o700))
-            .expect("secure isolated tmux socket root");
+        let tmux_tmpdir = Self::socket_root(temporary);
 
         let output = StdCommand::new(&binary)
             .args([
@@ -193,7 +198,7 @@ impl PrivateTmux {
             binary,
             socket: "default".to_owned(),
             session: "existing".to_owned(),
-            tmux_tmpdir: Some(tmux_tmpdir),
+            tmux_tmpdir,
         };
     }
 
@@ -201,12 +206,25 @@ impl PrivateTmux {
         let mut command = StdCommand::new(&self.binary);
         command.args(["-L", self.socket.as_str()]);
         command.env_remove("TMUX");
-
-        if let Some(tmux_tmpdir) = &self.tmux_tmpdir {
-            command.env("TMUX_TMPDIR", tmux_tmpdir);
-        }
+        command.env("TMUX_TMPDIR", &self.tmux_tmpdir);
 
         return command;
+    }
+
+    fn termtrace(&self) -> Command {
+        return termtrace_in(&self.tmux_tmpdir);
+    }
+
+    fn socket_path(&self) -> ByteString {
+        let output = self
+            .command()
+            .args(["display-message", "-p", "#{socket_path}"])
+            .output()
+            .expect("query tmux socket path");
+
+        assert!(output.status.success(), "tmux socket path was not reported");
+
+        return ByteString::from(trim_newline(output.stdout));
     }
 
     fn pane_session(&self, pane: &str) -> PathBuf {
@@ -240,8 +258,8 @@ impl PrivateTmux {
         let deadline = Instant::now() + Duration::from_secs(5);
 
         loop {
-            let output = Command::cargo_bin("termtrace")
-                .expect("binary should build")
+            let output = self
+                .termtrace()
                 .args(["tmux", "status", "--json", "--tmux"])
                 .arg(&self.binary)
                 .args(["-L", self.socket.as_str()])
@@ -345,8 +363,8 @@ impl PrivateTmux {
                 ])
                 .output()
                 .expect("diagnose pane list");
-            let status = Command::cargo_bin("termtrace")
-                .expect("binary should build")
+            let status = self
+                .termtrace()
                 .args(["tmux", "status", "--json", "--tmux"])
                 .arg(&self.binary)
                 .args(["-L", self.socket.as_str()])
@@ -437,6 +455,17 @@ impl Drop for PrivateTmux {
                 .status(),
         );
     }
+}
+
+#[allow(
+    clippy::expect_used,
+    reason = "tmux test helper stops when the Termtrace binary cannot be built"
+)]
+fn termtrace_in(tmux_tmpdir: &Path) -> Command {
+    let mut command = Command::cargo_bin("termtrace").expect("binary should build");
+    command.env("TMUX_TMPDIR", tmux_tmpdir);
+
+    return command;
 }
 
 #[allow(

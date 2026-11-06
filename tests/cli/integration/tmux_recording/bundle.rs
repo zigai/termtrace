@@ -3,7 +3,6 @@ use nix::{
     sys::signal::{kill, Signal},
     unistd::Pid,
 };
-use std::env;
 use termtrace_export::tmux;
 use termtrace_tmux::{
     artifact::{
@@ -265,15 +264,12 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
 #[test]
 fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
     let temporary = TempDir::new().expect("temporary directory");
-    fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
-        .expect("secure aggregate root");
-
+    let tmux_tmpdir = PrivateTmux::socket_root(&temporary);
     let binary = tmux_binary();
     let socket = format!("termtrace-aggregate-test-{}", uuid::Uuid::now_v7());
     let root = temporary.path().to_str().expect("UTF-8 temporary path");
     let tmux = binary.to_str().expect("UTF-8 tmux path");
-    let output = Command::cargo_bin("termtrace")
-        .expect("binary should build")
+    let output = termtrace_in(&tmux_tmpdir)
         .args([
             "tmux",
             "record",
@@ -303,7 +299,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         binary: binary.clone(),
         socket: socket.clone(),
         session: "aggregate".to_owned(),
-        tmux_tmpdir: env::var_os("TMUX_TMPDIR").map(PathBuf::from),
+        tmux_tmpdir: tmux_tmpdir.clone(),
     };
 
     let started: serde_json::Value =
@@ -335,7 +331,11 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
 
     assert_eq!(linked["format"], "termtrace-tmux-recording");
 
-    let inventory = tmux_json(&["tmux", "tracks", "work", "--output-root", root]);
+    let inventory = tmux_json(
+        &tmux_tmpdir,
+        &["tmux", "tracks", "work", "--output-root", root],
+    );
+
     let history = inventory["entries"]
         .as_array()
         .expect("incarnation history");
@@ -354,17 +354,20 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let observer = loop {
-        let status = tmux_json(&[
-            "tmux",
-            "status",
-            "--json",
-            "--tmux",
-            tmux,
-            "-L",
-            socket.as_str(),
-        ]);
+        let status = tmux_json(
+            &tmux_tmpdir,
+            &[
+                "tmux",
+                "status",
+                "--json",
+                "--tmux",
+                tmux,
+                "-L",
+                socket.as_str(),
+            ],
+        );
 
-        let events = tmux_events(root, "work");
+        let events = tmux_events(&tmux_tmpdir, root, "work");
         if let Some(pid) = status["observers"]["supervisor"].as_i64()
             && events
                 .iter()
@@ -382,7 +385,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
 
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let events = tmux_events(root, "work");
+        let events = tmux_events(&tmux_tmpdir, root, "work");
         let restarted = events
             .iter()
             .filter(|event| return event["kind"] == "observer_started")
@@ -404,13 +407,12 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         thread::sleep(Duration::from_millis(20));
     }
 
-    assert!(tmux_events(root, "work")
+    assert!(tmux_events(&tmux_tmpdir, root, "work")
         .iter()
         .any(|event| return event["kind"] == "pane_track_linked"));
 
     let status: serde_json::Value = serde_json::from_slice(
-        &Command::cargo_bin("termtrace")
-            .expect("binary should build")
+        &termtrace_in(&tmux_tmpdir)
             .args(["tmux", "status", "work", "--output-root", root])
             .assert()
             .success()
@@ -438,6 +440,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
                 "/bin/sleep",
                 "30",
             ])
+            .env("TMUX_TMPDIR", &tmux_tmpdir)
             .output()
             .expect("create uncovered aggregate pane")
             .stdout,
@@ -447,8 +450,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
     let gap_deadline = Instant::now() + Duration::from_secs(5);
     let uncovered = loop {
         let refreshed: serde_json::Value = serde_json::from_slice(
-            &Command::cargo_bin("termtrace")
-                .expect("binary should build")
+            &termtrace_in(&tmux_tmpdir)
                 .args(["tmux", "status", "work", "--output-root", root])
                 .assert()
                 .success()
@@ -484,6 +486,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
 
     let killed = StdCommand::new(&binary)
         .args(["-L", socket.as_str(), "kill-pane", "-t", bypass.as_str()])
+        .env("TMUX_TMPDIR", &tmux_tmpdir)
         .status()
         .expect("kill uncovered aggregate pane");
     assert!(killed.success());
@@ -491,8 +494,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
     let resolution_deadline = Instant::now() + Duration::from_secs(5);
     let resolved = loop {
         let refreshed: serde_json::Value = serde_json::from_slice(
-            &Command::cargo_bin("termtrace")
-                .expect("binary should build")
+            &termtrace_in(&tmux_tmpdir)
                 .args(["tmux", "status", "work", "--output-root", root])
                 .assert()
                 .success()
@@ -502,8 +504,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         .expect("aggregate status after gap resolution");
 
         let gap_page: serde_json::Value = serde_json::from_slice(
-            &Command::cargo_bin("termtrace")
-                .expect("binary should build")
+            &termtrace_in(&tmux_tmpdir)
                 .args(["tmux", "gaps", "work", "--output-root", root])
                 .assert()
                 .success()
@@ -554,7 +555,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
     assert!(final_last_observed >= initial_last_observed);
     assert!(resolved_unix_ns >= final_last_observed);
 
-    let events = tmux_events(root, "work");
+    let events = tmux_events(&tmux_tmpdir, root, "work");
     assert!(["coverage_gap_opened", "coverage_gap_resolved"]
         .iter()
         .all(|kind| {
@@ -563,15 +564,13 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
             });
         }));
 
-    Command::cargo_bin("termtrace")
-        .expect("binary should build")
+    termtrace_in(&tmux_tmpdir)
         .args(["tmux", "stop", "work", "--output-root", root, "--wait"])
         .assert()
         .success();
 
     let video = temporary.path().join("aggregate.mp4");
-    Command::cargo_bin("termtrace")
-        .expect("binary should build")
+    termtrace_in(&tmux_tmpdir)
         .env("PATH", "")
         .args([
             "tmux",
@@ -606,9 +605,8 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
     clippy::expect_used,
     reason = "tmux test helper stops when the CLI cannot report JSON"
 )]
-fn tmux_json(arguments: &[&str]) -> serde_json::Value {
-    let output = Command::cargo_bin("termtrace")
-        .expect("binary should build")
+fn tmux_json(tmux_tmpdir: &Path, arguments: &[&str]) -> serde_json::Value {
+    let output = termtrace_in(tmux_tmpdir)
         .args(arguments)
         .assert()
         .success()
@@ -619,16 +617,19 @@ fn tmux_json(arguments: &[&str]) -> serde_json::Value {
     return serde_json::from_slice(&output).expect("tmux JSON response");
 }
 
-fn tmux_events(root: &str, name: &str) -> Vec<serde_json::Value> {
-    let page = tmux_json(&[
-        "tmux",
-        "events",
-        name,
-        "--output-root",
-        root,
-        "--limit",
-        "4096",
-    ]);
+fn tmux_events(tmux_tmpdir: &Path, root: &str, name: &str) -> Vec<serde_json::Value> {
+    let page = tmux_json(
+        tmux_tmpdir,
+        &[
+            "tmux",
+            "events",
+            name,
+            "--output-root",
+            root,
+            "--limit",
+            "4096",
+        ],
+    );
 
     return page
         .get("events")

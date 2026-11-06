@@ -19,7 +19,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use termtrace_model::{
-    execution::event::{Event, EventBody, EventLogHeader, EventRecord},
+    execution::event::{Event, EventBody, EventLogHeader, EventLogPosition, EventRecord},
     execution::event_log::{
         OperationKind, PendingOperation, PendingOperationReport, RecoveryIssue, RecoveryReport,
     },
@@ -386,11 +386,40 @@ impl EventLogCursor {
         header_hash: &str,
     ) -> Result<()> {
         self.validate_live_source(device, inode, header_hash)?;
+
+        return self.resume_at(&EventLogPosition {
+            next_event_seq: position.next_event_seq,
+            file_offset: position.file_offset,
+            event_hash: position.event_hash.clone(),
+            monotonic_ns: position.monotonic_ns,
+        });
+    }
+
+    /// Position after the last record this cursor returned.
+    pub fn position(&self) -> EventLogPosition {
+        return EventLogPosition {
+            next_event_seq: self.validation.expected_seq,
+            file_offset: self.position_offset(),
+            event_hash: self.validation.previous_hash.to_hex().to_string(),
+            monotonic_ns: self.validation.previous_time,
+        };
+    }
+
+    /// Seek a fresh cursor to a position taken from an earlier read of the same source.
+    ///
+    /// Only the suffix is validated, so the cursor can never finish as full-log verification.
+    /// The caller must trust `position` and confirm the suffix with `validate_boundary`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the cursor has already read records or `position` precedes the bytes
+    /// read so far, the position hash is not valid BLAKE3 hex, or seeking fails.
+    pub fn resume_at(&mut self, position: &EventLogPosition) -> Result<()> {
         if self.validation.expected_seq != 0 || position.file_offset < self.encoded_bytes {
             return Err(invalid_log(
                 &self.path,
                 self.line_number,
-                "invalid live resume position",
+                "invalid resume position",
             ));
         }
 
@@ -398,7 +427,7 @@ impl EventLogCursor {
             return Error::InvalidEventLog {
                 path: self.path.clone(),
                 line: self.line_number,
-                reason: "invalid live cursor hash".to_owned(),
+                reason: "invalid resume position hash".to_owned(),
                 source: Some(Box::new(source)),
             };
         })?;

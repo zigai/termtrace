@@ -3,7 +3,6 @@ use nix::{
     sys::signal::{kill, Signal},
     unistd::Pid,
 };
-use std::env;
 
 #[test]
 fn tmux_server_crash_closes_idle_recording_without_leaking_the_shell() {
@@ -92,7 +91,7 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
             .stdout,
     );
 
-    let mut enable = Command::cargo_bin("termtrace").expect("binary should build");
+    let mut enable = server.termtrace();
     let enabled = enable
         .arg("tmux")
         .arg("enable")
@@ -154,7 +153,7 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
     });
     assert_eq!(status["enabled"], true);
 
-    let mut disable = Command::cargo_bin("termtrace").expect("binary should build");
+    let mut disable = server.termtrace();
     disable
         .args(["tmux", "disable", "--tmux"])
         .arg(&server.binary)
@@ -183,10 +182,7 @@ fn tmux_new_recording_allocates_a_socket_instead_of_reusing_default_server() {
     let server = PrivateTmux::unmanaged_default(&temporary, "/bin/sh");
     let root = temporary.path().to_str().expect("UTF-8 temporary path");
     let tmux = server.binary.to_str().expect("UTF-8 tmux path");
-    let tmux_tmpdir = server
-        .tmux_tmpdir
-        .as_ref()
-        .expect("default server socket root");
+    let tmux_tmpdir = &server.tmux_tmpdir;
     let existing_pid = String::from_utf8(trim_newline(
         server
             .command()
@@ -247,7 +243,7 @@ fn tmux_new_recording_allocates_a_socket_instead_of_reusing_default_server() {
         binary: server.binary.clone(),
         socket: allocated_socket.clone(),
         session: "aggregate".to_owned(),
-        tmux_tmpdir: Some(tmux_tmpdir.clone()),
+        tmux_tmpdir: tmux_tmpdir.clone(),
     };
 
     assert_ne!(allocated_socket, "default");
@@ -284,15 +280,12 @@ fn tmux_new_recording_allocates_a_socket_instead_of_reusing_default_server() {
 #[test]
 fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
     let temporary = TempDir::new().expect("temporary directory");
-    fs::set_permissions(temporary.path(), Permissions::from_mode(0o700))
-        .expect("secure aggregate root");
-
+    let tmux_tmpdir = PrivateTmux::socket_root(&temporary);
     let binary = tmux_binary();
     let socket = format!("termtrace-identity-test-{}", uuid::Uuid::now_v7());
     let root = temporary.path().to_str().expect("UTF-8 temporary path");
     let tmux = binary.to_str().expect("UTF-8 tmux path");
-    let started = Command::cargo_bin("termtrace")
-        .expect("binary should build")
+    let started = termtrace_in(&tmux_tmpdir)
         .args([
             "tmux",
             "record",
@@ -322,7 +315,7 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
         binary: binary.clone(),
         socket: socket.clone(),
         session: "original".to_owned(),
-        tmux_tmpdir: env::var_os("TMUX_TMPDIR").map(PathBuf::from),
+        tmux_tmpdir: tmux_tmpdir.clone(),
     };
 
     let response: serde_json::Value =
@@ -352,6 +345,7 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
 
     let killed = StdCommand::new(&binary)
         .args(["-L", socket.as_str(), "kill-server"])
+        .env("TMUX_TMPDIR", &tmux_tmpdir)
         .status()
         .expect("stop original tmux server");
     assert!(killed.success());
@@ -375,12 +369,12 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
             "/bin/sleep",
             "30",
         ])
+        .env("TMUX_TMPDIR", &tmux_tmpdir)
         .status()
         .expect("start replacement tmux server");
     assert!(replacement.success());
 
-    Command::cargo_bin("termtrace")
-        .expect("binary should build")
+    termtrace_in(&tmux_tmpdir)
         .args(["tmux", "status", "identity", "--output-root", root])
         .assert()
         .failure()

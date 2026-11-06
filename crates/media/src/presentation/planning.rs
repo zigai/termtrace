@@ -1499,8 +1499,10 @@ fn resolve_edit_selector(
 
     if let Some(state_id) = selector.state_id {
         let mut selected = None;
+        // Every output event ends in a boundary state, so the first boundary at or after a
+        // position shares its source event and time.
         visit_session_states_while(session, &AtomicBool::new(false), |state, _| {
-            if state.state_id == state_id {
+            if state.state_id >= state_id {
                 selected = Some(state.monotonic_ns);
             }
 

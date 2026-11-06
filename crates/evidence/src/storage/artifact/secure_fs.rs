@@ -483,3 +483,71 @@ pub(crate) fn sync_parent_directory(path: &Path) -> Result<()> {
 
     return sync_fd(&directory, parent);
 }
+
+/// Atomically create and publish a new owner-only regular file without syncing it.
+///
+/// For transient process handoff files that a reader polls and then deletes: the rename still
+/// exposes only complete content, but the file is not durable across a crash.
+///
+/// # Errors
+///
+/// Returns an error when the path is unsafe, already exists, or cannot be written and renamed. A
+/// failure leaves no destination file.
+pub fn write_secure_unsynced(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent_path = path.parent().ok_or_else(|| {
+        return Error::Filesystem {
+            path: path.to_path_buf(),
+            source: IoError::new(ErrorKind::InvalidInput, "path has no parent directory"),
+        };
+    })?;
+
+    let parent = open_parent_directory(path, true)?;
+    let destination_name = safe_file_name(path)?;
+    let staging_name = format!(".termtrace-write-{}.tmp", Uuid::now_v7());
+    let staging_path = parent_path.join(&staging_name);
+    let staging = open_file_at(
+        &parent,
+        OsStr::new(&staging_name),
+        OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::from_bits_truncate(0o600),
+        &staging_path,
+    )?;
+
+    validate_private_regular_file_fd(&staging, &staging_path)?;
+    let mut staging = File::from(staging);
+    let result = staging
+        .write_all(bytes)
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: staging_path.clone(),
+                source,
+            };
+        })
+        .and_then(|()| {
+            return renameat2(
+                &parent,
+                OsStr::new(&staging_name),
+                &parent,
+                destination_name,
+                RenameFlags::RENAME_NOREPLACE,
+            )
+            .map_err(|error| {
+                if error == Errno::EEXIST {
+                    return Error::DestinationExists {
+                        path: path.to_path_buf(),
+                    };
+                }
+                return nix_filesystem(path, error);
+            });
+        });
+
+    if result.is_err() {
+        let _cleanup_result = unlinkat(
+            &parent,
+            OsStr::new(&staging_name),
+            UnlinkatFlags::NoRemoveDir,
+        );
+    }
+
+    return result;
+}

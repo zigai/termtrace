@@ -1,4 +1,7 @@
-use super::support::{header, secure_directory};
+use super::{
+    super::segments::SYNC_DELAY,
+    support::{header, secure_directory},
+};
 use crate::{
     event_log::{
         DurabilityMode, DurabilityPolicy, EventLog, EventLogCursor, EventLogSummary,
@@ -6,10 +9,13 @@ use crate::{
     },
     Error,
 };
+use nix::libc::{EIO, ENOSPC};
 use proptest::{collection, prelude::*};
 use std::{
     fs::{self, Permissions},
+    io,
     os::unix::fs::PermissionsExt as _,
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -245,6 +251,11 @@ fn bounded_policy_flushes_an_idle_pending_prefix() {
     thread::sleep(Duration::from_millis(5));
 
     assert!(writer.flush_due().expect("flush due prefix"));
+
+    writer
+        .await_durable()
+        .expect("requested synchronization completes");
+
     assert_eq!(writer.durable_boundary(), writer.observed_boundary());
 
     let record = writer.durability_record();
@@ -332,7 +343,264 @@ fn deferred_events_follow_strict_and_bounded_policies() {
     thread::sleep(Duration::from_millis(5));
 
     assert!(bounded.flush_due().expect("flush due deferred event"));
+
+    bounded
+        .await_durable()
+        .expect("requested synchronization completes");
+
     assert_eq!(bounded.durable_boundary(), bounded.observed_boundary());
+}
+
+#[test]
+fn slow_synchronization_delays_neither_output_timestamps_nor_durable_waits() {
+    const DELAY: Duration = Duration::from_millis(400);
+
+    let temporary = TempDir::new().expect("temporary directory");
+    SYNC_DELAY.set(DELAY);
+
+    let mut writer = policy_writer(
+        &temporary,
+        "slow-sync",
+        DurabilityPolicy {
+            mode: DurabilityMode::Bounded,
+            maximum_interval_ms: Some(10),
+            maximum_uncommitted_bytes: Some(1024 * 1024),
+        },
+    );
+
+    SYNC_DELAY.set(Duration::ZERO);
+
+    // Reads keep arriving on their own thread while storage synchronizes, as PTY reads do.
+    let (reads, received) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        for index in 0..8 {
+            reads
+                .send((Instant::now(), format!("read {index}")))
+                .expect("deliver read");
+
+            thread::sleep(Duration::from_millis(25));
+        }
+    });
+
+    for (observed, text) in received {
+        writer
+            .append_observed_output(
+                Event::Output {
+                    data: ByteString::from(text.into_bytes()),
+                },
+                Some(observed),
+            )
+            .expect("append read");
+        writer.flush_due().expect("request due synchronization");
+    }
+
+    reader.join().expect("reader thread");
+
+    let started = Instant::now();
+    writer.append(marker("durable")).expect("durable marker");
+
+    assert!(
+        started.elapsed() >= DELAY,
+        "a durable append returns only after its synchronization"
+    );
+    assert_eq!(writer.durable_boundary(), writer.observed_boundary());
+
+    let path = writer.path().to_path_buf();
+    drop(writer);
+
+    let log = EventLog::read(&path).expect("read slow-sync log");
+    let lag = log
+        .events
+        .iter()
+        .filter_map(|record| {
+            return record
+                .observed_monotonic_ns
+                .map(|observed| return record.monotonic_ns - observed);
+        })
+        .max()
+        .expect("output records");
+    assert!(
+        u128::from(lag) < DELAY.as_nanos() / 2,
+        "output was timestamped {lag} ns after it was read"
+    );
+}
+
+#[test]
+fn idle_bounded_flush_keeps_polling_in_flight_and_reports_storage_failure() {
+    const DELAY: Duration = Duration::from_millis(400);
+
+    let temporary = TempDir::new().expect("temporary directory");
+    SYNC_DELAY.set(DELAY);
+
+    let mut writer = policy_writer(
+        &temporary,
+        "idle-failed-sync",
+        DurabilityPolicy {
+            mode: DurabilityMode::Bounded,
+            maximum_interval_ms: Some(1),
+            maximum_uncommitted_bytes: Some(1024),
+        },
+    );
+
+    SYNC_DELAY.set(Duration::ZERO);
+
+    writer
+        .append_output(Event::Output {
+            data: ByteString::from(&b"x"[..]),
+        })
+        .expect("buffer the last output before the child idles");
+    let observed = writer.observed_boundary();
+    let durable = writer.durable_boundary();
+    let pending_deadline = writer.flush_deadline().expect("pending output deadline");
+    thread::sleep(pending_deadline.saturating_duration_since(Instant::now()));
+
+    assert!(writer
+        .flush_due()
+        .expect("request asynchronous synchronization"));
+
+    // No more output is appended: a Sync request must itself keep the owner awake.
+    let in_flight_deadline = writer
+        .flush_deadline()
+        .expect("in-flight synchronization still has a wakeup deadline");
+    assert!(in_flight_deadline > pending_deadline);
+
+    thread::sleep(in_flight_deadline.saturating_duration_since(Instant::now()));
+
+    writer.observe_durable();
+
+    assert_eq!(writer.durable_boundary(), durable);
+    assert!(!writer
+        .flush_due()
+        .expect("poll without requesting another Sync"));
+
+    let next_deadline = writer.flush_deadline().expect("keep polling the same Sync");
+    assert!(next_deadline > in_flight_deadline);
+
+    writer.inject_storage_failure(io::Error::from_raw_os_error(ENOSPC));
+    // The actor adopts durable state before controls, then calls flush_due. Adoption must
+    // not consume a failure, even if the next wakeup deadline has not elapsed yet.
+    writer.observe_durable();
+    let error = writer
+        .flush_due()
+        .expect_err("idle storage failure must surface");
+    let Error::Filesystem { path, source } = error else {
+        panic!("expected the original filesystem failure, got {error:?}");
+    };
+
+    assert_eq!(path, writer.path());
+    assert_eq!(source.raw_os_error(), Some(ENOSPC));
+    assert_eq!(writer.observed_boundary(), observed);
+    assert_eq!(writer.durable_boundary(), durable);
+    assert!(matches!(
+        writer.flush_due(),
+        Err(Error::EventLogPoisoned { .. })
+    ));
+}
+
+#[test]
+fn flush_due_reports_storage_failure_even_without_a_deadline() {
+    let temporary = TempDir::new().expect("temporary directory");
+
+    for (name, policy) in [
+        (
+            "strict-failure",
+            DurabilityPolicy {
+                mode: DurabilityMode::Strict,
+                maximum_interval_ms: None,
+                maximum_uncommitted_bytes: None,
+            },
+        ),
+        (
+            "bounded-failure",
+            DurabilityPolicy {
+                mode: DurabilityMode::Bounded,
+                maximum_interval_ms: Some(1000),
+                maximum_uncommitted_bytes: Some(1024),
+            },
+        ),
+        (
+            "throughput-failure",
+            DurabilityPolicy {
+                mode: DurabilityMode::Throughput,
+                maximum_interval_ms: None,
+                maximum_uncommitted_bytes: None,
+            },
+        ),
+    ] {
+        let throughput = policy.mode == DurabilityMode::Throughput;
+        let mut writer = policy_writer(&temporary, name, policy);
+        if throughput {
+            // This exceeds the encoded buffer threshold and queues Write without Sync.
+            writer
+                .append_output(Event::Output {
+                    data: ByteString::from(vec![b'x'; 128 * 1024]),
+                })
+                .expect("queue an unsynchronized throughput write");
+            assert_ne!(writer.observed_boundary(), writer.durable_boundary());
+        }
+
+        assert_eq!(writer.flush_deadline(), None);
+        assert!(!writer.flush_due().expect("healthy idle writer"));
+        writer.inject_storage_failure(io::Error::from_raw_os_error(EIO));
+        writer.observe_durable();
+        assert_eq!(writer.flush_deadline(), None);
+        let error = writer
+            .flush_due()
+            .expect_err("no deadline must not hide a failure");
+        let Error::Filesystem { path, source } = error else {
+            panic!("expected the original filesystem failure, got {error:?}");
+        };
+        assert_eq!(path, writer.path());
+        assert_eq!(source.raw_os_error(), Some(EIO));
+        assert!(matches!(
+            writer.flush_due(),
+            Err(Error::EventLogPoisoned { .. })
+        ));
+    }
+}
+
+#[test]
+fn durable_boundary_moves_only_when_the_owner_adopts_completed_synchronization() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let mut writer = policy_writer(
+        &temporary,
+        "adopted-sync",
+        DurabilityPolicy {
+            mode: DurabilityMode::Bounded,
+            maximum_interval_ms: Some(1),
+            maximum_uncommitted_bytes: Some(1024),
+        },
+    );
+    writer
+        .append_output(Event::Output {
+            data: ByteString::from(&b"x"[..]),
+        })
+        .expect("append output");
+    let before = writer.durable_boundary();
+
+    thread::sleep(Duration::from_millis(5));
+
+    assert!(writer.flush_due().expect("request synchronization"));
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+
+    while writer.durability_record().sync_count == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "requested synchronization completes"
+        );
+
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    // Reads between adoptions agree even though the storage thread has finished.
+    assert_eq!(writer.durable_boundary(), before);
+    assert!(writer.flush_deadline().is_some());
+
+    writer.observe_durable();
+
+    assert_eq!(writer.durable_boundary(), writer.observed_boundary());
+    assert_eq!(writer.flush_deadline(), None);
 }
 
 #[test]

@@ -90,12 +90,12 @@
       "oneOf": [
         {
           "const": "all",
-          "description": "Retain every distinct state, including synchronized-output internals.",
+          "description": "List every boundary state, including those inside synchronized output.",
           "type": "string"
         },
         {
           "const": "presented",
-          "description": "Retain only states eligible for presentation by a native terminal.",
+          "description": "List every boundary state eligible for presentation by a native terminal.",
           "type": "string"
         }
       ]
@@ -116,9 +116,24 @@
       "description": "Semantic state hash at the selected interval's end.",
       "type": "string"
     },
+    "final_state_id": {
+      "description": "Stream position at the selected interval's end.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
     "ghostty_revision": {
       "description": "Exact Ghostty source revision.",
       "type": "string"
+    },
+    "latest_presented_state_id": {
+      "description": "Stream position of the latest state eligible for presentation, absent when none was.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "members": {
       "description": "Whole-file integrity and classification for every payload member.",
@@ -127,11 +142,14 @@
       },
       "type": "array"
     },
-    "semantic_state_count": {
-      "description": "Number of distinct semantic states encountered during replay.",
+    "sampling_stride_ns": {
+      "description": "Stride whose last presented state alone is listed, absent when every selected state is.",
       "format": "uint64",
       "minimum": 0,
-      "type": "integer"
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "session_id": {
       "description": "Source session identifier.",
@@ -161,14 +179,14 @@
       "description": "Selected half-open source interval, absent for a full-session index."
     },
     "state_count": {
-      "description": "Number of state records retained in the artifact files.",
+      "description": "Number of entries in the state index.",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
     },
     "state_selection": {
       "$ref": "#/$defs/StateSelection",
-      "description": "Semantic states retained in the JSONL artifacts."
+      "description": "Semantic states listed in the state index."
     },
     "version": {
       "description": "Artifact schema version.",
@@ -184,7 +202,7 @@
     "state_selection",
     "ghostty_revision",
     "state_count",
-    "semantic_state_count",
+    "final_state_id",
     "final_state_hash",
     "members"
   ],

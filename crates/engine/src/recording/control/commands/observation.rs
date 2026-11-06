@@ -265,6 +265,7 @@ pub(super) fn actor_screen_frame(
         session_id,
         boundaries,
         observed_monotonic_ns: event_log.elapsed_ns(),
+        state_id: live.presented_position,
     };
 
     return project_screen_frame(&live.presented, projection, source, true, capture_quality)

@@ -218,7 +218,7 @@ pub fn save(
 
         let save_manifest = SaveManifest {
             format: "termtrace-save".to_owned(),
-            version: 4,
+            version: 5,
             session_id: source_manifest.session_id,
             canonical_session: ByteString::from(canonical.as_os_str().as_bytes()),
             state_point: point,
@@ -348,7 +348,7 @@ pub fn save_screenshot_batch(
 
             let save_manifest = SaveManifest {
                 format: "termtrace-save".to_owned(),
-                version: 4,
+                version: 5,
                 session_id: source_manifest.session_id,
                 canonical_session: ByteString::from(canonical.as_os_str().as_bytes()),
                 state_point: point.clone(),
@@ -383,7 +383,7 @@ pub fn save_screenshot_batch(
 
         let manifest = ScreenshotBatchManifest {
             format: "termtrace-screenshot-batch".to_owned(),
-            version: 3,
+            version: 4,
             image_format: format,
             entries,
         };

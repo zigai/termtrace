@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use termtrace_engine::timeline::resolve_source_range;
-use termtrace_evidence::artifact::write_secure;
+use termtrace_evidence::artifact::{write_secure, write_secure_unsynced};
 use termtrace_evidence::{
     event_log::{EventLogCursor, EventLogSummary},
     session::read_manifest,
@@ -67,7 +67,7 @@ pub fn playback(options: &PlaybackOptions) -> Result<()> {
                 message: error.to_string(),
             };
 
-            if let Err(cleanup) = write_create_new_json(&options.error_file, &failure) {
+            if let Err(cleanup) = write_handoff_json(&options.error_file, &failure) {
                 return Err(Error::CleanupFailed {
                     primary: Box::new(error),
                     cleanup: Box::new(cleanup),
@@ -113,7 +113,10 @@ fn playback_inner(options: &PlaybackOptions) -> Result<()> {
             });
         }
 
-        write_create_new_json(&options.geometry_file, &reported)?;
+        write_secure(
+            &options.geometry_file,
+            &encode_json(&options.geometry_file, &reported)?,
+        )?;
 
         return playback_events(options, &mut terminal);
     })();
@@ -201,7 +204,7 @@ fn playback_events(options: &PlaybackOptions, terminal: &mut ReplayTerminal) -> 
 
     query()?;
 
-    write_secure(&options.ready_file, b"ready\n")?;
+    write_secure_unsynced(&options.ready_file, b"ready\n")?;
     thread::sleep(options.final_hold);
 
     return Ok(());
@@ -224,7 +227,7 @@ fn timed_playback(
             };
         })?;
 
-    write_create_new_json(
+    write_handoff_json(
         &options.timing_file,
         &PlaybackTiming {
             source_event_hash: log
@@ -437,16 +440,20 @@ fn unix_now_ns() -> Result<u128> {
         .map_err(|source| return Error::ClockBeforeEpoch { source });
 }
 
-pub(super) fn write_create_new_json(path: &Path, value: &impl serde::Serialize) -> Result<()> {
-    let encoded = serde_json::to_vec(value).map_err(|source| {
+fn encode_json(path: &Path, value: &impl serde::Serialize) -> Result<Vec<u8>> {
+    return serde_json::to_vec(value).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
             json_path: "$".to_owned(),
             source,
         };
-    })?;
+    });
+}
 
-    return write_secure(path, &encoded).map_err(Error::from);
+// The parent polls a handoff file once and deletes it, so it needs atomic publication but not
+// durability; an fsync here can stall playback for seconds on a busy disk.
+pub(super) fn write_handoff_json(path: &Path, value: &impl serde::Serialize) -> Result<()> {
+    return write_secure_unsynced(path, &encode_json(path, value)?).map_err(Error::from);
 }
 
 fn output_error(source: io::Error) -> Error {

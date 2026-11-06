@@ -253,5 +253,5 @@ fn tmux_default_warn_coverage_never_terminates_uncovered_panes() {
         "warn coverage terminated its uncovered pane during a recorded workflow"
     );
 
-    assert_late_checkpoint_inspection(&recording);
+    assert_late_indexed_inspection(&recording);
 }

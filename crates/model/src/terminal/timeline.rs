@@ -23,9 +23,9 @@ pub struct TimelineEntry {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TimelineItem {
-    /// A distinct Ghostty semantic state transition.
+    /// A Ghostty semantic boundary state.
     SemanticState {
-        /// Dense semantic state identifier.
+        /// Stream position of the state.
         state_id: u64,
         /// Byte offset within the responsible output event.
         event_byte_offset: Option<u64>,

@@ -71,7 +71,7 @@ pub fn replay_endpoint_for_prefix(
         session_manifest_hash: header.session_manifest_hash,
         source_complete: false,
         boundary: boundary.clone(),
-        state_id: None,
+        state_id: state.state_id,
         state_hash: state.state_hash,
         cols: state.state.cols,
         rows: state.state.rows,
@@ -193,7 +193,7 @@ pub fn observe_completed_with_formats(
     validated.check()?;
 
     let state = CachedSemanticState {
-        state_id: Some(inspection.record.state_id),
+        state_id: inspection.record.state_id,
         event_seq: inspection.record.event_seq,
         event_byte_offset: inspection.record.event_byte_offset,
         monotonic_ns: Some(inspection.record.monotonic_ns),
@@ -420,7 +420,7 @@ pub fn resolved_screen_state_for_session(
         session_id: Some(completion.session_id),
         source_completed: true,
         state_point: point,
-        state_id: state.state_id,
+        state_id: Some(state.state_id),
         event_seq: state.event_seq,
         monotonic_ns: state.monotonic_ns,
         boundary: CanonicalBoundary {
@@ -515,7 +515,7 @@ fn resolve_completed_state(
 
     return Ok((
         CachedSemanticState {
-            state_id: Some(inspection.record.state_id),
+            state_id: inspection.record.state_id,
             event_seq: inspection.record.event_seq,
             event_byte_offset: inspection.record.event_byte_offset,
             monotonic_ns: Some(inspection.record.monotonic_ns),
@@ -530,7 +530,7 @@ fn resolve_completed_state(
 
 fn cached_state_from_endpoint(state: EndpointInspection) -> CachedSemanticState {
     return CachedSemanticState {
-        state_id: None,
+        state_id: state.state_id,
         event_seq: state.event_seq,
         event_byte_offset: state.event_byte_offset,
         monotonic_ns: state.monotonic_ns,
@@ -563,7 +563,7 @@ fn completed_observation_from_cached(
         canonical_session: Some(ByteString::from(session.as_os_str().as_bytes())),
         source_completed: true,
         state_point: point,
-        state_id: state.state_id,
+        state_id: Some(state.state_id),
         state_hash: state.state_hash.clone(),
         event_seq: state.event_seq,
         monotonic_ns: state.monotonic_ns,

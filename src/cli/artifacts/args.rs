@@ -165,10 +165,10 @@ pub(in crate::cli) struct SaveArgs {
     /// One or more comma-separated representations.
     #[arg(long, value_enum, value_delimiter = ',', required = true)]
     pub(in crate::cli) format: Vec<SaveFormatArg>,
-    /// Exact semantic state identifier.
+    /// Stream position of the state: output bytes and applied resizes before it.
     #[arg(long)]
     pub(in crate::cli) state: Option<u64>,
-    /// Exact content-addressed semantic state hash.
+    /// Latest state with this content hash.
     #[arg(long, value_parser = parse_state_hash)]
     pub(in crate::cli) state_hash: Option<String>,
     /// Latest state at or before this event sequence.
@@ -197,10 +197,10 @@ pub(in crate::cli) struct ScreenshotArgs {
     /// New manifested screenshot artifact directory.
     #[arg(short = 'o', long)]
     pub(in crate::cli) out: PathBuf,
-    /// Exact semantic state identifier.
+    /// Stream position of the state: output bytes and applied resizes before it.
     #[arg(long)]
     pub(in crate::cli) state: Vec<u64>,
-    /// Exact content-addressed semantic state hash.
+    /// Latest state with this content hash.
     #[arg(long, value_parser = parse_state_hash)]
     pub(in crate::cli) state_hash: Vec<String>,
     /// Latest state at or before this event sequence.

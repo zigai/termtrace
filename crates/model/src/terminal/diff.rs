@@ -16,7 +16,7 @@ use std::{collections::HashMap, hash::Hash};
 pub struct DiffEndpoint {
     /// Requested endpoint selector.
     pub point: StatePoint,
-    /// Dense semantic state identifier.
+    /// Stream position of the state.
     pub state_id: u64,
     /// Complete semantic state hash.
     pub state_hash: String,

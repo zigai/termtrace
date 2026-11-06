@@ -1,4 +1,4 @@
-//! Deterministic byte-granular replay and semantic state indexing.
+//! Deterministic replay and semantic state indexing by stream position.
 
 use crate::Error;
 use std::path::PathBuf;
@@ -18,6 +18,7 @@ use delta::between;
 use engine::replay_for_index;
 #[cfg(test)]
 use engine::validate_replay_seed;
+use engine::POSITION_STRIDE;
 pub use engine::{
     format_state, inspect, inspect_completed_many, inspect_completed_session,
     inspect_completed_session_with_formats, inspect_many, inspect_with_formats, replay,
@@ -28,12 +29,12 @@ pub(crate) use engine::{
     inspect_latest_presented_prefix, inspect_latest_presented_stream, inspect_prefix_stream,
     inspect_session_stream, inspect_session_stream_with_formats,
     visit_recording_replay_range_while, visit_replay_range_while, visit_replay_seeded_while,
-    ReplaySeed, ReplayVisit,
+    ReplaySeed, ReplayStop, ReplayVisit,
 };
 #[cfg(test)]
 use engine::{
-    replay_with, replay_with_limits, replay_with_seed_and_limits, ReplayLimits,
-    DEFAULT_REPLAY_LIMITS,
+    replay_log, replay_with, replay_with_limits, replay_with_seed_and_limits, ReplayLimits,
+    ReplayRequest, DEFAULT_REPLAY_LIMITS,
 };
 #[cfg(test)]
 pub(crate) use engine::{reset_test_replay_output_bytes, test_replay_output_bytes};
@@ -43,13 +44,16 @@ pub use index::{
     derived_directory_name, derived_directory_name_for, index_session, index_session_for_video,
     index_session_range, index_session_with_options, index_session_with_stride,
 };
-pub(crate) use index::{DerivedIndex, CONTROL_INDEX, CONTROL_SOURCE_INDEX};
+pub(crate) use index::{
+    open_seekable, seekable_len, DerivedIndex, SeekableReader, CONTROL_INDEX, CONTROL_SOURCE_INDEX,
+};
 pub use trust::ValidatedSession;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct EndpointInspection {
     pub state: SemanticState,
     pub state_hash: String,
+    pub state_id: u64,
     pub event_seq: Option<u64>,
     pub event_byte_offset: Option<u64>,
     pub monotonic_ns: Option<u64>,

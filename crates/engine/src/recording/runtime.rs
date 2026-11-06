@@ -6,7 +6,7 @@ use super::{
     input::{apply, apply_resize},
     model::{RuntimeMessage, TerminalGeometry},
     outer_resize::{OuterResize, ResizeAuthority},
-    presentation::{process_semantic_output, resize_semantic},
+    presentation::process_semantic_output,
     process::RuntimeWorkers,
     support::{finish_with_cleanup, terminal_error},
     termination::{Effect, Fact, Tick},
@@ -18,7 +18,10 @@ use std::{
     io,
     mem::{replace, take},
     path::PathBuf,
-    sync::mpsc::{self, RecvTimeoutError},
+    sync::{
+        mpsc::{self, RecvTimeoutError},
+        Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -70,6 +73,7 @@ pub(super) fn run(
         initial_geometry,
         control_socket,
         host_signals,
+        Arc::clone(&actor.progress.pty_reads),
     );
     let (workers, receiver) = match started {
         Ok(started) => started,
@@ -102,6 +106,8 @@ pub(super) fn run(
                         .recv_timeout(deadline.saturating_duration_since(Instant::now()));
                 },
             );
+
+            actor.event_log.observe_durable();
 
             let mut received_output = false;
             match received {
@@ -414,6 +420,8 @@ impl SessionActor<'_> {
     fn process_runtime_message(&mut self, message: RuntimeMessage) -> Result<()> {
         match message {
             RuntimeMessage::Output { data, observed } => {
+                self.progress.applied_pty_reads = self.progress.applied_pty_reads.saturating_add(1);
+
                 // Establish canonical causality before any fallible mirror, parser, or reply.
                 let source_event_seq = match self.event_log.append_observed_output(
                     Event::Output {
@@ -505,9 +513,7 @@ impl SessionActor<'_> {
                     geometry,
                 )?;
 
-                resize_semantic(&mut self.live.semantic, geometry)?;
-                self.live.geometry = geometry;
-                self.live.presented_stale = true;
+                self.live.apply_resize(geometry)?;
             }
             RuntimeMessage::ResizeFailed(reason) => {
                 return Err(terminal_error("read terminal geometry", reason));

@@ -809,6 +809,7 @@ mod tests {
             &ScreenProjectionRequest::default(),
             ScreenFrameSource::Actor {
                 session_id: Uuid::nil(),
+                state_id: 0,
                 boundaries: boundaries(),
                 observed_monotonic_ns: 13,
             },
@@ -911,6 +912,7 @@ mod tests {
             &ScreenProjectionRequest::default(),
             ScreenFrameSource::Actor {
                 session_id: Uuid::nil(),
+                state_id: 0,
                 boundaries: boundaries(),
                 observed_monotonic_ns: 13,
             },
@@ -956,6 +958,7 @@ mod tests {
             },
             ScreenFrameSource::Actor {
                 session_id: Uuid::nil(),
+                state_id: 0,
                 boundaries: boundaries(),
                 observed_monotonic_ns: 13,
             },

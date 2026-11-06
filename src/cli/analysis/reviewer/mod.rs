@@ -317,35 +317,31 @@ impl ReviewModel {
         let Some(page) = self.page.as_mut() else {
             return self.query(if forward { ReviewQuery::State(0) } else { ReviewQuery::Final });
         };
-        let mut target = page.selected;
+        let selected = page.selected;
+        let position = page
+            .entries
+            .iter()
+            .position(|entry| return entry.state_id == selected);
 
-        loop {
-            target = if forward { target.saturating_add(1) } else { target.saturating_sub(1) };
-
-            if target == page.selected {
-                return Ok(());
+        let eligible = |entry: &&ReviewEntry| return !self.presented_only || entry.presented;
+        let neighbor = position.and_then(|index| {
+            if forward {
+                return page
+                    .entries
+                    .iter()
+                    .skip(index.saturating_add(1))
+                    .find(eligible);
             }
+            return page.entries.iter().take(index).rev().find(eligible);
+        });
+        if let Some(entry) = neighbor {
+            let target = entry.state_id;
+            page.selected = target;
+            self.native.clear();
+            self.status = "exact semantic page loaded; validating selected native evidence";
+            self.worker.submit(WorkKind::Native(target))?;
 
-            let Some(entry) = page
-                .entries
-                .iter()
-                .find(|entry| return entry.state_id == target)
-            else {
-                break;
-            };
-
-            if !self.presented_only || entry.presented {
-                page.selected = target;
-                self.native.clear();
-                self.status = "exact semantic page loaded; validating selected native evidence";
-                self.worker.submit(WorkKind::Native(target))?;
-
-                return Ok(());
-            }
-
-            if target == 0 || target == u64::MAX {
-                return Ok(());
-            }
+            return Ok(());
         }
 
         let from = page.selected;

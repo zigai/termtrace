@@ -37,7 +37,7 @@ pub struct ClockSample {
 }
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 19;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 20;
 /// Maximum encoded request or response size.
 pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 16 * 1024 * 1024;
 /// Response deadline for commands that do not wait or pace input.

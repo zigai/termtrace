@@ -20,6 +20,7 @@ const MAX_APC_SEQUENCE_BYTES: usize = 1024 * 1024;
 // Unfinished input that checkpoints must carry is bounded by the largest buffered control.
 const MAX_CONTINUATION_BYTES: usize = MAX_APC_SEQUENCE_BYTES;
 const ESC: u8 = 0x1b;
+const BEL: u8 = 0x07;
 const CAN: u8 = 0x18;
 const GROUND: u32 = sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_GROUND.cast_unsigned();
 const OSC_START: u32 =
@@ -28,12 +29,16 @@ const OSC_END: u32 = sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_OSC_
 
 mod checkpoint;
 mod effects;
+mod hold_probe;
+
+use hold_probe::HoldProbe;
 
 /// Owned semantic engine and render snapshot state.
 pub struct GhosttyVt {
     terminal: sys::GhosttyTerminal,
     effects: Box<Effects>,
     sequence: Sequence,
+    hold_probe: HoldProbe,
     render_holds: bool,
     captures_effects: bool,
     processing_error: bool,
@@ -48,6 +53,12 @@ pub struct OutputStep {
     pub plain: usize,
     /// The control sequence in the consumed bytes has not ended yet.
     pub open: bool,
+    /// The step stopped just before the final byte of a sequence that begins a
+    /// synchronized-output hold, so the screen is the frame the hold keeps.
+    pub hold_edge: bool,
+    /// The step stopped just before the final byte of a sequence that ends a
+    /// synchronized-output hold, so the screen is the last frame the hold hid.
+    pub release_edge: bool,
 }
 
 /// A synchronized-output (DEC mode 2026) hold change reported by Ghostty.
@@ -63,6 +74,7 @@ pub enum RenderHold {
 struct Effects {
     render: sys::GhosttyRenderState,
     last_snapshot: Option<SemanticState>,
+    unmarked_rows: bool,
     responses: Vec<Vec<u8>>,
     holds: Vec<RenderHold>,
     hold_error: Option<Error>,
@@ -157,12 +169,14 @@ impl GhosttyVt {
             effects: Box::new(Effects {
                 render,
                 last_snapshot: None,
+                unmarked_rows: false,
                 responses: Vec::new(),
                 holds: Vec::new(),
                 hold_error: None,
                 reported: Vec::new(),
             }),
             sequence: Sequence::Ground,
+            hold_probe: HoldProbe::default(),
             render_holds: false,
             captures_effects: false,
             processing_error: false,
@@ -203,7 +217,13 @@ impl GhosttyVt {
     }
 
     /// Feed PTY output through Ghostty's VT parser under the OSC size policy.
+    ///
+    /// Unlike [`Self::write_step`], this does not stop before synchronized-output holds.
     pub fn write(&mut self, mut bytes: &[u8]) {
+        if !bytes.is_empty() {
+            self.hold_probe.unknown();
+        }
+
         while !bytes.is_empty() {
             let consumed = match self.sequence {
                 Sequence::Ground | Sequence::Open => {
@@ -231,6 +251,11 @@ impl GhosttyVt {
     /// responses and render holds taken after the step belong to it. A
     /// sequence split across calls continues in the next call. An OSC longer
     /// than 1 MiB is cancelled, and the rest of it is dropped.
+    ///
+    /// While effects are captured, a bell in text also ends a step. While render
+    /// holds are captured, a step also stops just before the final byte of a CSI
+    /// that changes mode 2026, and reports [`OutputStep::hold_edge`] or
+    /// [`OutputStep::release_edge`].
     pub fn write_step(&mut self, bytes: &[u8]) -> OutputStep {
         let mut plain = 0;
         let mut consumed = 0;
@@ -240,6 +265,23 @@ impl GhosttyVt {
         {
             let written = match self.sequence {
                 Sequence::Ground => {
+                    // A bell in text is an effect of its own byte, so a captured one ends the step.
+                    if self.captures_effects
+                        && let Some(bell) = memchr::memchr2(ESC, BEL, rest)
+                            .filter(|index| return rest.get(*index) == Some(&BEL))
+                    {
+                        let text = bell.saturating_add(1);
+                        self.vt_write(rest.get(..text).unwrap_or_default());
+
+                        return OutputStep {
+                            consumed: text,
+                            plain: text,
+                            open: false,
+                            hold_edge: false,
+                            release_edge: false,
+                        };
+                    }
+
                     // C1 bytes at ground are UTF-8 to Ghostty, so only ESC starts a sequence.
                     let Some(escape) = memchr::memchr(ESC, rest) else {
                         self.vt_write(rest);
@@ -248,29 +290,68 @@ impl GhosttyVt {
                             consumed: bytes.len(),
                             plain: bytes.len(),
                             open: false,
+                            hold_edge: false,
+                            release_edge: false,
                         };
                     };
                     self.vt_write(rest.get(..=escape).unwrap_or_default());
                     plain = escape;
                     self.sequence = Sequence::Open;
+                    self.hold_probe.after_escape();
 
                     escape.saturating_add(1)
                 }
                 Sequence::Open => {
-                    let stop = self.write_until(rest, GROUND | OSC_START);
+                    // Only a change of mode 2026 is an edge; Ghostty ignores repeats.
+                    let held = self
+                        .render_holds
+                        .then(|| return self.synchronized_output().ok())
+                        .flatten();
+
+                    let hold_final = held
+                        .and_then(|held| return self.hold_probe.hold_final(rest, held))
+                        .filter(|index| return *index > 0);
+
+                    let target =
+                        hold_final.map_or(rest, |end| return rest.get(..end).unwrap_or_default());
+                    let stop = self.write_until(target, GROUND | OSC_START);
+                    self.hold_probe
+                        .advance(rest.get(..stop.consumed).unwrap_or_default());
 
                     if stop.reached & GROUND != 0 {
                         self.sequence = Sequence::Ground;
                     } else if stop.reached & OSC_START != 0 {
                         self.sequence = Sequence::osc(stop.introducer);
+                    } else if hold_final == Some(stop.consumed) {
+                        return OutputStep {
+                            consumed: consumed.saturating_add(stop.consumed),
+                            plain,
+                            open: true,
+                            hold_edge: held == Some(false),
+                            release_edge: held == Some(true),
+                        };
                     }
 
                     stop.consumed
                 }
-                Sequence::Osc { length } => self.write_osc(rest, length),
-                Sequence::DiscardOsc { escape } => self.discard_osc(rest, escape),
+                Sequence::Osc { length } => {
+                    let written = self.write_osc(rest, length);
+                    self.sync_probe_after_string(rest, written);
+
+                    written
+                }
+                Sequence::DiscardOsc { escape } => {
+                    let written = self.discard_osc(rest, escape);
+                    self.sync_probe_after_string(rest, written);
+
+                    written
+                }
             };
             consumed = consumed.saturating_add(written);
+
+            if self.sequence == Sequence::Ground {
+                self.hold_probe.reset();
+            }
 
             if self.sequence == Sequence::Ground && consumed > plain {
                 break;
@@ -281,7 +362,20 @@ impl GhosttyVt {
             consumed,
             plain,
             open: self.sequence != Sequence::Ground,
+            hold_edge: false,
+            release_edge: false,
         };
+    }
+
+    // An OSC ends at the ESC of ST, which may instead begin another sequence.
+    fn sync_probe_after_string(&mut self, bytes: &[u8], written: usize) {
+        if self.sequence == Sequence::Open {
+            if written > 0 && bytes.get(written - 1) == Some(&ESC) {
+                self.hold_probe.after_escape();
+            } else {
+                self.hold_probe.unknown();
+            }
+        }
     }
 
     /// Report synchronized-output holds through [`Self::take_render_holds`].
@@ -418,10 +512,19 @@ impl GhosttyVt {
     }
 
     fn vt_write(&mut self, bytes: &[u8]) {
+        self.note_unmarked_rows(bytes);
         unsafe { sys::ghostty_terminal_vt_write(self.terminal, bytes.as_ptr(), bytes.len()) };
     }
 
+    // Ghostty can attach a zero-width codepoint to a cell without marking its row dirty, and
+    // only non-ASCII input can complete such a codepoint.
+    fn note_unmarked_rows(&mut self, bytes: &[u8]) {
+        self.effects.unmarked_rows |= !bytes.is_ascii();
+    }
+
     fn write_until(&mut self, bytes: &[u8], boundaries: u32) -> WriteStop {
+        self.note_unmarked_rows(bytes);
+
         let mut stop = sys::GhosttyTerminalWriteStop {
             size: size_of::<sys::GhosttyTerminalWriteStop>(),
             ..sys::GhosttyTerminalWriteStop::default()
@@ -607,8 +710,13 @@ impl GhosttyVt {
     pub fn snapshot(&mut self) -> Result<SemanticState> {
         let effects = &mut *self.effects;
 
-        return snapshot::Snapshot::new(self.terminal, effects.render, &mut effects.last_snapshot)
-            .snapshot();
+        return snapshot::Snapshot::new(
+            self.terminal,
+            &mut effects.render,
+            &mut effects.last_snapshot,
+            &mut effects.unmarked_rows,
+        )
+        .snapshot();
     }
 
     /// Whether synchronized output (DEC private mode 2026) is enabled, without a snapshot.
@@ -631,8 +739,13 @@ impl GhosttyVt {
     pub fn snapshot_if_changed(&mut self) -> Result<Option<SemanticState>> {
         let effects = &mut *self.effects;
 
-        return snapshot::Snapshot::new(self.terminal, effects.render, &mut effects.last_snapshot)
-            .snapshot_if_changed();
+        return snapshot::Snapshot::new(
+            self.terminal,
+            &mut effects.render,
+            &mut effects.last_snapshot,
+            &mut effects.unmarked_rows,
+        )
+        .snapshot_if_changed();
     }
 
     /// Format the active screen using Ghostty's own formatter.
@@ -756,7 +869,14 @@ unsafe extern "C" fn render_hold_callback(
         return;
     }
 
-    match snapshot::Snapshot::new(terminal, effects.render, &mut effects.last_snapshot).snapshot() {
+    match snapshot::Snapshot::new(
+        terminal,
+        &mut effects.render,
+        &mut effects.last_snapshot,
+        &mut effects.unmarked_rows,
+    )
+    .snapshot()
+    {
         Ok(mut frame) => {
             // Ghostty sets mode 2026 before reporting the hold; the kept frame predates it.
             frame.modes.synchronized_output = false;
@@ -854,6 +974,8 @@ mod tests {
                 consumed,
                 plain,
                 open: false,
+                hold_edge: false,
+                release_edge: false,
             };
         };
 
@@ -875,7 +997,9 @@ mod tests {
             OutputStep {
                 consumed: 3,
                 plain: 0,
-                open: true
+                open: true,
+                hold_edge: false,
+                release_edge: false,
             }
         );
         assert!(terminal.take_responses().is_empty());
@@ -1117,5 +1241,218 @@ mod tests {
             ]
         ));
         assert!(!terminal.synchronized_output().expect("mode"));
+    }
+
+    fn steps(terminal: &mut GhosttyVt, input: &[u8]) -> Vec<OutputStep> {
+        let mut steps = Vec::new();
+
+        let mut offset = 0;
+        while offset < input.len() {
+            let step = terminal.write_step(&input[offset..]);
+            assert!(step.consumed > 0 && step.consumed <= input.len() - offset);
+            steps.push(step);
+            offset += step.consumed;
+        }
+
+        return steps;
+    }
+
+    #[test]
+    fn steps_stop_before_the_byte_that_begins_a_hold() {
+        let mut terminal = GhosttyVt::new(20, 4, 0).expect("create terminal");
+        terminal.capture_render_holds().expect("capture holds");
+        let first = terminal.write_step(b"ab[?1049;2026hc");
+        assert_eq!((first.consumed, first.hold_edge), (14, true));
+
+        let edge = terminal.snapshot().expect("edge");
+        assert!(!edge.modes.synchronized_output);
+        assert!(!edge.modes.alternate_screen);
+        assert_eq!(edge.grid[0].cells[1].grapheme, "b");
+        assert!(terminal
+            .take_render_holds()
+            .expect("no hold yet")
+            .is_empty());
+
+        let last = terminal.write_step(b"hc");
+        assert_eq!((last.consumed, last.hold_edge), (1, false));
+        assert!(terminal.synchronized_output().expect("mode"));
+        assert_eq!(terminal.take_render_holds().expect("hold").len(), 1);
+    }
+
+    #[test]
+    fn hold_edges_follow_sequences_across_writes_and_inline_controls() {
+        let mut terminal = GhosttyVt::new(20, 4, 0).expect("create terminal");
+        terminal.capture_render_holds().expect("capture holds");
+
+        assert!(!terminal.write_step(b"\x1b[?20").hold_edge);
+
+        let resumed = terminal.write_step(b"26\nh");
+        assert_eq!((resumed.consumed, resumed.hold_edge), (3, true));
+        assert_eq!(terminal.snapshot().expect("edge").cursor.row, Some(1));
+        assert!(!terminal.synchronized_output().expect("mode"));
+
+        // A sequence whose final byte starts the next write has no earlier byte to stop at.
+        steps(&mut terminal, b"h\x1b[?2026l\x1b[?2026");
+
+        assert!(!terminal.write_step(b"h").hold_edge);
+        assert!(terminal.synchronized_output().expect("mode"));
+
+        steps(&mut terminal, b"\x1b[?2026l\x1b[?20");
+        let checkpoint = terminal
+            .encode_checkpoint()
+            .expect("encode")
+            .expect("checkpoint");
+
+        let mut restored = GhosttyVt::restore_checkpoint(&checkpoint, 0).expect("restore");
+        assert!(restored.write_step(b"26h").hold_edge);
+    }
+
+    #[test]
+    fn a_string_before_a_hold_reaches_the_engine_whole_at_every_split() {
+        for input in [
+            &b"before\x1b]0;title\x07\x1b[?2026hhidden\x1b[?2026lafter"[..],
+            &b"before\x1b]2;title\x1b\\\x1b[?2026hhidden\x1b[?2026lafter"[..],
+        ] {
+            let mut whole = GhosttyVt::new(20, 4, 0).expect("create terminal");
+            whole.capture_render_holds().expect("capture holds");
+            whole.capture_effects().expect("capture effects");
+            whole.write(input);
+            let expected = whole.snapshot().expect("whole state");
+            let expected_holds = whole.take_render_holds().expect("whole holds");
+            let expected_effects = whole.take_effects();
+            assert_eq!(expected.metadata.title.as_bytes(), b"title");
+            assert_eq!(
+                expected.grid[0].cells[..17]
+                    .iter()
+                    .map(|cell| return cell.grapheme.as_str())
+                    .collect::<String>(),
+                "beforehiddenafter"
+            );
+            assert_eq!(
+                expected_effects,
+                vec![TerminalEffect::TitleChanged {
+                    title: ByteString::from(&b"title"[..]),
+                }]
+            );
+            assert!(matches!(
+                expected_holds.as_slice(),
+                [RenderHold::Began(_), RenderHold::Ended]
+            ));
+
+            // Include an unsplit write and every cut inside the OSC, its terminator,
+            // and the mode sequences. A look-ahead hold must not skip an OSC stop.
+            for split in 0..=input.len() {
+                for stepped in [false, true] {
+                    let mut terminal = GhosttyVt::new(20, 4, 0).expect("create terminal");
+                    terminal.capture_render_holds().expect("capture holds");
+                    terminal.capture_effects().expect("capture effects");
+
+                    for chunk in [&input[..split], &input[split..]] {
+                        if stepped {
+                            steps(&mut terminal, chunk);
+                        } else {
+                            terminal.write(chunk);
+                        }
+                    }
+
+                    assert_eq!(
+                        terminal.snapshot().expect("split state"),
+                        expected,
+                        "split={split}, stepped={stepped}"
+                    );
+                    assert_eq!(
+                        terminal.take_effects(),
+                        expected_effects,
+                        "split={split}, stepped={stepped}"
+                    );
+                    assert_eq!(
+                        terminal.take_render_holds().expect("split holds"),
+                        expected_holds,
+                        "split={split}, stepped={stepped}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn enabling_synchronized_output_again_inside_a_hold_is_not_an_edge_at_any_split() {
+        let repeat = b"\x1b[?2026hmore";
+
+        for split in 0..=repeat.len() {
+            // Also cover an existing hold established by ordinary writes: the
+            // probe must consult the engine's mode rather than its own history.
+            for stepped_start in [false, true] {
+                let mut terminal = GhosttyVt::new(20, 4, 0).expect("create terminal");
+                terminal.capture_render_holds().expect("capture holds");
+
+                let initial = b"shown\x1b[?2026h\x1b[2J\x1b[Hhidden";
+                if stepped_start {
+                    steps(&mut terminal, initial);
+                } else {
+                    terminal.write(initial);
+                }
+
+                let holds = terminal.take_render_holds().expect("initial hold");
+                let [RenderHold::Began(kept)] = holds.as_slice() else {
+                    panic!("expected one hold start, got {holds:?}");
+                };
+                assert_eq!(
+                    kept.grid[0].cells[..5]
+                        .iter()
+                        .map(|cell| return cell.grapheme.as_str())
+                        .collect::<String>(),
+                    "shown"
+                );
+
+                for chunk in [&repeat[..split], &repeat[split..]] {
+                    assert!(
+                        steps(&mut terminal, chunk)
+                            .iter()
+                            .all(|step| return !step.hold_edge && !step.release_edge),
+                        "split={split}, stepped_start={stepped_start}"
+                    );
+                    assert!(terminal
+                        .take_render_holds()
+                        .expect("no new hold")
+                        .is_empty());
+                    assert!(terminal.synchronized_output().expect("mode"));
+                }
+
+                let hidden = terminal.snapshot().expect("hidden state");
+                assert_eq!(
+                    hidden.grid[0].cells[..10]
+                        .iter()
+                        .map(|cell| return cell.grapheme.as_str())
+                        .collect::<String>(),
+                    "hiddenmore"
+                );
+                steps(&mut terminal, b"\x1b[?2026l");
+                assert_eq!(
+                    terminal.take_render_holds().expect("release"),
+                    vec![RenderHold::Ended]
+                );
+                assert!(!terminal.synchronized_output().expect("released mode"));
+            }
+        }
+    }
+
+    #[test]
+    fn steps_do_not_stop_for_other_modes_or_without_hold_capture() {
+        let mut capturing = GhosttyVt::new(20, 4, 0).expect("create terminal");
+        capturing.capture_render_holds().expect("capture holds");
+
+        let other = b"\x1b[?25h\x1b[?2026l\x1b[2026h\x1b[?2026:1h\x1b[>2026h";
+
+        assert!(steps(&mut capturing, other)
+            .iter()
+            .all(|step| return !step.hold_edge));
+        assert!(!capturing.synchronized_output().expect("mode"));
+
+        let mut plain = GhosttyVt::new(20, 4, 0).expect("create terminal");
+        assert!(steps(&mut plain, b"\x1b[?2026h")
+            .iter()
+            .all(|step| return !step.hold_edge));
+        assert!(plain.synchronized_output().expect("mode"));
     }
 }

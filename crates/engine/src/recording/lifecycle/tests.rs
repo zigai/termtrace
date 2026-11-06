@@ -15,7 +15,7 @@ use std::{
         net::{SocketAddr, UnixStream},
     },
     path::PathBuf,
-    sync::mpsc,
+    sync::{atomic::Ordering, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -37,9 +37,10 @@ use termtrace_model::{
     },
     protocol::control::{
         ControlCommand, ControlPayload, ControlRequest, ControlResponse, ControlResult,
-        CONTROL_PROTOCOL_VERSION,
+        StableCaptureQuality, CONTROL_PROTOCOL_VERSION,
     },
     terminal::observation::ActorBoundaries,
+    terminal::screen::ScreenProjectionRequest,
 };
 use termtrace_terminal::semantic_state_hash;
 
@@ -100,10 +101,9 @@ fn isolated_options(output_directory: PathBuf, command: Vec<OsString>) -> Record
 
 struct FailingOutput;
 
-#[test]
-fn actor_snapshot_refresh_invalidates_the_presented_hash() {
+fn with_actor(name: &str, check: impl FnOnce(&mut SessionActor<'_>)) {
     let temporary = TempDir::new().expect("temporary directory");
-    let directory = temporary.path().join("actor-snapshot");
+    let directory = temporary.path().join(name);
     create_session_directory(&directory).expect("session directory");
     let options = isolated_options(directory.clone(), vec![OsString::from("/bin/true")]);
     let geometry = validate_options(&options).expect("valid geometry");
@@ -146,25 +146,94 @@ fn actor_snapshot_refresh_invalidates_the_presented_hash() {
         MUTATION_CACHE_CAPACITY,
         ResourceLimits::default(),
     );
+    check(&mut actor);
+}
 
-    let mut previous = actor.live.presented_state_hash().expect("initial hash");
+#[test]
+fn actor_snapshot_refresh_invalidates_the_presented_hash() {
+    with_actor("actor-snapshot", |actor| {
+        let mut previous = actor.live.presented_state_hash().expect("initial hash");
 
-    for bytes in [b"READY".as_slice(), b"\rCHANGED".as_slice()] {
-        actor.live.semantic.write(bytes);
-        actor.live.presented_stale = true;
+        for bytes in [b"READY".as_slice(), b"\rCHANGED".as_slice()] {
+            actor.live.semantic.write(bytes);
+            actor.live.presented_stale = true;
+            actor
+                .live
+                .ensure_presented()
+                .expect("refresh actor snapshot");
+            let current = actor.live.presented_state_hash().expect("updated hash");
+            assert_eq!(
+                current,
+                semantic_state_hash(&actor.live.presented).expect("uncached state hash")
+            );
+            assert_ne!(current, previous);
+            previous = current;
+        }
+    });
+}
+
+#[test]
+fn stable_capture_never_settles_while_read_output_awaits_the_actor() {
+    with_actor("stable-pending-output", |actor| {
+        let stable_for = Duration::from_millis(20);
+        let (responses, received) = mpsc::sync_channel(1);
         actor
-            .live
-            .ensure_presented()
-            .expect("refresh actor snapshot");
-        let current = actor.live.presented_state_hash().expect("updated hash");
-        assert_eq!(
-            current,
-            semantic_state_hash(&actor.live.presented).expect("uncached state hash")
-        );
-        assert_ne!(current, previous);
+            .handle_control_request(
+                ControlRequest::new(ControlCommand::CaptureStable {
+                    stable_for_ns: u64::try_from(stable_for.as_nanos()).expect("interval"),
+                    timeout_ns: 10_000_000_000,
+                    projection: ScreenProjectionRequest::default(),
+                    reaction: None,
+                }),
+                responses,
+            )
+            .expect("admit stable capture");
+        actor
+            .evaluate_screen_waiters(false, false)
+            .expect("start the stable interval");
 
-        previous = current;
-    }
+        // The reader has read output that a delayed actor has not applied yet.
+        actor.progress.pty_reads.fetch_add(1, Ordering::Release);
+
+        thread::sleep(stable_for * 3);
+
+        actor
+            .evaluate_screen_waiters(false, false)
+            .expect("evaluate with output pending");
+        assert!(
+            received.try_recv().is_err(),
+            "queued output is not a quiet screen"
+        );
+        actor.progress.applied_pty_reads += 1;
+        actor.live.semantic.write(b"CHANGED");
+        actor.live.presented_stale = true;
+        actor.live.ensure_presented().expect("apply pending output");
+        actor
+            .evaluate_screen_waiters(false, false)
+            .expect("restart the stable interval");
+
+        thread::sleep(stable_for * 3);
+
+        actor
+            .evaluate_screen_waiters(false, false)
+            .expect("settle after applying output");
+
+        let response = received.try_recv().expect("settled capture");
+        let ControlResult::Ok {
+            data: ControlPayload::StableSnapshot { frame, quality, .. },
+        } = response.result
+        else {
+            panic!("unexpected stable capture response: {:?}", response.result);
+        };
+        assert_eq!(quality, StableCaptureQuality::Stable);
+        assert_eq!(
+            frame.state_hash,
+            actor
+                .live
+                .presented_state_hash()
+                .expect("applied state hash")
+        );
+    });
 }
 
 #[test]

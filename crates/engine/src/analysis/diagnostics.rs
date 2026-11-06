@@ -3,6 +3,7 @@
 mod stream;
 
 use crate::{
+    diff::inspect_point,
     observation::state_selector_for_session,
     replay::{
         inspect_session_stream, replay, visit_replay_range_while, visit_session_states_while,
@@ -13,7 +14,7 @@ use crate::{
 };
 use std::{
     collections::BTreeMap,
-    iter,
+    iter, mem,
     path::{Component, Path, PathBuf},
     sync::atomic::AtomicBool,
 };
@@ -24,7 +25,7 @@ use termtrace_model::{
     execution::event::Event,
     terminal::analysis::{
         DiagnoseReport, DiagnosticCheck, DiagnosticFinding, ExplainFinding, ExplainReport,
-        FindingConfidence, NativeCorrelation, NativeEvidenceLevel,
+        FindingConfidence, NativeCorrelation, NativeEvidenceLevel, OmittedFindings,
     },
     terminal::effect::{TerminalEffect, TerminalEffectRecord, UnknownSequenceKind},
     terminal::observation::StatePoint,
@@ -38,6 +39,9 @@ use termtrace_terminal::frame_event_records;
 use uuid::Uuid;
 
 const MAX_REPORTED_UNKNOWN_SEQUENCES: usize = 4;
+// Long sessions can repeat one finding per state, so reports list a bounded sample.
+const MAX_LISTED_FINDINGS_PER_CODE: u64 = 100;
+const MAX_LISTED_IDS: usize = 100;
 
 fn analysis_error(reason: impl Into<String>) -> Error {
     return Error::InvalidReplay {
@@ -89,7 +93,7 @@ impl ValidatedVisualManifest {
         });
     }
 
-    /// Bind a screenshot without a capture-time dense ID to a verified canonical state.
+    /// Bind a screenshot without a capture-time state ID to a verified canonical state.
     ///
     /// The media owner verifies the stored source prefix before supplying the resolved
     /// endpoint. This records a derived correlation without changing the source manifest.
@@ -237,6 +241,7 @@ pub fn diagnose(
         &states,
         &tokens,
         &effects,
+        true,
     ));
 }
 
@@ -331,6 +336,7 @@ pub(super) fn diagnose_states(
     states: &[StateRecord],
     tokens: &[VtToken],
     effects: &EffectEvidence,
+    bounded: bool,
 ) -> DiagnoseReport {
     checks.sort_unstable();
     checks.dedup();
@@ -375,6 +381,17 @@ pub(super) fn diagnose_states(
         effects.findings(&mut detected);
     }
 
+    let (mut detected, omitted_findings) = if bounded {
+        let mut findings = BoundedFindings::default();
+        for finding in detected {
+            findings.push(finding);
+        }
+
+        findings.finish()
+    } else {
+        (detected, Vec::new())
+    };
+
     let native = native_correlations(log, visual_evidence);
 
     for finding in &mut detected {
@@ -407,7 +424,7 @@ pub(super) fn diagnose_states(
 
     return DiagnoseReport {
         format: "termtrace-diagnose".to_owned(),
-        version: 1,
+        version: 3,
         session_id: log.header.session_id,
         source_final_event_hash: log.events.last().map_or_else(
             || return log.header.session_manifest_hash.clone(),
@@ -417,8 +434,97 @@ pub(super) fn diagnose_states(
         checks,
         broad_change_fraction: format!("{broad_change_percent}/100"),
         findings: detected,
+        omitted_findings,
         output_page: None,
     };
+}
+
+#[derive(Default)]
+pub(super) struct BoundedFindings {
+    listed: Vec<DiagnosticFinding>,
+    detected: BTreeMap<String, u64>,
+    scratch: Vec<DiagnosticFinding>,
+}
+
+impl BoundedFindings {
+    pub(super) fn detect(&mut self, detector: impl FnOnce(&mut Vec<DiagnosticFinding>)) {
+        let mut found = mem::take(&mut self.scratch);
+        detector(&mut found);
+
+        for finding in found.drain(..) {
+            self.push(finding);
+        }
+
+        self.scratch = found;
+    }
+
+    pub(super) fn push(&mut self, mut finding: DiagnosticFinding) {
+        list_bounded_ids(&mut finding.state_ids, "state", &mut finding.facts);
+        list_bounded_ids(&mut finding.token_ids, "token", &mut finding.facts);
+
+        let detected = self.detected.entry(finding.code.clone()).or_default();
+        *detected = detected.saturating_add(1);
+
+        if *detected <= MAX_LISTED_FINDINGS_PER_CODE {
+            self.listed.push(finding);
+        }
+    }
+
+    pub(super) fn finish(self) -> (Vec<DiagnosticFinding>, Vec<OmittedFindings>) {
+        let omitted = self
+            .detected
+            .into_iter()
+            .filter_map(|(code, detected)| {
+                let count = detected.saturating_sub(MAX_LISTED_FINDINGS_PER_CODE);
+
+                return (count > 0).then_some(OmittedFindings { code, count });
+            })
+            .collect();
+
+        return (self.listed, omitted);
+    }
+}
+
+#[derive(Default)]
+pub(super) struct IdSample {
+    count: u64,
+    ids: Vec<u64>,
+}
+
+impl IdSample {
+    pub(super) fn push(&mut self, id: u64) {
+        self.count = self.count.saturating_add(1);
+
+        if self.ids.len() < MAX_LISTED_IDS {
+            self.ids.push(id);
+        }
+    }
+
+    pub(super) fn listed(&self, label: &str, facts: &mut Vec<String>) -> Vec<u64> {
+        let listed = u64::try_from(self.ids.len()).unwrap_or(u64::MAX);
+
+        if self.count > listed {
+            facts.push(unlisted_ids_fact(listed, self.count, label));
+        }
+
+        return self.ids.clone();
+    }
+}
+
+fn list_bounded_ids(ids: &mut Vec<u64>, label: &str, facts: &mut Vec<String>) {
+    if ids.len() > MAX_LISTED_IDS {
+        let count = u64::try_from(ids.len()).unwrap_or(u64::MAX);
+        ids.truncate(MAX_LISTED_IDS);
+        facts.push(unlisted_ids_fact(
+            u64::try_from(MAX_LISTED_IDS).unwrap_or(u64::MAX),
+            count,
+            label,
+        ));
+    }
+}
+
+fn unlisted_ids_fact(listed: u64, count: u64, label: &str) -> String {
+    return format!("only the first {listed} of {count} {label} IDs are listed");
 }
 
 /// Explain a completed session while retaining only the requested event context.
@@ -494,7 +600,7 @@ pub fn explain_session(
 /// Returns an error when the target cannot resolve or replay/framing fails.
 pub fn explain(log: &EventLog, target: StatePoint, context_events: u64) -> Result<ExplainReport> {
     let replayed = replay(log)?;
-    let target_state = resolve_target_record(log, &replayed.states, &target)?.clone();
+    let target_state = inspect_point(log, &target)?.record;
     let target_event = target_state.event_seq.unwrap_or(0);
     let start_event = target_event.saturating_sub(context_events);
     let end_event = target_event.saturating_add(context_events);
@@ -547,53 +653,6 @@ pub fn explain(log: &EventLog, target: StatePoint, context_events: u64) -> Resul
         findings,
         output_page: None,
     });
-}
-
-fn resolve_target_record<'states>(
-    log: &EventLog,
-    states: &'states [StateRecord],
-    target: &StatePoint,
-) -> Result<&'states StateRecord> {
-    let marker_event = if let StatePoint::Marker { label } = target {
-        let mut matches = log.events.iter().filter(|record| {
-            return matches!(&record.event, Event::Marker { label: value, .. } if value == label);
-        });
-        let event_seq = matches
-            .next()
-            .map(|record| return record.seq)
-            .ok_or_else(|| return analysis_error("marker does not exist"))?;
-
-        if matches.next().is_some() {
-            return Err(analysis_error("marker label is ambiguous"));
-        }
-
-        Some(event_seq)
-    } else {
-        None
-    };
-
-    return states
-        .iter()
-        .rev()
-        .find(|state| match target {
-            StatePoint::LatestPresented => return state.presented,
-            StatePoint::StateId { state_id } => return state.state_id == *state_id,
-            StatePoint::StateHash { state_hash } => return state.state_hash == *state_hash,
-            StatePoint::EventSeq { event_seq } => {
-                return state
-                    .event_seq
-                    .is_none_or(|value| return value <= *event_seq);
-            }
-            StatePoint::MonotonicNs { monotonic_ns } => {
-                return state.monotonic_ns <= *monotonic_ns;
-            }
-            StatePoint::Marker { .. } => {
-                return state
-                    .event_seq
-                    .is_none_or(|value| return value <= marker_event.unwrap_or(0));
-            }
-        })
-        .ok_or_else(|| return analysis_error("no semantic state matches the target selector"));
 }
 
 fn detect_redundant_full_redraw(states: &[StateRecord], findings: &mut Vec<DiagnosticFinding>) {

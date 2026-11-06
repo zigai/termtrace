@@ -96,10 +96,10 @@ pub(in crate::cli) enum InspectFormat {
 pub(in crate::cli) struct InspectArgs {
     /// Completed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
-    /// Exact semantic state identifier.
+    /// Stream position of the state: output bytes and applied resizes before it.
     #[arg(long)]
     pub(in crate::cli) state: Option<u64>,
-    /// Exact content-addressed semantic state hash.
+    /// Latest state with this content hash.
     #[arg(long, value_parser = parse_state_hash)]
     pub(in crate::cli) state_hash: Option<String>,
     /// Latest state at or before this event sequence.
@@ -265,10 +265,10 @@ pub(in crate::cli) enum ExplainFormat {
 pub(in crate::cli) struct ExplainArgs {
     /// Completed session name or canonical path.
     pub(in crate::cli) session: PathBuf,
-    /// Exact semantic state identifier.
+    /// Stream position of the state: output bytes and applied resizes before it.
     #[arg(long, help_heading = "Target selection")]
     pub(in crate::cli) state: Option<u64>,
-    /// Exact content-addressed semantic state hash.
+    /// Latest state with this content hash.
     #[arg(long, value_parser = parse_state_hash, help_heading = "Target selection")]
     pub(in crate::cli) state_hash: Option<String>,
     /// Latest state at or before this event sequence.

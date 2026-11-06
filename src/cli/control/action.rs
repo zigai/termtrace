@@ -738,6 +738,7 @@ mod action_response_tests {
             &ScreenProjectionRequest::default(),
             ScreenFrameSource::Actor {
                 session_id: request_id,
+                state_id: 0,
                 boundaries: boundaries(),
                 observed_monotonic_ns: 1,
             },

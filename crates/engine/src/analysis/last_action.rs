@@ -128,6 +128,7 @@ pub fn analyze(
         &states,
         &tokens,
         &effects,
+        false,
     );
 
     let action_token_ids = tokens
@@ -276,7 +277,7 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
 
     let inspection = LastActionReport {
         format: "termtrace-last-action".to_owned(),
-        version: 2,
+        version: 3,
         session_id,
         source_final_event_hash: source_final_event_hash.clone(),
         action: action.clone(),
@@ -296,7 +297,7 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
 
     let diagnostics = LastActionDiagnosticsReport {
         format: "termtrace-last-action-diagnostics".to_owned(),
-        version: 1,
+        version: 2,
         session_id,
         source_final_event_hash,
         action,

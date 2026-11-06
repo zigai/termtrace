@@ -90,7 +90,7 @@ fn replay_screenshots_capture_the_selected_state() {
     assert_eq!(endpoint.state_hash, observed.state_hash);
     let early_endpoint =
         validate_replay_screenshot(session.path(), &early.directory, &cancelled).expect("valid");
-    assert_eq!(early_endpoint.state_id, Some(first_state));
+    assert_eq!(early_endpoint.state_id, first_state);
     assert_ne!(early_endpoint.state_hash, endpoint.state_hash);
 
     let single = session
@@ -227,10 +227,12 @@ fn playback_replays_the_session_onto_the_calling_terminal() {
         .expect("completion")
         .expect("completed");
     let handshake = scratch("native-playback-handshake");
-    let server = format!("termtrace-consumer-playback-{}", std::process::id());
+    let server = scratch("native-playback-tmux").join("server");
     let tmux = |arguments: &[&str]| {
         return Command::new("tmux")
-            .args(["-L", &server, "-f", "/dev/null"])
+            .arg("-S")
+            .arg(&server)
+            .args(["-f", "/dev/null"])
             .args(arguments)
             .env_remove("TMUX")
             .output()

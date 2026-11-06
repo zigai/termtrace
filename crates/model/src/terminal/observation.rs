@@ -37,8 +37,8 @@ pub struct ReplayCheckpoint {
     pub completion_blake3: String,
     /// Completion-bound final canonical event hash.
     pub final_event_hash: String,
-    /// Dense canonical state identifier when byte-granular replay established it.
-    pub state_id: Option<u64>,
+    /// Stream position of the state.
+    pub state_id: u64,
     /// Canonical event responsible for the state, when known.
     pub event_seq: Option<u64>,
     /// Byte offset inside the source output event, when known.
@@ -161,12 +161,12 @@ pub enum ObservationResolution {
 pub enum StatePoint {
     /// Latest presentation-eligible state.
     LatestPresented,
-    /// Exact semantic state identifier.
+    /// Stream position of the state: output bytes and applied resizes before it.
     StateId {
-        /// Exact semantic state identifier.
+        /// Stream position of the state: output bytes and applied resizes before it.
         state_id: u64,
     },
-    /// Exact content-addressed semantic state hash.
+    /// Latest state with this content hash.
     StateHash {
         /// BLAKE3 hash of the complete normalized semantic state.
         state_hash: String,

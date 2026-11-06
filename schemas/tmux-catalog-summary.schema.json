@@ -23,7 +23,11 @@
       "type": "integer"
     }
   },
-  "required": ["tracks", "unfinished_tracks", "coverage_gaps"],
+  "required": [
+    "tracks",
+    "unfinished_tracks",
+    "coverage_gaps"
+  ],
   "title": "TmuxCatalogSummary",
   "type": "object"
 }

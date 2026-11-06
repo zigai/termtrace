@@ -12,7 +12,7 @@ use std::{collections::VecDeque, path::Path, sync::atomic::AtomicBool};
 use termtrace_evidence::{event_log::EventLogCursor, session::SessionSnapshot};
 use termtrace_model::execution::layout::SessionLayout;
 use termtrace_model::{
-    execution::event::{Event, EventRecord},
+    execution::event::Event,
     terminal::{
         replay::SourceRange,
         timeline::{TimelineEntry, TimelineItem, TimelinePage},
@@ -238,8 +238,6 @@ fn next_canonical(
 pub(crate) struct TokenCursor {
     cursor: EventLogCursor,
     framer: Option<VtFramer>,
-    output: Option<EventRecord>,
-    byte_offset: usize,
     pending: VecDeque<VtToken>,
     range: Option<SourceRange>,
 }
@@ -248,9 +246,7 @@ impl TokenCursor {
     pub(crate) fn new(session: &Path, range: Option<SourceRange>) -> Result<Self> {
         return Ok(Self {
             cursor: EventLogCursor::open(SessionLayout::new(session).event_log())?,
-            framer: Some(VtFramer::default()),
-            output: None,
-            byte_offset: 0,
+            framer: Some(VtFramer::with_default_bound()?),
             pending: VecDeque::new(),
             range,
         });
@@ -283,28 +279,21 @@ impl TokenCursor {
                 return Ok(None);
             };
 
-            if let Some(record) = self.output.as_ref()
-                && let Event::Output { data } = &record.event
-                && let Some(byte) = data.as_bytes().get(self.byte_offset)
-            {
-                self.pending.extend(framer.feed_byte_at(
-                    record.seq,
-                    record.monotonic_ns,
-                    u64::try_from(self.byte_offset).unwrap_or(u64::MAX),
-                    *byte,
-                )?);
-
-                self.byte_offset = self.byte_offset.saturating_add(1);
-                continue;
-            }
-
-            self.output = self.cursor.next_record()?;
-            self.byte_offset = 0;
-
-            if self.output.is_none()
-                && let Some(framer) = self.framer.take()
-            {
-                self.pending.extend(framer.finish()?);
+            match self.cursor.next_record()? {
+                Some(record) => {
+                    if let Event::Output { data } = &record.event {
+                        self.pending.extend(framer.feed(
+                            record.seq,
+                            record.monotonic_ns,
+                            data.as_bytes(),
+                        )?);
+                    }
+                }
+                None => {
+                    if let Some(framer) = self.framer.take() {
+                        self.pending.extend(framer.finish()?);
+                    }
+                }
             }
         }
     }

@@ -27,7 +27,10 @@
           "type": "integer"
         }
       },
-      "required": ["width", "height"],
+      "required": [
+        "width",
+        "height"
+      ],
       "type": "object"
     },
     "ChildEnvironmentPolicy": {
@@ -154,20 +157,28 @@
           "description": "Maximum uncommitted interval for bounded mode.",
           "format": "uint64",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "maximum_uncommitted_bytes": {
           "description": "Maximum uncommitted PTY bytes for bounded mode.",
           "format": "uint64",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "mode": {
           "$ref": "#/$defs/DurabilityMode",
           "description": "Selected persistence behavior."
         }
       },
-      "required": ["mode"],
+      "required": [
+        "mode"
+      ],
       "type": "object"
     },
     "EnvironmentBase": {
@@ -214,10 +225,17 @@
         },
         "value_hash": {
           "description": "BLAKE3 of the exact value bytes for `value` or `hash` capture.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
-      "required": ["capture", "present", "sensitivity"],
+      "required": [
+        "capture",
+        "present",
+        "sensitivity"
+      ],
       "type": "object"
     },
     "ExecutionProvenance": {
@@ -255,7 +273,12 @@
           "description": "Recorder, kernel, and local identity facts."
         }
       },
-      "required": ["policy", "environment", "executable", "runtime"],
+      "required": [
+        "policy",
+        "environment",
+        "executable",
+        "runtime"
+      ],
       "type": "object"
     },
     "FileProvenance": {
@@ -264,7 +287,10 @@
       "properties": {
         "content_hash": {
           "description": "Complete-file BLAKE3 under a policy that requests content identity.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "content_identity": {
           "$ref": "#/$defs/ContentIdentityStatus",
@@ -286,7 +312,10 @@
           "description": "Canonical resolved path bytes when resolution succeeded."
         }
       },
-      "required": ["requested", "content_identity"],
+      "required": [
+        "requested",
+        "content_identity"
+      ],
       "type": "object"
     },
     "GeometryProvenance": {
@@ -309,7 +338,9 @@
           "description": "How the initial geometry was selected."
         }
       },
-      "required": ["source"],
+      "required": [
+        "source"
+      ],
       "type": "object"
     },
     "GeometrySource": {
@@ -338,33 +369,51 @@
       "properties": {
         "background": {
           "description": "Default background color in Ghostty syntax.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "font_family": {
           "description": "Regular terminal font family.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "font_size": {
           "description": "Font size in points, represented exactly as a Ghostty config value.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "foreground": {
           "description": "Default foreground color in Ghostty syntax.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "padding_x": {
           "description": "Symmetric horizontal window padding in points.",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "padding_y": {
           "description": "Symmetric vertical window padding in points.",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -401,7 +450,12 @@
           "description": "Original custom configuration path bytes, when supplied."
         }
       },
-      "required": ["overrides", "replay_profile", "replay_profile_hash", "effective_config_hash"],
+      "required": [
+        "overrides",
+        "replay_profile",
+        "replay_profile_hash",
+        "effective_config_hash"
+      ],
       "type": "object"
     },
     "ImportProvenance": {
@@ -427,7 +481,12 @@
           "type": "string"
         }
       },
-      "required": ["source_kind", "byte_count", "blake3", "source"],
+      "required": [
+        "source_kind",
+        "byte_count",
+        "blake3",
+        "source"
+      ],
       "type": "object"
     },
     "KernelProvenance": {
@@ -451,7 +510,12 @@
           "type": "string"
         }
       },
-      "required": ["system", "release", "version", "machine"],
+      "required": [
+        "system",
+        "release",
+        "version",
+        "machine"
+      ],
       "type": "object"
     },
     "NativeVisualProfile": {
@@ -460,29 +524,47 @@
       "properties": {
         "background": {
           "description": "Default background as `#rrggbb`.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "config": {
           "description": "Absolute Ghostty config file replacing the isolated Ghostty-default base.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "dpi": {
           "description": "Display DPI used by every native probe, launch, and replay; 96 when absent.",
           "format": "uint32",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "font_family": {
           "description": "Exact installed font family; no substitute is accepted.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "font_size_points": {
           "description": "Font size in points as an exact decimal string, such as `\"15\"` or `\"13.5\"`.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "foreground": {
           "description": "Default foreground as `#rrggbb`.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "padding_points": {
           "anyOf": [
@@ -517,7 +599,10 @@
           "type": "integer"
         }
       },
-      "required": ["x", "y"],
+      "required": [
+        "x",
+        "y"
+      ],
       "type": "object"
     },
     "ProvenanceCapture": {
@@ -561,7 +646,10 @@
           "description": "Built-in policy behavior."
         }
       },
-      "required": ["kind", "environment"],
+      "required": [
+        "kind",
+        "environment"
+      ],
       "type": "object"
     },
     "ProvenancePolicyKind": {
@@ -612,7 +700,10 @@
           "type": "string"
         }
       },
-      "required": ["profile", "profile_hash"],
+      "required": [
+        "profile",
+        "profile_hash"
+      ],
       "type": "object"
     },
     "RecorderProvenance": {
@@ -636,7 +727,12 @@
           "type": "string"
         }
       },
-      "required": ["version", "source_revision", "semantic_engine_revision", "binary"],
+      "required": [
+        "version",
+        "source_revision",
+        "semantic_engine_revision",
+        "binary"
+      ],
       "type": "object"
     },
     "RecordingFailurePolicy": {
@@ -662,19 +758,28 @@
           "description": "Maximum idle duration in milliseconds without input, output, or control activity.",
           "format": "uint64",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "max_duration_ms": {
           "description": "Maximum session duration in milliseconds before termination is triggered.",
           "format": "uint64",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "output_bytes": {
           "description": "Soft output budget that triggers termination after all observed bytes are retained.",
           "format": "uint64",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -723,7 +828,10 @@
           "description": "Process umask read without modifying it, when the host exposes it.",
           "format": "uint32",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -756,7 +864,9 @@
           "description": "Bundled semantic resource preset."
         }
       },
-      "required": ["preset"],
+      "required": [
+        "preset"
+      ],
       "type": "object"
     },
     "SessionGeometry": {
@@ -791,7 +901,12 @@
           "type": "integer"
         }
       },
-      "required": ["cols", "rows", "pixel_width", "pixel_height"],
+      "required": [
+        "cols",
+        "rows",
+        "pixel_width",
+        "pixel_height"
+      ],
       "type": "object"
     },
     "SessionLineage": {
@@ -994,7 +1109,9 @@
           "type": "integer"
         }
       },
-      "required": ["version"],
+      "required": [
+        "version"
+      ],
       "type": "object"
     },
     "WindowPadding": {
@@ -1016,7 +1133,10 @@
           "type": "integer"
         }
       },
-      "required": ["x", "y"],
+      "required": [
+        "x",
+        "y"
+      ],
       "type": "object"
     }
   },
@@ -1050,7 +1170,10 @@
     },
     "creation_alias": {
       "description": "Friendly alias supplied at creation, never used as canonical identity.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "durability_policy": {
       "$ref": "#/$defs/DurabilityPolicy",

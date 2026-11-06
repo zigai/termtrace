@@ -1,7 +1,7 @@
 use super::observation_error;
 use crate::replay::{
     semantic_state_hash,
-    trust::{self, ValidatedSession},
+    trust::{self, ensure_private_cache_directory, ValidatedSession},
     EndpointInspection,
 };
 use crate::{Error, Result};
@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     time::SystemTime,
 };
-use termtrace_evidence::artifact::{create_private_directory, sync_directory, write_secure};
+use termtrace_evidence::artifact::{sync_directory, write_secure};
 use termtrace_model::{
     execution::layout::SessionLayout,
     execution::session::SessionCompletion,
@@ -27,7 +27,7 @@ use zstd::stream::{encode_all, read::Decoder};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct CachedSemanticState {
-    pub state_id: Option<u64>,
+    pub state_id: u64,
     pub event_seq: Option<u64>,
     pub event_byte_offset: Option<u64>,
     pub monotonic_ns: Option<u64>,
@@ -36,7 +36,7 @@ pub(super) struct CachedSemanticState {
     pub state: SemanticState,
 }
 
-const REPLAY_CHECKPOINT_VERSION: u32 = 3;
+const REPLAY_CHECKPOINT_VERSION: u32 = 4;
 const MAX_REPLAY_CACHE_ENTRIES: u64 = 32;
 const MAX_REPLAY_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_REPLAY_CHECKPOINT_BYTES: u64 = 32 * 1024 * 1024;
@@ -182,7 +182,7 @@ pub(super) fn publish_checkpoint(
     inspection: &StateInspection,
 ) -> Result<()> {
     let state = CachedSemanticState {
-        state_id: Some(inspection.record.state_id),
+        state_id: inspection.record.state_id,
         event_seq: inspection.record.event_seq,
         event_byte_offset: inspection.record.event_byte_offset,
         monotonic_ns: Some(inspection.record.monotonic_ns),
@@ -200,7 +200,7 @@ pub(crate) fn publish_endpoint_checkpoint(
     inspection: &EndpointInspection,
 ) -> Result<()> {
     let state = CachedSemanticState {
-        state_id: None,
+        state_id: inspection.state_id,
         event_seq: inspection.event_seq,
         event_byte_offset: inspection.event_byte_offset,
         monotonic_ns: inspection.monotonic_ns,
@@ -478,34 +478,6 @@ fn cache_status_from_entries(
         maximum_entries: MAX_REPLAY_CACHE_ENTRIES,
         maximum_compressed_bytes: MAX_REPLAY_CACHE_BYTES,
     };
-}
-
-fn ensure_private_cache_directory(path: &Path) -> Result<()> {
-    match fs_err::symlink_metadata(path) {
-        Ok(metadata) => {
-            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-                return Err(observation_error(
-                    "replay checkpoint directory must be a real directory",
-                ));
-            }
-
-            if metadata.permissions().mode() & 0o077 != 0 {
-                return Err(observation_error(
-                    "replay checkpoint directory must be owner-only",
-                ));
-            }
-            return Ok(());
-        }
-        Err(error) if error.kind() == ErrorKind::NotFound => {
-            return Ok(create_private_directory(path)?);
-        }
-        Err(source) => {
-            return Err(Error::Filesystem {
-                path: path.to_path_buf(),
-                source,
-            });
-        }
-    }
 }
 
 #[cfg(test)]

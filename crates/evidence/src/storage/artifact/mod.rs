@@ -14,7 +14,7 @@ pub use roots::{append_artifact_prefix_root, append_artifact_root, read_artifact
 pub(crate) use secure_fs::sync_parent_directory;
 pub use secure_fs::{
     commit_directory, create_private_directory, finish_writer, secure_file, secure_writer,
-    sync_directory, write_secure,
+    sync_directory, write_secure, write_secure_unsynced,
 };
 #[cfg(test)]
 pub(crate) use verification::ArtifactMemberEnvelope;

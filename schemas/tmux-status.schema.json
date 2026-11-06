@@ -12,13 +12,19 @@
           "description": "Supervisor process, if one holds its lock.",
           "format": "uint32",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "watchdog": {
           "description": "Watchdog process, if one holds its lock.",
           "format": "uint32",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -38,7 +44,10 @@
           "description": "Pane root process.",
           "format": "uint32",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "recorded": {
           "description": "Run by a pane wrapper.",
@@ -68,7 +77,14 @@
           "type": "string"
         }
       },
-      "required": ["pane_id", "session_id", "window_id", "current_command", "selected", "recorded"],
+      "required": [
+        "pane_id",
+        "session_id",
+        "window_id",
+        "current_command",
+        "selected",
+        "recorded"
+      ],
       "type": "object"
     },
     "TmuxScopeMode": {

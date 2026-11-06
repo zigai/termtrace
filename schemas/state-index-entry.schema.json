@@ -4,27 +4,8 @@
   "description": "Compact event/video mapping information for one state.",
   "properties": {
     "checkpoint": {
-      "default": false,
-      "description": "Whether the checkpoint stream contains an engine checkpoint here.",
+      "description": "Whether the checkpoint catalog contains an engine checkpoint here.",
       "type": "boolean"
-    },
-    "control_index_offset": {
-      "description": "Byte offset of the first control-index entry at or after this checkpoint.",
-      "format": "uint64",
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
-    },
-    "control_rank": {
-      "description": "Number of control entries ordered before this checkpoint.",
-      "format": "uint64",
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
     },
     "event_byte_offset": {
       "description": "Source event byte offset.",
@@ -59,26 +40,18 @@
       "type": "string"
     },
     "state_id": {
-      "description": "State identifier.",
+      "description": "State stream position.",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
-    },
-    "timeline_rank": {
-      "description": "Combined semantic/effect/canonical/control timeline rank for this checkpoint.",
-      "format": "uint64",
-      "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
     }
   },
   "required": [
     "state_id",
     "state_hash",
     "monotonic_ns",
-    "presented"
+    "presented",
+    "checkpoint"
   ],
   "title": "StateIndexEntry",
   "type": "object"

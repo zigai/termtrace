@@ -17,7 +17,10 @@
         },
         "artifact_root_hash": {
           "description": "Artifact-root record hash at the checkpoint, when non-empty.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "canonicalization": {
           "description": "Pinned canonical payload encoding.",
@@ -108,7 +111,12 @@
           "description": "Exact detached signature bytes."
         }
       },
-      "required": ["scheme", "namespace", "key_id", "value"],
+      "required": [
+        "scheme",
+        "namespace",
+        "key_id",
+        "value"
+      ],
       "type": "object"
     }
   },
@@ -136,7 +144,12 @@
       "type": "integer"
     }
   },
-  "required": ["format", "version", "payload", "signature"],
+  "required": [
+    "format",
+    "version",
+    "payload",
+    "signature"
+  ],
   "title": "EvidenceReceipt",
   "type": "object"
 }

@@ -10,25 +10,32 @@ use super::{
 };
 use crate::{Error, Result};
 use compact_str::CompactString;
-use std::{ffi::c_void, mem::size_of, ptr, slice, str};
+use std::{
+    ffi::c_void,
+    mem::{self, size_of},
+    ptr, slice, str,
+};
 use termtrace_model::value::ByteString;
 
 pub(super) struct Snapshot<'engine> {
     terminal: sys::GhosttyTerminal,
-    render: sys::GhosttyRenderState,
+    render: &'engine mut sys::GhosttyRenderState,
     last_snapshot: &'engine mut Option<SemanticState>,
+    unmarked_rows: &'engine mut bool,
 }
 
 impl<'engine> Snapshot<'engine> {
     pub(super) fn new(
         terminal: sys::GhosttyTerminal,
-        render: sys::GhosttyRenderState,
+        render: &'engine mut sys::GhosttyRenderState,
         last_snapshot: &'engine mut Option<SemanticState>,
+        unmarked_rows: &'engine mut bool,
     ) -> Self {
         return Self {
             terminal,
             render,
             last_snapshot,
+            unmarked_rows,
         };
     }
 
@@ -53,10 +60,11 @@ impl<'engine> Snapshot<'engine> {
 
     pub(super) fn snapshot_if_changed(&mut self) -> Result<Option<SemanticState>> {
         check("update render state", unsafe {
-            sys::ghostty_render_state_update(self.render, self.terminal)
+            sys::ghostty_render_state_update(*self.render, self.terminal)
         })?;
 
-        let dirty = self.dirty_state()?;
+        let unmarked_rows = mem::take(self.unmarked_rows);
+        let mut dirty = self.dirty_state()?;
         let cols = self.render_get(
             "get columns",
             sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_COLS,
@@ -68,11 +76,20 @@ impl<'engine> Snapshot<'engine> {
         let cursor = self.cursor_state()?;
         let active_style = self.active_style()?;
         let metadata = self.terminal_metadata()?;
+        // Ghostty refreshes the default and cursor colors on every update without marking
+        // anything dirty; only palette changes do.
+        let colors = self.color_state(
+            self.last_snapshot
+                .as_ref()
+                .filter(|_| return dirty == DirtyState::Clean)
+                .map(|state| return &state.colors),
+        )?;
 
-        if dirty == DirtyState::Clean {
+        if dirty == DirtyState::Clean && !unmarked_rows {
             let unchanged = match self.last_snapshot.as_ref() {
                 Some(state) if state.cols == cols && state.rows == rows => {
                     state.cursor == cursor
+                        && state.colors == colors
                         && state.active_style == active_style
                         && state.metadata == metadata
                         && self.modes_equal(&state.modes)?
@@ -95,12 +112,13 @@ impl<'engine> Snapshot<'engine> {
                 _ => None,
             };
             if let Some(new_modes) = modes_outcome {
-                self.reset_render_dirty()?;
+                reset_render_dirty(*self.render)?;
 
                 let Some(state) = self.last_snapshot.as_mut() else {
                     return Ok(None);
                 };
                 state.cursor = cursor;
+                state.colors = colors;
 
                 if let Some(modes) = new_modes {
                     state.modes = modes;
@@ -126,22 +144,19 @@ impl<'engine> Snapshot<'engine> {
             _ => self.mode_state()?,
         };
 
-        let colors = if dirty == DirtyState::Clean {
-            match previous {
-                Some(state) => state.colors.clone(),
-                None => self.color_state()?,
-            }
-        } else {
-            self.color_state()?
-        };
+        let mut grid = self.grid(cols, rows, dirty, previous)?;
 
-        let grid = self.grid(cols, rows, dirty, previous)?;
+        if unmarked_rows {
+            self.refresh_unmarked_rows(cols, &mut grid, &mut dirty)?;
+        }
+
+        let previous = self.last_snapshot.as_ref();
         let dirty_rows = grid
             .iter()
             .filter_map(|row| return row.dirty.then_some(row.row))
             .collect();
 
-        self.reset_render_dirty()?;
+        reset_render_dirty(*self.render)?;
 
         let state = SemanticState {
             cols,
@@ -213,7 +228,7 @@ impl Snapshot<'_> {
     ) -> Result<T> {
         let mut value = T::default();
         check(operation, unsafe {
-            sys::ghostty_render_state_get(self.render, key, (&raw mut value).cast::<c_void>())
+            sys::ghostty_render_state_get(*self.render, key, (&raw mut value).cast::<c_void>())
         })?;
 
         return Ok(value);
@@ -424,14 +439,14 @@ impl Snapshot<'_> {
         });
     }
 
-    fn color_state(&self) -> Result<ColorState> {
+    fn color_state(&self, unchanged_palette: Option<&ColorState>) -> Result<ColorState> {
         let mut colors = sys::GhosttyRenderStateColors {
             size: size_of::<sys::GhosttyRenderStateColors>(),
             ..Default::default()
         };
         check("get render colors", unsafe {
             sys::ghostty_render_state_get(
-                self.render,
+                *self.render,
                 sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_COLORS,
                 (&raw mut colors).cast::<c_void>(),
             )
@@ -441,7 +456,10 @@ impl Snapshot<'_> {
             background: colors.background.into(),
             foreground: colors.foreground.into(),
             cursor: colors.cursor_has_value.then(|| return colors.cursor.into()),
-            palette: colors.palette.into_iter().map(Into::into).collect(),
+            palette: unchanged_palette.map_or_else(
+                || return colors.palette.into_iter().map(Into::into).collect(),
+                |previous| return previous.palette.clone(),
+            ),
         });
     }
 
@@ -465,14 +483,7 @@ impl Snapshot<'_> {
             return Ok(grid);
         }
 
-        let mut handles = RenderIterators::new()?;
-        check("populate row iterator", unsafe {
-            sys::ghostty_render_state_get(
-                self.render,
-                sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR,
-                (&raw mut handles.row).cast::<c_void>(),
-            )
-        })?;
+        let mut handles = RenderIterators::of(*self.render)?;
         let grid = match reusable {
             Some(previous) if dirty == DirtyState::Partial => {
                 let mut grid = previous.grid.clone();
@@ -494,15 +505,7 @@ impl Snapshot<'_> {
 
                 grid
             }
-            _ => {
-                let mut grid = Vec::with_capacity(usize::from(rows));
-                while unsafe { sys::ghostty_render_state_row_iterator_next(handles.row) } {
-                    let row = u16::try_from(grid.len()).unwrap_or(u16::MAX);
-                    grid.push(handles.read_row(row, cols)?);
-                }
-
-                grid
-            }
+            _ => handles.all_rows(rows, cols)?,
         };
 
         if grid.len() != usize::from(rows) {
@@ -512,22 +515,90 @@ impl Snapshot<'_> {
         }
 
         check("clean render state", unsafe {
-            sys::ghostty_render_state_clean(self.render)
+            sys::ghostty_render_state_clean(*self.render)
         })?;
 
         return Ok(grid);
     }
 
-    fn reset_render_dirty(&self) -> Result<()> {
-        let clean = sys::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FALSE;
+    // While grapheme clustering is off, Ghostty attaches a zero-width codepoint to the previous
+    // cell without marking its row dirty, so the render state can keep a stale copy of that row.
+    // A fresh render state reads every row, and rows that differ count as dirty.
+    fn refresh_unmarked_rows(
+        &mut self,
+        cols: u16,
+        grid: &mut [RowState],
+        dirty: &mut DirtyState,
+    ) -> Result<()> {
+        let mut fresh = RenderStateHandle::new()?;
+        check("update render state", unsafe {
+            sys::ghostty_render_state_update(fresh.0, self.terminal)
+        })?;
 
-        return check("reset render dirty state", unsafe {
-            sys::ghostty_render_state_set(
-                self.render,
-                sys::GhosttyRenderStateOption_GHOSTTY_RENDER_STATE_OPTION_DIRTY,
-                (&raw const clean).cast::<c_void>(),
-            )
-        });
+        let rows = u16::try_from(grid.len()).unwrap_or(u16::MAX);
+        let current = RenderIterators::of(fresh.0)?.all_rows(rows, cols)?;
+
+        if current.len() != grid.len() {
+            return Err(invalid_snapshot(
+                "render row count differs from terminal rows",
+            ));
+        }
+
+        check("clean render state", unsafe {
+            sys::ghostty_render_state_clean(fresh.0)
+        })?;
+
+        reset_render_dirty(fresh.0)?;
+        mem::swap(self.render, &mut fresh.0);
+
+        for (row, current) in grid.iter_mut().zip(current) {
+            if row.cells != current.cells
+                || row.soft_wrapped != current.soft_wrapped
+                || row.wrap_continuation != current.wrap_continuation
+            {
+                *row = RowState {
+                    dirty: true,
+                    ..current
+                };
+
+                if *dirty == DirtyState::Clean {
+                    *dirty = DirtyState::Partial;
+                }
+            }
+        }
+
+        return Ok(());
+    }
+}
+
+fn reset_render_dirty(render: sys::GhosttyRenderState) -> Result<()> {
+    let clean = sys::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FALSE;
+
+    return check("reset render dirty state", unsafe {
+        sys::ghostty_render_state_set(
+            render,
+            sys::GhosttyRenderStateOption_GHOSTTY_RENDER_STATE_OPTION_DIRTY,
+            (&raw const clean).cast::<c_void>(),
+        )
+    });
+}
+
+struct RenderStateHandle(sys::GhosttyRenderState);
+
+impl RenderStateHandle {
+    fn new() -> Result<Self> {
+        let mut render = ptr::null_mut();
+        check("create render state", unsafe {
+            sys::ghostty_render_state_new(ptr::null(), &raw mut render)
+        })?;
+
+        return Ok(Self(render));
+    }
+}
+
+impl Drop for RenderStateHandle {
+    fn drop(&mut self) {
+        unsafe { sys::ghostty_render_state_free(self.0) };
     }
 }
 
@@ -552,6 +623,29 @@ impl RenderIterators {
             return Err(error);
         }
         return Ok(Self { row, cells });
+    }
+
+    fn of(render: sys::GhosttyRenderState) -> Result<Self> {
+        let mut handles = Self::new()?;
+        check("populate row iterator", unsafe {
+            sys::ghostty_render_state_get(
+                render,
+                sys::GhosttyRenderStateData_GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR,
+                (&raw mut handles.row).cast::<c_void>(),
+            )
+        })?;
+
+        return Ok(handles);
+    }
+
+    fn all_rows(&mut self, rows: u16, cols: u16) -> Result<Vec<RowState>> {
+        let mut grid = Vec::with_capacity(usize::from(rows));
+        while unsafe { sys::ghostty_render_state_row_iterator_next(self.row) } {
+            let row = u16::try_from(grid.len()).unwrap_or(u16::MAX);
+            grid.push(self.read_row(row, cols)?);
+        }
+
+        return Ok(grid);
     }
 
     fn read_row(&mut self, row: u16, cols: u16) -> Result<RowState> {
@@ -1053,6 +1147,72 @@ mod tests {
             .format(Format::Vt)
             .expect("VT format")
             .contains(&0x1b));
+    }
+
+    #[test]
+    fn snapshots_follow_default_color_changes_on_a_clean_screen() {
+        let mut terminal = GhosttyVt::new(8, 2, 0).expect("create terminal");
+        terminal.write(b"text");
+        let before = terminal.snapshot().expect("first snapshot");
+        terminal.write(b"\x1b]10;rgb:11/22/33\x07\x1b]11;rgb:44/55/66\x07\x1b]12;rgb:77/88/99\x07");
+        let changed = terminal
+            .snapshot_if_changed()
+            .expect("color snapshot")
+            .expect("default colors changed");
+        assert_eq!(
+            changed.colors.foreground,
+            Rgb {
+                r: 0x11,
+                g: 0x22,
+                b: 0x33
+            }
+        );
+        assert_eq!(
+            changed.colors.background,
+            Rgb {
+                r: 0x44,
+                g: 0x55,
+                b: 0x66
+            }
+        );
+        assert_eq!(
+            changed.colors.cursor,
+            Some(Rgb {
+                r: 0x77,
+                g: 0x88,
+                b: 0x99
+            })
+        );
+        assert_eq!(changed.colors.palette, before.colors.palette);
+        assert!(changed
+            .grid
+            .iter()
+            .map(|row| return &row.cells)
+            .eq(before.grid.iter().map(|row| return &row.cells)));
+
+        terminal.write(b"\x1b]4;1;rgb:aa/bb/cc\x07");
+        let palette = terminal.snapshot().expect("palette snapshot");
+        assert_eq!(
+            palette.colors.palette[1],
+            Rgb {
+                r: 0xaa,
+                g: 0xbb,
+                b: 0xcc
+            }
+        );
+    }
+
+    #[test]
+    fn snapshots_follow_a_joiner_that_extends_the_previous_cell() {
+        let mut terminal = GhosttyVt::new(8, 2, 0).expect("create terminal");
+        terminal.write("a\u{1f468}".as_bytes());
+        terminal.snapshot().expect("snapshot before the joiner");
+        terminal.write("\u{200d}".as_bytes());
+        let joined = terminal.snapshot().expect("snapshot after the joiner");
+        let mut fresh = GhosttyVt::new(8, 2, 0).expect("create terminal");
+        fresh.write("a\u{1f468}\u{200d}".as_bytes());
+        let expected = fresh.snapshot().expect("fresh snapshot");
+        assert_eq!(joined.grid[0].cells, expected.grid[0].cells);
     }
 
     #[test]

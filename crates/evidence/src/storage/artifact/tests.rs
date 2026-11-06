@@ -347,6 +347,64 @@ fn secure_write_is_never_partially_published_at_injected_failure_boundaries() {
 }
 
 #[test]
+fn unsynced_secure_write_publishes_an_owner_only_file() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let destination = temporary.path().join("handoff/ready");
+    write_secure_unsynced(&destination, b"ready\n").expect("handoff file");
+
+    assert_eq!(
+        fs_err::read(&destination).expect("handoff content"),
+        b"ready\n"
+    );
+
+    let mode = fs_err::metadata(&destination)
+        .expect("metadata")
+        .permissions()
+        .mode()
+        & 0o777;
+
+    assert_eq!(mode, 0o600);
+}
+
+#[test]
+fn unsynced_secure_write_never_replaces_and_leaves_no_staging_file() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let directory = temporary.path().join("handoff");
+    create_private_directory(&directory).expect("private handoff directory");
+    let destination = directory.join("timing.json");
+    write_secure_unsynced(&destination, b"first").expect("first handoff");
+
+    let error = write_secure_unsynced(&destination, b"second").expect_err("existing handoff");
+    assert!(matches!(error, Error::DestinationExists { .. }));
+    assert_eq!(fs_err::read(&destination).expect("kept handoff"), b"first");
+
+    let entries: Vec<_> = fs_err::read_dir(&directory)
+        .expect("handoff directory")
+        .map(|entry| return entry.expect("handoff entry").file_name())
+        .collect();
+    assert_eq!(entries, [OsString::from("timing.json")]);
+}
+
+#[test]
+fn unsynced_secure_write_does_not_follow_symlinks() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let outside = temporary.path().join("outside");
+    fs_err::create_dir(&outside).expect("outside directory");
+    let link = temporary.path().join("linked-parent");
+    symlink(&outside, &link).expect("parent symlink");
+
+    let directory = temporary.path().join("handoff");
+    create_private_directory(&directory).expect("private handoff directory");
+    let target = outside.join("target");
+    symlink(&target, directory.join("ready")).expect("destination symlink");
+
+    assert!(write_secure_unsynced(&link.join("ready"), b"ready\n").is_err());
+    assert!(write_secure_unsynced(&directory.join("ready"), b"ready\n").is_err());
+    assert!(!outside.join("ready").exists());
+    assert!(!target.exists());
+}
+
+#[test]
 fn artifact_catalog_rejects_session_lock_and_catalog_symlinks() {
     let temporary = TempDir::new().expect("temporary directory");
     let outside = temporary.path().join("outside");

@@ -1,15 +1,14 @@
 use super::{
     super::{invalid_replay, json_error},
+    seekable::SeekableWriter,
     source::IndexSource,
     write_json_line,
 };
 use crate::{Error, Result};
 use std::{
-    fs::File,
-    io::{BufWriter, Write as _},
+    io::Write as _,
     path::{Path, PathBuf},
 };
-use termtrace_evidence::artifact::{finish_writer, secure_writer};
 use termtrace_model::{
     execution::event::Event,
     terminal::{
@@ -27,16 +26,16 @@ pub(super) fn write_control_index(
     let path = directory.join(super::CONTROL_INDEX);
     let source_path = directory.join(super::CONTROL_SOURCE_INDEX);
     let mut output = ControlWriter {
-        writer: secure_writer(&path)?,
+        writer: SeekableWriter::create(&path)?,
         path,
-        sources: secure_writer(&source_path)?,
+        sources: SeekableWriter::create(&source_path)?,
         source_path,
         current_source: None,
         file_offset: 0,
         range,
     };
 
-    let mut framer = VtFramer::default();
+    let mut framer = VtFramer::with_default_bound()?;
     for record in source.records()? {
         let record = record?;
 
@@ -55,15 +54,15 @@ pub(super) fn write_control_index(
         write_json_line(&mut output.sources, &entry, &output.source_path)?;
     }
 
-    finish_writer(output.writer, &output.path)?;
+    output.writer.finish()?;
 
-    return finish_writer(output.sources, &output.source_path).map_err(Error::from);
+    return output.sources.finish();
 }
 
 struct ControlWriter {
-    writer: BufWriter<File>,
+    writer: SeekableWriter,
     path: PathBuf,
-    sources: BufWriter<File>,
+    sources: SeekableWriter,
     source_path: PathBuf,
     current_source: Option<ControlSourceIndexEntry>,
     file_offset: u64,

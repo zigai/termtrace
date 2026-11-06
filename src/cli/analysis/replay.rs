@@ -137,7 +137,7 @@ pub(in crate::cli) fn run_index(
         &serde_json::json!({
             "directory": outcome.directory,
             "state_count": outcome.state_count,
-            "semantic_state_count": outcome.semantic_state_count,
+            "final_state_id": outcome.final_state_id,
             "source_complete": outcome.source_complete,
             "state_selection": outcome.state_selection,
             "final_state_hash": outcome.final_state_hash,

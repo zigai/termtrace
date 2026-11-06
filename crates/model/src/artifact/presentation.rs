@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, path::PathBuf};
 
 /// Current edit-plan format version.
-pub const EDIT_PLAN_VERSION: u32 = 1;
+pub const EDIT_PLAN_VERSION: u32 = 2;
 /// Current normalized presentation plan and manifest format version.
-pub const PRESENTATION_FORMAT_VERSION: u32 = 2;
+pub const PRESENTATION_FORMAT_VERSION: u32 = 3;
 
 /// One immutable presentation edit plan.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -141,7 +141,7 @@ pub struct EditSelector {
     pub monotonic_ns: Option<u64>,
     /// Latest semantic state at or before this canonical event.
     pub event_seq: Option<u64>,
-    /// Exact semantic state identifier.
+    /// Stream position of the state: output bytes and applied resizes before it.
     pub state_id: Option<u64>,
     /// Exact native source frame.
     pub native_frame: Option<u64>,

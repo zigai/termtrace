@@ -304,7 +304,6 @@ fn streaming_pages_match_full_timeline_with_controls() {
 #[test]
 fn late_page_uses_checkpoint_and_retains_only_requested_entries() {
     let temporary = tempfile::TempDir::new().expect("temporary directory");
-    let data = vec![b'x'; 1_100];
     let mut log = EventLog {
         header: EventLogHeader::new(
             Uuid::now_v7(),
@@ -316,16 +315,20 @@ fn late_page_uses_checkpoint_and_retains_only_requested_entries() {
             480,
             "xterm-ghostty",
         ),
-        events: vec![EventRecord {
-            observed_monotonic_ns: None,
-            seq: 0,
-            monotonic_ns: 1,
-            prev_hash: "0".repeat(64),
-            hash: "1".repeat(64),
-            event: Event::Output {
-                data: ByteString::from(data),
-            },
-        }],
+        events: (0..1_100)
+            .map(|seq| {
+                return EventRecord {
+                    observed_monotonic_ns: None,
+                    seq,
+                    monotonic_ns: seq + 1,
+                    prev_hash: "0".repeat(64),
+                    hash: "1".repeat(64),
+                    event: Event::Output {
+                        data: ByteString::from(b"x".as_slice()),
+                    },
+                };
+            })
+            .collect(),
         pending_operations: Vec::new(),
         source_path: Some(temporary.path().join("events.jsonl")),
     };

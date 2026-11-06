@@ -37,7 +37,11 @@
           "description": "Complete fresh-session result."
         }
       },
-      "required": ["attempt", "duration_ms", "report"],
+      "required": [
+        "attempt",
+        "duration_ms",
+        "report"
+      ],
       "type": "object"
     },
     "ScenarioCaseReport": {
@@ -60,7 +64,11 @@
           "description": "Factual verdict, independent of exit policy."
         }
       },
-      "required": ["scenario", "status", "attempts"],
+      "required": [
+        "scenario",
+        "status",
+        "attempts"
+      ],
       "type": "object"
     },
     "ScenarioCaseStatus": {
@@ -110,7 +118,12 @@
           "type": "string"
         }
       },
-      "required": ["step_index", "step_kind", "request_ids", "message"],
+      "required": [
+        "step_index",
+        "step_kind",
+        "request_ids",
+        "message"
+      ],
       "type": "object"
     },
     "ScenarioInfrastructureError": {
@@ -130,7 +143,11 @@
           "type": "string"
         }
       },
-      "required": ["phase", "code", "message"],
+      "required": [
+        "phase",
+        "code",
+        "message"
+      ],
       "type": "object"
     },
     "ScenarioReport": {
@@ -193,7 +210,10 @@
         "session_id": {
           "description": "Immutable canonical session identity, absent when launch never returned a session.",
           "format": "uuid",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "status": {
           "$ref": "#/$defs/ScenarioStatus",
@@ -268,10 +288,17 @@
         },
         "state_hash": {
           "description": "Matched presented state hash when applicable.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
-      "required": ["index", "kind", "request_ids"],
+      "required": [
+        "index",
+        "kind",
+        "request_ids"
+      ],
       "type": "object"
     },
     "ScenarioSuiteStatus": {
@@ -334,13 +361,19 @@
       "description": "Optional total shard count.",
       "format": "uint",
       "minimum": 0,
-      "type": ["integer", "null"]
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "shard_index": {
       "description": "Optional zero-based shard index.",
       "format": "uint",
       "minimum": 0,
-      "type": ["integer", "null"]
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "status": {
       "$ref": "#/$defs/ScenarioSuiteStatus",

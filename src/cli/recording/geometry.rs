@@ -29,7 +29,6 @@ pub(in crate::cli) fn run_geometry_probe(arguments: GeometryProbeArgs) -> Result
         .into_diagnostic()?;
     serde_json::to_writer(&mut output, &report).into_diagnostic()?;
     output.write_all(b"\n").into_diagnostic()?;
-    output.sync_all().into_diagnostic()?;
 
     return Ok(ExitCode::SUCCESS);
 }

@@ -49,7 +49,11 @@
           "type": "integer"
         }
       },
-      "required": ["anchor", "x", "y"],
+      "required": [
+        "anchor",
+        "x",
+        "y"
+      ],
       "type": "object"
     },
     "AnnotationStyle": {
@@ -86,7 +90,13 @@
           "type": "string"
         }
       },
-      "required": ["font_size", "foreground", "background", "background_opacity", "border"],
+      "required": [
+        "font_size",
+        "foreground",
+        "background",
+        "background_opacity",
+        "border"
+      ],
       "type": "object"
     },
     "CaptionLayout": {
@@ -177,7 +187,12 @@
           "type": "integer"
         }
       },
-      "required": ["x", "y", "width", "height"],
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
       "type": "object"
     },
     "ChangeSource": {
@@ -216,14 +231,20 @@
           "format": "uint8",
           "maximum": 255,
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "source": {
           "$ref": "#/$defs/ChangeSource",
           "description": "Semantic scheduling or actual decoded adjacent pixels."
         }
       },
-      "required": ["source", "mode"],
+      "required": [
+        "source",
+        "mode"
+      ],
       "type": "object"
     },
     "CursorMaskFrame": {
@@ -335,13 +356,19 @@
         },
         "semantic_state_hash": {
           "description": "Complete hash of the associated semantic state.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "semantic_state_id": {
           "description": "Latest presentation-eligible semantic state at or before the marker.",
           "format": "uint64",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -388,11 +415,17 @@
         },
         "template": {
           "description": "Per-frame dynamic text template.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "text": {
           "description": "Literal text, when the track is static.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "z_order": {
           "description": "Stable overlay ordering.",
@@ -480,7 +513,10 @@
       "properties": {
         "caption": {
           "description": "Optional caption retained as presentation content.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "hold_frame_count": {
           "description": "Generated hold frame count.",
@@ -552,7 +588,10 @@
           "description": "Resolved caller resource path used for this export."
         }
       },
-      "required": ["source_path", "resource_hash"],
+      "required": [
+        "source_path",
+        "resource_hash"
+      ],
       "type": "object"
     },
     "PixelTransform": {
@@ -567,7 +606,9 @@
               "type": "string"
             }
           },
-          "required": ["transform"],
+          "required": [
+            "transform"
+          ],
           "type": "object"
         },
         {
@@ -607,7 +648,13 @@
               "type": "integer"
             }
           },
-          "required": ["transform", "x", "y", "width", "height"],
+          "required": [
+            "transform",
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
           "type": "object"
         },
         {
@@ -633,7 +680,11 @@
               "type": "string"
             }
           },
-          "required": ["transform", "numerator", "denominator"],
+          "required": [
+            "transform",
+            "numerator",
+            "denominator"
+          ],
           "type": "object"
         },
         {
@@ -659,7 +710,11 @@
               "type": "integer"
             }
           },
-          "required": ["transform", "width", "height"],
+          "required": [
+            "transform",
+            "width",
+            "height"
+          ],
           "type": "object"
         },
         {
@@ -675,7 +730,10 @@
             },
             "label": {
               "description": "Optional visible label.",
-              "type": ["string", "null"]
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "transform": {
               "const": "callout",
@@ -703,7 +761,13 @@
               "type": "integer"
             }
           },
-          "required": ["transform", "x", "y", "width", "height"],
+          "required": [
+            "transform",
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
           "type": "object"
         }
       ]
@@ -734,7 +798,10 @@
           "type": "string"
         }
       },
-      "required": ["codec", "pixel_format"],
+      "required": [
+        "codec",
+        "pixel_format"
+      ],
       "type": "object"
     },
     "PresentationLayout": {
@@ -743,14 +810,19 @@
       "properties": {
         "branding": {
           "description": "Optional caller-owned branding label.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "caption": {
           "$ref": "#/$defs/CaptionLayout",
           "description": "Caption placement, with footer preserving terminal pixels."
         }
       },
-      "required": ["caption"],
+      "required": [
+        "caption"
+      ],
       "type": "object"
     },
     "PresentationSource": {
@@ -773,7 +845,11 @@
               "type": "string"
             }
           },
-          "required": ["kind", "video", "video_hash"],
+          "required": [
+            "kind",
+            "video",
+            "video_hash"
+          ],
           "type": "object"
         },
         {
@@ -789,7 +865,10 @@
               "description": "Complete semantic source plan."
             }
           },
-          "required": ["kind", "plan"],
+          "required": [
+            "kind",
+            "plan"
+          ],
           "type": "object"
         }
       ]
@@ -811,7 +890,10 @@
           "type": "integer"
         }
       },
-      "required": ["numerator", "denominator"],
+      "required": [
+        "numerator",
+        "denominator"
+      ],
       "type": "object"
     },
     "SemanticFontResource": {
@@ -946,7 +1028,15 @@
           "type": "integer"
         }
       },
-      "required": ["cols", "rows", "cell_width", "cell_height", "width", "height", "policy"],
+      "required": [
+        "cols",
+        "rows",
+        "cell_width",
+        "cell_height",
+        "width",
+        "height",
+        "policy"
+      ],
       "type": "object"
     },
     "SemanticVideoSourcePlan": {
@@ -1059,7 +1149,10 @@
           "type": "integer"
         }
       },
-      "required": ["start_monotonic_ns", "end_monotonic_ns"],
+      "required": [
+        "start_monotonic_ns",
+        "end_monotonic_ns"
+      ],
       "type": "object"
     },
     "TerminalGeometryReport": {
@@ -1108,7 +1201,14 @@
           "type": "integer"
         }
       },
-      "required": ["cols", "rows", "cell_width", "cell_height", "text_width", "text_height"],
+      "required": [
+        "cols",
+        "rows",
+        "cell_width",
+        "cell_height",
+        "text_width",
+        "text_height"
+      ],
       "type": "object"
     },
     "VideoRenderConfig": {
@@ -1121,7 +1221,10 @@
         },
         "end_marker": {
           "description": "Optional exclusive marker.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "fps": {
           "description": "Effective output frame rate.",
@@ -1146,7 +1249,10 @@
           "description": "Idle gap threshold used by trimming.",
           "format": "uint64",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "preset": {
           "description": "Named delivery preset.",
@@ -1166,18 +1272,27 @@
           },
           "maxItems": 2,
           "minItems": 2,
-          "type": ["array", "null"]
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "scale": {
           "description": "Requested integer scale factor.",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "start_marker": {
           "description": "Optional inclusive marker.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "trim_idle": {
           "description": "Whether long gaps without child output were removed.",
@@ -1210,7 +1325,10 @@
     },
     "change_algorithm": {
       "description": "Stable change-overlay implementation and truth description.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "change_frames": {
       "description": "Semantic deltas scheduled onto mapped presentation frames.",

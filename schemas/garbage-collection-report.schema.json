@@ -42,7 +42,12 @@
           "type": "string"
         }
       },
-      "required": ["session", "session_id", "completed_unix_ns", "bytes"],
+      "required": [
+        "session",
+        "session_id",
+        "completed_unix_ns",
+        "bytes"
+      ],
       "type": "object"
     }
   },
@@ -87,7 +92,10 @@
       "description": "Optional target for total completed managed-session bytes.",
       "format": "uint64",
       "minimum": 0,
-      "type": ["integer", "null"]
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "older_than_days": {
       "description": "Minimum completed-recording age in whole days.",

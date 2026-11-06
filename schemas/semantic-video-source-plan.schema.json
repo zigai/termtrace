@@ -148,7 +148,15 @@
           "type": "integer"
         }
       },
-      "required": ["cols", "rows", "cell_width", "cell_height", "width", "height", "policy"],
+      "required": [
+        "cols",
+        "rows",
+        "cell_width",
+        "cell_height",
+        "width",
+        "height",
+        "policy"
+      ],
       "type": "object"
     }
   },

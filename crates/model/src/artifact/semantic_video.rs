@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Current semantic-video source format.
-pub const SEMANTIC_VIDEO_VERSION: u32 = 4;
+pub const SEMANTIC_VIDEO_VERSION: u32 = 5;
 
 /// Fixed canvas used for every frame of one semantic video source.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

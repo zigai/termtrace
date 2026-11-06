@@ -16,7 +16,10 @@
           "type": "integer"
         }
       },
-      "required": ["start_monotonic_ns", "end_monotonic_ns"],
+      "required": [
+        "start_monotonic_ns",
+        "end_monotonic_ns"
+      ],
       "type": "object"
     }
   },
@@ -28,13 +31,19 @@
       "description": "Inclusive byte offset applied within the endpoint output event.",
       "format": "uint64",
       "minimum": 0,
-      "type": ["integer", "null"]
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "endpoint_event_seq": {
       "description": "Exact endpoint event for single-state playback.",
       "format": "uint64",
       "minimum": 0,
-      "type": ["integer", "null"]
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "instant": {
       "description": "Whether source-time sleeps were disabled.",
@@ -56,7 +65,10 @@
     "source_event_hash": {
       "default": null,
       "description": "Final hash of the canonical prefix validated by this playback process.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "source_range": {
       "anyOf": [
@@ -76,7 +88,11 @@
       "type": "integer"
     }
   },
-  "required": ["replay_origin_unix_ns", "speed", "instant"],
+  "required": [
+    "replay_origin_unix_ns",
+    "speed",
+    "instant"
+  ],
   "title": "PlaybackTiming",
   "type": "object"
 }

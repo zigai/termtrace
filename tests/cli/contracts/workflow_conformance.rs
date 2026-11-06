@@ -117,7 +117,7 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
             .success();
 
         if fixture.generate_index {
-            assert_late_checkpoint_inspection(&session);
+            assert_late_indexed_inspection(&session);
         }
 
         if fixture.run_as_scenario {

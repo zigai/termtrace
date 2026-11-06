@@ -7,7 +7,13 @@ use super::{
     presentation::LiveTerminal,
     termination::Termination,
 };
-use std::io::Write;
+use std::{
+    io::Write,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 use termtrace_evidence::{event_log::EventLogWriter, request_journal::MutationJournal};
 use termtrace_model::execution::session::{
     RecordingFailurePolicy, ResourceLimitOutcome, ResourceLimits,
@@ -19,6 +25,17 @@ pub(super) struct RuntimeProgress {
     pub(super) output_bytes: u64,
     pub(super) resource_limit: Option<ResourceLimitOutcome>,
     pub(super) unrecorded_output: Vec<u8>,
+    /// Output chunks the PTY reader has read, shared with the reader thread.
+    pub(super) pty_reads: Arc<AtomicU64>,
+    /// Output chunks the actor has received from the reader.
+    pub(super) applied_pty_reads: u64,
+}
+
+impl RuntimeProgress {
+    /// Output was read from the PTY that the live terminal has not applied yet.
+    pub(super) fn output_pending(&self) -> bool {
+        return self.pty_reads.load(Ordering::Acquire) > self.applied_pty_reads;
+    }
 }
 
 /// Sole mutable owner of a recording process and its ordered actor state.
@@ -70,6 +87,8 @@ impl<'runtime> SessionActor<'runtime> {
                 output_bytes: 0,
                 resource_limit: None,
                 unrecorded_output: Vec::new(),
+                pty_reads: Arc::default(),
+                applied_pty_reads: 0,
             },
             termination: Termination::new(),
             resource_limits,

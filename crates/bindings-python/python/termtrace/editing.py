@@ -116,7 +116,7 @@ class Edit:
 
     def __init__(self, *, resource_base: str | os.PathLike[str] | None = None) -> None:
         self.resource_base = None if resource_base is None else os.fspath(resource_base)
-        self._plan: types.EditPlanInput = {"version": 1, "clips": []}
+        self._plan: types.EditPlanInput = {"version": 2, "clips": []}
 
     def clip(
         self,
@@ -261,7 +261,11 @@ class Edit:
         return copy.deepcopy(self._plan)
 
     def to_source(self) -> types.EditSourceInput:
-        return {"kind": "plan", "edit": self.build(), "resource_base": self.resource_base}
+        return {
+            "kind": "plan",
+            "edit": self.build(),
+            "resource_base": self.resource_base,
+        }
 
     def normalize(self) -> types.NormalizedEdit:
         """Resolve, validate and hash the edit in Rust."""

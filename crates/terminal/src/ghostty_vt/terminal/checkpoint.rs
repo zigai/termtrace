@@ -80,6 +80,12 @@ impl GhosttyVt {
         engine.sequence = sequence;
         engine.processing_error = flags & PROCESSING_ERROR != 0;
 
+        match sequence {
+            Sequence::Ground => {}
+            Sequence::Open => engine.hold_probe.advance(&continuation(engine.terminal)?),
+            Sequence::Osc { .. } | Sequence::DiscardOsc { .. } => engine.hold_probe.unknown(),
+        }
+
         // The decoder replays unfinished input before callbacks exist, so Ghostty would never
         // report an unsupported control string in progress. CAN drops it unreported; replaying
         // the same bytes rebuilds the parser state with capture enabled. A partial UTF-8

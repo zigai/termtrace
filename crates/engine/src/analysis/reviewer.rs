@@ -214,7 +214,7 @@ fn export_into(
     write_secure(&temporary.join("screen.txt"), screen.as_bytes())?;
 
     let manifest = ReviewExportManifest {
-        version: 1,
+        version: 2,
         canonical_session: session.to_path_buf(),
         state_id: state.state_id,
         state_hash: state.state_hash.clone(),

@@ -14,7 +14,10 @@
           "description": "Normalized relative filename."
         }
       },
-      "required": ["path", "blake3"],
+      "required": [
+        "path",
+        "blake3"
+      ],
       "type": "object"
     },
     "ArtifactProductKind": {
@@ -59,7 +62,9 @@
               "type": "string"
             }
           },
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "type": "object"
         },
         {
@@ -71,7 +76,9 @@
               "type": "string"
             }
           },
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "type": "object"
         },
         {
@@ -83,7 +90,9 @@
               "type": "string"
             }
           },
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "type": "object"
         },
         {
@@ -99,7 +108,10 @@
               "description": "Truth of the input to presentation."
             }
           },
-          "required": ["kind", "source_kind"],
+          "required": [
+            "kind",
+            "source_kind"
+          ],
           "type": "object"
         }
       ]
@@ -165,7 +177,11 @@
           "type": "string"
         }
       },
-      "required": ["session_id", "session_manifest_hash", "boundary"],
+      "required": [
+        "session_id",
+        "session_manifest_hash",
+        "boundary"
+      ],
       "type": "object"
     },
     "Base64Bytes": {
@@ -192,7 +208,10 @@
           "type": "integer"
         }
       },
-      "required": ["cols", "rows"],
+      "required": [
+        "cols",
+        "rows"
+      ],
       "type": "object"
     },
     "DecimalU64": {
@@ -252,7 +271,10 @@
       "type": "object"
     },
     "NullableString": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "OriginalCaptureFailure": {
       "description": "Stable code for an original capture that did not publish an artifact.",
@@ -300,7 +322,10 @@
       "properties": {
         "cleanup": {
           "description": "Teardown or preservation failure reported beside the primary failure.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "code": {
           "$ref": "#/$defs/OriginalCaptureFailure",
@@ -318,7 +343,11 @@
           "type": "array"
         }
       },
-      "required": ["code", "reason", "surviving"],
+      "required": [
+        "code",
+        "reason",
+        "surviving"
+      ],
       "type": "object"
     },
     "OriginalCaptureState": {
@@ -380,7 +409,10 @@
           "type": "integer"
         }
       },
-      "required": ["width", "height"],
+      "required": [
+        "width",
+        "height"
+      ],
       "type": "object"
     },
     "SdkArtifactMember": {
@@ -446,7 +478,11 @@
           "description": "Canonical PTY bytes through this boundary."
         }
       },
-      "required": ["next_event_seq", "event_hash", "output_bytes"],
+      "required": [
+        "next_event_seq",
+        "event_hash",
+        "output_bytes"
+      ],
       "type": "object"
     },
     "SurvivingKind": {
@@ -492,7 +528,10 @@
           "description": "Exact Linux path bytes."
         }
       },
-      "required": ["path", "kind"],
+      "required": [
+        "path",
+        "kind"
+      ],
       "type": "object"
     }
   },
@@ -556,7 +595,10 @@
     "session_id": {
       "description": "Canonical session this supervisor records, written when the capture becomes live and\nkept afterwards; `None` only before the session exists.",
       "format": "uuid",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "state": {
       "$ref": "#/$defs/OriginalCaptureState",

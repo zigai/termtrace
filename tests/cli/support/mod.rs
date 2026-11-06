@@ -108,7 +108,10 @@ impl Drop for TempDir {
 pub(crate) use termtrace_engine::{
     inspection::{inspect_session, wait_for_completion, wait_for_output},
     recording::control_socket_name,
-    replay::{derived_directory_name, index_session_range, index_session_with_options, replay},
+    replay::{
+        derived_directory_name, index_session_range, index_session_with_options, replay,
+        visit_session_states_range_while,
+    },
 };
 pub(crate) use termtrace_evidence::{
     event_log::EventLog,
@@ -134,8 +137,7 @@ pub(crate) use termtrace_model::{
     terminal::analysis::DiagnosticCheck,
     terminal::observation::StatePoint,
     terminal::replay::{
-        IndexOptions, ReplayManifest, SourceRange, StateRecord, StateSelection, StateSelector,
-        GHOSTTY_REVISION,
+        IndexOptions, ReplayManifest, SourceRange, StateSelection, StateSelector, GHOSTTY_REVISION,
     },
     terminal::screen::{
         ScreenFrameContent, ScreenFrameSource, ScreenProjectionRequest, ScreenRegion,
@@ -212,9 +214,9 @@ pub(crate) fn wait_for_path(path: &Path) {
 
 #[allow(
     clippy::expect_used,
-    reason = "integration helper must stop when the generated checkpoint is invalid"
+    reason = "integration helper must stop when the generated index is invalid"
 )]
-pub(crate) fn assert_late_checkpoint_inspection(session: &Path) {
+pub(crate) fn assert_late_indexed_inspection(session: &Path) {
     let mut index = Command::cargo_bin("termtrace").expect("binary should build");
     index
         .args(["analyze", "index"])
@@ -222,45 +224,66 @@ pub(crate) fn assert_late_checkpoint_inspection(session: &Path) {
         .assert()
         .success();
 
-    let entries =
-        fs_err::read_to_string(session.join("derived/state-index.jsonl")).expect("state index");
+    let manifest: ReplayManifest = serde_json::from_slice(
+        &fs_err::read(session.join("derived/manifest.json")).expect("index manifest"),
+    )
+    .expect("index manifest JSON");
 
-    let entries = entries
-        .lines()
-        .map(|line| return serde_json::from_str::<serde_json::Value>(line).expect("index entry"))
-        .collect::<Vec<_>>();
-
-    let late_state = entries
-        .last()
-        .and_then(|entry| return entry["state_id"].as_u64())
+    let late_state = manifest
+        .final_state_id
+        .checked_sub(2)
         .expect("late state id");
-    let checkpoint = entries
-        .iter()
-        .filter(|entry| return entry["checkpoint"] == true)
-        .filter_map(|entry| return entry["state_id"].as_u64())
-        .max()
-        .expect("periodic checkpoint");
 
-    assert!(
-        checkpoint > 0 && checkpoint <= late_state,
-        "late inspection requires a nonzero checkpoint: checkpoint={checkpoint} late={late_state}"
+    let inspect_late = || {
+        let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
+
+        return inspect
+            .args(["analyze", "inspect"])
+            .arg(session)
+            .args([
+                "--state",
+                &late_state.to_string(),
+                "--format",
+                "json-compact",
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(format!(
+                r#""state_id":{late_state}"#
+            )))
+            .get_output()
+            .stdout
+            .clone();
+    };
+    let indexed = inspect_late();
+
+    fs_err::remove_file(session.join("artifact-roots.jsonl")).expect("remove artifact catalog");
+    fs_err::remove_dir_all(session.join("derived")).expect("remove derived index");
+
+    assert_eq!(
+        indexed,
+        inspect_late(),
+        "indexed and canonical inspection differ"
     );
+}
 
-    let mut inspect = Command::cargo_bin("termtrace").expect("binary should build");
-    inspect
-        .args(["analyze", "inspect"])
-        .arg(session)
-        .args([
-            "--state",
-            &late_state.to_string(),
-            "--format",
-            "json-compact",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(format!(
-            r#""state_id":{late_state}"#
-        )));
+#[allow(
+    clippy::expect_used,
+    reason = "test helper failures should stop at the unreadable cache"
+)]
+pub(crate) fn replay_checkpoints(session: &Path) -> Vec<PathBuf> {
+    let mut checkpoints = fs_err::read_dir(session.join("derived-cache"))
+        .expect("replay cache directory")
+        .map(|entry| return entry.expect("replay cache entry").path())
+        .filter(|path| {
+            return path
+                .file_name()
+                .is_some_and(|name| return name.as_encoded_bytes().starts_with(b"checkpoint-"));
+        })
+        .collect::<Vec<_>>();
+    checkpoints.sort();
+
+    return checkpoints;
 }
 
 #[allow(

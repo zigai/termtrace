@@ -1,7 +1,10 @@
 //! live session control CLI integration tests.
 
 use crate::support::*;
-use std::os::unix::net::{SocketAddr, UnixListener};
+use std::{
+    os::unix::net::{SocketAddr, UnixListener},
+    sync::atomic::AtomicBool,
+};
 use termtrace_evidence::session::{read_completion, read_manifest};
 use termtrace_model::{
     protocol::control::PointerOperation, terminal::observation::CaptureQuality,
@@ -84,11 +87,28 @@ fn assert_control_events(recording: &EventLog, session: &Path) {
 
     let ranged = index_session_range(session, Some(resize_result_time), None)
         .expect("range crossing resize intent/result");
-    let ranged_states = read_zstd_text(&ranged.directory.join("states.jsonl.zst"));
-    let ranged_states = ranged_states
-        .lines()
-        .map(|line| return serde_json::from_str::<StateRecord>(line).expect("state JSON"))
-        .collect::<Vec<_>>();
+
+    let manifest: ReplayManifest = serde_json::from_slice(
+        &fs_err::read(ranged.directory.join("manifest.json")).expect("range manifest"),
+    )
+    .expect("range manifest JSON");
+
+    let mut ranged_states = Vec::new();
+    visit_session_states_range_while(
+        session,
+        manifest.source_range,
+        &AtomicBool::new(false),
+        |record, _| {
+            ranged_states.push(record.clone());
+
+            return Ok(true);
+        },
+    )
+    .expect("ranged replay");
+    assert_eq!(
+        u64::try_from(ranged_states.len()).ok(),
+        Some(manifest.state_count)
+    );
 
     assert!(ranged_states
         .iter()

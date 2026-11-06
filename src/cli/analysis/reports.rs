@@ -527,6 +527,15 @@ fn diagnose_text(report: &DiagnoseReport) -> Result<String> {
         }
     }
 
+    for omitted in &report.omitted_findings {
+        writeln!(
+            output,
+            "omitted: {} further {} findings were detected but not listed",
+            omitted.count, omitted.code
+        )
+        .into_diagnostic()?;
+    }
+
     return Ok(output);
 }
 

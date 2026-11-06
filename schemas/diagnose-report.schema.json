@@ -196,6 +196,27 @@
         }
       ]
     },
+    "OmittedFindings": {
+      "additionalProperties": false,
+      "description": "Count of detected findings of one code that a report does not list.",
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable finding code.",
+          "type": "string"
+        },
+        "count": {
+          "description": "Detected findings with this code beyond the listed ones.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "code",
+        "count"
+      ],
+      "type": "object"
+    },
     "OutputPage": {
       "additionalProperties": false,
       "description": "Deterministic page coordinates for one ordered collection.",
@@ -279,6 +300,13 @@
       "description": "Stable report format.",
       "type": "string"
     },
+    "omitted_findings": {
+      "description": "Findings that were detected but not listed because their code reached the listing bound.",
+      "items": {
+        "$ref": "#/$defs/OmittedFindings"
+      },
+      "type": "array"
+    },
     "output_page": {
       "anyOf": [
         {
@@ -320,7 +348,8 @@
     "source_event_count",
     "checks",
     "broad_change_fraction",
-    "findings"
+    "findings",
+    "omitted_findings"
   ],
   "title": "DiagnoseReport",
   "type": "object"

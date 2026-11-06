@@ -3,7 +3,7 @@ use crate::{
     observation::observe_session,
     recording::{record_with_output, RecordOptions},
 };
-use std::{collections::BTreeMap, ffi::OsString, io};
+use std::{collections::BTreeMap, ffi::OsString, fs, io};
 use tempfile::TempDir;
 use termtrace_evidence::session::read_completion;
 use termtrace_model::{
@@ -194,11 +194,69 @@ fn genuinely_absent_initial_positions_remain_absent_after_repeated_replay() {
         let observation = observe(&source);
         assert_eq!(observation.event_seq, None);
         assert_eq!(observation.monotonic_ns, None);
-        assert_eq!(observation.state_id, None);
+        assert_eq!(observation.state_id, Some(0));
     }
 
     prune_replay_cache(&source).expect("empty-state prune");
 
     assert_eq!(observe(&source).event_seq, None);
     assert_eq!(before, hashes(&source));
+}
+
+#[test]
+fn recorded_validation_never_vouches_for_changed_event_bytes() {
+    let root = fixture("printf 'VALIDATED\\n'");
+    let source = root.path().join("source");
+    let validated = ValidatedSession::open(&source).expect("full validation");
+
+    assert!(SessionLayout::new(&source)
+        .derived_cache()
+        .join("validation.json")
+        .is_file());
+
+    let cached_validation = ValidatedSession::open(&source).expect("recorded validation");
+    assert_eq!(cached_validation.completion(), validated.completion());
+
+    // Same length, so only the content (and the file's change times) differ.
+    let event_log = SessionLayout::new(&source).event_log();
+    let mut bytes = fs_err::read(&event_log).expect("event log");
+    let hash = bytes
+        .windows(8)
+        .rposition(|window| return window == b"\"hash\":\"")
+        .expect("final record hash")
+        + 8;
+    bytes[hash] = if bytes[hash] == b'0' { b'1' } else { b'0' };
+    fs_err::set_permissions(&event_log, fs::Permissions::from_mode(0o600)).expect("writable log");
+    fs_err::write(&event_log, &bytes).expect("rewrite event log");
+
+    assert!(validated.check().is_err());
+    assert!(cached_validation.check().is_err());
+    assert!(trust::encode(&cached_validation, "changed source").is_err());
+    assert!(ValidatedSession::open(&source).is_err());
+}
+
+#[test]
+fn unauthenticated_validation_records_fall_back_to_full_validation() {
+    let root = fixture("printf 'REVALIDATED\\n'");
+    let source = root.path().join("source");
+    let validated = ValidatedSession::open(&source).expect("full validation");
+    let record = SessionLayout::new(&source)
+        .derived_cache()
+        .join("validation.json");
+
+    let mut tampered: serde_json::Value =
+        serde_json::from_slice(&fs_err::read(&record).expect("record")).expect("record JSON");
+    tampered["mac"] = serde_json::Value::String("0".repeat(64));
+    fs_err::write(
+        &record,
+        serde_json::to_vec(&tampered).expect("tampered record"),
+    )
+    .expect("tamper record");
+
+    assert_eq!(
+        ValidatedSession::open(&source)
+            .expect("full validation again")
+            .completion(),
+        validated.completion()
+    );
 }

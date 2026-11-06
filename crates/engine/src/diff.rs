@@ -526,6 +526,7 @@ mod tests {
                 observed: boundary,
             },
             observed_monotonic_ns: 0,
+            state_id: 0,
         };
 
         let region = (detail == FrameDetail::Cells).then_some(ScreenRegion {

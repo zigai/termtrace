@@ -59,10 +59,17 @@
         },
         "value_hash": {
           "description": "BLAKE3 of the exact value bytes for `value` or `hash` capture.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
-      "required": ["capture", "present", "sensitivity"],
+      "required": [
+        "capture",
+        "present",
+        "sensitivity"
+      ],
       "type": "object"
     },
     "FileProvenance": {
@@ -71,7 +78,10 @@
       "properties": {
         "content_hash": {
           "description": "Complete-file BLAKE3 under a policy that requests content identity.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "content_identity": {
           "$ref": "#/$defs/ContentIdentityStatus",
@@ -93,7 +103,10 @@
           "description": "Canonical resolved path bytes when resolution succeeded."
         }
       },
-      "required": ["requested", "content_identity"],
+      "required": [
+        "requested",
+        "content_identity"
+      ],
       "type": "object"
     },
     "KernelProvenance": {
@@ -117,7 +130,12 @@
           "type": "string"
         }
       },
-      "required": ["system", "release", "version", "machine"],
+      "required": [
+        "system",
+        "release",
+        "version",
+        "machine"
+      ],
       "type": "object"
     },
     "ProvenanceCapture": {
@@ -161,7 +179,10 @@
           "description": "Built-in policy behavior."
         }
       },
-      "required": ["kind", "environment"],
+      "required": [
+        "kind",
+        "environment"
+      ],
       "type": "object"
     },
     "ProvenancePolicyKind": {
@@ -220,7 +241,12 @@
           "type": "string"
         }
       },
-      "required": ["version", "source_revision", "semantic_engine_revision", "binary"],
+      "required": [
+        "version",
+        "source_revision",
+        "semantic_engine_revision",
+        "binary"
+      ],
       "type": "object"
     },
     "RuntimeProvenance": {
@@ -267,7 +293,10 @@
           "description": "Process umask read without modifying it, when the host exposes it.",
           "format": "uint32",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -318,7 +347,12 @@
       "description": "Recorder, kernel, and local identity facts."
     }
   },
-  "required": ["policy", "environment", "executable", "runtime"],
+  "required": [
+    "policy",
+    "environment",
+    "executable",
+    "runtime"
+  ],
   "title": "ExecutionProvenance",
   "type": "object"
 }

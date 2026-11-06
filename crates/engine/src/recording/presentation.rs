@@ -16,6 +16,10 @@ pub(super) struct LiveTerminal {
     pub(super) presented: SemanticState,
     /// The VT changed since `presented` was last refreshed.
     pub(super) presented_stale: bool,
+    /// Stream position: output bytes and applied resizes processed so far.
+    pub(super) position: u64,
+    /// Stream position of `presented`, as replay of the same session numbers it.
+    pub(super) presented_position: u64,
     pub(super) geometry: TerminalGeometry,
     pub(super) source_event_seq: Option<u64>,
     pub(super) suppress_mirrored_queries: bool,
@@ -71,6 +75,16 @@ impl LiveTerminal {
         let latest = self.semantic.snapshot()?;
         self.replace_presented(latest);
         self.presented_stale = false;
+        self.presented_position = self.position;
+
+        return Ok(());
+    }
+
+    pub(super) fn apply_resize(&mut self, geometry: TerminalGeometry) -> Result<()> {
+        resize_semantic(&mut self.semantic, geometry)?;
+        self.geometry = geometry;
+        self.presented_stale = true;
+        self.position = self.position.saturating_add(1);
 
         return Ok(());
     }
@@ -134,12 +148,26 @@ pub(super) fn process_semantic_output(
         let plain = rest.get(..step.plain).unwrap_or_default();
         let sequence = rest.get(step.plain..step.consumed).unwrap_or_default();
         offset = offset.saturating_add(step.consumed);
+        live.position = live
+            .position
+            .saturating_add(u64::try_from(step.consumed).unwrap_or(u64::MAX));
+
         live.presented_stale = true;
 
-        // Without changes since the last refresh, the kept frame equals `presented`.
+        // The step stopped before the byte that begins a hold, so the screen is the kept frame.
+        if step.hold_edge {
+            let edge = live.semantic.snapshot()?;
+            live.replace_presented(edge);
+            live.presented_position = live.position;
+        }
+
+        // Ghostty's own frame stands in when the step did not stop before the hold.
         for hold in live.semantic.take_render_holds()? {
-            if let RenderHold::Began(frame) = hold {
+            if let RenderHold::Began(frame) = hold
+                && live.presented_position != live.position.saturating_sub(1)
+            {
                 live.replace_presented(*frame);
+                live.presented_position = live.position.saturating_sub(1);
             }
         }
 
@@ -189,7 +217,7 @@ pub(super) fn process_semantic_output(
     return Ok(());
 }
 
-pub(super) fn resize_semantic(semantic: &mut GhosttyVt, geometry: TerminalGeometry) -> Result<()> {
+fn resize_semantic(semantic: &mut GhosttyVt, geometry: TerminalGeometry) -> Result<()> {
     semantic
         .resize(
             geometry.cols,
@@ -257,13 +285,17 @@ pub(super) fn find_text_regions(state: &SemanticState, needle: &str) -> Vec<Text
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::replay::inspect;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
     use termtrace_evidence::{
         artifact::create_private_directory,
         event_log::{EventLog, SessionClock},
     };
-    use termtrace_model::execution::event::EventLogHeader;
+    use termtrace_model::{
+        execution::event::{EventLogHeader, OperationStatus},
+        terminal::replay::StateSelector,
+    };
     use termtrace_terminal::{semantic_state_hash, semantic_viewport_text};
 
     struct Recording {
@@ -308,6 +340,8 @@ mod tests {
                 semantic,
                 presented,
                 presented_stale: false,
+                position: 0,
+                presented_position: 0,
                 pending_query_responses: Vec::new(),
                 source_event_seq: None,
                 suppress_mirrored_queries: true,
@@ -342,6 +376,44 @@ mod tests {
                 data,
             )
             .expect("process output");
+        }
+
+        fn output(&mut self, data: &[u8]) {
+            let seq = self
+                .event_log
+                .append(Event::Output {
+                    data: ByteString::from(data),
+                })
+                .expect("output event");
+            self.read(seq, data);
+        }
+
+        fn resize(&mut self, cols: u16, rows: u16) {
+            let operation_id = Uuid::now_v7();
+            let geometry = TerminalGeometry {
+                cols,
+                rows,
+                pixel_width: cols * 10,
+                pixel_height: rows * 20,
+            };
+            self.event_log
+                .append(Event::ResizeIntent {
+                    operation_id,
+                    cols,
+                    rows,
+                    pixel_width: geometry.pixel_width,
+                    pixel_height: geometry.pixel_height,
+                })
+                .expect("resize intent");
+
+            self.live.apply_resize(geometry).expect("resize");
+            self.event_log
+                .append(Event::ResizeResult {
+                    operation_id,
+                    status: OperationStatus::Applied,
+                    error_code: None,
+                })
+                .expect("resize result");
         }
 
         fn presented_text(&mut self) -> String {
@@ -503,10 +575,51 @@ mod tests {
             pixel_width: 300,
             pixel_height: 80,
         };
-        resize_semantic(&mut recording.live.semantic, geometry).expect("resize");
+        recording.live.apply_resize(geometry).expect("resize");
         recording.live.presented_stale = true;
 
         assert_eq!(recording.presented_text().trim_end(), "resized");
+    }
+
+    #[test]
+    fn live_presented_positions_match_replay_of_the_recorded_log() {
+        let scenarios: [&[Option<&[u8]>]; 5] = [
+            &[Some(b"hello\r\nworld")],
+            &[Some(b"kept\x1b[?2026hlost")],
+            &[Some(b"a\x1b[?20"), Some(b"26hb"), Some(b"c\x1b[?2026ld")],
+            &[Some(b"x\x1b[?2026hy"), None, Some(b"z")],
+            &[Some(b"primary\x1b[?2026;1049halternate"), None],
+        ];
+
+        for scenario in scenarios {
+            let mut recording = Recording::new(20, 4);
+            for step in scenario {
+                match step {
+                    Some(data) => recording.output(data),
+                    None => recording.resize(30, 4),
+                }
+            }
+
+            recording
+                .live
+                .ensure_presented()
+                .expect("refresh presented state");
+            let live_position = recording.live.presented_position;
+            let live_hash = recording
+                .live
+                .presented_state_hash()
+                .expect("presented hash");
+
+            drop(recording.event_log);
+            let log = EventLog::read(&recording.path).expect("event log");
+            let replayed =
+                inspect(&log, StateSelector::LatestPresented).expect("latest presented replay");
+            assert_eq!(
+                (live_position, live_hash),
+                (replayed.record.state_id, replayed.record.state_hash),
+                "{scenario:?}"
+            );
+        }
     }
 
     #[test]
@@ -535,6 +648,8 @@ mod tests {
             semantic,
             presented,
             presented_stale: false,
+            position: 0,
+            presented_position: 0,
             pending_query_responses: Vec::new(),
             source_event_seq: None,
             suppress_mirrored_queries: false,

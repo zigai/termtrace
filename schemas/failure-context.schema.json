@@ -33,20 +33,28 @@
           "description": "Maximum uncommitted interval for bounded mode.",
           "format": "uint64",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "maximum_uncommitted_bytes": {
           "description": "Maximum uncommitted PTY bytes for bounded mode.",
           "format": "uint64",
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "mode": {
           "$ref": "#/$defs/DurabilityMode",
           "description": "Selected persistence behavior."
         }
       },
-      "required": ["mode"],
+      "required": [
+        "mode"
+      ],
       "type": "object"
     },
     "DurabilityRecord": {
@@ -103,7 +111,10 @@
               "type": "string"
             }
           },
-          "required": ["operation", "facts"],
+          "required": [
+            "operation",
+            "facts"
+          ],
           "type": "object"
         },
         {
@@ -117,7 +128,10 @@
               "type": "string"
             }
           },
-          "required": ["operation", "facts"],
+          "required": [
+            "operation",
+            "facts"
+          ],
           "type": "object"
         },
         {
@@ -131,7 +145,10 @@
               "type": "string"
             }
           },
-          "required": ["operation", "facts"],
+          "required": [
+            "operation",
+            "facts"
+          ],
           "type": "object"
         }
       ]
@@ -158,7 +175,9 @@
               "type": "string"
             }
           },
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "type": "object"
         },
         {
@@ -176,7 +195,10 @@
               "type": "string"
             }
           },
-          "required": ["kind", "completed_atoms"],
+          "required": [
+            "kind",
+            "completed_atoms"
+          ],
           "type": "object"
         },
         {
@@ -188,7 +210,9 @@
               "type": "string"
             }
           },
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "type": "object"
         },
         {
@@ -200,7 +224,9 @@
               "type": "string"
             }
           },
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "type": "object"
         }
       ]
@@ -211,7 +237,10 @@
       "properties": {
         "cleanup": {
           "description": "Teardown, preservation or reaping failure reported beside the primary failure.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "code": {
           "anyOf": [
@@ -255,7 +284,12 @@
           "type": "array"
         }
       },
-      "required": ["state", "session", "surviving", "reason"],
+      "required": [
+        "state",
+        "session",
+        "surviving",
+        "reason"
+      ],
       "type": "object"
     },
     "OriginalCaptureFailure": {
@@ -379,7 +413,11 @@
           "type": "integer"
         }
       },
-      "required": ["kind", "limit", "observed"],
+      "required": [
+        "kind",
+        "limit",
+        "observed"
+      ],
       "type": "object"
     },
     "RestartAttempt": {
@@ -413,7 +451,12 @@
           "description": "Authoritative stdout-log path bytes."
         }
       },
-      "required": ["session", "stdout_log", "stderr_log", "launched"],
+      "required": [
+        "session",
+        "stdout_log",
+        "stderr_log",
+        "launched"
+      ],
       "type": "object"
     },
     "RestartFailureFacts": {
@@ -461,7 +504,10 @@
           "description": "Allocated successor/orphan locations and proven admission facts."
         }
       },
-      "required": ["alias", "phase"],
+      "required": [
+        "alias",
+        "phase"
+      ],
       "type": "object"
     },
     "RestartFailurePhase": {
@@ -555,7 +601,10 @@
         "exit_code": {
           "description": "Normal exit code when available.",
           "format": "int32",
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "failure": {
           "anyOf": [
@@ -604,7 +653,10 @@
         },
         "signal_name": {
           "description": "Signal name when available.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "terminal_event_seq": {
           "description": "Sequence number of the required terminal `Exit` event.",
@@ -653,7 +705,10 @@
           "type": "string"
         }
       },
-      "required": ["code", "message"],
+      "required": [
+        "code",
+        "message"
+      ],
       "type": "object"
     },
     "SuccessorReadiness": {
@@ -729,7 +784,10 @@
           "description": "Exact Linux path bytes."
         }
       },
-      "required": ["path", "kind"],
+      "required": [
+        "path",
+        "kind"
+      ],
       "type": "object"
     },
     "TmuxFailureFacts": {
@@ -781,7 +839,10 @@
         },
         "stop_requested": {
           "description": "Whether `StopRequested` is proven committed; None means no such receipt is available.",
-          "type": ["boolean", "null"]
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "required": [
@@ -845,7 +906,11 @@
           "type": "string"
         }
       },
-      "required": ["scope", "effect", "retry"],
+      "required": [
+        "scope",
+        "effect",
+        "retry"
+      ],
       "type": "object"
     },
     {
@@ -864,7 +929,11 @@
           "type": "string"
         }
       },
-      "required": ["scope", "guidance", "management"],
+      "required": [
+        "scope",
+        "guidance",
+        "management"
+      ],
       "type": "object"
     }
   ],

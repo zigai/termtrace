@@ -2,7 +2,7 @@
 
 use crate::{
     artifact::metadata::ArtifactMember,
-    execution::event_log::CanonicalBoundary,
+    execution::{event::EventLogPosition, event_log::CanonicalBoundary},
     terminal::state::{
         CellState, CellStyle, ColorState, CursorState, DirtyState, ModeState, SemanticState,
         TerminalMetadata,
@@ -16,8 +16,8 @@ use uuid::Uuid;
 /// Pinned Ghostty source revision used by the semantic adapter.
 pub const GHOSTTY_REVISION: &str = "9781c0afc8225510e33127466f0815eb51086d7d";
 /// Derived artifact format version.
-pub const STATE_FORMAT_VERSION: u32 = 7;
-/// Replay-index member listing every semantic state.
+pub const STATE_FORMAT_VERSION: u32 = 11;
+/// Replay-index member listing the retained semantic states.
 pub const STATE_INDEX: &str = "state-index.jsonl";
 
 /// An exact presentation-eligible endpoint within a validated canonical prefix.
@@ -32,8 +32,8 @@ pub struct ReplayEndpoint {
     pub source_complete: bool,
     /// Exact source prefix that was validated during resolution.
     pub boundary: CanonicalBoundary,
-    /// Dense state identifier when the resolver calculated it.
-    pub state_id: Option<u64>,
+    /// Stream position of the endpoint state.
+    pub state_id: u64,
     /// Hash of the complete normalized semantic state at the endpoint.
     pub state_hash: String,
     /// Canonical viewport columns at the endpoint.
@@ -81,10 +81,10 @@ impl SourceRange {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum StateSelection {
-    /// Retain every distinct state, including synchronized-output internals.
+    /// List every boundary state, including those inside synchronized output.
     #[default]
     All,
-    /// Retain only states eligible for presentation by a native terminal.
+    /// List every boundary state eligible for presentation by a native terminal.
     Presented,
 }
 
@@ -99,8 +99,8 @@ pub struct IndexOptions {
     pub live_snapshot: bool,
     /// Semantic states retained in artifacts.
     pub state_selection: StateSelection,
-    /// Optional sampling stride in monotonic nanoseconds (e.g. 1/FPS increments for video indexing)
-    /// rather than recording and hashing every intermediate byte/flutter delta.
+    /// Optional retention stride in monotonic nanoseconds (e.g. 1/FPS increments for video
+    /// indexing): only the last presented state of each stride is listed in the state index.
     pub sampling_stride_ns: Option<u64>,
 }
 
@@ -139,7 +139,7 @@ pub struct RowDiff {
     pub cells: Vec<CellState>,
 }
 
-/// Delta from the previous distinct state.
+/// Delta from the previous state of the same replay.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateDelta {
     /// New `(cols, rows)` when geometry changed.
@@ -158,10 +158,10 @@ pub struct StateDelta {
     pub rows: Vec<RowDiff>,
 }
 
-/// One distinct semantic state boundary.
+/// The semantic state at one stream position.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateRecord {
-    /// Dense zero-based state identifier.
+    /// Stream position: the output bytes and applied resizes that produced this state.
     pub state_id: u64,
     /// Canonical event responsible for this state; absent for an initial or range-baseline state.
     pub event_seq: Option<u64>,
@@ -177,14 +177,14 @@ pub struct StateRecord {
     pub ghostty_dirty: DirtyState,
     /// Rows Ghostty marked dirty.
     pub ghostty_dirty_rows: Vec<u16>,
-    /// Stable delta from the preceding distinct state.
+    /// Stable delta from the preceding state of the same replay.
     pub delta: StateDelta,
 }
 
 /// Compact event/video mapping information for one state.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateIndexEntry {
-    /// State identifier.
+    /// State stream position.
     pub state_id: u64,
     /// State hash.
     pub state_hash: String,
@@ -196,18 +196,8 @@ pub struct StateIndexEntry {
     pub monotonic_ns: u64,
     /// Whether a native renderer could present this state.
     pub presented: bool,
-    /// Whether the checkpoint stream contains an engine checkpoint here.
-    #[serde(default)]
+    /// Whether the checkpoint catalog contains an engine checkpoint here.
     pub checkpoint: bool,
-    /// Combined semantic/effect/canonical/control timeline rank for this checkpoint.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeline_rank: Option<u64>,
-    /// Byte offset of the first control-index entry at or after this checkpoint.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub control_index_offset: Option<u64>,
-    /// Number of control entries ordered before this checkpoint.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub control_rank: Option<u64>,
 }
 
 /// Seek position for a canonical event's first control-index entry.
@@ -220,18 +210,35 @@ pub struct ControlSourceIndexEntry {
     pub control_index_offset: u64,
 }
 
-/// Catalog entry locating one periodic engine checkpoint in the binary checkpoint member.
+/// Catalog entry for one engine checkpoint.
 ///
-/// The frame holds the checkpointed state's record and an exact libghostty-vt engine snapshot.
+/// The frame holds the checkpointed state's record and an exact libghostty-vt engine snapshot,
+/// so any later position can be rebuilt by restoring it and replaying up to that position.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SemanticReplayCheckpoint {
-    /// Checkpointed state identifier.
+    /// Stream position of the checkpointed state.
     pub state_id: u64,
     /// Canonical event responsible for the checkpointed state.
     pub event_seq: Option<u64>,
+    /// Inclusive output byte offset of the checkpointed state inside its event.
+    pub event_byte_offset: Option<u64>,
     /// Monotonic timestamp of the checkpointed state in nanoseconds.
     pub monotonic_ns: u64,
+    /// Whether the checkpointed state was eligible for presentation.
+    pub presented: bool,
+    /// Number of boundary states before the checkpointed state.
+    pub state_rank: u64,
+    /// Number of hidden boundary states before the checkpointed state.
+    pub hidden_before: u64,
+    /// Combined semantic/effect/canonical/control timeline rank of the checkpointed state.
+    pub timeline_rank: u64,
+    /// Byte offset of the first control-index entry at or after the checkpointed state.
+    pub control_index_offset: u64,
+    /// Number of control entries ordered before the checkpointed state.
+    pub control_rank: u64,
+    /// Event-log position of the checkpointed state's event, where replay can resume.
+    pub source_position: Option<EventLogPosition>,
     /// Byte offset of the checkpoint's zstd frame in the binary checkpoint member.
     pub offset: u64,
     /// Compressed byte length of that frame.
@@ -241,8 +248,8 @@ pub struct SemanticReplayCheckpoint {
 /// Summary of one deterministic replay.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReplayArtifacts {
-    /// Number of distinct states, including the initial blank state.
-    pub state_count: u64,
+    /// Stream position of the state at the selected interval's end.
+    pub final_state_id: u64,
     /// Semantic state hash at the selected interval's end.
     pub final_state_hash: String,
     /// Ghostty-formatted final plain text.
@@ -256,7 +263,7 @@ pub struct ReplayArtifacts {
 /// In-memory replay result intended for tests and programmatic inspection.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CollectedReplay {
-    /// Every distinct state delta.
+    /// Every boundary state.
     pub states: Vec<StateRecord>,
     /// Final derived outputs.
     pub artifacts: ReplayArtifacts,
@@ -265,13 +272,15 @@ pub struct CollectedReplay {
 /// Selector for one reconstructed semantic state.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StateSelector {
-    /// Final distinct state.
+    /// State at the end of the log.
     Final,
     /// Latest state eligible for terminal presentation.
     LatestPresented,
-    /// Exact state identifier.
+    /// State at an exact stream position.
     StateId(u64),
-    /// Exact content-addressed semantic state hash.
+    /// Latest position in the run of equal states that holds the last boundary state with this
+    /// hash. Finding the run end replays each position up to the next boundary; a hash that no
+    /// boundary state shows replays every position of the log.
     StateHash(String),
     /// Latest state at or before an event sequence.
     EventSeq(u64),
@@ -301,14 +310,18 @@ pub struct ReplayManifest {
     pub source_range: Option<SourceRange>,
     /// Whether completion proved the source event log immutable.
     pub source_complete: bool,
-    /// Semantic states retained in the JSONL artifacts.
+    /// Semantic states listed in the state index.
     pub state_selection: StateSelection,
+    /// Stride whose last presented state alone is listed, absent when every selected state is.
+    pub sampling_stride_ns: Option<u64>,
     /// Exact Ghostty source revision.
     pub ghostty_revision: String,
-    /// Number of state records retained in the artifact files.
+    /// Number of entries in the state index.
     pub state_count: u64,
-    /// Number of distinct semantic states encountered during replay.
-    pub semantic_state_count: u64,
+    /// Stream position at the selected interval's end.
+    pub final_state_id: u64,
+    /// Stream position of the latest state eligible for presentation, absent when none was.
+    pub latest_presented_state_id: Option<u64>,
     /// Semantic state hash at the selected interval's end.
     pub final_state_hash: String,
     /// Hash of the final state retained in filtered artifact files.
@@ -322,10 +335,10 @@ pub struct ReplayManifest {
 pub struct IndexOutcome {
     /// Atomically committed derived directory.
     pub directory: PathBuf,
-    /// Number of state records retained in artifacts.
+    /// Number of entries in the state index.
     pub state_count: u64,
-    /// Total distinct states encountered during replay.
-    pub semantic_state_count: u64,
+    /// Stream position at the selected interval's end.
+    pub final_state_id: u64,
     /// Whether the source had immutable completion evidence.
     pub source_complete: bool,
     /// State retention policy used by this index.

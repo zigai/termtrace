@@ -498,9 +498,6 @@ mod state_cursor_tests {
             monotonic_ns: 1,
             presented: true,
             checkpoint: false,
-            timeline_rank: None,
-            control_index_offset: None,
-            control_rank: None,
         };
         let mut bytes = serde_json::to_vec(&state).expect("state JSON");
         bytes.push(b'\n');

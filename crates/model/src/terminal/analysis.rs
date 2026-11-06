@@ -346,7 +346,19 @@ pub struct DiagnoseReport {
     pub broad_change_fraction: String,
     /// Deterministic findings.
     pub findings: Vec<DiagnosticFinding>,
+    /// Findings that were detected but not listed because their code reached the listing bound.
+    pub omitted_findings: Vec<OmittedFindings>,
     /// Page coordinates when CLI output intentionally contains a bounded subset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_page: Option<OutputPage>,
+}
+
+/// Count of detected findings of one code that a report does not list.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OmittedFindings {
+    /// Stable machine-readable finding code.
+    pub code: String,
+    /// Detected findings with this code beyond the listed ones.
+    pub count: u64,
 }

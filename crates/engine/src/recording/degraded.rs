@@ -53,6 +53,7 @@ pub(super) fn preserve_terminal(
             "interactive forwarding continues; semantic control and input auditing are unavailable"
                 .to_owned(),
     });
+    actor.event_log.observe_durable();
     let path = actor
         .event_log
         .path()
@@ -191,6 +192,7 @@ pub(super) fn preserve_terminal(
 
                 health.unrecorded_output_bytes = unrecorded_output_bytes;
                 health.unrecorded_input_bytes = unrecorded_input_bytes;
+                actor.event_log.observe_durable();
                 health.degraded_ended_monotonic_ns = Some(actor.event_log.elapsed_ns());
                 health.durable_boundary = actor.event_log.durable_boundary();
                 health.observed_boundary = actor.event_log.observed_boundary();

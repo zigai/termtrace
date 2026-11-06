@@ -1,4 +1,4 @@
-"""SDK model types generated from the Rust type catalog. Do not edit; run scripts/sdk-types.py."""
+"""SDK model types generated from the Rust type catalog. Do not edit; run `just generate`."""
 
 from __future__ import annotations
 
@@ -694,6 +694,7 @@ class DiagnoseReport(TypedDict):
     checks: list[DiagnosticCheck]
     findings: list[DiagnosticFinding]
     format: str
+    omitted_findings: list[OmittedFindings]
     output_page: NotRequired[OutputPage | None]
     session_id: str
     source_event_count: int
@@ -1855,6 +1856,13 @@ class Observers(TypedDict):
     watchdog: int | None
 
 
+class OmittedFindings(TypedDict):
+    "Count of detected findings of one code that a report does not list."
+
+    code: str
+    count: int
+
+
 OperationStatus: TypeAlias = "Literal['applied', 'failed']"
 
 
@@ -2964,6 +2972,7 @@ class ScreenFrameSourceActor(TypedDict):
     observed_monotonic_ns: int
     session_id: str
     source: Literal["actor"]
+    state_id: int
 
 
 class ScreenFrameSourceResolved(TypedDict):
@@ -3640,7 +3649,7 @@ class StableScreenCapture(TypedDict):
 
 
 class StateDelta(TypedDict):
-    "Delta from the previous distinct state."
+    "Delta from the previous state of the same replay."
 
     active_style: CellStyle | None
     colors: ColorState | None
@@ -3685,21 +3694,21 @@ class StatePointMonotonicNs(TypedDict):
 
 
 class StatePointStateHash(TypedDict):
-    "Exact content-addressed semantic state hash."
+    "Latest state with this content hash."
 
     selector: Literal["state_hash"]
     state_hash: str
 
 
 class StatePointStateId(TypedDict):
-    "Exact semantic state identifier."
+    "Stream position of the state: output bytes and applied resizes before it."
 
     selector: Literal["state_id"]
     state_id: int
 
 
 class StateRecord(TypedDict):
-    "One distinct semantic state boundary."
+    "The semantic state at one stream position."
 
     delta: StateDelta
     event_byte_offset: int | None
@@ -3971,7 +3980,7 @@ class TimelineItemCanonicalEvent(TypedDict):
 
 
 class TimelineItemSemanticState(TypedDict):
-    "A distinct Ghostty semantic state transition."
+    "A Ghostty semantic boundary state."
 
     changed_cells: int
     changed_rows: list[int]

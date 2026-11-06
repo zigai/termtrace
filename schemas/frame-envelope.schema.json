@@ -77,14 +77,20 @@
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "cursor_row": {
           "description": "Cursor row when it lies in the viewport.",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "cursor_visible": {
           "description": "Whether the cursor is visible.",
@@ -106,7 +112,13 @@
           "type": "string"
         }
       },
-      "required": ["viewport_text", "cols", "rows", "cursor_visible", "modes"],
+      "required": [
+        "viewport_text",
+        "cols",
+        "rows",
+        "cursor_visible",
+        "modes"
+      ],
       "type": "object"
     },
     "TerminalMode": {
@@ -128,7 +140,11 @@
           "type": "integer"
         }
       },
-      "required": ["number", "ansi", "enabled"],
+      "required": [
+        "number",
+        "ansi",
+        "enabled"
+      ],
       "type": "object"
     }
   },
@@ -164,7 +180,14 @@
       "type": "integer"
     }
   },
-  "required": ["version", "state_hash", "presented", "capture_quality", "frame", "frame_hash"],
+  "required": [
+    "version",
+    "state_hash",
+    "presented",
+    "capture_quality",
+    "frame",
+    "frame_hash"
+  ],
   "title": "FrameEnvelope",
   "type": "object"
 }

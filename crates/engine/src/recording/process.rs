@@ -26,7 +26,10 @@ use std::{
     os::fd::{AsFd as _, OwnedFd},
     os::unix::fs::{DirBuilderExt as _, PermissionsExt as _},
     path::{Path, PathBuf},
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc, Arc,
+    },
     thread,
     time::Instant,
 };
@@ -41,6 +44,7 @@ fn spawn_reader(
     master_raw_fd: Option<i32>,
     cancel_read: OwnedFd,
     sender: mpsc::SyncSender<RuntimeMessage>,
+    pty_reads: Arc<AtomicU64>,
 ) -> Result<thread::JoinHandle<()>> {
     let thread = thread::Builder::new()
         .name("termtrace-pty-reader".to_owned())
@@ -106,6 +110,10 @@ fn spawn_reader(
                         let Some(slice) = buffer.get(..length) else {
                             continue;
                         };
+
+                        // Counted before the send so the actor can tell that output it has
+                        // not yet applied exists even while the inbox is full.
+                        pty_reads.fetch_add(1, Ordering::Release);
 
                         if sender
                             .send(RuntimeMessage::Output {
@@ -576,6 +584,7 @@ impl RuntimeWorkers {
         initial_geometry: TerminalGeometry,
         control_socket: &str,
         host_signals: Signals,
+        pty_reads: Arc<AtomicU64>,
     ) -> Result<(Self, mpsc::Receiver<RuntimeMessage>)> {
         let signals = spawn_host_signals(host_signals, sender.clone())?;
         let control = match spawn(control_socket, sender.clone()) {
@@ -618,7 +627,7 @@ impl RuntimeWorkers {
             return terminal_error("create PTY reader cancellation pipe", error.to_string());
         })?;
 
-        let reader = match spawn_reader(reader, master_fd, cancel_read, sender.clone()) {
+        let reader = match spawn_reader(reader, master_fd, cancel_read, sender.clone(), pty_reads) {
             Ok(worker) => worker,
             Err(error) => {
                 drop(receiver);
@@ -814,6 +823,7 @@ mod tests {
                 },
                 &format!("termtrace-worker-test-{}", uuid::Uuid::now_v7()),
                 register_host_signals().expect("register host signals"),
+                Arc::default(),
             )
             .expect("start real runtime workers");
 
@@ -877,6 +887,7 @@ mod tests {
             },
             &"x".repeat(256),
             register_host_signals().expect("register host signals"),
+            Arc::default(),
         );
         assert!(started.is_err());
 
@@ -920,8 +931,14 @@ mod tests {
         let (cancel_read, cancel_write) = pipe().expect("create cancel pipe");
         let (sender, receiver) = mpsc::sync_channel(16);
 
-        let thread = spawn_reader(Box::new(File::from(read_pipe)), None, cancel_read, sender)
-            .expect("spawn reader");
+        let thread = spawn_reader(
+            Box::new(File::from(read_pipe)),
+            None,
+            cancel_read,
+            sender,
+            Arc::default(),
+        )
+        .expect("spawn reader");
 
         fd_write(&cancel_write, b"x").expect("signal reader cancellation");
         let join_result = thread.join();

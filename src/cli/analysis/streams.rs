@@ -87,7 +87,7 @@ pub(in crate::cli) fn run_output(
     let mut output_hash = blake3::Hasher::new();
     let mut source_bytes = 0_u64;
     let mut output_bytes = 0_u64;
-    let mut stripper = ControlStripper::default();
+    let mut stripper = ControlStripper::new().into_diagnostic()?;
 
     {
         let mut writer = BufWriter::new(&mut staged);
@@ -186,7 +186,7 @@ fn follow_output(
     end_event_seq: Option<u64>,
     strip_controls: bool,
 ) -> Result<ExitCode> {
-    let mut stripper = ControlStripper::default();
+    let mut stripper = ControlStripper::new().into_diagnostic()?;
     let result = follow_records(
         response,
         session,

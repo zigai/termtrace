@@ -427,7 +427,7 @@
       "type": "object"
     },
     "StateDelta": {
-      "description": "Delta from the previous distinct state.",
+      "description": "Delta from the previous state of the same replay.",
       "properties": {
         "active_style": {
           "anyOf": [
@@ -592,11 +592,11 @@
   },
   "$id": "https://github.com/zigai/termtrace/schemas/state-record.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "One distinct semantic state boundary.",
+  "description": "The semantic state at one stream position.",
   "properties": {
     "delta": {
       "$ref": "#/$defs/StateDelta",
-      "description": "Stable delta from the preceding distinct state."
+      "description": "Stable delta from the preceding state of the same replay."
     },
     "event_byte_offset": {
       "description": "Zero-based byte offset inside an output event.",
@@ -645,7 +645,7 @@
       "type": "string"
     },
     "state_id": {
-      "description": "Dense zero-based state identifier.",
+      "description": "Stream position: the output bytes and applied resizes that produced this state.",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"

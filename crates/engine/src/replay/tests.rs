@@ -1,7 +1,11 @@
 use super::engine::{inspect_latest_presented_fast, inspect_latest_presented_fast_with_limits};
 use super::*;
 use proptest::{collection, prelude::*};
-use std::sync::{atomic::AtomicBool, Arc};
+use std::{
+    collections::HashMap,
+    slice,
+    sync::{atomic::AtomicBool, Arc},
+};
 use termtrace_evidence::{
     artifact::create_private_directory,
     event_log::{EventLog, EventLogWriter, SessionClock},
@@ -96,6 +100,66 @@ fn resize(cols: u16, rows: u16) -> [Event; 2] {
     ];
 }
 
+// The hash at every position, from a reference replay that writes one byte at a time and
+// captures after each.
+fn byte_at_a_time_hashes(log: &EventLog) -> Vec<String> {
+    let mut terminal =
+        GhosttyVt::new(log.header.cols, log.header.rows, 100_000).expect("reference terminal");
+    terminal
+        .apply_terminal_colors(&log.header.colors)
+        .expect("reference colors");
+    terminal
+        .set_terminfo_name(&log.header.term)
+        .expect("reference terminfo");
+
+    let hash = |terminal: &mut GhosttyVt| {
+        return semantic_state_hash(&terminal.snapshot().expect("reference snapshot"))
+            .expect("reference hash");
+    };
+    let mut hashes = vec![hash(&mut terminal)];
+    let mut intents = HashMap::new();
+
+    for record in &log.events {
+        match &record.event {
+            Event::Output { data } => {
+                for byte in data.as_bytes() {
+                    terminal.write_step(slice::from_ref(byte));
+                    hashes.push(hash(&mut terminal));
+                }
+            }
+            Event::ResizeIntent {
+                operation_id,
+                cols,
+                rows,
+                ..
+            } => {
+                intents.insert(*operation_id, (*cols, *rows));
+            }
+            Event::ResizeResult {
+                operation_id,
+                status: OperationStatus::Applied,
+                ..
+            } => {
+                let (cols, rows) = intents[operation_id];
+                terminal
+                    .resize(cols, rows, 8, 16)
+                    .expect("reference resize");
+                hashes.push(hash(&mut terminal));
+            }
+            _ => {}
+        }
+    }
+
+    return hashes;
+}
+
+fn position_of(states: &[StateRecord], state_id: u64) -> usize {
+    return states
+        .iter()
+        .position(|record| return record.state_id == state_id)
+        .expect("seed is a canonical boundary state");
+}
+
 // Checkpoints every state of a full replay, then resumes from each one. The resumed replay must
 // emit exactly the canonical records after that checkpoint and reach the same final state.
 fn assert_every_checkpoint_resumes_canonically(log: &EventLog) {
@@ -107,6 +171,7 @@ fn assert_every_checkpoint_resumes_canonically(log: &EventLog) {
             checkpoint: engine
                 .encode_checkpoint()?
                 .expect("replay engines track unfinished input"),
+            source_position: None,
         });
 
         canonical.push(record);
@@ -116,7 +181,7 @@ fn assert_every_checkpoint_resumes_canonically(log: &EventLog) {
     .expect("canonical replay");
 
     for seed in seeds {
-        let start = usize::try_from(seed.record.state_id).expect("state index");
+        let start = position_of(&canonical, seed.record.state_id);
         let mut resumed = Vec::new();
         let seeded =
             replay_with_seed_and_limits(log, None, seed, DEFAULT_REPLAY_LIMITS, |record, _, _| {
@@ -128,7 +193,7 @@ fn assert_every_checkpoint_resumes_canonically(log: &EventLog) {
 
         assert_eq!(resumed, canonical[start..], "resumed from state {start}");
         assert_eq!(seeded.final_state_hash, artifacts.final_state_hash);
-        assert_eq!(seeded.state_count, artifacts.state_count);
+        assert_eq!(seeded.final_state_id, artifacts.final_state_id);
     }
 }
 
@@ -160,8 +225,9 @@ fn explicit_live_prefix_excludes_later_output_and_hidden_sync_bytes() {
     let expected =
         inspect_latest_presented_fast(&output_log(b"OLD")).expect("expected visible state");
     assert_eq!(endpoint.state_hash, expected.state_hash);
+    assert_eq!(endpoint.state_id, 10);
     assert_eq!(endpoint.event_seq, Some(0));
-    assert_eq!(endpoint.event_byte_offset, Some(2));
+    assert_eq!(endpoint.event_byte_offset, Some(9));
 
     let mut wrong_bytes = boundary.clone();
     wrong_bytes.output_bytes += 1;
@@ -234,11 +300,12 @@ fn fast_endpoint_budgets_deferred_snapshots_across_many_output_records() {
 
 #[test]
 fn fast_endpoint_matches_byte_granular_latest_presented_state() {
-    let log = output_log(b"before\x1b[?2026hhidden\x1b[?2026l-after\x1b[2;4Hdone");
+    let log = output_log(b"before\x1b[?2026hhidden\x1b[?2026l-after\x1b[2;4Hdone\x1b[?2026hx");
     let fast = inspect_latest_presented_fast(&log).expect("fast endpoint replay");
     let canonical =
         inspect(&log, StateSelector::LatestPresented).expect("canonical latest presented state");
     assert_eq!(fast.state_hash, canonical.record.state_hash);
+    assert_eq!(fast.state_id, canonical.record.state_id);
     assert_eq!(fast.event_seq, canonical.record.event_seq);
     assert_eq!(fast.event_byte_offset, canonical.record.event_byte_offset);
     assert_eq!(fast.monotonic_ns, Some(canonical.record.monotonic_ns));
@@ -251,6 +318,7 @@ fn fast_endpoint_retains_source_cursor_for_trailing_buffered_output() {
     let canonical =
         inspect(&log, StateSelector::LatestPresented).expect("canonical latest presented state");
     assert_eq!(fast.state_hash, canonical.record.state_hash);
+    assert_eq!(fast.state_id, canonical.record.state_id);
     assert_eq!(fast.event_seq, canonical.record.event_seq);
     assert_eq!(fast.event_byte_offset, canonical.record.event_byte_offset);
     assert_eq!(fast.monotonic_ns, Some(canonical.record.monotonic_ns));
@@ -263,6 +331,7 @@ fn fast_endpoint_excludes_uncommitted_synchronized_output() {
     let canonical =
         inspect(&log, StateSelector::LatestPresented).expect("canonical latest presented state");
     assert_eq!(fast.state_hash, canonical.record.state_hash);
+    assert_eq!(fast.state_id, canonical.record.state_id);
     assert!(!fast.state.modes.synchronized_output);
 }
 
@@ -275,7 +344,8 @@ fn fast_endpoint_keeps_the_frame_from_the_start_of_a_hold() {
         "shown"
     );
     assert!(!fast.state.modes.alternate_screen);
-    assert_eq!(fast.event_byte_offset, Some(4));
+    assert_eq!(fast.state_id, 17);
+    assert_eq!(fast.event_byte_offset, Some(16));
 }
 
 #[test]
@@ -287,6 +357,7 @@ fn fast_endpoint_presents_again_after_a_reset_ends_a_hold() {
         "after"
     );
     assert!(!fast.state.modes.synchronized_output);
+    assert_eq!(fast.state_id, 23);
     assert_eq!(fast.event_byte_offset, Some(22));
 }
 
@@ -335,21 +406,7 @@ fn validated_checkpoint_seed_skips_long_session_canonical_output_prefix() {
     let data = vec![b'x'; 2 * 1_024];
     let log = output_log(&data);
     let checkpoint_offset = 1_024;
-    let mut seed = None;
-
-    replay_with(&log, None, |record, _, engine| {
-        if record.event_byte_offset == Some(checkpoint_offset) {
-            seed = Some(ReplaySeed {
-                record,
-                checkpoint: engine.encode_checkpoint()?.expect("checkpoint available"),
-            });
-        }
-
-        return Ok(());
-    })
-    .expect("checkpoint source replay");
-
-    let seed = seed.expect("periodic checkpoint state");
+    let seed = seed_at(&log, checkpoint_offset + 1);
     let remaining = u64::try_from(data.len())
         .expect("output length")
         .saturating_sub(checkpoint_offset.saturating_add(1));
@@ -411,111 +468,327 @@ fn checkpoints_resume_across_resizes_and_scrollback() {
     assert_every_checkpoint_resumes_canonically(&event_log(8, 3, events));
 }
 
-#[test]
-fn long_index_emits_periodic_validated_checkpoint_entries() {
-    let mut data = b"\x1b]2;tmux-title\x1b\\\x1b]7;file:///tmp\x1b\\".to_vec();
-    data.extend(vec![b'x'; 1_100]);
-    let output_bytes = u64::try_from(data.len()).expect("output length");
-    let mut log = output_log(&data);
+// Mixed output long enough for several checkpoint segments: control sequences split across
+// events, resizes, scrollback, synchronized-output holds, the alternate screen, and a screen
+// drawn twice so its state hashes recur.
+fn segmented_log() -> EventLog {
+    let mut events = vec![output(b"\x1b]2;segmented\x07")];
+
+    for line in 0..250_u32 {
+        let mut data = format!("{line:04} {}\r\n", "x".repeat(48)).into_bytes();
+
+        if line % 37 == 0 {
+            data.extend_from_slice(b"\x1b[?2026hhidden frame\x1b[?2026l");
+        }
+
+        if line % 23 == 0 {
+            data.extend_from_slice(b"\x1b[3");
+        }
+
+        if line % 23 == 1 {
+            data.splice(0..0, b"1m".iter().copied());
+        }
+
+        if line == 100 {
+            data.extend_from_slice(b"\x1b[?1049halternate");
+        }
+
+        if line == 150 {
+            data.extend_from_slice(b"\x1b[?1049l");
+        }
+
+        if line == 180 || line == 230 {
+            data.extend_from_slice(b"\x1b[0m\x1b[2J\x1b[Hsame screen");
+        }
+
+        events.push(output(&data));
+
+        if line % 97 == 50 {
+            events.extend(resize(if line % 2 == 0 { 30 } else { 40 }, 8));
+        }
+    }
+
+    return event_log(40, 10, events);
+}
+
+fn indexed(log: &EventLog) -> (tempfile::TempDir, EventLog) {
     let temporary = tempfile::TempDir::new().expect("temporary directory");
+    let mut log = log.clone();
     log.source_path = Some(temporary.path().join("events.jsonl"));
-    let directory =
-        index::write_cataloged(temporary.path(), &log).expect("periodic checkpoint index");
+    index::write_cataloged(temporary.path(), &log).expect("cataloged index");
 
-    let entries: Vec<StateIndexEntry> = fs_err::read_to_string(directory.join("state-index.jsonl"))
-        .expect("state index")
-        .lines()
-        .map(|line| return serde_json::from_str(line).expect("state index entry"))
-        .collect();
+    return (temporary, log);
+}
 
-    let checkpoint_ids: Vec<u64> = entries
-        .iter()
-        .filter(|entry| return entry.checkpoint)
-        .map(|entry| return entry.state_id)
-        .collect();
-    assert!(
-        checkpoint_ids.len() > 1,
-        "multiple checkpoints must be emitted"
-    );
-    assert!(
-        checkpoint_ids.windows(2).all(|w| return w[0] < w[1]),
-        "checkpoint IDs must be ordered"
-    );
-    assert_eq!(checkpoint_ids.first().copied(), Some(0));
-    assert!(
-        checkpoint_ids
-            .last()
-            .copied()
-            .is_some_and(|last| return last >= 1_000),
-        "must include late resume point"
-    );
-
-    for entry in entries.iter().filter(|entry| return entry.checkpoint) {
-        assert!(
-            entry.timeline_rank.is_some()
-                && entry.control_index_offset.is_some()
-                && entry.control_rank.is_some(),
-            "checkpoint {} must persist combined timeline and control resume metadata",
-            entry.state_id
-        );
-    }
-
-    assert!(directory.join("control-index.jsonl").is_file());
-    assert!(directory.join("control-source-index.jsonl").is_file());
-
-    let seed = DerivedIndex::open(&log)
-        .expect("trusted index lookup")
-        .expect("cataloged index")
-        .nearest_seed(&StateSelector::StateId(1_099))
-        .expect("validated checkpoint lookup")
-        .expect("nearest late checkpoint");
-    assert_eq!(
-        seed.record.state_id,
-        *checkpoint_ids.last().expect("last checkpoint")
-    );
-
-    let seed_offset = seed
-        .record
-        .event_byte_offset
-        .expect("output checkpoint offset");
-
-    let remaining_output_bytes = output_bytes.saturating_sub(seed_offset.saturating_add(1));
-    let seeded = replay_with_seed_and_limits(
-        &log,
-        None,
-        seed,
-        ReplayLimits {
-            output_bytes: remaining_output_bytes,
-            ..DEFAULT_REPLAY_LIMITS
+fn seed_at(log: &EventLog, position: u64) -> ReplaySeed {
+    let mut seed = None;
+    replay_log(
+        log,
+        DEFAULT_REPLAY_LIMITS,
+        ReplayRequest {
+            stop: Some(ReplayStop::Position(position)),
+            ..ReplayRequest::default()
         },
-        |_, _, _| return Ok(()),
+        |visit, engine| {
+            if let ReplayVisit::State(record, _) = visit
+                && record.state_id == position
+            {
+                seed = Some(ReplaySeed {
+                    record,
+                    checkpoint: engine.encode_checkpoint()?.expect("checkpoint available"),
+                    source_position: None,
+                });
+            }
+
+            return Ok(true);
+        },
     )
-    .expect("late replay must fit the suffix-only output budget");
-    assert_eq!(
-        seeded.final_state_hash,
-        replay(&log)
-            .expect("canonical replay")
-            .artifacts
-            .final_state_hash
-    );
+    .expect("replay to the seed position");
 
-    let index = DerivedIndex::open(&log)
-        .expect("trusted index lookup")
-        .expect("cataloged index");
-
-    for state_id in checkpoint_ids {
-        let seed = index
-            .nearest_seed(&StateSelector::StateId(state_id))
-            .expect("checkpoint lookup")
-            .expect("checkpoint at its own state");
-        assert_eq!(seed.record.state_id, state_id);
-
-        validate_replay_seed(&log, &seed).expect("checkpoint must seed the pinned Ghostty engine");
-    }
+    return seed.expect("the stop position is captured");
 }
 
 #[test]
-fn every_periodic_checkpoint_candidate_is_written() {
+fn every_position_matches_byte_at_a_time_replay() {
+    let log = segmented_log();
+    let reference = byte_at_a_time_hashes(&log);
+    let last = u64::try_from(reference.len() - 1).expect("final position");
+    let canonical = replay(&log).expect("canonical replay");
+    assert_eq!(canonical.artifacts.final_state_id, last);
+
+    for record in &canonical.states {
+        let position = usize::try_from(record.state_id).expect("position");
+        assert_eq!(
+            record.state_hash, reference[position],
+            "boundary {position}"
+        );
+    }
+
+    // A hold's presented edge is the position just before the byte that begins it.
+    let mut start = 0;
+    let mut edges = Vec::new();
+
+    for record in &log.events {
+        match &record.event {
+            Event::Output { data } => {
+                let bytes = data.as_bytes();
+                edges.extend(
+                    bytes
+                        .windows(8)
+                        .enumerate()
+                        .filter(|(_, window)| return *window == b"\x1b[?2026h")
+                        .map(|(offset, _)| return start + offset + 7),
+                );
+
+                start += bytes.len();
+            }
+            Event::ResizeResult { .. } => start += 1,
+            _ => {}
+        }
+    }
+
+    assert!(edges.len() >= 6);
+    for edge in edges {
+        let edge = u64::try_from(edge).expect("edge position");
+        assert!(
+            canonical
+                .states
+                .iter()
+                .any(|record| return record.state_id == edge && record.presented),
+            "hold edge {edge}"
+        );
+    }
+
+    for position in (0..=last).step_by(41) {
+        let inspection = inspect(&log, StateSelector::StateId(position)).expect("position");
+        assert_eq!(
+            inspection.record.state_hash,
+            reference[usize::try_from(position).expect("position")],
+            "position {position}"
+        );
+        assert_eq!(inspection.record.state_id, position);
+    }
+
+    assert!(inspect(&log, StateSelector::StateId(last + 1)).is_err());
+}
+
+#[test]
+fn indexed_seeks_rebuild_the_canonical_record_and_state() {
+    let log = segmented_log();
+    let mut canonical = Vec::new();
+    replay_with(&log, None, |record, state, _| {
+        canonical.push(StateInspection {
+            record,
+            state: state.clone(),
+        });
+
+        return Ok(());
+    })
+    .expect("canonical replay");
+
+    let (_directory, indexed_log) = indexed(&log);
+    let checkpoints = DerivedIndex::open(&indexed_log)
+        .expect("trusted index lookup")
+        .expect("cataloged index")
+        .checkpoints()
+        .expect("checkpoint catalog");
+    assert!(
+        checkpoints.len() >= 3,
+        "the log must span several checkpoints"
+    );
+
+    for boundary in canonical.iter().step_by(13).chain(canonical.last()) {
+        let seek = inspect(
+            &indexed_log,
+            StateSelector::StateId(boundary.record.state_id),
+        )
+        .expect("indexed seek");
+        assert_eq!(&seek, boundary, "boundary {}", boundary.record.state_id);
+    }
+
+    let last = canonical.last().expect("final state").record.state_id;
+    let mut positions: Vec<u64> = (0..=last).step_by(97).collect();
+
+    for checkpoint in &checkpoints {
+        positions.extend(
+            [1, 2]
+                .iter()
+                .filter_map(|delta| return checkpoint.state_id.checked_sub(*delta)),
+        );
+        positions.extend((0..3).map(|delta| return checkpoint.state_id + delta));
+    }
+
+    for position in positions
+        .into_iter()
+        .filter(|position| return *position <= last)
+    {
+        assert_eq!(
+            inspect(&indexed_log, StateSelector::StateId(position)).expect("indexed seek"),
+            inspect(&log, StateSelector::StateId(position)).expect("canonical seek"),
+            "position {position}"
+        );
+    }
+
+    assert!(inspect(&indexed_log, StateSelector::StateId(last + 1)).is_err());
+}
+
+#[test]
+fn indexed_selectors_resolve_like_canonical_replay() {
+    let log = segmented_log();
+    let (_directory, indexed_log) = indexed(&log);
+    let canonical = replay(&log).expect("canonical replay");
+    let mut selectors = vec![StateSelector::Final, StateSelector::LatestPresented];
+
+    for record in log.events.iter().step_by(7) {
+        selectors.push(StateSelector::EventSeq(record.seq));
+        selectors.push(StateSelector::MonotonicNs(record.monotonic_ns));
+        selectors.push(StateSelector::MonotonicNs(record.monotonic_ns - 1));
+    }
+
+    let mut first_occurrence = HashMap::new();
+    let mut recurring = Vec::new();
+
+    for state in &canonical.states {
+        if first_occurrence
+            .insert(state.state_hash.clone(), state.state_id)
+            .is_some()
+        {
+            recurring.push(state.state_hash.clone());
+        }
+    }
+
+    assert!(!recurring.is_empty(), "the redrawn screen must recur");
+
+    for state_hash in recurring.into_iter().take(2).chain(
+        canonical
+            .states
+            .iter()
+            .step_by(5_000)
+            .map(|state| return state.state_hash.clone()),
+    ) {
+        selectors.push(StateSelector::StateHash(state_hash));
+    }
+
+    let expected = inspect_many(&log, &selectors).expect("canonical selections");
+    for (selector, expected) in selectors.into_iter().zip(expected) {
+        let seek = inspect(&indexed_log, selector.clone()).expect("indexed selection");
+        assert_eq!(seek, expected, "{selector:?}");
+    }
+
+    assert!(inspect(&indexed_log, StateSelector::StateHash("0".repeat(64))).is_err());
+}
+
+#[test]
+fn hidden_tail_resolves_latest_presented_to_an_earlier_segment() {
+    let mut events = vec![output(b"shown")];
+    events.push(output(b"\x1b[?2026h"));
+
+    for line in 0..300_u32 {
+        events.push(output(
+            format!("{line:04} {}\r\n", "y".repeat(48)).as_bytes(),
+        ));
+    }
+
+    let log = event_log(40, 10, events);
+    let (_directory, indexed_log) = indexed(&log);
+    let checkpoints = DerivedIndex::open(&indexed_log)
+        .expect("trusted index lookup")
+        .expect("cataloged index")
+        .checkpoints()
+        .expect("checkpoint catalog");
+    assert!(checkpoints.len() >= 2, "the hidden run must span segments");
+
+    let expected = inspect(&log, StateSelector::LatestPresented).expect("canonical selection");
+    assert_eq!(expected.record.state_id, 12);
+    assert_eq!(expected.record.event_seq, Some(1));
+    assert_eq!(
+        inspect(&indexed_log, StateSelector::LatestPresented).expect("indexed selection"),
+        expected
+    );
+}
+
+#[test]
+fn boundary_states_are_event_ends_effects_and_hold_edges() {
+    let log = event_log(
+        20,
+        4,
+        vec![
+            output(b"a\x1b[3"),
+            output(b"1mb\x1b]2;ti"),
+            output(b"tle\x1b\\c\x1b[?2026hd\x1b[?2026le"),
+        ],
+    );
+
+    let boundaries: Vec<(u64, Option<u64>, Option<u64>, bool)> = replay(&log)
+        .expect("canonical replay")
+        .states
+        .iter()
+        .map(|record| {
+            return (
+                record.state_id,
+                record.event_seq,
+                record.event_byte_offset,
+                record.presented,
+            );
+        })
+        .collect();
+    assert_eq!(
+        boundaries,
+        [
+            (0, None, None, true),
+            (4, Some(0), Some(3), true),
+            (13, Some(1), Some(8), true),
+            (18, Some(2), Some(4), true),
+            (26, Some(2), Some(12), true),
+            (35, Some(2), Some(21), false),
+            (36, Some(2), Some(22), true),
+            (37, Some(2), Some(23), true),
+        ]
+    );
+}
+
+#[test]
+fn checkpoints_inside_long_wrapped_alternate_screen_output_resume_canonically() {
     // Long unbroken lines keep the cursor in pending wrap and the alternate screen hides the
     // primary one; neither may prevent a checkpoint.
     let mut data = b"\x1b[?1049h".to_vec();
@@ -524,22 +797,31 @@ fn every_periodic_checkpoint_candidate_is_written() {
     }
 
     let log = output_log(&data);
-    let temporary = tempfile::TempDir::new().expect("temporary directory");
-    let directory = temporary.path().join("derived");
-    create_private_directory(&directory).expect("private derived directory");
-    let (artifacts, _) = index::write(&directory, &log, None, true, StateSelection::All)
-        .expect("periodic checkpoint index");
+    let (_directory, indexed_log) = indexed(&log);
+    let index = DerivedIndex::open(&indexed_log)
+        .expect("trusted index lookup")
+        .expect("cataloged index");
 
-    let checkpoint_count = fs_err::read_to_string(directory.join("state-index.jsonl"))
-        .expect("state index")
-        .lines()
-        .map(|line| return serde_json::from_str::<StateIndexEntry>(line).expect("index entry"))
-        .filter(|entry| return entry.checkpoint)
-        .count();
-    assert_eq!(
-        u64::try_from(checkpoint_count).expect("checkpoint count"),
-        artifacts.state_count.div_ceil(128)
-    );
+    let checkpoints = index.checkpoints().expect("checkpoint catalog");
+    assert!(checkpoints.len() > 1, "long output must be checkpointed");
+
+    let canonical = replay(&log).expect("canonical replay");
+
+    for checkpoint in checkpoints {
+        let seed = index.seed(&checkpoint).expect("checkpoint frame");
+        validate_replay_seed(&log, &seed).expect("checkpoint must seed the pinned Ghostty engine");
+
+        let start = position_of(&canonical.states, seed.record.state_id);
+        let mut resumed = Vec::new();
+        replay_with_seed_and_limits(&log, None, seed, DEFAULT_REPLAY_LIMITS, |record, _, _| {
+            resumed.push(record);
+
+            return Ok(());
+        })
+        .expect("checkpoint replay");
+
+        assert_eq!(resumed, canonical.states[start..]);
+    }
 }
 
 #[test]

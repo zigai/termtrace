@@ -37,7 +37,9 @@
               "description": "Explicit loop policy."
             }
           },
-          "required": ["format"],
+          "required": [
+            "format"
+          ],
           "type": "object"
         },
         {
@@ -49,7 +51,9 @@
               "type": "string"
             }
           },
-          "required": ["format"],
+          "required": [
+            "format"
+          ],
           "type": "object"
         }
       ]
@@ -89,7 +93,10 @@
       "description": "Must match verified source pixels; never a fallback preference."
     }
   },
-  "required": ["formats", "source_kind"],
+  "required": [
+    "formats",
+    "source_kind"
+  ],
   "title": "DerivativeExportOptions",
   "type": "object"
 }

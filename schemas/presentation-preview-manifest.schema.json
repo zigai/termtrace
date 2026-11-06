@@ -28,14 +28,24 @@
         },
         "schema_type": {
           "description": "Public schema identifier, when the file is structured data.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "sensitivity": {
           "$ref": "#/$defs/ArtifactSensitivity",
           "description": "Sensitivity classification."
         }
       },
-      "required": ["path", "byte_length", "blake3", "media_type", "sensitivity", "relationship"],
+      "required": [
+        "path",
+        "byte_length",
+        "blake3",
+        "media_type",
+        "sensitivity",
+        "relationship"
+      ],
       "type": "object"
     },
     "ArtifactSensitivity": {
@@ -90,7 +100,13 @@
           "type": "integer"
         }
       },
-      "required": ["columns", "tile_width", "max_frames", "change_only", "preview_width"],
+      "required": [
+        "columns",
+        "tile_width",
+        "max_frames",
+        "change_only",
+        "preview_width"
+      ],
       "type": "object"
     }
   },

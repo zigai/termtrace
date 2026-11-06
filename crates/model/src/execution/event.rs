@@ -422,6 +422,20 @@ pub struct EventRecord {
     pub event: Event,
 }
 
+/// Validated position immediately before a canonical record (or after the header).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EventLogPosition {
+    /// Sequence of the next record.
+    pub next_event_seq: u64,
+    /// Byte offset of the next record in the canonical stream.
+    pub file_offset: u64,
+    /// Hash of the preceding record or header.
+    pub event_hash: String,
+    /// Timestamp of the preceding record, or zero at the header.
+    pub monotonic_ns: u64,
+}
+
 /// Hash-and-length summary for one elided canonical byte field.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]

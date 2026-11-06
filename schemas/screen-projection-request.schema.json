@@ -58,7 +58,12 @@
           "type": "integer"
         }
       },
-      "required": ["top", "left", "right", "bottom"],
+      "required": [
+        "top",
+        "left",
+        "right",
+        "bottom"
+      ],
       "type": "object"
     }
   },
@@ -83,7 +88,9 @@
       "description": "Exact absolute region, or the complete viewport for text/spans."
     }
   },
-  "required": ["detail"],
+  "required": [
+    "detail"
+  ],
   "title": "ScreenProjectionRequest",
   "type": "object"
 }

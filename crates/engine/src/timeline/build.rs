@@ -1,24 +1,18 @@
 use super::selection::range_error;
 use crate::replay::{
-    timeline_event, visit_replay_range_while, visit_replay_seeded_while, DerivedIndex, ReplaySeed,
-    ReplayVisit, CONTROL_INDEX, CONTROL_SOURCE_INDEX,
+    open_seekable, seekable_len, timeline_event, visit_replay_range_while,
+    visit_replay_seeded_while, DerivedIndex, ReplaySeed, ReplayVisit, SeekableReader,
+    CONTROL_INDEX, CONTROL_SOURCE_INDEX,
 };
 use crate::{Error, Result};
 #[cfg(test)]
 use std::cell::Cell;
-use std::{
-    collections::VecDeque,
-    fs::{self, File},
-    io::{BufRead, BufReader, ErrorKind, Seek, SeekFrom},
-    path::PathBuf,
-};
+use std::{collections::VecDeque, io::BufRead, path::PathBuf};
 use termtrace_evidence::event_log::EventLog;
 use termtrace_model::{
     execution::event::Event,
     terminal::effect::TerminalEffectRecord,
-    terminal::replay::{
-        ControlSourceIndexEntry, StateIndexEntry, StateRecord, StateSelector, STATE_INDEX,
-    },
+    terminal::replay::{ControlSourceIndexEntry, StateRecord},
     terminal::vt::VtToken,
 };
 use termtrace_model::{
@@ -276,7 +270,7 @@ impl<'log> TokenTimelineCursor<'log> {
 
 struct IndexedTokenTimelineCursor {
     path: PathBuf,
-    reader: BufReader<File>,
+    reader: SeekableReader,
     line: String,
     #[cfg_attr(
         not(test),
@@ -298,22 +292,11 @@ impl IndexedTokenTimelineCursor {
             return Ok(None);
         }
 
-        let mut file = File::open(&path).map_err(|source| {
-            return Error::Filesystem {
-                path: path.clone(),
-                source,
-            };
-        })?;
-        file.seek(SeekFrom::Start(offset)).map_err(|source| {
-            return Error::Filesystem {
-                path: path.clone(),
-                source,
-            };
-        })?;
+        let reader = open_seekable(&path, offset)?;
 
         return Ok(Some(Self {
             path,
-            reader: BufReader::new(file),
+            reader,
             line: String::new(),
             range,
             record_metrics,
@@ -437,20 +420,22 @@ impl<'log> AuxiliaryTimelineCursor<'log> {
                     record_metrics,
                 );
             });
-            match indexed {
-                Ok(Some(cursor)) => (Some(ControlTimelineCursor::Indexed(cursor)), None),
-                Ok(None) => (
-                    Some(ControlTimelineCursor::Framed(TokenTimelineCursor {
+
+            match indexed.and_then(|indexed| {
+                return match indexed {
+                    Some(cursor) => Ok(ControlTimelineCursor::Indexed(cursor)),
+                    None => Ok(ControlTimelineCursor::Framed(TokenTimelineCursor {
                         log,
                         range,
                         record_metrics,
                         event_index: 0,
                         byte_offset: 0,
-                        framer: Some(VtFramer::default()),
+                        framer: Some(VtFramer::with_default_bound()?),
                         pending: VecDeque::new(),
                     })),
-                    None,
-                ),
+                };
+            }) {
+                Ok(cursor) => (Some(cursor), None),
                 Err(error) => (None, Some(error)),
             }
         } else {
@@ -538,27 +523,12 @@ fn locate_range_control_offset(
                 None => (record.seq, record.seq),
             });
         });
-
     let Some((first_event, last_event)) = relevant_bounds else {
-        return fs::metadata(&controls_path)
-            .map(|metadata| return Some(metadata.len()))
-            .map_err(|source| {
-                return Error::Filesystem {
-                    path: controls_path,
-                    source,
-                };
-            });
+        return seekable_len(&controls_path).map(Some);
     };
 
-    let file = File::open(&source_index_path).map_err(|source| {
-        return Error::Filesystem {
-            path: source_index_path.clone(),
-            source,
-        };
-    })?;
-
     let mut offset = None;
-    for line in BufReader::new(file).lines() {
+    for line in open_seekable(&source_index_path, 0)?.lines() {
         let line = line.map_err(|source| {
             return Error::Filesystem {
                 path: source_index_path.clone(),
@@ -596,75 +566,35 @@ fn locate_offset_checkpoint(
     let Some(index) = index.filter(|_| return offset > 0) else {
         return Ok(None);
     };
-    let path = index.member(STATE_INDEX);
-    let file = match File::open(&path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(source) => {
-            return Err(Error::Filesystem { path, source });
-        }
-    };
 
-    let mut reader = BufReader::new(file);
-    let mut line = String::new();
-    let mut hidden_before = 0_u64;
     let mut candidate = None;
+    for checkpoint in index.checkpoints()? {
+        let mut rank = checkpoint.timeline_rank;
 
-    loop {
-        line.clear();
-        let read = reader.read_line(&mut line).map_err(|source| {
-            return Error::Filesystem {
-                path: path.clone(),
-                source,
-            };
-        })?;
-        if read == 0 {
+        if !include_hidden_states {
+            rank = rank.saturating_sub(checkpoint.hidden_before);
+        }
+
+        if !include_controls {
+            rank = rank.saturating_sub(checkpoint.control_rank);
+        }
+
+        if rank > offset {
             break;
         }
 
-        let entry: StateIndexEntry = serde_json::from_str(line.trim_end()).map_err(|source| {
-            return Error::InvalidJson {
-                path: path.clone(),
-                json_path: "$".to_owned(),
-                source,
-            };
-        })?;
-
-        if entry.checkpoint
-            && let (Some(mut rank), Some(control_index_offset), Some(control_rank)) = (
-                entry.timeline_rank,
-                entry.control_index_offset,
-                entry.control_rank,
-            )
-        {
-            if !include_hidden_states {
-                rank = rank.saturating_sub(hidden_before);
-            }
-
-            if !include_controls {
-                rank = rank.saturating_sub(control_rank);
-            }
-
-            if rank <= offset {
-                candidate = Some((rank, entry.state_id, control_index_offset));
-            } else {
-                break;
-            }
-        }
-
-        if !entry.presented {
-            hidden_before = hidden_before.saturating_add(1);
-        }
+        candidate = Some((rank, checkpoint));
     }
 
-    let Some((checkpoint_rank, state_id, control_index_offset)) = candidate else {
+    let Some((checkpoint_rank, checkpoint)) = candidate else {
         return Ok(None);
     };
-    let seed = index
-        .nearest_seed(&StateSelector::StateId(state_id))?
-        .ok_or_else(|| return range_error("timeline checkpoint index entry has no replay seed"))?;
 
-    return Ok(Some((checkpoint_rank, seed, Some(control_index_offset))));
+    return Ok(Some((
+        checkpoint_rank,
+        index.seed(&checkpoint)?,
+        Some(checkpoint.control_index_offset),
+    )));
 }
 
 struct TimelinePageCollector {

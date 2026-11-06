@@ -19,7 +19,6 @@ use super::{
     actor::SessionActor,
     input::apply_resize,
     model::{RuntimeMessage, TerminalGeometry},
-    presentation::resize_semantic,
     support::{actor_boundaries, control_error_response, deliver_response, terminal_error},
 };
 use crate::Result;
@@ -495,9 +494,7 @@ impl SessionActor<'_> {
             geometry,
         )?;
 
-        resize_semantic(&mut self.live.semantic, geometry)?;
-        self.live.geometry = geometry;
-        self.live.presented_stale = true;
+        self.live.apply_resize(geometry)?;
 
         let Some(pending) = correlated.and_then(|_| {
             return self

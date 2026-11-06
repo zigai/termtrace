@@ -36,7 +36,10 @@
       "description": "Semantic state used when a cursor mask affected this frame.",
       "format": "uint64",
       "minimum": 0,
-      "type": ["integer", "null"]
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "encoded_pixel_change": {
       "description": "Whether this frame uses actual adjacent decoded encoded-pixel comparison.",
@@ -60,19 +63,28 @@
     },
     "source_state_hash": {
       "description": "Exact semantic source state hash, present only for semantic-rendered input.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "source_state_id": {
       "description": "Exact semantic source state, present only for semantic-rendered input.",
       "format": "uint64",
       "minimum": 0,
-      "type": ["integer", "null"]
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "source_state_monotonic_ns": {
       "description": "Exact semantic source timestamp, present only for semantic-rendered input.",
       "format": "uint64",
       "minimum": 0,
-      "type": ["integer", "null"]
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "transforms": {
       "description": "Presentation-only transforms applied to this frame.",
