@@ -79,12 +79,12 @@ lint:
 
 # Format every supported first-party file type
 format:
-    @ruff format --extend-exclude '*.md' .
+    @ruff format --extend-exclude '*.md,vendor/ghostty' .
     @cargo statement-spacing fix --format-first
-    @oxfmt '!**/*.md' '!**/*.toml' '!schemas/**' '!**/package.json' '!crates/bindings-node/types.d.ts' '!**/fixtures/**' '!**/snapshots/**' '!**/corpus/**' '!**/package-lock.json' '!crates/bindings-node/dts-header.d.ts' '!crates/bindings-node/index.d.ts' '!**/*-lock.json'
+    @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r oxfmt --no-error-on-unmatched-pattern '!**/*.md' '!schemas/**' '!**/package.json' '!crates/bindings-node/types.d.ts' '!**/fixtures/**' '!**/snapshots/**' '!**/corpus/**' '!**/package-lock.json' '!crates/bindings-node/dts-header.d.ts' '!crates/bindings-node/index.d.ts' '!**/*-lock.json'
     @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r shfmt -f | xargs -r -d '\n' shfmt -w
     @git ls-files -co --exclude-standard -- Justfile justfile "*.just" | while IFS= read -r file; do just --justfile "$file" --fmt; done
-    @just markdown fmt
+    @just markdown fmt --exclude vendor/ghostty
 
 # Run the complete native recording, replay, video, and screenshot verification test
 native-check:
@@ -197,13 +197,14 @@ clean: (remove "node_modules" "vendor/ghostty/zig-out" "vendor/ghostty/.zig-cach
 
 # Check the same files and tools without writing
 formatcheck:
-    @ruff format --check --extend-exclude '*.md' .
+    @ruff format --check --extend-exclude '*.md,vendor/ghostty' .
     @cargo fmt --check
     @cargo statement-spacing check
-    @oxfmt --check '!**/*.md' '!**/*.toml' '!schemas/**' '!**/package.json' '!crates/bindings-node/types.d.ts' '!**/fixtures/**' '!**/snapshots/**' '!**/corpus/**' '!**/package-lock.json' '!crates/bindings-node/dts-header.d.ts' '!crates/bindings-node/index.d.ts' '!**/*-lock.json'
+    @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r oxfmt --check --no-error-on-unmatched-pattern '!**/*.md' '!schemas/**' '!**/package.json' '!crates/bindings-node/types.d.ts' '!**/fixtures/**' '!**/snapshots/**' '!**/corpus/**' '!**/package-lock.json' '!crates/bindings-node/dts-header.d.ts' '!crates/bindings-node/index.d.ts' '!**/*-lock.json'
     @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r shfmt -f | xargs -r -d '\n' shfmt -d
     @git ls-files -co --exclude-standard -- Justfile justfile "*.just" | while IFS= read -r file; do just --justfile "$file" --fmt --check; done
-    @just markdown check
+    @just markdown check --exclude vendor/ghostty
+    @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r editorconfig-checker -disable-indent-size -disable-indentation -disable-max-line-length -disable-charset -exclude '^fuzz/corpus/'
 
 # Run the commit checks and slow suites
 checkfull: (run-checks "formatcheck" "lockcheck" "audit" "lint" "bindings-lint" "validate" "bindings-build" "test" "integration" "bindings-test" "native-check" "native-test" "sanitize" "race" "miri" "fuzz" "mutation" "bench")
