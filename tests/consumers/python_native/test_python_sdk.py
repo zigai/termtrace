@@ -10,13 +10,12 @@ import math
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 import threading
 import time
 import uuid
-from pathlib import Path
 from fractions import Fraction
+from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
@@ -37,13 +36,13 @@ from termtrace import (
     Termtrace,
     TermtraceError,
     TimeoutError,
+    _async,
     aio,
     normalize_edit,
     output_frames_for_source_frame,
     source_for_output_frame,
     types,
 )
-from termtrace import _async
 from termtrace.aio import AsyncTermtrace
 
 TERMTRACE_BIN = os.path.abspath(
@@ -142,7 +141,7 @@ def test_raw_output_streaming() -> None:
         ) as rec:
             rec.screen().wait_for_text("OUTPUT_STREAM_LINE", timeout_secs=5.0)
             # Read output bytes
-            raw_bytes, next_off, has_more = rec.read_output(offset=0, limit=4096)
+            raw_bytes, next_off, _ = rec.read_output(offset=0, limit=4096)
             assert len(raw_bytes) > 0
             assert b"OUTPUT_STREAM_LINE" in raw_bytes
             assert next_off > 0
@@ -1547,24 +1546,23 @@ async def test_semantic_preview_and_every_format_render_from_python(
             session, edit, out, renderer="semantic", fps=EDITING["fps"]
         )
         assert Path(render["output"]) == out
-        probe = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=codec_name",
-                "-of",
-                "csv=p=0",
-                str(out),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
+        probe = await asyncio.create_subprocess_exec(
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "csv=p=0",
+            str(out),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        assert probe.stdout.strip() == codec
+        stdout, stderr = await probe.communicate()
+        assert probe.returncode == 0, stderr.decode()
+        assert stdout.decode().strip() == codec
         manifest = json.loads(
             (Path(render["sidecar"]) / "manifest.json").read_text(encoding="utf-8")
         )

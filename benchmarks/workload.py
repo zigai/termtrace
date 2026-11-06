@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 import select
 import sys
 import termios
 import tty
+from pathlib import Path
 
 
 def emit(data: bytes) -> None:

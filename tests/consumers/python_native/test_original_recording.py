@@ -17,8 +17,8 @@ from termtrace import (
     OriginalRecording,
     Termtrace,
     TermtraceError,
+    types,
 )
-from termtrace import types
 from termtrace.aio import AsyncTermtrace
 
 TERMTRACE_BIN = os.path.abspath(

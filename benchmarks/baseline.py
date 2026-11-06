@@ -11,16 +11,16 @@ Measures all critical hit paths:
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
 import json
 import os
-from pathlib import Path
 import shutil
 import statistics
 import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -97,7 +97,7 @@ class BenchmarkSuite:
     ) -> tuple[subprocess.CompletedProcess[bytes], float]:
         cmd = [str(x) for x in args]
         start = time.perf_counter_ns()
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        res = subprocess.run(cmd, capture_output=True, check=False)
         elapsed = time.perf_counter_ns() - start
         if check and res.returncode != 0:
             err = res.stderr.decode("utf-8", errors="replace")
@@ -148,7 +148,7 @@ class BenchmarkSuite:
 
         for mode in ["throughput", "bounded", "strict"]:
 
-            def run_record() -> float:
+            def run_record(mode: str = mode) -> float:
                 session = self.temp_dir / f"bench-dur-{mode}.termtrace"
                 if session.exists():
                     shutil.rmtree(session)

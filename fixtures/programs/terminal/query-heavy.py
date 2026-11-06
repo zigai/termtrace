@@ -8,7 +8,6 @@ import termios
 import time
 import tty
 
-
 stdout = sys.stdout.fileno()
 stdin = sys.stdin.fileno()
 original = termios.tcgetattr(stdin)

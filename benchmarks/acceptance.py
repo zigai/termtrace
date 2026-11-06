@@ -4,12 +4,10 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import fcntl
 import hashlib
 import math
 import os
-from pathlib import Path
 import platform
 import pty
 import re
@@ -25,9 +23,11 @@ import termios
 import threading
 import time
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Self
 
 import msgspec
-
 from acceptance_models import (
     Contract,
     Gate,
@@ -54,7 +54,7 @@ def object_json(data: bytes) -> dict[str, object]:
     if isinstance(value, list) and len(value) == 1:
         value = value[0]
     if not isinstance(value, dict):
-        raise ValueError("expected one JSON object")
+        raise TypeError("expected one JSON object")
     return value
 
 
@@ -109,7 +109,7 @@ class MemoryMonitor:
                 return
             self.done.wait(0.005)
 
-    def __enter__(self) -> MemoryMonitor:
+    def __enter__(self) -> Self:
         self.thread.start()
         return self
 
@@ -194,7 +194,7 @@ class AcceptanceRunner:
         if not isinstance(profile, dict) or not isinstance(
             profile.get("ghostty_config"), str
         ):
-            raise ValueError("missing Ghostty profile")
+            raise TypeError("missing Ghostty profile")
         self.profile.write_text(profile["ghostty_config"])
 
     def cli(self, *args: str | Path) -> list[str]:
@@ -551,7 +551,7 @@ class AcceptanceRunner:
                     manifest = object_json((session / "session.json").read_bytes())
                     socket_name = manifest.get("control_socket")
                     if not isinstance(socket_name, str):
-                        raise ValueError("recording manifest has no control socket")
+                        raise TypeError("recording manifest has no control socket")
                     while f"@{socket_name}" not in Path("/proc/net/unix").read_text():
                         if process.poll() is not None or time.monotonic() > deadline:
                             raise RuntimeError(
@@ -626,7 +626,7 @@ class AcceptanceRunner:
         status = self.payload(self.run(self.cli("status", session)))
         clock = status.get("clock_sample")
         if not isinstance(clock, dict):
-            raise RuntimeError(
+            raise TypeError(
                 "actor clock calibration unavailable: notification delta is inconclusive"
             )
         origin = int(clock["system_monotonic_ns"]) - int(clock["session_monotonic_ns"])
@@ -939,7 +939,7 @@ class AcceptanceRunner:
             elif isinstance(boundary.get("durable_boundary"), dict):
                 cursor = boundary["durable_boundary"].get("next_event_seq")
         if not isinstance(cursor, int):
-            raise ValueError(
+            raise TypeError(
                 f"live status did not return its durable event cursor: {status}"
             )
         command = self.cli(

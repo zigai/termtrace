@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import select
 import signal
 import struct
@@ -17,8 +16,9 @@ import sys
 import time
 import uuid
 import zlib
-from typing import Any
+from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import gi
 
@@ -180,7 +180,7 @@ class Portal:
             raise RuntimeError("portal must provide exactly one selected window")
         node, properties = streams[0]
         if not isinstance(node, int) or not isinstance(properties, dict):
-            raise RuntimeError("portal returned an invalid PipeWire stream")
+            raise TypeError("portal returned an invalid PipeWire stream")
         result, descriptors = self.bus.call_with_unix_fd_list_sync(
             "org.freedesktop.portal.Desktop",
             "/org/freedesktop/portal/desktop",
@@ -302,7 +302,7 @@ class Acquisition:
                 )
                 temporary.rename(self.directory / "acquisition-ready.json")
             return Gst.PadProbeReturn.OK
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - callback boundary; finish() re-raises it
             # PyGObject does not propagate callback exceptions to the pipeline owner.
             self.failure = e
             return Gst.PadProbeReturn.DROP
@@ -376,7 +376,7 @@ class Acquisition:
             )
             if message is not None:
                 if message.type == Gst.MessageType.ERROR:
-                    error, debug = message.parse_error()
+                    error, _ = message.parse_error()
                     raise RuntimeError(f"capture pipeline failed: {error.message}")
                 if stopping is None:
                     raise RuntimeError(

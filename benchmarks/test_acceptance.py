@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stdout
 import hashlib
 import io
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
 from acceptance_models import Gate, Sample, latency_result, percentile
