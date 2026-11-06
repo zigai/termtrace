@@ -75,7 +75,7 @@ lint:
     @cargo machete
     @set -e; for file in install.sh benchmarks/*.sh scripts/*.sh; do bash -n "$file"; done
     @bash scripts/check-github-action-pins.sh
-    @uv run --project crates/bindings-python --group dev ruff check .
+    @uv run --project crates/bindings-python --group dev ruff check --extend-exclude vendor/ghostty .
 
 # Format every supported first-party file type
 format:
@@ -109,7 +109,7 @@ fix: && format
     cargo clippy --locked --workspace --all-targets --all-features --fix --allow-dirty --allow-staged
     cargo clippy --locked -p termtrace-sdk --no-default-features --all-targets --fix --allow-dirty --allow-staged
     cargo machete --fix
-    uv run --project crates/bindings-python --group dev ruff check --fix .
+    uv run --project crates/bindings-python --group dev ruff check --fix --extend-exclude vendor/ghostty .
 
 # Measure all local test suites and print coverage
 coverage:
