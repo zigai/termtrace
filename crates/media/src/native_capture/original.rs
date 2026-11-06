@@ -263,7 +263,7 @@ pub fn capture_original(
         };
     });
 
-    let (manifest, manifest_bytes, completion) = match (result, control_removed) {
+    let staged = match (result, control_removed) {
         (Ok(staged), Ok(())) => staged,
         (Ok(_), Err(cleanup)) => {
             return Err(preserve_failed(
@@ -307,9 +307,7 @@ pub fn capture_original(
         &staging,
         &destination,
         destination_parent,
-        &manifest,
-        &manifest_bytes,
-        &completion,
+        &staged,
     )
     .map_err(|error| {
         return classify(OriginalCaptureFailure::PublicationFailed, cancelled, error);
@@ -318,24 +316,30 @@ pub fn capture_original(
     return Ok(OriginalCapture {
         outcome: outcome(destination, &CaptureKind::Video),
         result: published,
-        completion,
+        completion: staged.completion,
     });
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "publication names the session, staging and destination explicitly"
-)]
+struct StagedCapture {
+    manifest: VisualManifest,
+    manifest_bytes: Vec<u8>,
+    completion: SessionCompletion,
+}
+
 fn publish(
     session_directory: &Path,
     parent: &Path,
     staging: &Path,
     destination: &Path,
     destination_parent: &Path,
-    manifest: &VisualManifest,
-    manifest_bytes: &[u8],
-    completion: &SessionCompletion,
+    staged: &StagedCapture,
 ) -> Result<MediaArtifactResult> {
+    let StagedCapture {
+        manifest,
+        manifest_bytes,
+        completion,
+    } = staged;
+
     // Recording creates the session itself. Only after completion can the native
     // staging directory become its direct child for the common artifact commit protocol.
     let publication_staging =
@@ -622,7 +626,7 @@ fn capture_staged(
     arguments: impl FnOnce(&OriginalRecorderPaths<'_>) -> Vec<OsString>,
     staging: &Path,
     control: &Path,
-) -> Result<(VisualManifest, Vec<u8>, SessionCompletion)> {
+) -> Result<StagedCapture> {
     use OriginalCaptureFailure::{
         AcquisitionFailed, PublicationFailed, RecordingFailed, StartupFailed,
     };
@@ -1096,7 +1100,11 @@ fn capture_staged(
     })();
     let (manifest, bytes) = published.map_err(stage(PublicationFailed, cancelled))?;
 
-    return Ok((manifest, bytes, completion));
+    return Ok(StagedCapture {
+        manifest,
+        manifest_bytes: bytes,
+        completion,
+    });
 }
 
 fn wait_for_acquisition(

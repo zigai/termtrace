@@ -397,27 +397,19 @@ pub fn plan_with_capture_directory(
         fps,
     )?;
 
-    let change_frames = normalize_semantic_changes(
+    let semantic_mapping = SemanticFrameMapping {
         session,
-        edit.change_visualization.as_ref(),
-        &clips,
-        capture_start,
+        clips: &clips,
+        capture_start_ns: capture_start,
         fps,
         source_width,
         source_height,
-        source_geometry,
-    )?;
+        geometry: source_geometry,
+    };
+    let change_frames =
+        normalize_semantic_changes(&semantic_mapping, edit.change_visualization.as_ref())?;
 
-    let cursor_masks = normalize_cursor_masks(
-        session,
-        &edit.transforms,
-        &clips,
-        capture_start,
-        fps,
-        source_width,
-        source_height,
-        source_geometry,
-    )?;
+    let cursor_masks = normalize_cursor_masks(&semantic_mapping, &edit.transforms)?;
 
     let (output_width, output_height) = validate_transform_geometry(
         edit,
@@ -1053,29 +1045,45 @@ fn normalize_annotations(
     return Ok(normalized);
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the semantic/native coordinate boundary is clearer with explicit measured inputs"
-)]
-fn normalize_semantic_changes(
-    session: &Path,
-    visualization: Option<&ChangeVisualization>,
-    clips: &[NormalizedClip],
+struct SemanticFrameMapping<'source> {
+    session: &'source Path,
+    clips: &'source [NormalizedClip],
     capture_start_ns: i128,
     fps: u16,
     source_width: u16,
     source_height: u16,
     geometry: TerminalGeometryReport,
+}
+
+impl SemanticFrameMapping<'_> {
+    fn source_frame(&self, monotonic_ns: u64) -> u64 {
+        return frame_floor_ns(
+            source_elapsed_ns(monotonic_ns, self.capture_start_ns),
+            self.fps,
+        );
+    }
+
+    fn text_origin(&self) -> (u16, u16) {
+        return (
+            self.source_width.saturating_sub(self.geometry.text_width) / 2,
+            self.source_height.saturating_sub(self.geometry.text_height) / 2,
+        );
+    }
+}
+
+fn normalize_semantic_changes(
+    mapping: &SemanticFrameMapping<'_>,
+    visualization: Option<&ChangeVisualization>,
 ) -> Result<Vec<NormalizedChangeFrame>> {
     if !visualization.is_some_and(|change| return change.source == ChangeSource::SemanticCells) {
         return Ok(Vec::new());
     }
 
-    let x_origin = source_width.saturating_sub(geometry.text_width) / 2;
-    let y_origin = source_height.saturating_sub(geometry.text_height) / 2;
+    let geometry = mapping.geometry;
+    let (x_origin, y_origin) = mapping.text_origin();
     let mut output_frames_by_source = BTreeMap::<u64, Vec<u64>>::new();
 
-    for clip in clips {
+    for clip in mapping.clips {
         for output_frame in clip.output_start_frame..clip.output_end_frame {
             let (source_frame, _) = mapped_source_frame(clip, output_frame);
             output_frames_by_source
@@ -1087,13 +1095,12 @@ fn normalize_semantic_changes(
 
     let mut changes = Vec::new();
 
-    visit_session_states_while(session, &AtomicBool::new(false), |state, _| {
+    visit_session_states_while(mapping.session, &AtomicBool::new(false), |state, _| {
         if !state.presented {
             return Ok(true);
         }
 
-        let source_frame =
-            frame_floor_ns(source_elapsed_ns(state.monotonic_ns, capture_start_ns), fps);
+        let source_frame = mapping.source_frame(state.monotonic_ns);
 
         let output_frames = output_frames_by_source
             .get(&source_frame)
@@ -1140,19 +1147,9 @@ fn normalize_semantic_changes(
     return Ok(changes);
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "cursor masks explicitly bind semantic state, video mapping, and measured geometry"
-)]
 fn normalize_cursor_masks(
-    session: &Path,
+    mapping: &SemanticFrameMapping<'_>,
     transforms: &[PixelTransform],
-    clips: &[NormalizedClip],
-    capture_start_ns: i128,
-    fps: u16,
-    source_width: u16,
-    source_height: u16,
-    geometry: TerminalGeometryReport,
 ) -> Result<Vec<CursorMaskFrame>> {
     if !transforms
         .iter()
@@ -1162,7 +1159,7 @@ fn normalize_cursor_masks(
     }
 
     let mut presented_by_frame = BTreeMap::new();
-    for clip in clips {
+    for clip in mapping.clips {
         for output_frame in clip.output_start_frame..clip.output_end_frame {
             let (source_frame, _) = mapped_source_frame(clip, output_frame);
             presented_by_frame.insert(source_frame, None);
@@ -1173,14 +1170,13 @@ fn normalize_cursor_masks(
     let mut cursor = None::<CursorState>;
     let mut presented = None;
 
-    visit_session_states_while(session, &AtomicBool::new(false), |state, _| {
+    visit_session_states_while(mapping.session, &AtomicBool::new(false), |state, _| {
         if let Some(next) = state.delta.cursor.clone() {
             cursor = Some(next);
         }
 
         if state.presented {
-            let source_frame =
-                frame_floor_ns(source_elapsed_ns(state.monotonic_ns, capture_start_ns), fps);
+            let source_frame = mapping.source_frame(state.monotonic_ns);
 
             while pending
                 .peek()
@@ -1203,11 +1199,11 @@ fn normalize_cursor_masks(
         value.clone_from(&presented);
     }
 
-    let x_origin = source_width.saturating_sub(geometry.text_width) / 2;
-    let y_origin = source_height.saturating_sub(geometry.text_height) / 2;
+    let geometry = mapping.geometry;
+    let (x_origin, y_origin) = mapping.text_origin();
     let mut masks = Vec::new();
 
-    for clip in clips {
+    for clip in mapping.clips {
         for output_frame in clip.output_start_frame..clip.output_end_frame {
             let (source_frame, _) = mapped_source_frame(clip, output_frame);
             let Some(Some((state_id, state_hash, cursor))) = presented_by_frame.get(&source_frame)

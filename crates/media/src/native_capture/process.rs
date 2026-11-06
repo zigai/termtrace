@@ -253,23 +253,45 @@ pub(super) fn spawn_geometry_probe(
     );
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the arguments mirror the explicit playback subprocess protocol"
-)]
+pub(super) struct PlaybackFiles {
+    pub(super) timing: PathBuf,
+    pub(super) error: PathBuf,
+    pub(super) geometry: PathBuf,
+    pub(super) ready: PathBuf,
+}
+
+impl PlaybackFiles {
+    pub(super) fn in_staging(staging: &Path) -> Self {
+        return Self {
+            timing: staging.join("playback-timing.json"),
+            error: staging.join("playback-error.json"),
+            geometry: staging.join("geometry-preflight.json"),
+            ready: staging.join("playback-ready"),
+        };
+    }
+}
+
+pub(super) struct GhosttyEnvironment<'launch> {
+    pub(super) display: &'launch str,
+    pub(super) overrides: &'launch [String],
+    pub(super) profile: Option<&'launch Path>,
+    pub(super) scaling: Option<super::capture::DisplayScaling>,
+}
+
 pub(super) fn spawn_ghostty(
     helper: &Path,
     options: &CaptureOptions,
     staging: &Path,
-    display: &str,
-    timing: &Path,
-    error: &Path,
-    geometry: &Path,
-    ready: &Path,
-    overrides: &[String],
-    profile: Option<&Path>,
-    scaling: Option<super::capture::DisplayScaling>,
+    files: &PlaybackFiles,
+    environment: &GhosttyEnvironment<'_>,
 ) -> Result<ManagedChild> {
+    let GhosttyEnvironment {
+        display,
+        overrides,
+        profile,
+        scaling,
+    } = *environment;
+
     let stdout = secure_file(&staging.join("ghostty.stdout.log"))?;
     let stderr = secure_file(&staging.join("ghostty.stderr.log"))?;
     let mut command = owned_command(helper, "dbus-run-session")?;
@@ -283,13 +305,13 @@ pub(super) fn spawn_ghostty(
         .arg(flag(playback::SESSION))
         .arg(&options.session_directory)
         .arg(flag(playback::TIMING_FILE))
-        .arg(timing)
+        .arg(&files.timing)
         .arg(flag(playback::ERROR_FILE))
-        .arg(error)
+        .arg(&files.error)
         .arg(flag(playback::GEOMETRY_FILE))
-        .arg(geometry)
+        .arg(&files.geometry)
         .arg(flag(playback::READY_FILE))
-        .arg(ready)
+        .arg(&files.ready)
         .arg(flag(playback::START_DELAY_MS))
         .arg(if matches!(&options.kind, CaptureKind::Video) { "1500" } else { "0" })
         .arg(flag(playback::FINAL_HOLD_MS))

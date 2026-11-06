@@ -13,6 +13,7 @@ use super::{
     process::{
         ghostty_overrides, spawn_ghostty, spawn_xvfb, stop_ffmpeg, wait_for_file,
         wait_for_playback_handshake, wait_for_success, wait_for_x_socket, DisplayLease,
+        GhosttyEnvironment, PlaybackFiles,
     },
     profile::materialize,
     validate_visual_manifest, Error, Result,
@@ -373,26 +374,22 @@ fn capture_staged(
         super::window::publish_font_dpi(&display, dpi)?;
     }
 
-    let geometry_path = staging.join("geometry-preflight.json");
-    let timing_file = staging.join("playback-timing.json");
-    let error_file = staging.join("playback-error.json");
-    let ready_file = staging.join("playback-ready");
+    let files = PlaybackFiles::in_staging(staging);
     let overrides = ghostty_overrides(options.padding);
     let mut ghostty = spawn_ghostty(
         helper,
         options,
         staging,
-        &display,
-        &timing_file,
-        &error_file,
-        &geometry_path,
-        &ready_file,
-        &overrides,
-        profile_root.as_deref(),
-        Some(scaling),
+        &files,
+        &GhosttyEnvironment {
+            display: &display,
+            overrides: &overrides,
+            profile: profile_root.as_deref(),
+            scaling: Some(scaling),
+        },
     )?;
     let geometry_report =
-        super::process::wait_for_json(&geometry_path, &mut ghostty, Duration::from_secs(20))?;
+        super::process::wait_for_json(&files.geometry, &mut ghostty, Duration::from_secs(20))?;
 
     validate_capture(
         manifest.geometry,
@@ -403,8 +400,8 @@ fn capture_staged(
     )?;
 
     let timing: PlaybackTiming = wait_for_playback_handshake(
-        &timing_file,
-        &error_file,
+        &files.timing,
+        &files.error,
         &mut ghostty,
         Duration::from_secs(20),
     )?;
@@ -454,7 +451,7 @@ fn capture_staged(
                 |range| return Duration::from_nanos(range.duration_ns()),
             );
             wait_for_file(
-                &ready_file,
+                &files.ready,
                 &mut ghostty,
                 Duration::from_secs(25) + duration,
             )?;
@@ -495,7 +492,7 @@ fn capture_staged(
             (Some(probe), Vec::new())
         }
         CaptureKind::Screenshot { .. } => {
-            wait_for_file(&ready_file, &mut ghostty, Duration::from_secs(25))?;
+            wait_for_file(&files.ready, &mut ghostty, Duration::from_secs(25))?;
             let samples = capture_stable_x11_frame(staging, &display, &screenshot)?;
             wait_for_success(&mut ghostty, Duration::from_secs(10), staging)?;
             (None, samples)
@@ -507,7 +504,7 @@ fn capture_staged(
     secure_permissions(&screenshot)?;
     let screenshot_probe = probe_screenshot(&screenshot, options.width, options.height)?;
 
-    for transient in [&timing_file, &ready_file] {
+    for transient in [&files.timing, &files.ready] {
         fs::remove_file(transient).map_err(|source| {
             return Error::Filesystem {
                 path: transient.clone(),
