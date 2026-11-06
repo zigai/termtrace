@@ -2185,14 +2185,14 @@ pub struct StopOptions {
 }
 
 /// Primary entry point for launching and managing Termtrace recordings in Node.js.
-#[napi(js_name = "Termtrace")]
+#[napi]
 #[derive(Clone)]
-pub struct JsTermtrace {
+pub struct Termtrace {
     pub(crate) terminal: Terminal,
 }
 
 #[napi]
-impl JsTermtrace {
+impl Termtrace {
     /// Typed system service, without starting probes on construction.
     #[napi]
     pub fn system(&self) -> diagnostics::JsSystem {
@@ -2488,7 +2488,7 @@ impl JsTermtrace {
     }
 }
 
-impl JsTermtrace {
+impl Termtrace {
     async fn start(&self, spec: LaunchSpec) -> napi::Result<JsRecording> {
         let terminal = self.terminal.clone();
 
@@ -2513,7 +2513,7 @@ impl JsTermtrace {
 }
 
 #[napi]
-impl JsTermtrace {
+impl Termtrace {
     /// Attach to an existing session directory.
     ///
     /// # Errors

@@ -1,7 +1,7 @@
 //! Edit normalization, presentation videos, and frame mapping.
 
 use crate::host::{Arg, Model};
-use crate::{to_napi_err, JsTermtrace};
+use crate::{to_napi_err, Termtrace};
 use napi_derive::napi;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -37,7 +37,7 @@ async fn video(
 }
 
 #[napi]
-impl JsTermtrace {
+impl Termtrace {
     /// Resolve the presentation plan of `edit` over a completed `session` without rendering.
     /// `renderer` is `native` (verified Ghostty pixels, captured first when missing; never
     /// semantic) or `semantic`; `fps` defaults to 30.

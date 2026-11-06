@@ -1530,6 +1530,36 @@ export type JsSystem = System
 
 /** Primary entry point for launching and managing Termtrace recordings in Node.js. */
 export declare class Termtrace {
+  /**
+   * Resolve the presentation plan of `edit` over a completed `session` without rendering.
+   * `renderer` is `native` (verified Ghostty pixels, captured first when missing; never
+   * semantic) or `semantic`; `fps` defaults to 30.
+   *
+   * # Errors
+   *
+   * Rejects with an edit failure `code` and `details` for a rejected edit, and for blocked
+   * capabilities, invalid evidence, or capture failures.
+   */
+  videoPlan(session: Arg<ExactPath>, edit: Arg<EditSource>, options: Arg<VideoOptions>): Promise<Model<PresentationPlan>>
+  /**
+   * Render a contact sheet and low-resolution review video of `edit` into the new
+   * `directory`. `options.preview` sets the storyboard.
+   *
+   * # Errors
+   *
+   * Rejects like `videoPlan`, and when the directory exists or rendering fails.
+   */
+  videoPreview(session: Arg<ExactPath>, edit: Arg<EditSource>, directory: Arg<ExactPath>, options: Arg<VideoOptions>): Promise<Model<VideoPreview>>
+  /**
+   * Render `edit` to `out`, whose lowercase `.mp4`, `.gif`, or `.webm` extension selects
+   * the format, keeping a manifested `.termtrace` sidecar beside it. An existing output
+   * fails unless `options.overwrite` is set for an MP4; GIF and `WebM` are never replaced.
+   *
+   * # Errors
+   *
+   * Rejects like `videoPlan`, and when the output exists or rendering fails.
+   */
+  videoRender(session: Arg<ExactPath>, edit: Arg<EditSource>, out: Arg<ExactPath>, options: Arg<VideoOptions>): Promise<Model<VideoRender>>
   /** Typed system service, without starting probes on construction. */
   system(): System
   /** Instrumentation bound to one live session. */
@@ -1744,7 +1774,6 @@ export declare class Termtrace {
    */
   probeCapabilities(cancel?: CancelToken | undefined | null): Promise<Model<CapabilityReport>>
 }
-export type JsTermtrace = Termtrace
 
 /** Aggregate tmux recording through the shared tmux service. */
 export declare class Tmux {
