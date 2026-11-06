@@ -61,3 +61,7 @@ Thumbs.db
 
 # Statement spacing tool state
 .statement-spacing/
+.coverage
+.coverage.*
+/target/llvm-cov-target/
+coverage/
