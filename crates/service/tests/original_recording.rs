@@ -805,10 +805,10 @@ fn named_background_recording_attaches_by_alias_and_exact_path_bytes() {
     assert!(acted.is_matched());
 
     control
-        .resize(110, 32, &MutationGuard::default())
+        .resize(90, 26, &MutationGuard::default())
         .expect("resize through the exact path");
 
-    wait_for_output(&exact, "winch 32 110");
+    wait_for_output(&exact, "winch 26 90");
 
     let recording = exact
         .finish(StopRequest::default(), FINISH)
