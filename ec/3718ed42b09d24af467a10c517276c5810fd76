@@ -1,0 +1,1 @@
+Final-pass: Justfile-only generated-schema, generated-TypeScript, and package-ordering exclusions; no source files modified. Isolated format and formatcheck passed before this scope narrowing. No further checks were started under the final throttle.
