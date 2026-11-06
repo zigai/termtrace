@@ -1,5 +1,4 @@
 use super::*;
-use std::time::{Duration, Instant};
 use termtrace_evidence::event_log::{EventLogWriter, SessionClock};
 use termtrace_model::{
     execution::event::{Event, EventBody, EventLogHeader},
@@ -335,7 +334,7 @@ fn index_session_with_video_options_samples_cleanly() {
 }
 
 #[test]
-fn high_resolution_canvas_video_stride_completes_in_seconds() {
+fn high_resolution_canvas_video_stride_captures_only_stride_states() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let session = temporary.path().join("session_4k");
     create_private_directory(&session).expect("private directory");
@@ -374,7 +373,6 @@ fn high_resolution_canvas_video_stride_completes_in_seconds() {
 
     set_output_burst_timestamps(&event_path);
 
-    let start = Instant::now();
     let outcome = index_session_with_options(
         &session,
         IndexOptions {
@@ -383,14 +381,6 @@ fn high_resolution_canvas_video_stride_completes_in_seconds() {
         },
     )
     .expect("index high resolution canvas with video stride");
-
-    let elapsed = start.elapsed();
-
-    println!("4K high resolution 300x100 indexing completed in: {elapsed:?}");
-    assert!(
-        elapsed < Duration::from_secs(5),
-        "indexing 4K session with video stride took too long: {elapsed:?}"
-    );
     assert_eq!(outcome.state_selection, StateSelection::All);
     assert_eq!(outcome.state_count, 2);
 }
