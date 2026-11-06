@@ -4,6 +4,7 @@ description: Flight recorder for terminal applications through Termtrace. Use wh
 disable-model-invocation: false
 user-invocable: true
 ---
+
 Use the smallest evidence-producing workflow that answers the task. By default,
 every CLI command emits human-readable, clean text and tables. Pass `--json` to
 any command to receive machine-readable, 2-space formatted JSON on stdout. When

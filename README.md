@@ -1,116 +1,123 @@
 # Termtrace
 
-Termtrace is a Linux terminal flight recorder for debugging and automating
-terminal applications. It preserves canonical PTY input and output while
-reconstructing the presentation-eligible screens that applications displayed.
-Those are separate truth sources: output history is not proof that text was
-presented in the viewport.
+[![rustc: 1.97.1+](https://img.shields.io/badge/rustc-1.97.1%2B-orange?logo=rust)](Cargo.toml)
+[![Rust Edition: 2024](https://img.shields.io/badge/edition-2024-blue.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Features
+A flight recorder for terminal programs. Run something under Termtrace and you get
+every byte that went in and out of the terminal, plus every screen the program
+drew. Afterwards you can step through it, diff screens, take screenshots, or render
+a video.
 
-- Exact PTY event recording and semantic screen reconstruction.
-- Live screen waits, input, markers, resizing, and process control.
-- Semantic replay, timelines, diffs, diagnostics, and review.
-- Deterministic semantic images and native Ghostty screenshots/video.
-- Repeatable terminal tests, typed clients, and verified evidence bundles.
+- **Debug TUIs:** See what was on screen at any point, and what your last key changed.
+- **Drive programs from scripts:** Send keys and wait for text to appear, instead of `tmux send-keys` and `sleep`.
+- **Give agents a terminal:** The MCP server lets coding agents start, type into, and read terminal programs.
+- **Share what happened:** Screenshots, MP4 or GIF video, and bug-report bundles from one recording.
 
-## Install
+## Installation
 
 ```sh
 curl -LsSf https://github.com/zigai/termtrace/raw/main/install.sh | bash
 ```
 
-Generate shell completions with `termtrace completion zsh` (or `bash`, `fish`,
-`elvish`, `powershell`).
+Linux only (x86_64 or aarch64, glibc 2.28+). Video needs Ghostty and FFmpeg;
+`termtrace doctor` tells you what's missing.
 
 ## Quick start
 
-Record a command, inspect its final presented screen, browse its timeline, and
-verify the evidence:
+Record a program, use it, quit, and look at what happened:
 
 ```sh
-termtrace record --out ./app.termtrace --geometry inherit -- my-terminal-app
-termtrace screen ./app.termtrace
-termtrace analyze timeline ./app.termtrace
-termtrace analyze verify ./app.termtrace
+termtrace record --out app.termtrace -- my-app
+termtrace screen app.termtrace
+termtrace analyze timeline app.termtrace
 ```
 
-Recordings are owner-only directories and existing output paths are never
-replaced.
-
-## Live sessions
+Or run it in the background and drive it. `send` returns once `Saved` is on screen:
 
 ```sh
-termtrace record -d app --cols 120 --rows 36 --until-screen Ready -- my-terminal-app
-termtrace send app text:help enter --until-idle=250ms
-termtrace wait app --screen Saved
-termtrace screen app --since STATE
-termtrace status app
-termtrace restart app
+termtrace record -d app --until-screen Ready -- my-app
+termtrace send app text:hello enter --until-screen Saved
 termtrace stop app --wait
 ```
 
-`record -d NAME --until-*` starts a named background session and synchronizes
-its initial screen. `send` applies input and checks its postcondition in one
-request; the reported input application remains authoritative even if the
-postcondition fails. Pass the state returned by one observation to
-`screen --since` to avoid retransmitting an unchanged screen. `wait` blocks on
-screen text, output bytes, or idle stability without sending input; `status`
-reports live counters (or lists registered sessions when no name is given); and
-`restart` stops a named session and starts its successor under the same name.
-Use a [language client](skills/termtrace/references/client-workflows.md) when
-more than two or three actions are expected.
-
-## Record a complete tmux session
-
-Record the composite tmux client screen and its individual pane tracks under one
-aggregate manifest:
+Make something you can attach to an issue:
 
 ```sh
-termtrace tmux record work --new -- tmux new-session -s work
-termtrace tmux status work
-termtrace tmux stop work --wait
-termtrace tmux video work --out work.mp4
+termtrace screenshot app.termtrace -o app-screenshot
+termtrace video app.termtrace -o app.mp4
+termtrace bundle app.termtrace -o bug-report
 ```
 
-The composite track retains borders, status lines, layouts, zoom, copy mode, and
-window or pane changes for faithful video. Pane tracks retain clean canonical
-PTY evidence for inspection. Coverage gaps warn by default; select
-`--coverage strict` only when Termtrace is explicitly permitted to terminate an
-uncovered pane.
+## Commands
 
-For automatic pane recording outside an aggregate workflow, generate and source
-`termtrace tmux config`, or use `termtrace tmux enable` for future panes in an
-already-running server. Run `termtrace tmux --help` for scope selection and
-aggregate inspection commands.
+```text
+$ termtrace --help
+Record native terminal pixels and every semantic terminal state
 
-## Debugging, artifacts, and tests
+Usage: termtrace [OPTIONS] <COMMAND>
 
-```sh
-termtrace analyze ./app.termtrace
-termtrace analyze diagnose ./app.termtrace
-termtrace screenshot ./app.termtrace -o ./app-screenshot
-termtrace bundle ./app.termtrace -o ./bug-report --profile debug --screenshot
-termtrace video ./app.termtrace -o ./app.mp4 --preset docs --renderer semantic
-termtrace test SCENARIO.json
+Commands:
+  record      Record a terminal command (use -d/--detach for a background session)
+  screen      View the live or historical presented terminal viewport
+  send        Send terminal input (keys, text, clicks, resize) and await screen state
+  wait        Wait for screen text, output bytes, or idle stability
+  status      Show live session status or list registered sessions (--gc to prune)
+  stop        Request graceful termination of a running background session
+  restart     Atomically stop and restart a background session
+  analyze     Inspect session forensics (default: triage last action)
+  screenshot  Capture a rendered PNG/SVG screenshot of a session
+  video       Export a presentation MP4, GIF, or VP9 `WebM` from a completed session
+  bundle      Create an evidence bundle (supports --profile debug and --screenshot)
+  test        Execute strict evidence-native terminal scenario tests
+  tmux        Record managed tmux panes for their full lifetime
+  completion  Generate a shell autocompletion script from the current command graph
+  doctor      Diagnose the installation, dependencies, state, and capabilities
+  mcp         Serve the session workflow as Model Context Protocol tools and resources over stdio
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+      --help       Print help
+  -q, --quiet      Suppress standard output and communicate only via exit codes
+      --log <LOG>  Diagnostic log level threshold (error, warn, info, debug, trace) [env:
+                   TERMTRACE_LOG=] [default: warn]
+  -V, --version    Print version
 ```
 
-`termtrace analyze` summarizes the last input action; its subcommands cover
-timelines, diffs, state inspection, exact output, and offline verification. Use
-`termtrace doctor` to check optional native dependencies.
+## MCP server
 
-## Documentation
+Claude Code (`.mcp.json` in your project):
 
-- [Live control](skills/termtrace/references/live-control.md)
-- [Language clients](skills/termtrace/references/client-workflows.md)
-- [Artifacts](skills/termtrace/references/artifacts.md)
-- [Repeatable testing](skills/termtrace/references/testing.md)
-- [Runnable Rust, Python, and TypeScript examples](examples/sdk/README.md)
-- [SDK capability matrix](docs/sdk-capability-contract.md)
+```json
+{
+  "mcpServers": {
+    "termtrace": { "command": "termtrace", "args": ["mcp"] }
+  }
+}
+```
 
-Run `termtrace --help` for the normal workflow and direct command help for exact
-options. Avoid recursively traversing deep help or shell-filtering it.
+Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.termtrace]
+command = "termtrace"
+args = ["mcp"]
+```
+
+Other clients: run `termtrace mcp` as a stdio server. Agent sessions show up in the CLI, so `termtrace screen <name>` shows what the agent sees.
+
+## SDKs
+
+Rust, Python, and TypeScript. Not published yet: build them with `just bindings-build`, or use `crates/sdk` from Rust.
+
+```python
+import termtrace
+
+with termtrace.Termtrace().record(["my-app"]) as rec:
+    rec.screen().wait_for_text("Ready", timeout_secs=5)
+    rec.actions().send_text("hello").send_key("enter").until_screen("Saved").run()
+```
 
 ## License
 
-[MIT License](LICENSE)
+[MIT](LICENSE)
