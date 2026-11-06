@@ -835,7 +835,7 @@ fn verify_gif(path: &Path, plan: &PresentationPlan, looping: GifLoop) -> Result<
         return Err(plan_error("GIF missing global palette"));
     }
 
-    read(3 * (1usize << ((header[10] & 7) + 1)))?;
+    let palette = read(3 * (1usize << ((header[10] & 7) + 1)))?;
     let mut count = 0u64;
     let mut delay = None;
     let mut loop_found = false;
@@ -883,7 +883,10 @@ fn verify_gif(path: &Path, plan: &PresentationPlan, looping: GifLoop) -> Result<
             }
             0x2c => {
                 let descriptor = read(9)?;
-                if descriptor[8] & 0x80 != 0 {
+                // FFmpeg 8 repeats the global palette as the first frame's local palette.
+                if descriptor[8] & 0x80 != 0
+                    && read(3 * (1usize << ((descriptor[8] & 7) + 1)))? != palette
+                {
                     return Err(plan_error("GIF contains per-frame palettes"));
                 }
 
