@@ -1,0 +1,4 @@
+- just check passes on the final working tree: format, lock, audit, lint, typecheck, bindings build, and tests
+- The 14 native capability tests and the native capture test pass against real Ghostty, Xvfb, and FFmpeg
+- The matrix check, Rust consumer conformance test, 10 Python conformance and type-contract tests, and the Node conformance test pass
+- just generate with the new Rust generators reproduces the checked-in Python and TypeScript files byte for byte, except the header line
