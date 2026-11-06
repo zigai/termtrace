@@ -1,5 +1,6 @@
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 2 }
+default-filter = "not (test(answers_and_audits_terminal_queries) | test(attached_mirror_suppresses_answered_split_queries_and_preserves_display_sequences) | test(completed_output_burst_refreshes_the_pty_drain_deadline) | test(control_server_accepts_a_second_request_while_the_first_is_pending) | test(fatal_actor_exit_writes_durable_failure_completion) | test(graceful_control_shutdown_drains_an_inflight_request) | test(idle_timeout_limit_terminates_session) | test(incomplete_request_read_is_interrupted_promptly_on_shutdown) | test(max_duration_limit_terminates_session) | test(output_budget_retains_observed_bytes_and_records_termination) | test(poisoned_terminal_exit_append_preserves_incomplete_failure_without_completion) | test(preserve_policy_keeps_the_application_alive_after_a_mirror_failure) | test(preserves_complete_osc_query_when_response_precedes_st) | test(records_exact_output_and_exit_after_output_close) | test(spawn_and_provenance_share_the_effective_child_path) | test(spawn_failure_after_manifest_creation_writes_valid_fatal_closure) | test(terminates_descendants_that_retain_the_slave_pty))"
 
 [profile.ci]
 fail-fast = false

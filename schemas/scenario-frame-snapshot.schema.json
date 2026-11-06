@@ -16,20 +16,14 @@
       "format": "uint16",
       "maximum": 65535,
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "cursor_row": {
       "description": "Cursor row when visible in the viewport.",
       "format": "uint16",
       "maximum": 65535,
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "cursor_visible": {
       "description": "Cursor visibility.",
@@ -53,13 +47,7 @@
       "type": "string"
     }
   },
-  "required": [
-    "version",
-    "viewport_text",
-    "cols",
-    "rows",
-    "cursor_visible"
-  ],
+  "required": ["version", "viewport_text", "cols", "rows", "cursor_visible"],
   "title": "ScenarioFrameSnapshot",
   "type": "object"
 }

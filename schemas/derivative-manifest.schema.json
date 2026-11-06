@@ -12,9 +12,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind"
-          ],
+          "required": ["kind"],
           "type": "object"
         },
         {
@@ -26,9 +24,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind"
-          ],
+          "required": ["kind"],
           "type": "object"
         },
         {
@@ -40,9 +36,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind"
-          ],
+          "required": ["kind"],
           "type": "object"
         },
         {
@@ -58,10 +52,7 @@
               "description": "Truth of the input to presentation."
             }
           },
-          "required": [
-            "kind",
-            "source_kind"
-          ],
+          "required": ["kind", "source_kind"],
           "type": "object"
         }
       ]
@@ -127,11 +118,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "session_id",
-        "session_manifest_hash",
-        "boundary"
-      ],
+      "required": ["session_id", "session_manifest_hash", "boundary"],
       "type": "object"
     },
     "DecimalU64": {
@@ -157,9 +144,7 @@
               "description": "Explicit loop policy."
             }
           },
-          "required": [
-            "format"
-          ],
+          "required": ["format"],
           "type": "object"
         },
         {
@@ -171,9 +156,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "format"
-          ],
+          "required": ["format"],
           "type": "object"
         }
       ]
@@ -202,13 +185,7 @@
           "description": "Explicit-path ffprobe evidence (including time base/color facts)."
         }
       },
-      "required": [
-        "delivery",
-        "path",
-        "blake3",
-        "frame_count",
-        "probe"
-      ],
+      "required": ["delivery", "path", "blake3", "frame_count", "probe"],
       "type": "object"
     },
     "GifLoop": {
@@ -227,10 +204,7 @@
       ]
     },
     "NullableString": {
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     },
     "SdkArtifactMember": {
       "additionalProperties": false,
@@ -295,11 +269,7 @@
           "description": "Canonical PTY bytes through this boundary."
         }
       },
-      "required": [
-        "next_event_seq",
-        "event_hash",
-        "output_bytes"
-      ],
+      "required": ["next_event_seq", "event_hash", "output_bytes"],
       "type": "object"
     }
   },

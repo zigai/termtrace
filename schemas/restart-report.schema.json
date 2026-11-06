@@ -31,19 +31,13 @@
           "description": "Recorder PID when a supervisor supplied one.",
           "format": "uint32",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "recorder_process_start_ticks": {
           "description": "Linux process start-time ticks paired with `recorder_pid` against PID reuse.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "registered_unix_ns": {
           "description": "Registry publication time from the local system clock.",
@@ -105,14 +99,7 @@
       "description": "New binding."
     }
   },
-  "required": [
-    "alias",
-    "predecessor",
-    "successor",
-    "stdout_log",
-    "stderr_log",
-    "ready"
-  ],
+  "required": ["alias", "predecessor", "successor", "stdout_log", "stderr_log", "ready"],
   "title": "RestartReport",
   "type": "object"
 }

@@ -59,7 +59,9 @@ _U64_MAX = 2**64 - 1
 def test_sync_recording_lifecycle() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(["/bin/sh", "-norc", "-c", "echo PY_SYNC_OK"], rows=24, cols=80) as rec:
+        with tt.record(
+            ["/bin/sh", "-norc", "-c", "echo PY_SYNC_OK"], rows=24, cols=80
+        ) as rec:
             assert rec.is_active()
             assert len(rec.session_id) > 0
             screen = rec.screen()
@@ -72,7 +74,9 @@ def test_sync_recording_lifecycle() -> None:
 def test_screen_frame_and_text() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(["/bin/sh", "-norc", "-c", "echo FRAME_TEST_LINE"], rows=30, cols=100) as rec:
+        with tt.record(
+            ["/bin/sh", "-norc", "-c", "echo FRAME_TEST_LINE"], rows=30, cols=100
+        ) as rec:
             screen = rec.screen()
             screen.wait_for_text("FRAME_TEST_LINE", timeout_secs=5.0)
             frame = screen.frame()
@@ -114,7 +118,9 @@ def test_pointer_actions() -> None:
 def test_visual_snapshot_save() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(["/bin/sh", "-norc", "-c", "echo VISUAL_SAVE_TEST"], rows=24, cols=80) as rec:
+        with tt.record(
+            ["/bin/sh", "-norc", "-c", "echo VISUAL_SAVE_TEST"], rows=24, cols=80
+        ) as rec:
             rec.screen().wait_for_text("VISUAL_SAVE_TEST", timeout_secs=5.0)
             save_dir = os.path.join(tmpdir, "snapshot_out")
             saved = rec.save(save_dir, formats=["png", "svg", "html", "txt", "json"])
@@ -131,7 +137,9 @@ def test_visual_snapshot_save() -> None:
 def test_raw_output_streaming() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(["/bin/sh", "-norc", "-c", "echo OUTPUT_STREAM_LINE"], rows=24, cols=80) as rec:
+        with tt.record(
+            ["/bin/sh", "-norc", "-c", "echo OUTPUT_STREAM_LINE"], rows=24, cols=80
+        ) as rec:
             rec.screen().wait_for_text("OUTPUT_STREAM_LINE", timeout_secs=5.0)
             # Read output bytes
             raw_bytes, next_off, has_more = rec.read_output(offset=0, limit=4096)
@@ -146,7 +154,9 @@ def test_raw_output_streaming() -> None:
 def test_event_log_reading() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(["/bin/sh", "-norc", "-c", "echo EVENT_TEST"], rows=24, cols=80) as rec:
+        with tt.record(
+            ["/bin/sh", "-norc", "-c", "echo EVENT_TEST"], rows=24, cols=80
+        ) as rec:
             rec.screen().wait_for_text("EVENT_TEST", timeout_secs=5.0)
             events = rec.read_events(cursor=0, limit=50)
             assert isinstance(events, list)
@@ -158,7 +168,9 @@ def test_replay_analysis_services() -> None:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
         with tt.record(["/bin/sh", "-norc"], rows=24, cols=80) as rec:
             state = rec.screen().wait_for_text("$", timeout_secs=5.0)
-            rec.actions().send_text("echo ACTION_FOR_ANALYSIS").send_key("Enter").until_screen("ACTION_FOR_ANALYSIS").execute()
+            rec.actions().send_text("echo ACTION_FOR_ANALYSIS").send_key(
+                "Enter"
+            ).until_screen("ACTION_FOR_ANALYSIS").execute()
             session = rec.session()
             state_hash = state.hash
 
@@ -183,7 +195,9 @@ def test_system_capabilities() -> None:
 def test_registry_operations() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(["/bin/sh", "-norc", "-c", "echo REGISTRY_TEST"], rows=24, cols=80) as rec:
+        with tt.record(
+            ["/bin/sh", "-norc", "-c", "echo REGISTRY_TEST"], rows=24, cols=80
+        ) as rec:
             session_path = rec.path
             alias = f"test-alias-{os.getpid()}"
             # Register
@@ -206,7 +220,9 @@ def test_registry_operations() -> None:
 def test_session_integrity_verification() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(["/bin/sh", "-norc", "-c", "echo INTEGRITY_TEST"], rows=24, cols=80) as rec:
+        with tt.record(
+            ["/bin/sh", "-norc", "-c", "echo INTEGRITY_TEST"], rows=24, cols=80
+        ) as rec:
             session_path = rec.path
         # Once closed, verify structure
         report = tt.verify_session(session_path, level="structure")
@@ -218,7 +234,9 @@ def test_session_integrity_verification() -> None:
 async def test_async_recording_lifecycle() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = AsyncTermtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        async with await tt.record(["/bin/sh", "-norc", "-c", "echo PY_ASYNC_OK"]) as rec:
+        async with await tt.record(
+            ["/bin/sh", "-norc", "-c", "echo PY_ASYNC_OK"]
+        ) as rec:
             assert await rec.is_active()
             screen = rec.screen()
             state = await screen.wait_for_text("PY_ASYNC_OK", timeout_secs=5.0)
@@ -300,13 +318,18 @@ async def test_cancelled_recording_launch_is_cleaned_up_and_failures_reported(
             rec.stop.assert_called_once_with()
         else:
             rec.stop.assert_not_called()
-        records = [record for record in caplog.records if record.name == "termtrace.aio"]
-        assert len(records) == {
-            None: 0,
-            "force_close": 1,
-            "stop": 2,
-            "launch": 1,
-        }[failure]
+        records = [
+            record for record in caplog.records if record.name == "termtrace.aio"
+        ]
+        assert (
+            len(records)
+            == {
+                None: 0,
+                "force_close": 1,
+                "stop": 2,
+                "launch": 1,
+            }[failure]
+        )
         assert all(record.exc_info is not None for record in records)
         assert _async._pending_launches == pending_before
     finally:
@@ -321,7 +344,9 @@ async def test_cancelled_recording_launch_is_cleaned_up_and_failures_reported(
 def test_asciicast_export() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(["/bin/sh", "-norc", "-c", "echo ASCIICAST_TEST"], rows=24, cols=80) as rec:
+        with tt.record(
+            ["/bin/sh", "-norc", "-c", "echo ASCIICAST_TEST"], rows=24, cols=80
+        ) as rec:
             screen = rec.screen()
             screen.wait_for_text("ASCIICAST_TEST", timeout_secs=5.0)
             session = rec.session()
@@ -332,7 +357,9 @@ def test_asciicast_export() -> None:
 
 
 def test_pytest_plugin_fixture(termtrace_session: Any) -> None:
-    rec = termtrace_session(["/bin/sh", "-norc", "-c", "echo PYTEST_FIXTURE_OK"], rows=24, cols=80)
+    rec = termtrace_session(
+        ["/bin/sh", "-norc", "-c", "echo PYTEST_FIXTURE_OK"], rows=24, cols=80
+    )
     screen = rec.screen()
     state = screen.wait_for_text("PYTEST_FIXTURE_OK", timeout_secs=5.0)
     assert "PYTEST_FIXTURE_OK" in state.text
@@ -407,7 +434,11 @@ def check_parity_case(frame: ScreenFrame, case: dict[str, Any]) -> None:
 
     assert "matches" in expect, f"{name}: unexpected success"
     observed = [
-        {"text": m.text, "ranges": triples(m.ranges), "widths": [c["width"] for c in m.cells]}
+        {
+            "text": m.text,
+            "ranges": triples(m.ranges),
+            "widths": [c["width"] for c in m.cells],
+        }
         for m in found
     ]
     assert observed == expect["matches"], name
@@ -421,7 +452,9 @@ def test_offline_parity_corpus_and_exact_frame_facts() -> None:
     assert frame.source["observed_monotonic_ns"] == int(facts["observed_monotonic_ns"])
     assert frame.source["observed_monotonic_ns"] == 2**64 - 1
     observed = frame.source["boundaries"]["observed"]
-    assert observed["next_event_seq"] == int(facts["observed_next_event_seq"]) == 2**53 + 1
+    assert (
+        observed["next_event_seq"] == int(facts["observed_next_event_seq"]) == 2**53 + 1
+    )
     assert frame.cursor["row"] is None and frame.cursor["column"] is None
     assert json.loads(frame.to_json()) == json.loads(PARITY_FRAME_JSON)
     assert len(PARITY["cases"]) >= 12
@@ -456,7 +489,9 @@ def test_live_locator_parity_rich_frame_and_waits() -> None:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
         with tt.record(live["command"], rows=live["rows"], cols=live["cols"]) as rec:
             screen = rec.screen()
-            ready = screen.get_by_text(live["ready"]).wait(timeout_secs=10, interval_secs=0.02)
+            ready = screen.get_by_text(live["ready"]).wait(
+                timeout_secs=10, interval_secs=0.02
+            )
             for case in live["cases"]:
                 check_parity_case(ready.frame, case)
 
@@ -494,7 +529,11 @@ def test_live_locator_parity_rich_frame_and_waits() -> None:
             assert state.frame.state_hash == state.hash
 
             assert screen.get_by_text("Save").count() == 2
-            assert screen.get_by_text("Save").wait_for({"count": 2}, timeout_secs=5).matches
+            assert (
+                screen.get_by_text("Save")
+                .wait_for({"count": 2}, timeout_secs=5)
+                .matches
+            )
             stable = screen.get_by_text("Cancel").wait_stable(
                 timeout_secs=5, interval_secs=0.02, stable_for_secs=0.05
             )
@@ -506,8 +545,12 @@ def test_live_locator_parity_rich_frame_and_waits() -> None:
             assert unmatched["matched"] is False and unmatched["satisfied"] is False
             assert unmatched["quality"] == "deadline"
             assert isinstance(unmatched["frame"], ScreenFrame)
-            matched = screen.wait_for({"predicate": "row_contains", "row": 7, "text": "END"})
-            assert matched["satisfied"] and isinstance(matched["first_match_monotonic_ns"], int)
+            matched = screen.wait_for(
+                {"predicate": "row_contains", "row": 7, "text": "END"}
+            )
+            assert matched["satisfied"] and isinstance(
+                matched["first_match_monotonic_ns"], int
+            )
 
             capture = screen.capture_stable(stable_for_secs=0.05, timeout_secs=5)
             assert capture["quality"] == "stable"
@@ -519,7 +562,9 @@ def test_live_locator_parity_rich_frame_and_waits() -> None:
 
             started = time.monotonic()
             with pytest.raises(LocatorTimeoutError) as timed_out:
-                screen.get_by_text("NEVER-SHOWN").wait_for(timeout_secs=1, interval_secs=0.02)
+                screen.get_by_text("NEVER-SHOWN").wait_for(
+                    timeout_secs=1, interval_secs=0.02
+                )
             elapsed = time.monotonic() - started
             assert isinstance(timed_out.value, TimeoutError)
             assert timed_out.value.kind == "locator_timeout"
@@ -565,12 +610,16 @@ def test_live_locator_parity_rich_frame_and_waits() -> None:
                 screen.frame_at({"selector": "state_id", "state_id": 0})
 
         completed = tt.attach(rec.path).screen()
-        first = completed.frame_at({"selector": "state_id", "state_id": 0}, include_hidden=True)
+        first = completed.frame_at(
+            {"selector": "state_id", "state_id": 0}, include_hidden=True
+        )
         assert first.capture_quality == "completed"
         assert first.source["source"] == "resolved"
         assert first.source["state_id"] == 0
         assert first.source["source_completed"] is True
-        observed = completed.observe({"selector": "state_id", "state_id": 0}, include_hidden=True)
+        observed = completed.observe(
+            {"selector": "state_id", "state_id": 0}, include_hidden=True
+        )
         assert observed["state_id"] == 0 and observed["source_completed"] is True
         assert isinstance(observed["canonical_session"], bytes)
         final = completed.frame()
@@ -590,7 +639,9 @@ def test_live_locator_parity_rich_frame_and_waits() -> None:
 
 
 @pytest.mark.asyncio
-async def test_async_locator_cancellation_joins_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_async_locator_cancellation_joins_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     loop = asyncio.get_running_loop()
     workers: list[asyncio.Future[Any]] = []
     run_in_executor = loop.run_in_executor
@@ -607,7 +658,9 @@ async def test_async_locator_cancellation_joins_worker(monkeypatch: pytest.Monke
             await screen.get_by_text("READY").wait(timeout_secs=10)
             monkeypatch.setattr(loop, "run_in_executor", capture)
             task = asyncio.create_task(
-                screen.get_by_text("NEVER-SHOWN").wait_for(timeout_secs=30, interval_secs=0.02)
+                screen.get_by_text("NEVER-SHOWN").wait_for(
+                    timeout_secs=30, interval_secs=0.02
+                )
             )
             await asyncio.sleep(0.3)
             cancelled_at = time.monotonic()
@@ -707,7 +760,9 @@ def test_legacy_execute_sends_a_fresh_request_each_call() -> None:
             second_id = builder.request_id
             assert second_id != first_id
             assert not builder.sealed
-            builder.send_text("two\n").until_screen("GOT:two", timeout_secs=5.0).execute()
+            builder.send_text("two\n").until_screen(
+                "GOT:two", timeout_secs=5.0
+            ).execute()
             assert builder.request_id not in {first_id, second_id}
             text = screen_text(rec)
             assert text.count("GOT:one") == 1
@@ -729,7 +784,9 @@ def test_mutation_failures_match_the_shared_fixture() -> None:
             first = rec.actions().send_text("first\n")
             first.run()
             with pytest.raises(TermtraceError) as collision:
-                rec.actions().with_request_id(first.request_id).send_text("other\n").run()
+                rec.actions().with_request_id(first.request_id).send_text(
+                    "other\n"
+                ).run()
             assert error_facts(collision.value) == INTERACTION["errors"]["collision"]
 
             with pytest.raises(TermtraceError) as strict:
@@ -737,7 +794,11 @@ def test_mutation_failures_match_the_shared_fixture() -> None:
             assert error_facts(strict.value) == INTERACTION["errors"]["strict_pointer"]
             assert strict.value.request_id is not None
 
-            late = rec.actions().send_text("late\n").until_screen("NEVER", timeout_secs=0.2)
+            late = (
+                rec.actions()
+                .send_text("late\n")
+                .until_screen("NEVER", timeout_secs=0.2)
+            )
             with pytest.raises(TermtraceError) as incomplete:
                 late.run()
             assert error_facts(incomplete.value) == INTERACTION["errors"]["incomplete"]
@@ -763,7 +824,10 @@ def test_send_reports_derived_step_identities_and_partial_failures() -> None:
                     {"step": "input", "atoms": [{"text": "sent"}, {"key": "enter"}]},
                 ],
                 request_id=send_id,
-                until={"condition": "screen", "predicate": {"predicate": "contains", "text": "GOT:sent"}},
+                until={
+                    "condition": "screen",
+                    "predicate": {"predicate": "contains", "text": "GOT:sent"},
+                },
             )
             assert result["request_id"] == send_id
             last = result["last"]
@@ -805,7 +869,9 @@ def test_raw_bytes_and_wide_integers_stay_exact() -> None:
         with launch_fixture(tt, "raw_command") as rec:
             raw = bytes.fromhex(INTERACTION["raw_bytes_hex"])
             with pytest.raises(ValueError, match="Invalid symbol"):
-                rec.send([{"step": "input", "atoms": [{"bytes": raw.decode("latin-1")}]}])  # type: ignore[typeddict-item]
+                rec.send(
+                    [{"step": "input", "atoms": [{"bytes": raw.decode("latin-1")}]}]
+                )  # type: ignore[typeddict-item]
             result = rec.actions().send_bytes(memoryview(bytearray(raw))).run()
             assert result.input["bytes_written"] == len(raw)
             rec.screen().wait_for_text(INTERACTION["raw_bytes_echo"], timeout_secs=5.0)
@@ -840,7 +906,9 @@ def test_typed_pointer_operations_report_their_outcomes() -> None:
             drag = pointer.drag(1, 0, 5, 0, steps=3, strict=True)
             assert drag["kind"] == "applied"
             assert b"<32;" in drag["bytes"]
-            activated = pointer.activate(INTERACTION["activation_text"], unique=True, strict=True)
+            activated = pointer.activate(
+                INTERACTION["activation_text"], unique=True, strict=True
+            )
             assert activated["kind"] == "activated"
             assert (activated["text"], activated["start_column"], activated["row"]) == (
                 INTERACTION["activation_text"],
@@ -882,7 +950,9 @@ def test_session_controls_and_status() -> None:
                 rec.force_close()
 
 
-def test_launch_environment_is_isolated_and_exact(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_launch_environment_is_isolated_and_exact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("TT_COPY", INTERACTION["copy_value"])
     monkeypatch.setenv("TT_SECRET", INTERACTION["secret_value"])
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -913,7 +983,9 @@ def test_launch_environment_is_isolated_and_exact(monkeypatch: pytest.MonkeyPatc
 def test_launch_limits_end_the_session(limit: str) -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        rec = tt.launch(["/bin/sh", "-c", "printf READY; sleep 30"], {f"{limit}_ms": 400})
+        rec = tt.launch(
+            ["/bin/sh", "-c", "printf READY; sleep 30"], {f"{limit}_ms": 400}
+        )
         completion = rec.wait_for_completion(timeout_ms=10_000)
         assert completion["resource_limit"]["kind"] == limit
         assert completion["resource_limit"]["limit"] == 400
@@ -924,11 +996,15 @@ async def test_async_run_cancellation_keeps_the_admitted_action() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = AsyncTermtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
         async with await tt.launch(INTERACTION["echo_command"]) as rec:
-            await rec.screen().wait_for_text(INTERACTION["ready_text"], timeout_secs=5.0)
+            await rec.screen().wait_for_text(
+                INTERACTION["ready_text"], timeout_secs=5.0
+            )
             builder = (
                 rec.actions()
                 .send_text("slow\n")
-                .until_screen_where({"predicate": "contains", "text": "NEVER"}, timeout_ms=800)
+                .until_screen_where(
+                    {"predicate": "contains", "text": "NEVER"}, timeout_ms=800
+                )
                 .allow_incomplete()
             )
             request_id = builder.request_id
@@ -945,7 +1021,9 @@ async def test_async_run_seals_before_scheduling() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = AsyncTermtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
         async with await tt.launch(INTERACTION["echo_command"]) as rec:
-            await rec.screen().wait_for_text(INTERACTION["ready_text"], timeout_secs=5.0)
+            await rec.screen().wait_for_text(
+                INTERACTION["ready_text"], timeout_secs=5.0
+            )
             builder = rec.actions().send_text("sealed\n")
             pending = builder.run()
             with pytest.raises(TermtraceError) as sealed:
@@ -972,7 +1050,9 @@ async def test_async_run_seals_before_scheduling() -> None:
 
 
 def test_shared_atomic_action_fixture_matches_the_rust_summary() -> None:
-    fixture = json.loads((ACTION_FIXTURES / "atomic-action.json").read_text(encoding="utf-8"))
+    fixture = json.loads(
+        (ACTION_FIXTURES / "atomic-action.json").read_text(encoding="utf-8")
+    )
     region = fixture["region"]
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
@@ -980,13 +1060,19 @@ def test_shared_atomic_action_fixture_matches_the_rust_summary() -> None:
         with tt.launch(fixture["command"], options) as rec:
             assert rec.wait_for_output(fixture["ready_text"], timeout_secs=5.0)
             initial = rec.screen().frame()
-            builder = rec.actions().with_request_id(fixture["request_id"]).if_state(initial.state_hash)
+            builder = (
+                rec.actions()
+                .with_request_id(fixture["request_id"])
+                .if_state(initial.state_hash)
+            )
             for atom in fixture["input"]:
                 if atom["kind"] == "text":
                     builder.send_text(atom["text"])
                 else:
                     builder.send_key(atom["key"])
-            builder.until_screen_where(fixture["predicate"], timeout_ms=5000).projection(
+            builder.until_screen_where(
+                fixture["predicate"], timeout_ms=5000
+            ).projection(
                 fixture["frame_detail"],
                 {
                     "top": region["top"],
@@ -1005,7 +1091,8 @@ def test_shared_atomic_action_fixture_matches_the_rust_summary() -> None:
                 "state_hash_valid": len(frame.state_hash) == 64,
                 "atom_count": result.input["atom_count"],
                 "matched": result.matched
-                and result.postcondition.get("quality") in {"matched", "matched_unsettled"}
+                and result.postcondition.get("quality")
+                in {"matched", "matched_unsettled"}
                 and fixture["expected_text"] in frame.text,
                 "presented": frame.presented,
                 "retry_exact": retry.to_json() == result.to_json(),
@@ -1031,7 +1118,9 @@ def test_nested_frame_wide_fields_are_exact_integers() -> None:
             result = (
                 rec.actions()
                 .send_text("framed\n")
-                .until_screen_where({"predicate": "contains", "text": "GOT:framed"}, timeout_ms=5000)
+                .until_screen_where(
+                    {"predicate": "contains", "text": "GOT:framed"}, timeout_ms=5000
+                )
                 .run()
             )
     report = json.loads(result.to_json())
@@ -1068,7 +1157,11 @@ def test_rejected_stop_keeps_the_recording_attached() -> None:
             assert rejected.value.request_id == used
             assert rec.is_active()
             assert rec.status()["kind"] == "live"
-            after = rec.actions().send_text("after\n").until_screen("GOT:after", timeout_secs=5.0)
+            after = (
+                rec.actions()
+                .send_text("after\n")
+                .until_screen("GOT:after", timeout_secs=5.0)
+            )
             assert after.run().matched
             rec.stop()
             assert not rec.is_active()
@@ -1087,7 +1180,9 @@ VISUAL_PROFILES = json.loads(
 SEMANTIC_PROFILE = {"version": 1, "semantic": {"preset": "bundled-v1"}}
 
 
-def assert_visual_profile_report(report: dict[str, Any], vector: dict[str, Any]) -> None:
+def assert_visual_profile_report(
+    report: dict[str, Any], vector: dict[str, Any]
+) -> None:
     assert report["version"] == 1
     assert report["profile"] == vector["normalized"]
     assert report["profile_hash"] == vector["profile_hash"]
@@ -1095,13 +1190,19 @@ def assert_visual_profile_report(report: dict[str, Any], vector: dict[str, Any])
         native = report["native"]
         assert native["dpi"] == 96
         assert native["discovered_font_families"] == ["JetBrains Mono"]
-        assert (native["geometry"]["required_cols"], native["geometry"]["required_rows"]) == (40, 10)
+        assert (
+            native["geometry"]["required_cols"],
+            native["geometry"]["required_rows"],
+        ) == (40, 10)
         assert len(native["effective_config_hash"]) == 64
     else:
         assert report["native"] is None
     if "semantic" in vector["normalized"]:
         assert report["semantic"]["font_set_blake3"]
-        assert (report["semantic"]["cell_width"], report["semantic"]["cell_height"]) == (12, 24)
+        assert (
+            report["semantic"]["cell_width"],
+            report["semantic"]["cell_height"],
+        ) == (12, 24)
     else:
         assert report["semantic"] is None
 
@@ -1113,10 +1214,13 @@ async def test_visual_profile_vectors_agree_in_sync_and_async_preflight() -> Non
 
         for vector in VISUAL_PROFILES["positive"]:
             assert_visual_profile_report(
-                sync.preflight_visual_profile(vector["profile"], cols=40, rows=10), vector
+                sync.preflight_visual_profile(vector["profile"], cols=40, rows=10),
+                vector,
             )
             assert_visual_profile_report(
-                await asynchronous.preflight_visual_profile(vector["profile"], cols=40, rows=10),
+                await asynchronous.preflight_visual_profile(
+                    vector["profile"], cols=40, rows=10
+                ),
                 vector,
             )
 
@@ -1150,7 +1254,9 @@ def test_semantic_visual_profile_records_without_native_tools(
             ["/bin/sh", "-c", "echo SEMANTIC_PROFILE"], visual_profile=SEMANTIC_PROFILE
         ) as rec:
             assert rec.wait_for_output("SEMANTIC_PROFILE", timeout_secs=5.0)
-        manifest = json.loads((Path(rec.path) / "session.json").read_text(encoding="utf-8"))
+        manifest = json.loads(
+            (Path(rec.path) / "session.json").read_text(encoding="utf-8")
+        )
         assert manifest["version"] == 13
         assert manifest["visual_profile"]["profile_hash"] == report["profile_hash"]
         assert manifest["ghostty_visual"] is None
@@ -1174,7 +1280,10 @@ def test_native_visual_profile_failures_stop_before_the_application_starts() -> 
                 ["/bin/sh", "-c", 'printf started > "$1"', "probe", str(marker)],
                 visual_profile=missing_font,
             )
-        assert (missing.value.kind, missing.value.code) == ("engine", "font_unavailable")
+        assert (missing.value.kind, missing.value.code) == (
+            "engine",
+            "font_unavailable",
+        )
 
         with pytest.raises(TermtraceError) as invalid:
             tt.launch(
@@ -1186,14 +1295,16 @@ def test_native_visual_profile_failures_stop_before_the_application_starts() -> 
         assert not root.exists() or not any(root.iterdir())
 
 
-SDK_FIXTURES = (Path(__file__).resolve().parents[3] / "fixtures/conformance/sdk").resolve()
+SDK_FIXTURES = (
+    Path(__file__).resolve().parents[3] / "fixtures/conformance/sdk"
+).resolve()
 EDITING = json.loads((SDK_FIXTURES / "editing.json").read_text(encoding="utf-8"))
-EDIT_SESSION_SCRIPT = (
-    "trap 'exit 0' TERM; i=0; while :; do i=$((i+1)); printf 'line %s\\n' $i; sleep 0.4; done"
-)
+EDIT_SESSION_SCRIPT = "trap 'exit 0' TERM; i=0; while :; do i=$((i+1)); printf 'line %s\\n' $i; sleep 0.4; done"
 
 
-def fixture_edit(resource_base: Path | None, subtitle: Path | str = "editing-captions.ass") -> Edit:
+def fixture_edit(
+    resource_base: Path | None, subtitle: Path | str = "editing-captions.ass"
+) -> Edit:
     default_style: types.AnnotationStyle = {
         "font_size": 20,
         "foreground": "#ffffff",
@@ -1251,7 +1362,9 @@ def fixture_edit(resource_base: Path | None, subtitle: Path | str = "editing-cap
 
 
 @pytest.fixture(scope="module")
-def edit_workspace(tmp_path_factory: pytest.TempPathFactory) -> tuple[Termtrace, Path, Path]:
+def edit_workspace(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Termtrace, Path, Path]:
     root = tmp_path_factory.mktemp("editing").resolve()
     tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(root / "evidence"))
     grid = EDITING["session"]["grid"]
@@ -1262,7 +1375,13 @@ def edit_workspace(tmp_path_factory: pytest.TempPathFactory) -> tuple[Termtrace,
         visual_profile=SEMANTIC_PROFILE,
     ) as rec:
         rec.screen().wait_for_text("line 1", timeout_secs=5.0)
-        for delay, label in [(0.3, "intro"), (0.6, "middle"), (0.1, "repeat"), (0.1, "repeat"), (0.5, "outro")]:
+        for delay, label in [
+            (0.3, "intro"),
+            (0.6, "middle"),
+            (0.1, "repeat"),
+            (0.1, "repeat"),
+            (0.5, "outro"),
+        ]:
             time.sleep(delay)
             rec.mark(label)
         time.sleep(0.3)
@@ -1311,7 +1430,10 @@ def test_fixture_edit_built_in_python_matches_the_rust_normalization_and_file_pl
         assert found is not None
         spans = output_frames_for_source_frame(from_builder, found["source_frame"])
         assert any(start <= frame < end for start, end in spans)
-    assert source_for_output_frame(from_builder, from_builder["output_frame_count"]) is None
+    assert (
+        source_for_output_frame(from_builder, from_builder["output_frame_count"])
+        is None
+    )
 
 
 def test_relative_subtitles_need_an_explicit_resource_base() -> None:
@@ -1319,14 +1441,19 @@ def test_relative_subtitles_need_an_explicit_resource_base() -> None:
     with pytest.raises(TermtraceError) as caught:
         fixture_edit(None).normalize()
     assert caught.value.code == expected["code"]
-    assert {key: caught.value.details[key] for key in expected["facts"]} == expected["facts"]
+    assert {key: caught.value.details[key] for key in expected["facts"]} == expected[
+        "facts"
+    ]
 
     absolute = fixture_edit(None, SDK_FIXTURES / "editing-captions.ass")
     assert absolute.normalize()["edit_plan_hash"] == EDITING["edit_plan_hash"]
 
     with tempfile.TemporaryDirectory() as elsewhere:
         as_file = edit_file(Path(elsewhere), EDITING["edit"])
-        shutil.copy(SDK_FIXTURES / "editing-captions.ass", Path(elsewhere) / "editing-captions.ass")
+        shutil.copy(
+            SDK_FIXTURES / "editing-captions.ass",
+            Path(elsewhere) / "editing-captions.ass",
+        )
         assert normalize_edit(as_file)["edit_plan_hash"] == EDITING["edit_plan_hash"]
 
 
@@ -1337,7 +1464,12 @@ def test_selectors_keep_exact_64_bit_values_and_reject_inexact_host_types() -> N
     assert clip["from"]["eventSeq"] == wide
     assert clip["to"]["stateId"] == _U64_MAX
 
-    for value, error in [(1.0, TypeError), (True, TypeError), (-1, ValueError), (2**64, ValueError)]:
+    for value, error in [
+        (1.0, TypeError),
+        (True, TypeError),
+        (-1, ValueError),
+        (2**64, ValueError),
+    ]:
         with pytest.raises(error):
             Select.event(value)  # type: ignore[arg-type]
     with pytest.raises(TypeError):
@@ -1353,13 +1485,20 @@ def test_speeds_produce_the_documented_frame_counts(
     def edit(speed: tuple[int, int]) -> Edit:
         return (
             Edit()
-            .clip(Select.at_ns(speeds["from_ns"]), Select.at_ns(speeds["to_ns"]), speed=speed)
+            .clip(
+                Select.at_ns(speeds["from_ns"]),
+                Select.at_ns(speeds["to_ns"]),
+                speed=speed,
+            )
             .clip(Select.at_ns(speeds["to_ns"]), Select.at_ns(speeds["tail_to_ns"]))
         )
 
     for case in speeds["cases"]:
         clip = plan_semantic(tt, session, edit(tuple(case["speed"])))["clips"][0]
-        assert clip["source_end_frame"] - clip["source_start_frame"] == speeds["source_frames"]
+        assert (
+            clip["source_end_frame"] - clip["source_start_frame"]
+            == speeds["source_frames"]
+        )
         assert clip["retimed_frame_count"] == case["retimed_frame_count"], case
 
     for speed in speeds["invalid"]:
@@ -1374,7 +1513,9 @@ def test_shared_negative_edits_fail_with_the_same_codes_and_facts(
 ) -> None:
     tt, session, root = edit_workspace
     for case in EDITING["negative"]:
-        path = edit_file(root / "negative" / case["name"], case["edit"], case.get("files"))
+        path = edit_file(
+            root / "negative" / case["name"], case["edit"], case.get("files")
+        )
         with pytest.raises(TermtraceError) as caught:
             plan_semantic(tt, session, path)
         assert caught.value.code == case["code"], case["name"]
@@ -1397,17 +1538,36 @@ async def test_semantic_preview_and_every_format_render_from_python(
     assert preview["plan"]["edit_plan_hash"] == EDITING["edit_plan_hash"]
 
     completion = json.loads((session / "completion.json").read_text(encoding="utf-8"))
-    assert json.loads((session / "session.json").read_text(encoding="utf-8"))["visual_profile"]
+    assert json.loads((session / "session.json").read_text(encoding="utf-8"))[
+        "visual_profile"
+    ]
     for extension, codec in [("mp4", "h264"), ("gif", "gif"), ("webm", "vp9")]:
         out = output / f"edited.{extension}"
-        render = tt.video_render(session, edit, out, renderer="semantic", fps=EDITING["fps"])
+        render = tt.video_render(
+            session, edit, out, renderer="semantic", fps=EDITING["fps"]
+        )
         assert Path(render["output"]) == out
         probe = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(out)],
-            check=True, capture_output=True, text=True,
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=codec_name",
+                "-of",
+                "csv=p=0",
+                str(out),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
         )
         assert probe.stdout.strip() == codec
-        manifest = json.loads((Path(render["sidecar"]) / "manifest.json").read_text(encoding="utf-8"))
+        manifest = json.loads(
+            (Path(render["sidecar"]) / "manifest.json").read_text(encoding="utf-8")
+        )
         if extension == "mp4":
             assert render["artifact"] is None
             assert manifest["source_truth_layer"] == "semantic_rendering"
@@ -1415,15 +1575,22 @@ async def test_semantic_preview_and_every_format_render_from_python(
             artifact = render["artifact"]
             assert artifact is not None
             assert artifact["provenance"]["source_kind"] == "semantic_rendering"
-            assert artifact["source"]["session_manifest_hash"] == completion["session_manifest_hash"]
+            assert (
+                artifact["source"]["session_manifest_hash"]
+                == completion["session_manifest_hash"]
+            )
 
     existing = output / "edited.mp4"
     before = existing.read_bytes()
     with pytest.raises(TermtraceError, match="already exists"):
-        tt.video_render(session, edit, existing, renderer="semantic", fps=EDITING["fps"])
+        tt.video_render(
+            session, edit, existing, renderer="semantic", fps=EDITING["fps"]
+        )
     assert existing.read_bytes() == before
     with pytest.raises(TermtraceError, match="already exists"):
-        tt.video_render(session, edit, output / "edited.gif", renderer="semantic", overwrite=True)
+        tt.video_render(
+            session, edit, output / "edited.gif", renderer="semantic", overwrite=True
+        )
 
 
 TERMINAL_PROGRAMS = Path(__file__).resolve().parents[3] / "fixtures/programs/terminal"
@@ -1432,7 +1599,10 @@ LINE_COMMAND = [str(TERMINAL_PROGRAMS / "line-command.sh")]
 
 
 def reported(text: str, event: str) -> list[int]:
-    return [int(ms) for ms in re.findall(rf"^{re.escape(event)} T=(\d+)", text, re.MULTILINE)]
+    return [
+        int(ms)
+        for ms in re.findall(rf"^{re.escape(event)} T=(\d+)", text, re.MULTILINE)
+    ]
 
 
 def wait_for_completed(session: Any) -> dict[str, Any]:
@@ -1466,13 +1636,19 @@ def test_launch_returns_a_ready_session_and_fails_past_its_readiness_deadline(
         tt.launch(["/bin/sh", "-c", "sleep 30"], {"startup_timeout_ms": 1})
 
 
-def test_launch_runs_the_child_in_the_requested_working_directory(tmp_path: Path) -> None:
+def test_launch_runs_the_child_in_the_requested_working_directory(
+    tmp_path: Path,
+) -> None:
     workdir = tmp_path / "child-workdir"
     workdir.mkdir()
     (workdir / "marker-file.txt").write_text("marker", encoding="utf-8")
     tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
     with tt.launch(
-        ["/bin/sh", "-c", "printf 'CWD=%s\\r\\n' \"$(pwd -P)\"; ls; printf DONE; sleep 30"],
+        [
+            "/bin/sh",
+            "-c",
+            "printf 'CWD=%s\\r\\n' \"$(pwd -P)\"; ls; printf DONE; sleep 30",
+        ],
         {"cwd": str(workdir), "cols": 200},
     ) as rec:
         text = rec.screen().wait_for_text("DONE", timeout_secs=5.0).text
@@ -1521,7 +1697,9 @@ def test_detached_session_keeps_running_and_is_controlled_through_its_target(
             tt.attach(rec.path).signal("terminate")
 
 
-def test_paste_focus_and_scroll_reach_an_application_that_reports_them(tmp_path: Path) -> None:
+def test_paste_focus_and_scroll_reach_an_application_that_reports_them(
+    tmp_path: Path,
+) -> None:
     tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
     with launch_reporter(tt) as rec:
         pasted = (
@@ -1555,7 +1733,9 @@ def test_paste_focus_and_scroll_reach_an_application_that_reports_them(tmp_path:
 def test_paced_text_arrives_one_character_at_a_time(tmp_path: Path) -> None:
     tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
     with launch_reporter(tt) as rec:
-        rec.actions().send_text("abc").until_screen("KEY=63", timeout_secs=5.0).execute()
+        rec.actions().send_text("abc").until_screen(
+            "KEY=63", timeout_secs=5.0
+        ).execute()
         text = (
             rec.actions()
             .pace(200)
@@ -1567,7 +1747,9 @@ def test_paced_text_arrives_one_character_at_a_time(tmp_path: Path) -> None:
         burst = [reported(text, f"KEY={key}")[0] for key in ("61", "62", "63")]
         paced = [reported(text, f"KEY={key}")[0] for key in ("78", "79", "7a")]
         assert max(burst) - min(burst) < 100
-        assert all(later - earlier >= 150 for earlier, later in itertools.pairwise(paced))
+        assert all(
+            later - earlier >= 150 for earlier, later in itertools.pairwise(paced)
+        )
 
 
 def test_wait_for_idle_returns_after_output_stops(tmp_path: Path) -> None:
@@ -1581,7 +1763,9 @@ def test_wait_for_idle_returns_after_output_stops(tmp_path: Path) -> None:
         assert "SETTLED" in state.text
 
     with (
-        tt.launch(["/bin/sh", "-c", "echo BUSY; while :; do date +%s%N; sleep 0.1; done"]) as rec,
+        tt.launch(
+            ["/bin/sh", "-c", "echo BUSY; while :; do date +%s%N; sleep 0.1; done"]
+        ) as rec,
         pytest.raises(TermtraceError, match="stable interval"),
     ):
         # A blank screen before the first output would itself be idle.
@@ -1589,9 +1773,13 @@ def test_wait_for_idle_returns_after_output_stops(tmp_path: Path) -> None:
         rec.screen().wait_for_idle(timeout_secs=1.5)
 
 
-def test_observe_selects_a_hidden_synchronized_state_only_when_asked(tmp_path: Path) -> None:
+def test_observe_selects_a_hidden_synchronized_state_only_when_asked(
+    tmp_path: Path,
+) -> None:
     tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
-    rec = tt.launch(["/bin/sh", "-c", "printf '\\033[?2026hHIDDEN-PART\\033[?2026l VISIBLE-PART'"])
+    rec = tt.launch(
+        ["/bin/sh", "-c", "printf '\\033[?2026hHIDDEN-PART\\033[?2026l VISIBLE-PART'"]
+    )
     with rec:
         rec.output().wait_for(b"VISIBLE-PART", 5)
     screen = tt.attach(rec.path).screen()
@@ -1660,15 +1848,30 @@ async def test_async_paste_pacing_focus_and_scroll_reach_an_application_that_rep
     tt = AsyncTermtrace(binary=TERMTRACE_BIN, evidence_root=str(tmp_path / "sessions"))
     async with await tt.launch(INPUT_REPORTER, {"rows": 40, "cols": 80}) as rec:
         await rec.screen().wait_for_text("REPORTER_READY", timeout_secs=5.0)
-        pasted = await rec.actions().paste("async words").until_screen("PASTE=", timeout_secs=5.0).run()
+        pasted = (
+            await rec.actions()
+            .paste("async words")
+            .until_screen("PASTE=", timeout_secs=5.0)
+            .run()
+        )
         assert pasted.frame is not None
         assert len(reported(pasted.frame.text, "PASTE=async words")) == 1
         assert not reported(pasted.frame.text, "KEY=61")
 
-        paced = await rec.actions().pace(200).send_text("xyz").until_screen("KEY=7a", timeout_secs=5.0).run()
+        paced = (
+            await rec.actions()
+            .pace(200)
+            .send_text("xyz")
+            .until_screen("KEY=7a", timeout_secs=5.0)
+            .run()
+        )
         assert paced.frame is not None
-        arrivals = [reported(paced.frame.text, f"KEY={key}")[0] for key in ("78", "79", "7a")]
-        assert all(later - earlier >= 150 for earlier, later in itertools.pairwise(arrivals))
+        arrivals = [
+            reported(paced.frame.text, f"KEY={key}")[0] for key in ("78", "79", "7a")
+        ]
+        assert all(
+            later - earlier >= 150 for earlier, later in itertools.pairwise(arrivals)
+        )
 
         pointer = rec.pointer()
         assert (await pointer.focus(False, strict=True))["kind"] == "applied"
@@ -1720,7 +1923,9 @@ async def test_async_launch_target_idle_observe_cache_and_discard(
     completed = await tt.attach(rec.path)
     hidden = [
         entry["item"]
-        for entry in (await completed.analysis().timeline(limit=1000, include_hidden=True))["entries"]
+        for entry in (
+            await completed.analysis().timeline(limit=1000, include_hidden=True)
+        )["entries"]
         if entry["item"]["kind"] == "semantic_state" and not entry["item"]["presented"]
     ][-1]
     point: types.StatePoint = {"selector": "state_id", "state_id": hidden["state_id"]}

@@ -134,12 +134,14 @@ def main() -> None:
 
     if args.subcommand == "emit-run-manifest":
         binary = Path(args.binary).resolve()
-        version = json.loads(subprocess.check_output(
-            [str(binary), "version", "--json"], timeout=30
-        ))
+        version = json.loads(
+            subprocess.check_output([str(binary), "version", "--json"], timeout=30)
+        )
         if isinstance(version, list) and len(version) == 1:
             version = version[0]
-        if not isinstance(version, dict) or not isinstance(version.get("build_revision"), str):
+        if not isinstance(version, dict) or not isinstance(
+            version.get("build_revision"), str
+        ):
             raise ValueError("binary did not report its build revision")
         with binary.open("rb") as stream:
             binary_hash = hashlib.file_digest(stream, "sha256").hexdigest()

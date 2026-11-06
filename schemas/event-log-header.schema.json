@@ -26,10 +26,7 @@
           },
           "maxItems": 3,
           "minItems": 3,
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": ["array", "null"]
         },
         "foreground": {
           "description": "Default foreground as red, green, and blue bytes.",
@@ -63,12 +60,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "source",
-        "foreground",
-        "background",
-        "palette"
-      ],
+      "required": ["source", "foreground", "background", "palette"],
       "type": "object"
     }
   },

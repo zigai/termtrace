@@ -32,11 +32,7 @@
           "description": "Explicit sensitivity class."
         }
       },
-      "required": [
-        "path",
-        "sensitivity",
-        "relationship"
-      ],
+      "required": ["path", "sensitivity", "relationship"],
       "type": "object"
     },
     "BundleProfile": {
@@ -91,13 +87,7 @@
       "type": "integer"
     }
   },
-  "required": [
-    "format",
-    "version",
-    "profile",
-    "includes_canonical_evidence",
-    "members"
-  ],
+  "required": ["format", "version", "profile", "includes_canonical_evidence", "members"],
   "title": "BundlePlan",
   "type": "object"
 }

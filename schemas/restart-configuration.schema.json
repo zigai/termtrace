@@ -87,10 +87,7 @@
       "format": "uint16",
       "maximum": 65535,
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "cell_width": {
       "default": null,
@@ -98,10 +95,7 @@
       "format": "uint16",
       "maximum": 65535,
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "clear_idle_timeout": {
       "default": false,
@@ -124,10 +118,7 @@
       "format": "uint16",
       "maximum": 65535,
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "command": {
       "default": null,
@@ -135,10 +126,7 @@
       "items": {
         "$ref": "#/$defs/Base64Bytes"
       },
-      "type": [
-        "array",
-        "null"
-      ]
+      "type": ["array", "null"]
     },
     "cwd": {
       "anyOf": [
@@ -169,50 +157,35 @@
       "description": "Bounded durability interval override.",
       "format": "uint64",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "durability_max_uncommitted_bytes": {
       "default": null,
       "description": "Bounded durability byte override.",
       "format": "uint64",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "idle_timeout_ms": {
       "default": null,
       "description": "New inactivity limit.",
       "format": "uint64",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "max_duration_ms": {
       "default": null,
       "description": "New wall-clock duration limit.",
       "format": "uint64",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "output_byte_budget": {
       "default": null,
       "description": "New output budget.",
       "format": "uint64",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "provenance": {
       "anyOf": [
@@ -250,18 +223,12 @@
       "format": "uint16",
       "maximum": 65535,
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "term": {
       "default": null,
       "description": "New TERM, absent to keep.",
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     }
   },
   "title": "RestartConfiguration",

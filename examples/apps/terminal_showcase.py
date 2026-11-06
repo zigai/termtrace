@@ -94,9 +94,7 @@ class TerminalShowcase:
         if not self.should_terminate:
             raise TimeoutError("showcase did not receive graceful stop")
         self._line("SHOWCASE_STOPPED_GRACEFULLY", color="1;38;5;82")
-        self._line(
-            "Raw events → semantic states → native pixels", color="38;5;250"
-        )
+        self._line("Raw events → semantic states → native pixels", color="38;5;250")
         time.sleep(0.5)
 
     def _terminal_query(self, query: bytes, terminator: bytes) -> bytes:

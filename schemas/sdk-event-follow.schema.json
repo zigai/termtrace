@@ -28,28 +28,20 @@
           "description": "Maximum uncommitted interval for bounded mode.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "maximum_uncommitted_bytes": {
           "description": "Maximum uncommitted PTY bytes for bounded mode.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "mode": {
           "$ref": "#/$defs/DurabilityMode",
           "description": "Selected persistence behavior."
         }
       },
-      "required": [
-        "mode"
-      ],
+      "required": ["mode"],
       "type": "object"
     },
     "DurabilityRecord": {
@@ -119,12 +111,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "next_event_seq",
-        "file_offset",
-        "event_hash",
-        "monotonic_ns"
-      ],
+      "required": ["next_event_seq", "file_offset", "event_hash", "monotonic_ns"],
       "type": "object"
     },
     "ResourceLimitKind": {
@@ -168,11 +155,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "kind",
-        "limit",
-        "observed"
-      ],
+      "required": ["kind", "limit", "observed"],
       "type": "object"
     },
     "SessionCompletion": {
@@ -196,10 +179,7 @@
         "exit_code": {
           "description": "Normal exit code when available.",
           "format": "int32",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "failure": {
           "anyOf": [
@@ -248,10 +228,7 @@
         },
         "signal_name": {
           "description": "Signal name when available.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "terminal_event_seq": {
           "description": "Sequence number of the required terminal `Exit` event.",
@@ -300,10 +277,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "code",
-        "message"
-      ],
+      "required": ["code", "message"],
       "type": "object"
     }
   },
@@ -351,13 +325,7 @@
           "description": "Requested position, when retained and durable."
         }
       },
-      "required": [
-        "kind",
-        "device",
-        "inode",
-        "header_hash",
-        "durable"
-      ],
+      "required": ["kind", "device", "inode", "header_hash", "durable"],
       "type": "object"
     },
     {
@@ -373,10 +341,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "kind",
-        "completion"
-      ],
+      "required": ["kind", "completion"],
       "type": "object"
     }
   ],

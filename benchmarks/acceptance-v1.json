@@ -57,7 +57,11 @@
     {
       "id": "line-oriented",
       "kind": "line_oriented",
-      "command": ["/bin/sh", "-c", "i=0; while [ $i -lt 10000 ]; do printf 'line %05d payload payload payload\\n' \"$i\"; i=$((i+1)); done"],
+      "command": [
+        "/bin/sh",
+        "-c",
+        "i=0; while [ $i -lt 10000 ]; do printf 'line %05d payload payload payload\\n' \"$i\"; i=$((i+1)); done"
+      ],
       "completion_marker": "line 09999 payload payload payload"
     },
     {
@@ -78,7 +82,19 @@
     {
       "id": "cli-command-count-parity",
       "kind": "ergonomics",
-      "workflows": ["start", "act", "send", "wait", "screen", "control resize", "restart", "stop", "screenshot", "test", "video"],
+      "workflows": [
+        "start",
+        "act",
+        "send",
+        "wait",
+        "screen",
+        "control resize",
+        "restart",
+        "stop",
+        "screenshot",
+        "test",
+        "video"
+      ],
       "maximum_commands_per_workflow": 1,
       "maximum_required_identifiers_per_workflow": 1
     },

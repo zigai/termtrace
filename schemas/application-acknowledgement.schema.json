@@ -13,10 +13,7 @@
           "description": "Latest boundary processed by the session actor, possibly volatile."
         }
       },
-      "required": [
-        "durable",
-        "observed"
-      ],
+      "required": ["durable", "observed"],
       "type": "object"
     },
     "CanonicalBoundary": {
@@ -40,11 +37,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "next_event_seq",
-        "event_hash",
-        "output_bytes"
-      ],
+      "required": ["next_event_seq", "event_hash", "output_bytes"],
       "type": "object"
     }
   },
@@ -69,17 +62,10 @@
     "span_id": {
       "description": "Span identity for start/end, absent for a discrete event.",
       "format": "uuid",
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     }
   },
-  "required": [
-    "acknowledged",
-    "process_instance_id",
-    "boundaries"
-  ],
+  "required": ["acknowledged", "process_instance_id", "boundaries"],
   "title": "ApplicationAcknowledgement",
   "type": "object"
 }

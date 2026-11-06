@@ -42,7 +42,13 @@ def test_cursor_json_round_trips_exact_integers_and_path_bytes() -> None:
     assert events.cursor_from_json(text) == cursor
     exact = '"next_event_seq":18446744073709551615'
     assert exact in text
-    for replacement in ['"18446744073709551615"', "18446744073709551616", "-1", "1.5", "01"]:
+    for replacement in [
+        '"18446744073709551615"',
+        "18446744073709551616",
+        "-1",
+        "1.5",
+        "01",
+    ]:
         with pytest.raises(ValueError):
             events.cursor_from_json(
                 text.replace(exact, f'"next_event_seq":{replacement}')

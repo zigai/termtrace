@@ -19,10 +19,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "cols",
-        "rows"
-      ],
+      "required": ["cols", "rows"],
       "type": "object"
     },
     "DecimalU64": {
@@ -54,10 +51,7 @@
   "properties": {
     "code": {
       "description": "Stable rejection code.",
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     },
     "configured_unix_ns": {
       "anyOf": [
@@ -109,26 +103,16 @@
       "description": "Configured window height in pixels, including Ghostty's window overhead.",
       "format": "uint32",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "window_width": {
       "description": "Configured window width in pixels, including Ghostty's window overhead.",
       "format": "uint32",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     }
   },
-  "required": [
-    "request_id",
-    "requested",
-    "decision"
-  ],
+  "required": ["request_id", "requested", "decision"],
   "title": "WindowResizeRecord",
   "type": "object"
 }

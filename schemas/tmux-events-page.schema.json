@@ -26,26 +26,16 @@
         },
         "pane_id": {
           "description": "Related pane ID, or none for an aggregate limitation.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "resolved_unix_ns": {
           "description": "Wall-clock time when the gap was first observed to be resolved.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         }
       },
-      "required": [
-        "kind",
-        "first_observed_unix_ns",
-        "last_observed_unix_ns"
-      ],
+      "required": ["kind", "first_observed_unix_ns", "last_observed_unix_ns"],
       "type": "object"
     },
     "TmuxEventRecord": {
@@ -63,10 +53,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind",
-            "coverage"
-          ],
+          "required": ["kind", "coverage"],
           "type": "object"
         },
         {
@@ -81,10 +68,7 @@
               "description": "Composite session identity and path."
             }
           },
-          "required": [
-            "kind",
-            "link"
-          ],
+          "required": ["kind", "link"],
           "type": "object"
         },
         {
@@ -95,9 +79,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind"
-          ],
+          "required": ["kind"],
           "type": "object"
         },
         {
@@ -108,9 +90,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind"
-          ],
+          "required": ["kind"],
           "type": "object"
         },
         {
@@ -125,10 +105,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind",
-            "identity"
-          ],
+          "required": ["kind", "identity"],
           "type": "object"
         },
         {
@@ -145,10 +122,7 @@
               "type": "integer"
             }
           },
-          "required": [
-            "kind",
-            "pid"
-          ],
+          "required": ["kind", "pid"],
           "type": "object"
         },
         {
@@ -163,10 +137,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind",
-            "session_id"
-          ],
+          "required": ["kind", "session_id"],
           "type": "object"
         },
         {
@@ -181,10 +152,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind",
-            "session_id"
-          ],
+          "required": ["kind", "session_id"],
           "type": "object"
         },
         {
@@ -199,10 +167,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind",
-            "window_id"
-          ],
+          "required": ["kind", "window_id"],
           "type": "object"
         },
         {
@@ -217,10 +182,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind",
-            "window_id"
-          ],
+          "required": ["kind", "window_id"],
           "type": "object"
         },
         {
@@ -235,10 +197,7 @@
               "description": "Pane identifiers."
             }
           },
-          "required": [
-            "kind",
-            "pane"
-          ],
+          "required": ["kind", "pane"],
           "type": "object"
         },
         {
@@ -253,10 +212,7 @@
               "description": "Last observed pane identifiers."
             }
           },
-          "required": [
-            "kind",
-            "pane"
-          ],
+          "required": ["kind", "pane"],
           "type": "object"
         },
         {
@@ -271,10 +227,7 @@
               "description": "Pane identifiers after the move."
             }
           },
-          "required": [
-            "kind",
-            "pane"
-          ],
+          "required": ["kind", "pane"],
           "type": "object"
         },
         {
@@ -293,11 +246,7 @@
               "description": "Pane identifiers."
             }
           },
-          "required": [
-            "kind",
-            "pane",
-            "layout"
-          ],
+          "required": ["kind", "pane", "layout"],
           "type": "object"
         },
         {
@@ -316,11 +265,7 @@
               "description": "Pane identifiers."
             }
           },
-          "required": [
-            "kind",
-            "pane",
-            "active"
-          ],
+          "required": ["kind", "pane", "active"],
           "type": "object"
         },
         {
@@ -339,11 +284,7 @@
               "description": "Pane identifiers."
             }
           },
-          "required": [
-            "kind",
-            "pane",
-            "active"
-          ],
+          "required": ["kind", "pane", "active"],
           "type": "object"
         },
         {
@@ -362,11 +303,7 @@
               "type": "boolean"
             }
           },
-          "required": [
-            "kind",
-            "pane",
-            "zoomed"
-          ],
+          "required": ["kind", "pane", "zoomed"],
           "type": "object"
         },
         {
@@ -378,20 +315,14 @@
             },
             "mode": {
               "description": "Active mode name, or none when no mode is active.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "pane": {
               "$ref": "#/$defs/TmuxPaneAddress",
               "description": "Pane identifiers."
             }
           },
-          "required": [
-            "kind",
-            "pane"
-          ],
+          "required": ["kind", "pane"],
           "type": "object"
         },
         {
@@ -406,10 +337,7 @@
               "description": "Linked incarnation."
             }
           },
-          "required": [
-            "kind",
-            "track"
-          ],
+          "required": ["kind", "track"],
           "type": "object"
         },
         {
@@ -429,11 +357,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind",
-            "pane_id",
-            "session_id"
-          ],
+          "required": ["kind", "pane_id", "session_id"],
           "type": "object"
         },
         {
@@ -448,10 +372,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind",
-            "gap"
-          ],
+          "required": ["kind", "gap"],
           "type": "object"
         },
         {
@@ -466,10 +387,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind",
-            "gap"
-          ],
+          "required": ["kind", "gap"],
           "type": "object"
         }
       ],
@@ -487,10 +405,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "sequence",
-        "observed_unix_ns"
-      ],
+      "required": ["sequence", "observed_unix_ns"],
       "type": "object"
     },
     "TmuxGapKind": {
@@ -534,11 +449,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "session_id",
-        "window_id",
-        "pane_id"
-      ],
+      "required": ["session_id", "window_id", "pane_id"],
       "type": "object"
     },
     "TmuxPaneTrack": {
@@ -564,12 +475,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "pane_id",
-        "session_id",
-        "session",
-        "linked_unix_ns"
-      ],
+      "required": ["pane_id", "session_id", "session", "linked_unix_ns"],
       "type": "object"
     },
     "TmuxRecordingCoverage": {
@@ -613,12 +519,7 @@
           "description": "Server socket path bytes."
         }
       },
-      "required": [
-        "pid",
-        "socket_path",
-        "socket_device",
-        "socket_inode"
-      ],
+      "required": ["pid", "socket_path", "socket_device", "socket_inode"],
       "type": "object"
     },
     "TmuxSessionLink": {
@@ -634,10 +535,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "session_id",
-        "session"
-      ],
+      "required": ["session_id", "session"],
       "type": "object"
     }
   },
@@ -656,15 +554,10 @@
       "description": "First sequence of the following page, if any.",
       "format": "uint64",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     }
   },
-  "required": [
-    "events"
-  ],
+  "required": ["events"],
   "title": "EventPage",
   "type": "object"
 }

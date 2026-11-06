@@ -28,11 +28,7 @@
       "description": "Rounded frame boundary in centiseconds."
     }
   },
-  "required": [
-    "frame",
-    "start_centiseconds",
-    "delay_centiseconds"
-  ],
+  "required": ["frame", "start_centiseconds", "delay_centiseconds"],
   "title": "GifFrameTiming",
   "type": "object"
 }

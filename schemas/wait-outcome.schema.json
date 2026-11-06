@@ -22,11 +22,7 @@
       "type": "integer"
     }
   },
-  "required": [
-    "event_seq",
-    "output_end_offset",
-    "monotonic_ns"
-  ],
+  "required": ["event_seq", "output_end_offset", "monotonic_ns"],
   "title": "WaitOutcome",
   "type": "object"
 }

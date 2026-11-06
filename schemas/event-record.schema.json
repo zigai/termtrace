@@ -26,10 +26,7 @@
         "parent_span_id": {
           "description": "Optional parent span in the same process instance.",
           "format": "uuid",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "process_id": {
           "description": "Caller-reported operating-system PID.",
@@ -45,10 +42,7 @@
         "span_id": {
           "description": "Span identity; required for span lifecycle transitions.",
           "format": "uuid",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
       "required": [
@@ -102,10 +96,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "type",
-            "data"
-          ],
+          "required": ["type", "data"],
           "type": "object"
         },
         {
@@ -114,10 +105,7 @@
           "properties": {
             "caller_intent": {
               "description": "Optional caller-supplied reason for applying the input.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "data": {
               "$ref": "#/$defs/Base64Bytes",
@@ -138,10 +126,7 @@
             },
             "semantic_input": {
               "description": "Canonical symbolic input, such as `ctrl+u` or `paste`.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "source": {
               "$ref": "#/$defs/InputSource",
@@ -149,24 +134,14 @@
             },
             "terminal_modes_hash": {
               "description": "BLAKE3 of canonical terminal modes used to encode this atom, when mode-aware.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "type": {
               "const": "input_intent",
               "type": "string"
             }
           },
-          "required": [
-            "type",
-            "operation_id",
-            "source",
-            "input_kind",
-            "descriptor",
-            "data"
-          ],
+          "required": ["type", "operation_id", "source", "input_kind", "descriptor", "data"],
           "type": "object"
         },
         {
@@ -181,10 +156,7 @@
             },
             "error_code": {
               "description": "Stable diagnostic code on failure.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "operation_id": {
               "description": "Identifier from the corresponding intent.",
@@ -200,12 +172,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "type",
-            "operation_id",
-            "status",
-            "bytes_written"
-          ],
+          "required": ["type", "operation_id", "status", "bytes_written"],
           "type": "object"
         },
         {
@@ -250,14 +217,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "type",
-            "operation_id",
-            "cols",
-            "rows",
-            "pixel_width",
-            "pixel_height"
-          ],
+          "required": ["type", "operation_id", "cols", "rows", "pixel_width", "pixel_height"],
           "type": "object"
         },
         {
@@ -266,10 +226,7 @@
           "properties": {
             "error_code": {
               "description": "Stable diagnostic code on failure.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "operation_id": {
               "description": "Identifier from the corresponding intent.",
@@ -285,11 +242,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "type",
-            "operation_id",
-            "status"
-          ],
+          "required": ["type", "operation_id", "status"],
           "type": "object"
         },
         {
@@ -315,12 +268,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "type",
-            "operation_id",
-            "number",
-            "name"
-          ],
+          "required": ["type", "operation_id", "number", "name"],
           "type": "object"
         },
         {
@@ -329,10 +277,7 @@
           "properties": {
             "error_code": {
               "description": "Stable diagnostic code on failure.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "operation_id": {
               "description": "Identifier from the corresponding intent.",
@@ -348,11 +293,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "type",
-            "operation_id",
-            "status"
-          ],
+          "required": ["type", "operation_id", "status"],
           "type": "object"
         },
         {
@@ -373,11 +314,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "type",
-            "operation_id",
-            "label"
-          ],
+          "required": ["type", "operation_id", "label"],
           "type": "object"
         },
         {
@@ -398,11 +335,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "type",
-            "operation_id",
-            "data"
-          ],
+          "required": ["type", "operation_id", "data"],
           "type": "object"
         },
         {
@@ -425,31 +358,20 @@
               "description": "Inclusive offset of the query's final byte in that output event.",
               "format": "uint64",
               "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "type": ["integer", "null"]
             },
             "source_event_seq": {
               "description": "Canonical output event containing the end of the query.",
               "format": "uint64",
               "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "type": ["integer", "null"]
             },
             "type": {
               "const": "query_response",
               "type": "string"
             }
           },
-          "required": [
-            "type",
-            "query",
-            "response",
-            "responder"
-          ],
+          "required": ["type", "query", "response", "responder"],
           "type": "object"
         },
         {
@@ -464,20 +386,14 @@
               "description": "Child process ID when available.",
               "format": "uint32",
               "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "type": ["integer", "null"]
             },
             "type": {
               "const": "lifecycle",
               "type": "string"
             }
           },
-          "required": [
-            "type",
-            "lifecycle_kind"
-          ],
+          "required": ["type", "lifecycle_kind"],
           "type": "object"
         },
         {
@@ -487,34 +403,23 @@
             "code": {
               "description": "Exit status when the process exited normally.",
               "format": "int32",
-              "type": [
-                "integer",
-                "null"
-              ]
+              "type": ["integer", "null"]
             },
             "signal": {
               "description": "Signal number when signal termination occurred.",
               "format": "int32",
-              "type": [
-                "integer",
-                "null"
-              ]
+              "type": ["integer", "null"]
             },
             "signal_name": {
               "description": "Platform signal description when available.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "type": {
               "const": "exit",
               "type": "string"
             }
           },
-          "required": [
-            "type"
-          ],
+          "required": ["type"],
           "type": "object"
         },
         {
@@ -534,11 +439,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "type",
-            "code",
-            "message"
-          ],
+          "required": ["type", "code", "message"],
           "type": "object"
         }
       ]
@@ -555,9 +456,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind"
-          ],
+          "required": ["kind"],
           "type": "object"
         },
         {
@@ -569,9 +468,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind"
-          ],
+          "required": ["kind"],
           "type": "object"
         },
         {
@@ -640,11 +537,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind",
-            "bracketed",
-            "terminal_modes_hash"
-          ],
+          "required": ["kind", "bracketed", "terminal_modes_hash"],
           "type": "object"
         },
         {
@@ -668,12 +561,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind",
-            "focused",
-            "encoder",
-            "terminal_modes_hash"
-          ],
+          "required": ["kind", "focused", "encoder", "terminal_modes_hash"],
           "type": "object"
         },
         {
@@ -714,20 +602,14 @@
               "format": "uint16",
               "maximum": 65535,
               "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "type": ["integer", "null"]
             },
             "end_row": {
               "description": "Optional zero-based destination row for a drag.",
               "format": "uint16",
               "maximum": 65535,
               "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "type": ["integer", "null"]
             },
             "kind": {
               "const": "pointer",
@@ -992,10 +874,7 @@
       "description": "PTY read completion time, when observed separately from canonical append time.\nThis is not the application's write time or a framebuffer presentation time.",
       "format": "uint64",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "prev_hash": {
       "description": "BLAKE3 hash of the preceding header or event.",
@@ -1008,13 +887,7 @@
       "type": "integer"
     }
   },
-  "required": [
-    "seq",
-    "monotonic_ns",
-    "prev_hash",
-    "hash",
-    "event"
-  ],
+  "required": ["seq", "monotonic_ns", "prev_hash", "hash", "event"],
   "title": "EventRecord",
   "type": "object"
 }

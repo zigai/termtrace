@@ -21,26 +21,16 @@
         },
         "pane_id": {
           "description": "Related pane ID, or none for an aggregate limitation.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "resolved_unix_ns": {
           "description": "Wall-clock time when the gap was first observed to be resolved.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         }
       },
-      "required": [
-        "kind",
-        "first_observed_unix_ns",
-        "last_observed_unix_ns"
-      ],
+      "required": ["kind", "first_observed_unix_ns", "last_observed_unix_ns"],
       "type": "object"
     },
     "TmuxGapKind": {
@@ -84,10 +74,7 @@
       "type": "integer"
     }
   },
-  "required": [
-    "sequence",
-    "gap"
-  ],
+  "required": ["sequence", "gap"],
   "title": "TmuxGapCatalogEntry",
   "type": "object"
 }

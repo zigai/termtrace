@@ -125,20 +125,14 @@
       "description": "Opt-in completed-pane retention budget; absent means no budget-based deletion.",
       "format": "uint64",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "retain_days": {
       "default": null,
       "description": "Opt-in completed-pane retention age; absent means no age-based deletion.",
       "format": "uint64",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "sessions": {
       "default": [],
@@ -151,10 +145,7 @@
     "term": {
       "default": null,
       "description": "Optional terminal identity override.",
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     },
     "windows": {
       "default": [],

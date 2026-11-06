@@ -21,7 +21,16 @@ WIDE_FORMATS = {"int64", "uint64", "int128", "uint128", "int", "uint"}
 
 def load_catalog() -> dict:
     output = subprocess.run(
-        ["cargo", "run", "--quiet", "--locked", "-p", "termtrace-service", "--example", "sdk_types"],
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "--locked",
+            "-p",
+            "termtrace-service",
+            "--example",
+            "sdk_types",
+        ],
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -31,14 +40,20 @@ def load_catalog() -> dict:
 
 
 def pascal(text: str) -> str:
-    return "".join(part[:1].upper() + part[1:] for part in re.split(r"[^0-9A-Za-z]+", str(text)) if part)
+    return "".join(
+        part[:1].upper() + part[1:]
+        for part in re.split(r"[^0-9A-Za-z]+", str(text))
+        if part
+    )
 
 
 def variant_name(parent: str, branch: dict, index: int) -> str:
     for spec in branch.get("properties", {}).values():
         if isinstance(spec, dict) and "const" in spec:
             return parent + pascal(spec["const"])
-    if len(branch.get("required", [])) == 1 and set(branch.get("properties", {})) == set(branch["required"]):
+    if len(branch.get("required", [])) == 1 and set(
+        branch.get("properties", {})
+    ) == set(branch["required"]):
         return parent + pascal(branch["required"][0])
     return f"{parent}Variant{index}"
 
@@ -65,12 +80,17 @@ class Emitter:
             self.typescript[name] = self.interface(name, schema, description)
             return
         self.python[name] = f'{name}: TypeAlias = "{self.type(schema, name, True)}"'
-        self.typescript[name] = self.jsdoc(description, "") + f"export type {name} = {self.type(schema, name, False)}"
+        self.typescript[name] = (
+            self.jsdoc(description, "")
+            + f"export type {name} = {self.type(schema, name, False)}"
+        )
 
     @staticmethod
     def is_object(schema: object) -> bool:
-        return isinstance(schema, dict) and "properties" in schema and not any(
-            key in schema for key in ("oneOf", "anyOf", "allOf")
+        return (
+            isinstance(schema, dict)
+            and "properties" in schema
+            and not any(key in schema for key in ("oneOf", "anyOf", "allOf"))
         )
 
     def type(self, schema: object, name: str, python: bool) -> str:
@@ -92,18 +112,30 @@ class Emitter:
             return f"Literal[{text}]" if python else text
         if "enum" in schema:
             values = [repr(v) if python else json.dumps(v) for v in schema["enum"]]
-            return "Literal[" + ", ".join(values) + "]" if python else " | ".join(values)
+            return (
+                "Literal[" + ", ".join(values) + "]" if python else " | ".join(values)
+            )
         for union in ("oneOf", "anyOf"):
             if union in schema:
-                return self.union([self.branch(name, schema, branch, i, python) for i, branch in enumerate(schema[union])], python)
+                return self.union(
+                    [
+                        self.branch(name, schema, branch, i, python)
+                        for i, branch in enumerate(schema[union])
+                    ],
+                    python,
+                )
         if "allOf" in schema:
             parts = schema["allOf"]
             if len(parts) != 1:
-                raise TypeError(f"{name}: allOf with {len(parts)} parts is not supported")
+                raise TypeError(
+                    f"{name}: allOf with {len(parts)} parts is not supported"
+                )
             return self.type(parts[0], name, python)
         kind = schema.get("type")
         if isinstance(kind, list):
-            return self.union([self.type({**schema, "type": k}, name, python) for k in kind], python)
+            return self.union(
+                [self.type({**schema, "type": k}, name, python) for k in kind], python
+            )
         if kind == "null":
             return "None" if python else "null"
         if kind == "boolean":
@@ -120,24 +152,37 @@ class Emitter:
             return "str" if python else "string"
         if kind == "array":
             if "prefixItems" in schema:
-                items = [self.type(item, f"{name}Item{i}", python) for i, item in enumerate(schema["prefixItems"])]
-                return f"tuple[{', '.join(items)}]" if python else f"[{', '.join(items)}]"
+                items = [
+                    self.type(item, f"{name}Item{i}", python)
+                    for i, item in enumerate(schema["prefixItems"])
+                ]
+                return (
+                    f"tuple[{', '.join(items)}]" if python else f"[{', '.join(items)}]"
+                )
             item = self.type(schema.get("items", {}), f"{name}Item", python)
             return f"list[{item}]" if python else f"Array<{item}>"
         if kind == "object" or "properties" in schema:
             if "properties" not in schema:
-                value = self.type(schema.get("additionalProperties", {}), f"{name}Value", python)
+                value = self.type(
+                    schema.get("additionalProperties", {}), f"{name}Value", python
+                )
                 return f"dict[str, {value}]" if python else f"Record<string, {value}>"
             self.define(name, schema)
             return name
         return "JsonValue"
 
-    def branch(self, parent: str, schema: dict, branch: dict, index: int, python: bool) -> str:
+    def branch(
+        self, parent: str, schema: dict, branch: dict, index: int, python: bool
+    ) -> str:
         if "properties" in schema and isinstance(branch, dict):
             branch = {
                 **branch,
                 "properties": {**schema["properties"], **branch.get("properties", {})},
-                "required": list(dict.fromkeys([*schema.get("required", []), *branch.get("required", [])])),
+                "required": list(
+                    dict.fromkeys(
+                        [*schema.get("required", []), *branch.get("required", [])]
+                    )
+                ),
             }
         if self.is_object(branch):
             name = variant_name(parent, branch, index)
@@ -149,17 +194,25 @@ class Emitter:
     def union(types: list[str], python: bool) -> str:
         types = list(dict.fromkeys(types))
         if python:
-            literals = [t[len("Literal[") : -1] for t in types if t.startswith("Literal[")]
+            literals = [
+                t[len("Literal[") : -1] for t in types if t.startswith("Literal[")
+            ]
             if len(literals) > 1:
                 first = next(i for i, t in enumerate(types) if t.startswith("Literal["))
                 rest = [t for t in types if not t.startswith("Literal[")]
-                types = [*rest[:first], "Literal[" + ", ".join(literals) + "]", *rest[first:]]
+                types = [
+                    *rest[:first],
+                    "Literal[" + ", ".join(literals) + "]",
+                    *rest[first:],
+                ]
         return " | ".join(types)
 
     def typed_dict(self, name: str, schema: dict, description: str | None) -> str:
         fields = schema["properties"]
         required = set(schema.get("required", []))
-        functional = any(keyword.iskeyword(field) or not field.isidentifier() for field in fields)
+        functional = any(
+            keyword.iskeyword(field) or not field.isidentifier() for field in fields
+        )
         entries = []
         for field, spec in fields.items():
             field_type = self.type(spec, name + pascal(field), True)
@@ -169,7 +222,9 @@ class Emitter:
         if functional:
             if schema.get(FRAME_EXTENSION):
                 entries.append(("frame", "FrameHandle"))
-            body = ", ".join(f"{field!r}: {json.dumps(field_type)}" for field, field_type in entries)
+            body = ", ".join(
+                f"{field!r}: {json.dumps(field_type)}" for field, field_type in entries
+            )
             return f'{name} = TypedDict("{name}", {{{body}}})'
         lines = [f"class {name}(TypedDict):"]
         if description:
@@ -193,10 +248,14 @@ class Emitter:
         required = set(schema.get("required", []))
         lines = [self.jsdoc(description, "") + f"export interface {name} {{"]
         for field, spec in schema["properties"].items():
-            doc = self.jsdoc(spec.get("description") if isinstance(spec, dict) else None, "  ")
+            doc = self.jsdoc(
+                spec.get("description") if isinstance(spec, dict) else None, "  "
+            )
             optional = "" if field in required else "?"
             key = field if field.isidentifier() else json.dumps(field)
-            lines.append(f"{doc}  {key}{optional}: {self.type(spec, name + pascal(field), False)}")
+            lines.append(
+                f"{doc}  {key}{optional}: {self.type(spec, name + pascal(field), False)}"
+            )
         if schema.get(FRAME_EXTENSION):
             lines.append("  frame: FrameHandle")
         lines.append("}")
@@ -241,7 +300,9 @@ def write_header(names: list[str]) -> None:
     block = "\n".join(
         [
             HEADER_START,
-            "import type { Arg, JsonValue, Model, " + ", ".join(names) + " } from './types'",
+            "import type { Arg, JsonValue, Model, "
+            + ", ".join(names)
+            + " } from './types'",
             "export type * from './types'",
             HEADER_END,
         ]
@@ -301,9 +362,18 @@ def main() -> int:
     python.python.update(accepted.python)
     names = sorted(typescript.typescript)
     body = "\n\n\n".join(python.python[n] for n in sorted(python.python))
-    header = PYTHON_HEADER if "Never" in body else PYTHON_HEADER.replace("Never, NotRequired", "NotRequired")
+    header = (
+        PYTHON_HEADER
+        if "Never" in body
+        else PYTHON_HEADER.replace("Never, NotRequired", "NotRequired")
+    )
     PYTHON_OUT.write_text(header + "\n\n" + body + "\n")
-    TYPESCRIPT_OUT.write_text(TYPESCRIPT_HEADER + "\n" + "\n\n".join(typescript.typescript[n] for n in names) + "\n")
+    TYPESCRIPT_OUT.write_text(
+        TYPESCRIPT_HEADER
+        + "\n"
+        + "\n\n".join(typescript.typescript[n] for n in names)
+        + "\n"
+    )
     write_header(names)
     return 0
 

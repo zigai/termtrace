@@ -1,1475 +1,1781 @@
-const test = require('node:test');
-const assert = require('node:assert');
-const os = require('node:os');
-const path = require('node:path');
-const fs = require('node:fs');
+const test = require("node:test");
+const assert = require("node:assert");
+const os = require("node:os");
+const path = require("node:path");
+const fs = require("node:fs");
 
-const { Termtrace } = require('@termtrace/core');
-const { withTermtrace } = require('@termtrace/core/testing');
+const { Termtrace } = require("@termtrace/core");
+const { withTermtrace } = require("@termtrace/core/testing");
 
 const TERMTRACE_BIN = process.env.TERMTRACE_BIN
-  ? path.resolve(process.env.TERMTRACE_BIN)
-  : path.resolve(__dirname, '../../../../target/debug/termtrace');
+    ? path.resolve(process.env.TERMTRACE_BIN)
+    : path.resolve(__dirname, "../../../../target/debug/termtrace");
 
-test('sync and async recording lifecycle', async () => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-consumer-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.record(['/bin/sh', '-norc', '-c', 'echo NODE_CONSUMER_OK'], 24, 80);
-    assert.strictEqual(rec.isActive(), true);
-    assert.ok(rec.sessionId.length > 0);
+test("sync and async recording lifecycle", async () => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-consumer-"));
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo NODE_CONSUMER_OK"], 24, 80);
+        assert.strictEqual(rec.isActive(), true);
+        assert.ok(rec.sessionId.length > 0);
 
-    const screen = rec.screen();
-    const state = await screen.waitForText('NODE_CONSUMER_OK', 5000);
-    assert.ok(state.text.includes('NODE_CONSUMER_OK'));
-    assert.ok(state.cursorRow >= 0);
+        const screen = rec.screen();
+        const state = await screen.waitForText("NODE_CONSUMER_OK", 5000);
+        assert.ok(state.text.includes("NODE_CONSUMER_OK"));
+        assert.ok(state.cursorRow >= 0);
 
-    await rec.stop();
-    assert.strictEqual(rec.isActive(), false);
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
+        await rec.stop();
+        assert.strictEqual(rec.isActive(), false);
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
 });
 
-test('screen frame geometry and text retrieval', async () => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-frame-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.record(['/bin/sh', '-norc', '-c', 'echo FRAME_GEOMETRY_OK'], 32, 96);
-    const screen = rec.screen();
-    await screen.waitForText('FRAME_GEOMETRY_OK', 5000);
+test("screen frame geometry and text retrieval", async () => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-frame-"));
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo FRAME_GEOMETRY_OK"], 32, 96);
+        const screen = rec.screen();
+        await screen.waitForText("FRAME_GEOMETRY_OK", 5000);
 
-    const frame = await screen.frame();
-    assert.strictEqual(frame.rows, 32);
-    assert.strictEqual(frame.cols, 96);
-    assert.ok(frame.text.includes('FRAME_GEOMETRY_OK'));
+        const frame = await screen.frame();
+        assert.strictEqual(frame.rows, 32);
+        assert.strictEqual(frame.cols, 96);
+        assert.ok(frame.text.includes("FRAME_GEOMETRY_OK"));
 
-    const plainText = await screen.text();
-    assert.ok(plainText.includes('FRAME_GEOMETRY_OK'));
+        const plainText = await screen.text();
+        assert.ok(plainText.includes("FRAME_GEOMETRY_OK"));
 
-    await rec.stop();
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
+        await rec.stop();
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
 });
 
-test('action builder state-guarded input', async () => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-actions-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.record(['/bin/sh', '-norc'], 24, 80);
-    const screen = rec.screen();
-    const readyState = await screen.waitForText('$', 5000);
+test("action builder state-guarded input", async () => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-actions-"));
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.record(["/bin/sh", "-norc"], 24, 80);
+        const screen = rec.screen();
+        const readyState = await screen.waitForText("$", 5000);
 
-    const actions = rec.actions();
-    actions.ifState(readyState.hash);
-    actions.sendText('echo ACTION_NODE_SUCCESS');
-    actions.sendKey('Enter');
-    actions.untilScreen('ACTION_NODE_SUCCESS', 5000);
-    const outcome = await actions.execute();
+        const actions = rec.actions();
+        actions.ifState(readyState.hash);
+        actions.sendText("echo ACTION_NODE_SUCCESS");
+        actions.sendKey("Enter");
+        actions.untilScreen("ACTION_NODE_SUCCESS", 5000);
+        const outcome = await actions.execute();
 
-    assert.ok(outcome);
-    assert.ok(outcome.text.includes('ACTION_NODE_SUCCESS'));
+        assert.ok(outcome);
+        assert.ok(outcome.text.includes("ACTION_NODE_SUCCESS"));
 
-    await rec.stop();
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
+        await rec.stop();
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
 });
 
-test('pointer actions (click, scroll, focus)', async () => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-pointer-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.record(['/bin/sh', '-norc'], 24, 80);
-    await rec.screen().waitForText('$', 5000);
+test("pointer actions (click, scroll, focus)", async () => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-pointer-"));
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.record(["/bin/sh", "-norc"], 24, 80);
+        await rec.screen().waitForText("$", 5000);
 
-    await rec.pointerClick(10, 5, 'left');
-    await rec.pointerScroll(10, 5, 2);
-    await rec.pointerFocus(true);
+        await rec.pointerClick(10, 5, "left");
+        await rec.pointerScroll(10, 5, 2);
+        await rec.pointerFocus(true);
 
-    await rec.stop();
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
+        await rec.stop();
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
 });
 
-test('visual snapshot save (PNG, SVG, HTML, TXT, JSON)', async () => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-save-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.record(['/bin/sh', '-norc', '-c', 'echo VISUAL_SAVE_NODE'], 24, 80);
-    await rec.screen().waitForText('VISUAL_SAVE_NODE', 5000);
+test("visual snapshot save (PNG, SVG, HTML, TXT, JSON)", async () => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-save-"));
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo VISUAL_SAVE_NODE"], 24, 80);
+        await rec.screen().waitForText("VISUAL_SAVE_NODE", 5000);
 
-    const saveDir = path.join(tmpdir, 'snapshot_out');
-    const manifestJson = await rec.save(saveDir, ['png', 'svg', 'html', 'txt', 'json']);
-    const manifest = (manifestJson);
+        const saveDir = path.join(tmpdir, "snapshot_out");
+        const manifestJson = await rec.save(saveDir, ["png", "svg", "html", "txt", "json"]);
+        const manifest = manifestJson;
 
-    assert.ok(manifest.format);
-    assert.ok(fs.existsSync(saveDir));
-    assert.ok(manifest.files.length > 0);
-    const firstFile = path.join(saveDir, manifest.files[0].path);
-    assert.ok(fs.existsSync(firstFile));
+        assert.ok(manifest.format);
+        assert.ok(fs.existsSync(saveDir));
+        assert.ok(manifest.files.length > 0);
+        const firstFile = path.join(saveDir, manifest.files[0].path);
+        assert.ok(fs.existsSync(firstFile));
 
-    await rec.stop();
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
+        await rec.stop();
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
 });
 
-test('raw output streaming and wait', async () => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-output-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.record(['/bin/sh', '-norc', '-c', 'echo RAW_OUTPUT_NODE'], 24, 80);
-    await rec.screen().waitForText('RAW_OUTPUT_NODE', 5000);
+test("raw output streaming and wait", async () => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-output-"));
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo RAW_OUTPUT_NODE"], 24, 80);
+        await rec.screen().waitForText("RAW_OUTPUT_NODE", 5000);
 
-    const page = await rec.readOutput(0n, 4096);
-    assert.ok(page.bytes.length > 0);
-    const textOut = Buffer.from(page.bytes).toString('utf8');
-    assert.ok(textOut.includes('RAW_OUTPUT_NODE'));
+        const page = await rec.readOutput(0n, 4096);
+        assert.ok(page.bytes.length > 0);
+        const textOut = Buffer.from(page.bytes).toString("utf8");
+        assert.ok(textOut.includes("RAW_OUTPUT_NODE"));
 
-    const matched = await rec.waitForOutput('RAW_OUTPUT_NODE', 5000);
-    assert.strictEqual(matched, true);
+        const matched = await rec.waitForOutput("RAW_OUTPUT_NODE", 5000);
+        assert.strictEqual(matched, true);
 
-    await rec.stop();
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
+        await rec.stop();
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
 });
 
-test('event log reading and pagination', async () => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-events-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.record(['/bin/sh', '-norc', '-c', 'echo EVENT_NODE_TEST'], 24, 80);
-    await rec.screen().waitForText('EVENT_NODE_TEST', 5000);
+test("event log reading and pagination", async () => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-events-"));
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo EVENT_NODE_TEST"], 24, 80);
+        await rec.screen().waitForText("EVENT_NODE_TEST", 5000);
 
-    const eventsJson = await rec.readEvents(0n, 50);
-    const events = (eventsJson);
-    assert.ok(Array.isArray(events));
-    assert.ok(events.length > 0);
+        const eventsJson = await rec.readEvents(0n, 50);
+        const events = eventsJson;
+        assert.ok(Array.isArray(events));
+        assert.ok(events.length > 0);
 
-    await rec.stop();
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
+        await rec.stop();
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
 });
 
-test('replay analysis services (explain, diagnose, last_action, timeline)', async () => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-analysis-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.record(['/bin/sh', '-norc'], 24, 80);
-    const state = await rec.screen().waitForText('$', 5000);
+test("replay analysis services (explain, diagnose, last_action, timeline)", async () => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-analysis-"));
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.record(["/bin/sh", "-norc"], 24, 80);
+        const state = await rec.screen().waitForText("$", 5000);
 
-    const actions = rec.actions();
-    actions.sendText('echo ACTION_FOR_ANALYSIS');
-    actions.sendKey('Enter');
-    actions.untilScreen('ACTION_FOR_ANALYSIS', 5000);
-    await actions.execute();
+        const actions = rec.actions();
+        actions.sendText("echo ACTION_FOR_ANALYSIS");
+        actions.sendKey("Enter");
+        actions.untilScreen("ACTION_FOR_ANALYSIS", 5000);
+        await actions.execute();
 
-    const session = rec.session();
-    const stateHash = state.hash;
-    await rec.stop();
+        const session = rec.session();
+        const stateHash = state.hash;
+        await rec.stop();
 
-    // Replay analysis on completed session
-    const explanation = (await session.explain(stateHash, 1));
-    assert.ok(explanation.target);
+        // Replay analysis on completed session
+        const explanation = await session.explain(stateHash, 1);
+        assert.ok(explanation.target);
 
-    const diagnosis = (await session.diagnose(20));
-    assert.ok(diagnosis.findings);
+        const diagnosis = await session.diagnose(20);
+        assert.ok(diagnosis.findings);
 
-    const lastAct = (await session.lastAction());
-    assert.ok(typeof lastAct === 'object');
+        const lastAct = await session.lastAction();
+        assert.ok(typeof lastAct === "object");
 
-    const timeline = (await session.timelinePage(0, 10));
-    assert.ok(timeline.entries);
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
+        const timeline = await session.timelinePage(0, 10);
+        assert.ok(timeline.entries);
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
 });
 
-test('system capability probe', async () => {
-  const tt = new Termtrace(TERMTRACE_BIN);
-  const capsJson = await tt.probeCapabilities();
-  const caps = (capsJson);
-  assert.ok(Array.isArray(caps.capabilities));
+test("system capability probe", async () => {
+    const tt = new Termtrace(TERMTRACE_BIN);
+    const capsJson = await tt.probeCapabilities();
+    const caps = capsJson;
+    assert.ok(Array.isArray(caps.capabilities));
 });
 
-test('registry operations (register, resolve, list, remove, gc)', async () => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-registry-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.record(['/bin/sh', '-norc', '-c', 'echo REGISTRY_NODE'], 24, 80);
-    const sessionPath = rec.path;
-    const alias = `node-alias-${process.pid}`;
+test("registry operations (register, resolve, list, remove, gc)", async () => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-registry-"));
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo REGISTRY_NODE"], 24, 80);
+        const sessionPath = rec.path;
+        const alias = `node-alias-${process.pid}`;
 
-    const entry = (await tt.registryRegister(alias, sessionPath));
-    assert.strictEqual(entry.alias, alias);
+        const entry = await tt.registryRegister(alias, sessionPath);
+        assert.strictEqual(entry.alias, alias);
 
-    const resolved = await tt.registryResolve(alias);
-    assert.strictEqual(resolved, sessionPath);
+        const resolved = await tt.registryResolve(alias);
+        assert.strictEqual(resolved, sessionPath);
 
-    const entries = (await tt.registryList(true));
-    assert.ok(entries.some(e => e.alias === alias));
+        const entries = await tt.registryList(true);
+        assert.ok(entries.some((e) => e.alias === alias));
 
-    const removed = await tt.registryRemove(alias);
-    assert.strictEqual(removed, true);
+        const removed = await tt.registryRemove(alias);
+        assert.strictEqual(removed, true);
 
-    const gcReport = (await tt.registryGc(1, 10, undefined, false));
-    assert.ok(gcReport.state_root);
+        const gcReport = await tt.registryGc(1, 10, undefined, false);
+        assert.ok(gcReport.state_root);
 
-    await rec.stop();
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
+        await rec.stop();
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
 });
 
-test('session integrity verification', async () => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-integrity-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.record(['/bin/sh', '-norc', '-c', 'echo INTEGRITY_NODE'], 24, 80);
-    await rec.screen().waitForText('INTEGRITY_NODE', 5000);
-    const sessionPath = rec.path;
-    await rec.stop();
-    const report = (await tt.verifySession(sessionPath, 'structure'));
-    assert.strictEqual(report.valid, true);
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
+test("session integrity verification", async () => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-integrity-"));
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo INTEGRITY_NODE"], 24, 80);
+        await rec.screen().waitForText("INTEGRITY_NODE", 5000);
+        const sessionPath = rec.path;
+        await rec.stop();
+        const report = await tt.verifySession(sessionPath, "structure");
+        assert.strictEqual(report.valid, true);
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
 });
 
-test('withTermtrace testing helper lifecycle', async () => {
-  await withTermtrace(
-    async ({ record }) => {
-      const rec = await record(['/bin/sh', '-norc', '-c', 'echo HELPER_TEST_OK']);
-      const screen = rec.screen();
-      const state = await screen.waitForText('HELPER_TEST_OK', 5000);
-      assert.ok(state.text.includes('HELPER_TEST_OK'));
-    },
-    { binary: TERMTRACE_BIN }
-  );
-});
-
-test('asciicast export writes valid playback file', async () => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-export-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.record(['/bin/sh', '-norc', '-c', 'echo EXPORT_NODE_OK'], 24, 80);
-    const screen = rec.screen();
-    await screen.waitForText('EXPORT_NODE_OK', 5000);
-
-    const session = rec.session();
-    const castPath = path.join(tmpdir, 'playback.cast');
-    await session.exportAsciicast(castPath);
-
-    assert.ok(fs.existsSync(castPath));
-    assert.ok(fs.statSync(castPath).size > 0);
-
-    await rec.stop();
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
-});
-
-test('failures carry typed kind, code, effect, and retry', async () => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-timeout-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.record(['/bin/sh', '-norc', '-c', 'sleep 10'], 24, 80);
-    const screen = rec.screen();
-
-    await assert.rejects(
-      async () => {
-        await screen.waitForText('ABSENT_PATTERN_123', 200);
-      },
-      (error) => {
-        assert.match(error.message, /timed out waiting for pattern/);
-        assert.equal(error.kind, 'wait_unsatisfied');
-        assert.deepEqual(error.effect, { kind: 'not_applied' });
-        assert.equal(error.retry, 'new_request');
-        return true;
-      }
+test("withTermtrace testing helper lifecycle", async () => {
+    await withTermtrace(
+        async ({ record }) => {
+            const rec = await record(["/bin/sh", "-norc", "-c", "echo HELPER_TEST_OK"]);
+            const screen = rec.screen();
+            const state = await screen.waitForText("HELPER_TEST_OK", 5000);
+            assert.ok(state.text.includes("HELPER_TEST_OK"));
+        },
+        { binary: TERMTRACE_BIN },
     );
-
-    const guarded = rec.actions();
-    guarded.ifState('0'.repeat(64));
-    guarded.sendKey('ctrl+shift+F5');
-    await assert.rejects(
-      () => guarded.execute(),
-      (error) => {
-        assert.equal(error.kind, 'stale_state');
-        assert.equal(error.code, 'stale_observation');
-        assert.deepEqual(error.effect, { kind: 'not_applied' });
-        assert.equal(error.retry, 'new_request');
-        return true;
-      }
-    );
-
-    await rec.stop();
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
 });
 
-test('withTermtrace retains real session evidence after a test failure', async () => {
-  const failure = new Error('deliberate test failure');
-  let evidenceRoot;
-  let recording;
-  try {
-    await assert.rejects(
-      withTermtrace(async ({ record, evidenceRoot: root }) => {
-        evidenceRoot = root;
-        recording = await record([
-          '/bin/sh', '-c',
-          'trap "exit 0" TERM; printf HELPER_FAILURE_READY; while :; do sleep 0.1; done',
-        ]);
-        await recording.screen().waitForText('HELPER_FAILURE_READY', 5000);
-        throw failure;
-      }, { binary: TERMTRACE_BIN }),
-      (error) => error === failure,
-    );
-    assert.ok(fs.existsSync(evidenceRoot));
-    assert.ok(fs.existsSync(path.join(recording.path, 'events.jsonl')));
-    assert.ok(fs.existsSync(path.join(recording.path, 'completion.json')));
-    assert.equal(recording.isActive(), false);
-    assert.equal(failure.termtrace.evidenceRoot, evidenceRoot);
-  } finally {
-    if (recording && recording.isActive()) recording.forceClose();
-    if (evidenceRoot) fs.rmSync(evidenceRoot, { recursive: true, force: true });
-  }
+test("asciicast export writes valid playback file", async () => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-export-"));
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo EXPORT_NODE_OK"], 24, 80);
+        const screen = rec.screen();
+        await screen.waitForText("EXPORT_NODE_OK", 5000);
+
+        const session = rec.session();
+        const castPath = path.join(tmpdir, "playback.cast");
+        await session.exportAsciicast(castPath);
+
+        assert.ok(fs.existsSync(castPath));
+        assert.ok(fs.statSync(castPath).size > 0);
+
+        await rec.stop();
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
 });
 
-const { CancelToken, LocatorSpec, ScreenFrame } = require('@termtrace/core');
+test("failures carry typed kind, code, effect, and retry", async () => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-timeout-"));
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.record(["/bin/sh", "-norc", "-c", "sleep 10"], 24, 80);
+        const screen = rec.screen();
+
+        await assert.rejects(
+            async () => {
+                await screen.waitForText("ABSENT_PATTERN_123", 200);
+            },
+            (error) => {
+                assert.match(error.message, /timed out waiting for pattern/);
+                assert.equal(error.kind, "wait_unsatisfied");
+                assert.deepEqual(error.effect, { kind: "not_applied" });
+                assert.equal(error.retry, "new_request");
+                return true;
+            },
+        );
+
+        const guarded = rec.actions();
+        guarded.ifState("0".repeat(64));
+        guarded.sendKey("ctrl+shift+F5");
+        await assert.rejects(
+            () => guarded.execute(),
+            (error) => {
+                assert.equal(error.kind, "stale_state");
+                assert.equal(error.code, "stale_observation");
+                assert.deepEqual(error.effect, { kind: "not_applied" });
+                assert.equal(error.retry, "new_request");
+                return true;
+            },
+        );
+
+        await rec.stop();
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
+});
+
+test("withTermtrace retains real session evidence after a test failure", async () => {
+    const failure = new Error("deliberate test failure");
+    let evidenceRoot;
+    let recording;
+    try {
+        await assert.rejects(
+            withTermtrace(
+                async ({ record, evidenceRoot: root }) => {
+                    evidenceRoot = root;
+                    recording = await record([
+                        "/bin/sh",
+                        "-c",
+                        'trap "exit 0" TERM; printf HELPER_FAILURE_READY; while :; do sleep 0.1; done',
+                    ]);
+                    await recording.screen().waitForText("HELPER_FAILURE_READY", 5000);
+                    throw failure;
+                },
+                { binary: TERMTRACE_BIN },
+            ),
+            (error) => error === failure,
+        );
+        assert.ok(fs.existsSync(evidenceRoot));
+        assert.ok(fs.existsSync(path.join(recording.path, "events.jsonl")));
+        assert.ok(fs.existsSync(path.join(recording.path, "completion.json")));
+        assert.equal(recording.isActive(), false);
+        assert.equal(failure.termtrace.evidenceRoot, evidenceRoot);
+    } finally {
+        if (recording && recording.isActive()) recording.forceClose();
+        if (evidenceRoot) fs.rmSync(evidenceRoot, { recursive: true, force: true });
+    }
+});
+
+const { CancelToken, LocatorSpec, ScreenFrame } = require("@termtrace/core");
 const CAPTURE_QUANTUM_MS = 250;
-const locatorFixtures = path.resolve(__dirname, '../../../../fixtures/conformance/locators');
-const parity = JSON.parse(fs.readFileSync(path.join(locatorFixtures, 'parity.json'), 'utf8'));
+const locatorFixtures = path.resolve(__dirname, "../../../../fixtures/conformance/locators");
+const parity = JSON.parse(fs.readFileSync(path.join(locatorFixtures, "parity.json"), "utf8"));
 
 function paritySpec(description) {
-  let locator;
-  if ('text' in description) locator = LocatorSpec.text(description.text);
-  else if ('exact' in description) locator = LocatorSpec.exact(description.exact);
-  else if ('regex' in description) locator = LocatorSpec.regex(description.regex);
-  else locator = new LocatorSpec();
-  if ('row' in description) locator = locator.inRow(description.row);
-  if ('region' in description) locator = locator.inRegion(description.region);
-  if ('style' in description) locator = locator.withStyle(description.style);
-  if (description.cross_soft_wraps) locator = locator.acrossSoftWraps();
-  return locator;
+    let locator;
+    if ("text" in description) locator = LocatorSpec.text(description.text);
+    else if ("exact" in description) locator = LocatorSpec.exact(description.exact);
+    else if ("regex" in description) locator = LocatorSpec.regex(description.regex);
+    else locator = new LocatorSpec();
+    if ("row" in description) locator = locator.inRow(description.row);
+    if ("region" in description) locator = locator.inRegion(description.region);
+    if ("style" in description) locator = locator.withStyle(description.style);
+    if (description.cross_soft_wraps) locator = locator.acrossSoftWraps();
+    return locator;
 }
 
 const triples = (ranges) => ranges.map((r) => [r.row, r.start_column, r.end_column]);
 
 function checkParityCase(frame, testCase) {
-  const { name, expect } = testCase;
-  let found;
-  try {
-    const result = frame.query(paritySpec(testCase.spec));
-    if (testCase.operation === undefined) found = result.all();
-    else if (testCase.operation === 'nth') found = [result.nth(testCase.index)];
-    else found = [result[testCase.operation]()];
-  } catch (error) {
-    assert.ok(expect.error, `${name}: ${error.message}`);
-    assert.strictEqual(error.kind, expect.error.kind, name);
-    for (const field of ['count', 'index', 'state_hash']) {
-      if (field in expect.error && !(field === 'count' && expect.error.kind === 'no_match')) assert.strictEqual(error[field], field === 'state_hash' ? expect.error[field] : BigInt(expect.error[field]), `${name}: ${field}`);
+    const { name, expect } = testCase;
+    let found;
+    try {
+        const result = frame.query(paritySpec(testCase.spec));
+        if (testCase.operation === undefined) found = result.all();
+        else if (testCase.operation === "nth") found = [result.nth(testCase.index)];
+        else found = [result[testCase.operation]()];
+    } catch (error) {
+        assert.ok(expect.error, `${name}: ${error.message}`);
+        assert.strictEqual(error.kind, expect.error.kind, name);
+        for (const field of ["count", "index", "state_hash"]) {
+            if (field in expect.error && !(field === "count" && expect.error.kind === "no_match"))
+                assert.strictEqual(
+                    error[field],
+                    field === "state_hash" ? expect.error[field] : BigInt(expect.error[field]),
+                    `${name}: ${field}`,
+                );
+        }
+        if (expect.error.ranges)
+            assert.deepStrictEqual(triples(error.ranges), expect.error.ranges, name);
+        return;
     }
-    if (expect.error.ranges) assert.deepStrictEqual(triples(error.ranges), expect.error.ranges, name);
-    return;
-  }
-  assert.ok(expect.matches, `${name}: unexpected success`);
-  assert.deepStrictEqual(
-    found.map((m) => ({ text: m.text, ranges: triples(m.ranges), widths: m.cells.map((c) => c.width) })),
-    expect.matches,
-    name,
-  );
+    assert.ok(expect.matches, `${name}: unexpected success`);
+    assert.deepStrictEqual(
+        found.map((m) => ({
+            text: m.text,
+            ranges: triples(m.ranges),
+            widths: m.cells.map((c) => c.width),
+        })),
+        expect.matches,
+        name,
+    );
 }
 
-test('live locator parity, rich frames, and waits', async () => {
-  const live = parity.live;
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-locators-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.record(live.command, live.rows, live.cols);
+test("live locator parity, rich frames, and waits", async () => {
+    const live = parity.live;
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-locators-"));
     try {
-      const screen = rec.screen();
-      const ready = await screen.getByText(live.ready).wait(10000, 20);
-      for (const testCase of live.cases) checkParityCase(ready.frame, testCase);
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.record(live.command, live.rows, live.cols);
+        try {
+            const screen = rec.screen();
+            const ready = await screen.getByText(live.ready).wait(10000, 20);
+            for (const testCase of live.cases) checkParityCase(ready.frame, testCase);
 
-      const frame = await screen.frame();
-      assert.strictEqual(frame.rows, live.rows);
-      assert.strictEqual(frame.cols, live.cols);
-      assert.ok(frame.text.includes('END'));
-      assert.strictEqual(frame.content.detail, 'spans');
-      assert.strictEqual(frame.content.rows.length, live.rows);
-      assert.strictEqual(typeof frame.source.observed_monotonic_ns, 'bigint');
-      assert.strictEqual(typeof frame.source.boundaries.observed.next_event_seq, 'bigint');
-      assert.strictEqual(frame.modes.wraparound, true);
-      assert.strictEqual(frame.colors.palette.length, 256);
-      assert.strictEqual(frame.content.rows[5].soft_wrapped, true);
-      assert.strictEqual(frame.content.rows[6].wrap_continuation, true);
+            const frame = await screen.frame();
+            assert.strictEqual(frame.rows, live.rows);
+            assert.strictEqual(frame.cols, live.cols);
+            assert.ok(frame.text.includes("END"));
+            assert.strictEqual(frame.content.detail, "spans");
+            assert.strictEqual(frame.content.rows.length, live.rows);
+            assert.strictEqual(typeof frame.source.observed_monotonic_ns, "bigint");
+            assert.strictEqual(typeof frame.source.boundaries.observed.next_event_seq, "bigint");
+            assert.strictEqual(frame.modes.wraparound, true);
+            assert.strictEqual(frame.colors.palette.length, 256);
+            assert.strictEqual(frame.content.rows[5].soft_wrapped, true);
+            assert.strictEqual(frame.content.rows[6].wrap_continuation, true);
 
-      const region = { top: 1, left: 0, bottom: 2, right: 6 };
-      const cells = await screen.frame({ detail: 'cells', region });
-      assert.deepStrictEqual(cells.returnedRegion, region);
-      assert.deepStrictEqual(cells.content.rows[0].cells.slice(0, 2).map((c) => c.wide_kind), ['wide', 'spacer_tail']);
-      await assert.rejects(screen.frame({ detail: 'cells' }));
+            const region = { top: 1, left: 0, bottom: 2, right: 6 };
+            const cells = await screen.frame({ detail: "cells", region });
+            assert.deepStrictEqual(cells.returnedRegion, region);
+            assert.deepStrictEqual(
+                cells.content.rows[0].cells.slice(0, 2).map((c) => c.wide_kind),
+                ["wide", "spacer_tail"],
+            );
+            await assert.rejects(screen.frame({ detail: "cells" }));
 
-      const retained = frame.query(LocatorSpec.text('Save'));
-      assert.strictEqual(retained.frame.frameHash, frame.frameHash);
-      assert.strictEqual(retained.count(), 2);
+            const retained = frame.query(LocatorSpec.text("Save"));
+            assert.strictEqual(retained.frame.frameHash, frame.frameHash);
+            assert.strictEqual(retained.count(), 2);
 
-      const state = await screen.waitForText('END', 5000);
-      assert.strictEqual(typeof state.cursorRow, 'number');
-      assert.strictEqual(state.cursor.row, state.cursorRow);
-      assert.strictEqual(state.frame.stateHash, state.hash);
+            const state = await screen.waitForText("END", 5000);
+            assert.strictEqual(typeof state.cursorRow, "number");
+            assert.strictEqual(state.cursor.row, state.cursorRow);
+            assert.strictEqual(state.frame.stateHash, state.hash);
 
-      assert.strictEqual(await screen.getByText('Save').count(), 2);
-      assert.strictEqual((await screen.getByText('Save').waitFor({ condition: { count: 2 }, timeoutMs: 5000 })).matches.length, 2);
-      assert.strictEqual((await screen.getByText('Cancel').waitStable(5000, 20, 50)).matches.length, 1);
+            assert.strictEqual(await screen.getByText("Save").count(), 2);
+            assert.strictEqual(
+                (
+                    await screen
+                        .getByText("Save")
+                        .waitFor({ condition: { count: 2 }, timeoutMs: 5000 })
+                ).matches.length,
+                2,
+            );
+            assert.strictEqual(
+                (await screen.getByText("Cancel").waitStable(5000, 20, 50)).matches.length,
+                1,
+            );
 
-      const unmatched = await screen.waitFor({ predicate: 'contains', text: 'NEVER-SHOWN' }, { timeoutMs: 300 });
-      assert.strictEqual(unmatched.matched, false);
-      assert.strictEqual(unmatched.satisfied, false);
-      assert.strictEqual(unmatched.quality, 'deadline');
-      assert.ok(unmatched.frame instanceof ScreenFrame);
-      const matched = await screen.waitFor({ predicate: 'row_contains', row: 7, text: 'END' });
-      assert.strictEqual(matched.satisfied, true);
-      assert.strictEqual(typeof matched.first_match_monotonic_ns, 'bigint');
+            const unmatched = await screen.waitFor(
+                { predicate: "contains", text: "NEVER-SHOWN" },
+                { timeoutMs: 300 },
+            );
+            assert.strictEqual(unmatched.matched, false);
+            assert.strictEqual(unmatched.satisfied, false);
+            assert.strictEqual(unmatched.quality, "deadline");
+            assert.ok(unmatched.frame instanceof ScreenFrame);
+            const matched = await screen.waitFor({
+                predicate: "row_contains",
+                row: 7,
+                text: "END",
+            });
+            assert.strictEqual(matched.satisfied, true);
+            assert.strictEqual(typeof matched.first_match_monotonic_ns, "bigint");
 
-      const capture = await screen.captureStable({ stableForMs: 50, timeoutMs: 5000 });
-      assert.strictEqual(capture.quality, 'stable');
-      assert.ok(capture.semantic_state_zstd instanceof Uint8Array);
-      assert.strictEqual(capture.stable_for_ns, 50000000n);
-      const observation = await screen.observe();
-      assert.strictEqual(typeof observation.boundary.next_event_seq, 'bigint');
+            const capture = await screen.captureStable({ stableForMs: 50, timeoutMs: 5000 });
+            assert.strictEqual(capture.quality, "stable");
+            assert.ok(capture.semantic_state_zstd instanceof Uint8Array);
+            assert.strictEqual(capture.stable_for_ns, 50000000n);
+            const observation = await screen.observe();
+            assert.strictEqual(typeof observation.boundary.next_event_seq, "bigint");
 
-      const locator = screen.getByText('NEVER-SHOWN');
-      for (const timeoutMs of [-1, 1.5, Number.NaN, 3600001]) {
-        await assert.rejects(locator.waitFor({ timeoutMs }), RangeError);
-      }
-      await assert.rejects(locator.waitFor({ timeoutMs: 0 }), (error) => error.kind === 'invalid_query');
-      await assert.rejects(locator.waitFor({ timeoutMs: 1000, stableForMs: 2000 }), (error) => error.kind === 'invalid_query');
-      await assert.rejects(locator.waitFor({ condition: 'present' }), TypeError);
-      assert.throws(() => screen.getByRegex(/x/), TypeError);
+            const locator = screen.getByText("NEVER-SHOWN");
+            for (const timeoutMs of [-1, 1.5, Number.NaN, 3600001]) {
+                await assert.rejects(locator.waitFor({ timeoutMs }), RangeError);
+            }
+            await assert.rejects(
+                locator.waitFor({ timeoutMs: 0 }),
+                (error) => error.kind === "invalid_query",
+            );
+            await assert.rejects(
+                locator.waitFor({ timeoutMs: 1000, stableForMs: 2000 }),
+                (error) => error.kind === "invalid_query",
+            );
+            await assert.rejects(locator.waitFor({ condition: "present" }), TypeError);
+            assert.throws(() => screen.getByRegex(/x/), TypeError);
 
-      const started = Date.now();
-      await assert.rejects(locator.waitFor({ timeoutMs: 1000, intervalMs: 20 }), (error) => {
-        assert.strictEqual(error.kind, 'locator_timeout');
-        assert.deepStrictEqual(error.effect, { kind: 'not_applied' });
-        assert.ok(error.frame instanceof ScreenFrame);
-        assert.strictEqual(error.state_hash, error.frame.stateHash);
-        return true;
-      });
-      assert.ok(Date.now() - started <= 1000 + CAPTURE_QUANTUM_MS + 500);
+            const started = Date.now();
+            await assert.rejects(locator.waitFor({ timeoutMs: 1000, intervalMs: 20 }), (error) => {
+                assert.strictEqual(error.kind, "locator_timeout");
+                assert.deepStrictEqual(error.effect, { kind: "not_applied" });
+                assert.ok(error.frame instanceof ScreenFrame);
+                assert.strictEqual(error.state_hash, error.frame.stateHash);
+                return true;
+            });
+            assert.ok(Date.now() - started <= 1000 + CAPTURE_QUANTUM_MS + 500);
 
-      const controller = new AbortController();
-      const waiting = locator.waitFor({ timeoutMs: 30000, intervalMs: 20, signal: controller.signal });
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      const abortedAt = Date.now();
-      controller.abort();
-      await assert.rejects(waiting, (error) => {
-        assert.strictEqual(error.kind, 'cancelled');
-        assert.ok(error.frame instanceof ScreenFrame);
-        return true;
-      });
-      const latency = Date.now() - abortedAt;
-      assert.ok(latency < 1500, `cancellation took ${latency} ms`);
-      console.log(`node cancellation latency: ${latency} ms`);
-      // The native worker has returned, so a follow-up capture is served immediately.
-      assert.ok((await screen.frame()).text.includes('END'));
+            const controller = new AbortController();
+            const waiting = locator.waitFor({
+                timeoutMs: 30000,
+                intervalMs: 20,
+                signal: controller.signal,
+            });
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            const abortedAt = Date.now();
+            controller.abort();
+            await assert.rejects(waiting, (error) => {
+                assert.strictEqual(error.kind, "cancelled");
+                assert.ok(error.frame instanceof ScreenFrame);
+                return true;
+            });
+            const latency = Date.now() - abortedAt;
+            assert.ok(latency < 1500, `cancellation took ${latency} ms`);
+            console.log(`node cancellation latency: ${latency} ms`);
+            // The native worker has returned, so a follow-up capture is served immediately.
+            assert.ok((await screen.frame()).text.includes("END"));
 
-      const preAborted = AbortSignal.abort();
-      await assert.rejects(locator.waitFor({ timeoutMs: 30000, signal: preAborted }), (error) => error.kind === 'cancelled' && error.frame === null);
-      const token = new CancelToken();
-      const tokenWait = locator.waitFor({ timeoutMs: 30000, intervalMs: 20, cancel: token });
-      token.cancel();
-      await assert.rejects(tokenWait, (error) => error.kind === 'cancelled');
-      assert.strictEqual(token.cancelled, true);
-      await assert.rejects(screen.frameAt({ selector: 'state_id', state_id: 0n }));
+            const preAborted = AbortSignal.abort();
+            await assert.rejects(
+                locator.waitFor({ timeoutMs: 30000, signal: preAborted }),
+                (error) => error.kind === "cancelled" && error.frame === null,
+            );
+            const token = new CancelToken();
+            const tokenWait = locator.waitFor({ timeoutMs: 30000, intervalMs: 20, cancel: token });
+            token.cancel();
+            await assert.rejects(tokenWait, (error) => error.kind === "cancelled");
+            assert.strictEqual(token.cancelled, true);
+            await assert.rejects(screen.frameAt({ selector: "state_id", state_id: 0n }));
+        } finally {
+            await rec.stop();
+        }
+
+        const completed = (await tt.attach(rec.path)).screen();
+        const first = await completed.frameAt(
+            { selector: "state_id", state_id: 0n },
+            { includeHidden: true },
+        );
+        assert.strictEqual(first.captureQuality, "completed");
+        assert.strictEqual(first.source.source, "resolved");
+        assert.strictEqual(first.source.state_id, 0n);
+        assert.strictEqual(first.source.source_completed, true);
+        const observed = await completed.observe({
+            point: { selector: "state_id", state_id: 0n },
+            includeHidden: true,
+        });
+        assert.strictEqual(observed.state_id, 0n);
+        assert.ok(observed.canonical_session instanceof Uint8Array);
+        // Argument conversion fails before the promise exists.
+        assert.throws(() => completed.frameAt({ selector: "state_id", state_id: -1n }), TypeError);
+        const final = await completed.frame();
+        assert.ok(final.presented && final.text.includes("END"));
+        assert.strictEqual(await completed.getByText("Save").count(), 2);
+
+        const erasing = await tt.record(
+            ["/bin/sh", "-c", "printf LOADING; sleep 1; printf '\\r\\033[K'; sleep 30"],
+            5,
+            40,
+        );
+        try {
+            const loading = erasing.screen().getByText("LOADING");
+            await loading.wait(5000);
+            const gone = await loading.waitFor({
+                condition: "absent",
+                timeoutMs: 5000,
+                intervalMs: 20,
+            });
+            assert.deepStrictEqual(gone.matches, []);
+            assert.ok(!gone.frame.text.includes("LOADING"));
+        } finally {
+            await erasing.stop();
+        }
     } finally {
-      await rec.stop();
+        fs.rmSync(tmpdir, { recursive: true, force: true });
     }
-
-    const completed = (await tt.attach(rec.path)).screen();
-    const first = await completed.frameAt({ selector: 'state_id', state_id: 0n }, { includeHidden: true });
-    assert.strictEqual(first.captureQuality, 'completed');
-    assert.strictEqual(first.source.source, 'resolved');
-    assert.strictEqual(first.source.state_id, 0n);
-    assert.strictEqual(first.source.source_completed, true);
-    const observed = await completed.observe({ point: { selector: 'state_id', state_id: 0n }, includeHidden: true });
-    assert.strictEqual(observed.state_id, 0n);
-    assert.ok(observed.canonical_session instanceof Uint8Array);
-    // Argument conversion fails before the promise exists.
-    assert.throws(() => completed.frameAt({ selector: 'state_id', state_id: -1n }), TypeError);
-    const final = await completed.frame();
-    assert.ok(final.presented && final.text.includes('END'));
-    assert.strictEqual(await completed.getByText('Save').count(), 2);
-
-    const erasing = await tt.record(['/bin/sh', '-c', "printf LOADING; sleep 1; printf '\\r\\033[K'; sleep 30"], 5, 40);
-    try {
-      const loading = erasing.screen().getByText('LOADING');
-      await loading.wait(5000);
-      const gone = await loading.waitFor({ condition: 'absent', timeoutMs: 5000, intervalMs: 20 });
-      assert.deepStrictEqual(gone.matches, []);
-      assert.ok(!gone.frame.text.includes('LOADING'));
-    } finally {
-      await erasing.stop();
-    }
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
 });
 
-const crypto = require('node:crypto');
-const { ActionResult } = require('@termtrace/core');
+const crypto = require("node:crypto");
+const { ActionResult } = require("@termtrace/core");
 
 const INTERACTION = JSON.parse(
-  fs.readFileSync(path.resolve(__dirname, '../../../../fixtures/conformance/actions/interaction-control.json'), 'utf8'),
+    fs.readFileSync(
+        path.resolve(
+            __dirname,
+            "../../../../fixtures/conformance/actions/interaction-control.json",
+        ),
+        "utf8",
+    ),
 );
 
 function errorFacts(error) {
-  return { kind: error.kind, code: error.code, effect: error.effect, retry: error.retry };
+    return { kind: error.kind, code: error.code, effect: error.effect, retry: error.retry };
 }
 
 function uuidV5(namespace, name) {
-  const digest = crypto
-    .createHash('sha1')
-    .update(Buffer.from(namespace.replace(/-/g, ''), 'hex'))
-    .update(name, 'utf8')
-    .digest()
-    .subarray(0, 16);
-  digest[6] = (digest[6] & 0x0f) | 0x50;
-  digest[8] = (digest[8] & 0x3f) | 0x80;
-  const hex = digest.toString('hex');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    const digest = crypto
+        .createHash("sha1")
+        .update(Buffer.from(namespace.replace(/-/g, ""), "hex"))
+        .update(name, "utf8")
+        .digest()
+        .subarray(0, 16);
+    digest[6] = (digest[6] & 0x0f) | 0x50;
+    digest[8] = (digest[8] & 0x3f) | 0x80;
+    const hex = digest.toString("hex");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function sendStepId(sendRequestId, index) {
-  const name = INTERACTION.send_step_name.replace('{send}', sendRequestId).replace('{index}', String(index));
-  return uuidV5(INTERACTION.send_step_namespace, name);
+    const name = INTERACTION.send_step_name
+        .replace("{send}", sendRequestId)
+        .replace("{index}", String(index));
+    return uuidV5(INTERACTION.send_step_namespace, name);
 }
 
 async function withFixture(commandName, options, body) {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-interaction-'));
-  const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-  const rec = await tt.launch(INTERACTION[commandName], options);
-  try {
-    await rec.screen().waitForText(INTERACTION.ready_text, 5000);
-    await body(rec, tmpdir);
-  } finally {
-    if (rec.isActive()) await rec.stop();
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-interaction-"));
+    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+    const rec = await tt.launch(INTERACTION[commandName], options);
+    try {
+        await rec.screen().waitForText(INTERACTION.ready_text, 5000);
+        await body(rec, tmpdir);
+    } finally {
+        if (rec.isActive()) await rec.stop();
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
 }
 
 function count(text, needle) {
-  return text.split(needle).length - 1;
+    return text.split(needle).length - 1;
 }
 
-test('run seals the request and replays it with the same identity', async () => {
-  await withFixture('echo_command', undefined, async (rec) => {
-    const chosen = crypto.randomUUID();
-    const builder = rec.actions().withRequestId(chosen);
-    assert.strictEqual(builder.requestId, chosen);
-    assert.throws(() => rec.actions().withRequestId('not-a-uuid'), (error) => error.kind === 'invalid_operation');
+test("run seals the request and replays it with the same identity", async () => {
+    await withFixture("echo_command", undefined, async (rec) => {
+        const chosen = crypto.randomUUID();
+        const builder = rec.actions().withRequestId(chosen);
+        assert.strictEqual(builder.requestId, chosen);
+        assert.throws(
+            () => rec.actions().withRequestId("not-a-uuid"),
+            (error) => error.kind === "invalid_operation",
+        );
 
-    const pending = builder
-      .sendText('once')
-      .sendKey('enter')
-      .untilScreenWhere({ predicate: 'contains', text: 'GOT:once' }, 5000)
-      .run();
-    assert.strictEqual(builder.sealed, true);
-    for (const change of [
-      () => builder.sendText('more'),
-      () => builder.withRequestId(crypto.randomUUID()),
-      () => builder.allowIncomplete(),
-      () => builder.execute(),
-    ]) {
-      assert.throws(change, (error) => {
-        assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.sealed);
-        return true;
-      });
-    }
-    const result = await pending;
-    assert.ok(result instanceof ActionResult);
-    assert.strictEqual(result.requestId, chosen);
-    assert.strictEqual(result.input.sequence_id, chosen);
-    assert.strictEqual(typeof result.input.bytes_written, 'bigint');
-    assert.strictEqual(result.matched, true);
-    assert.strictEqual(result.stateHash, result.postcondition.state_hash);
-    assert.ok(result.frame.text.includes('GOT:once'));
+        const pending = builder
+            .sendText("once")
+            .sendKey("enter")
+            .untilScreenWhere({ predicate: "contains", text: "GOT:once" }, 5000)
+            .run();
+        assert.strictEqual(builder.sealed, true);
+        for (const change of [
+            () => builder.sendText("more"),
+            () => builder.withRequestId(crypto.randomUUID()),
+            () => builder.allowIncomplete(),
+            () => builder.execute(),
+        ]) {
+            assert.throws(change, (error) => {
+                assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.sealed);
+                return true;
+            });
+        }
+        const result = await pending;
+        assert.ok(result instanceof ActionResult);
+        assert.strictEqual(result.requestId, chosen);
+        assert.strictEqual(result.input.sequence_id, chosen);
+        assert.strictEqual(typeof result.input.bytes_written, "bigint");
+        assert.strictEqual(result.matched, true);
+        assert.strictEqual(result.stateHash, result.postcondition.state_hash);
+        assert.ok(result.frame.text.includes("GOT:once"));
 
-    const retry = await builder.run();
-    assert.deepStrictEqual(retry.input, result.input);
-    assert.strictEqual(count(await rec.screen().text(), 'GOT:once'), 1);
-    const restored = ActionResult.fromJson(result.toJson());
-    assert.deepStrictEqual(restored.input, result.input);
-    assert.deepStrictEqual(restored.postcondition, result.postcondition);
-  });
+        const retry = await builder.run();
+        assert.deepStrictEqual(retry.input, result.input);
+        assert.strictEqual(count(await rec.screen().text(), "GOT:once"), 1);
+        const restored = ActionResult.fromJson(result.toJson());
+        assert.deepStrictEqual(restored.input, result.input);
+        assert.deepStrictEqual(restored.postcondition, result.postcondition);
+    });
 });
 
-test('legacy execute sends a fresh request each call', async () => {
-  await withFixture('echo_command', undefined, async (rec) => {
-    const builder = rec.actions();
-    const firstId = builder.requestId;
-    builder.sendText('one\n').untilScreen('GOT:one', 5000);
-    const state = await builder.execute();
-    assert.strictEqual(typeof state.cursorRow, 'number');
-    const secondId = builder.requestId;
-    assert.notStrictEqual(secondId, firstId);
-    assert.strictEqual(builder.sealed, false);
-    await builder.sendText('two\n').untilScreen('GOT:two', 5000).execute();
-    assert.ok(![firstId, secondId].includes(builder.requestId));
-    const text = await rec.screen().text();
-    assert.strictEqual(count(text, 'GOT:one'), 1);
-    assert.strictEqual(count(text, 'GOT:two'), 1);
-  });
+test("legacy execute sends a fresh request each call", async () => {
+    await withFixture("echo_command", undefined, async (rec) => {
+        const builder = rec.actions();
+        const firstId = builder.requestId;
+        builder.sendText("one\n").untilScreen("GOT:one", 5000);
+        const state = await builder.execute();
+        assert.strictEqual(typeof state.cursorRow, "number");
+        const secondId = builder.requestId;
+        assert.notStrictEqual(secondId, firstId);
+        assert.strictEqual(builder.sealed, false);
+        await builder.sendText("two\n").untilScreen("GOT:two", 5000).execute();
+        assert.ok(![firstId, secondId].includes(builder.requestId));
+        const text = await rec.screen().text();
+        assert.strictEqual(count(text, "GOT:one"), 1);
+        assert.strictEqual(count(text, "GOT:two"), 1);
+    });
 });
 
-test('mutation failures match the shared fixture', async () => {
-  await withFixture('echo_command', undefined, async (rec) => {
-    const staleBuilder = rec.actions().ifState('0'.repeat(64)).sendText('stale\n');
-    await assert.rejects(staleBuilder.run(), (error) => {
-      assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.stale);
-      assert.strictEqual(error.request_id, staleBuilder.requestId);
-      assert.strictEqual(typeof error.details.boundaries.durable.next_event_seq, 'bigint');
-      return true;
-    });
+test("mutation failures match the shared fixture", async () => {
+    await withFixture("echo_command", undefined, async (rec) => {
+        const staleBuilder = rec.actions().ifState("0".repeat(64)).sendText("stale\n");
+        await assert.rejects(staleBuilder.run(), (error) => {
+            assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.stale);
+            assert.strictEqual(error.request_id, staleBuilder.requestId);
+            assert.strictEqual(typeof error.details.boundaries.durable.next_event_seq, "bigint");
+            return true;
+        });
 
-    const first = rec.actions().sendText('first\n');
-    await first.run();
-    await assert.rejects(rec.actions().withRequestId(first.requestId).sendText('other\n').run(), (error) => {
-      assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.collision);
-      return true;
-    });
+        const first = rec.actions().sendText("first\n");
+        await first.run();
+        await assert.rejects(
+            rec.actions().withRequestId(first.requestId).sendText("other\n").run(),
+            (error) => {
+                assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.collision);
+                return true;
+            },
+        );
 
-    await assert.rejects(rec.pointer().click(0, 0, { strict: true }), (error) => {
-      assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.strict_pointer);
-      assert.ok(error.request_id);
-      return true;
-    });
+        await assert.rejects(rec.pointer().click(0, 0, { strict: true }), (error) => {
+            assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.strict_pointer);
+            assert.ok(error.request_id);
+            return true;
+        });
 
-    await assert.rejects(rec.actions().sendText('late\n').untilScreen('NEVER', 200).run(), (error) => {
-      assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.incomplete);
-      assert.ok(error.result instanceof ActionResult);
-      assert.strictEqual(error.result.input.atom_count, 1);
-      assert.strictEqual(error.result.matched, false);
-      return true;
-    });
+        await assert.rejects(
+            rec.actions().sendText("late\n").untilScreen("NEVER", 200).run(),
+            (error) => {
+                assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.incomplete);
+                assert.ok(error.result instanceof ActionResult);
+                assert.strictEqual(error.result.input.atom_count, 1);
+                assert.strictEqual(error.result.matched, false);
+                return true;
+            },
+        );
 
-    const text = (await rec.screen().waitForText('GOT:late', 5000)).text;
-    assert.ok(text.includes('GOT:first'));
-    assert.ok(!text.includes('GOT:stale'));
-    assert.ok(!text.includes('GOT:other'));
-  });
+        const text = (await rec.screen().waitForText("GOT:late", 5000)).text;
+        assert.ok(text.includes("GOT:first"));
+        assert.ok(!text.includes("GOT:stale"));
+        assert.ok(!text.includes("GOT:other"));
+    });
 });
 
-test('send reports derived step identities and partial failures', async () => {
-  await withFixture('echo_command', undefined, async (rec) => {
-    const sendId = crypto.randomUUID();
-    const result = await rec.send({
-      steps: [
-        { step: 'mark', label: 'before' },
-        { step: 'input', atoms: [{ text: 'sent' }, { key: 'enter' }] },
-      ],
-      request_id: sendId, until: { condition: 'screen', predicate: { predicate: 'contains', text: 'GOT:sent' } },
-    });
-    assert.strictEqual(result.request_id, sendId);
-    assert.strictEqual(result.last.kind, 'action');
-    assert.strictEqual(result.last.step, 1n);
-    assert.strictEqual(result.last.request_id, sendStepId(sendId, 1));
-    assert.ok(result.last.result instanceof ActionResult);
+test("send reports derived step identities and partial failures", async () => {
+    await withFixture("echo_command", undefined, async (rec) => {
+        const sendId = crypto.randomUUID();
+        const result = await rec.send({
+            steps: [
+                { step: "mark", label: "before" },
+                { step: "input", atoms: [{ text: "sent" }, { key: "enter" }] },
+            ],
+            request_id: sendId,
+            until: { condition: "screen", predicate: { predicate: "contains", text: "GOT:sent" } },
+        });
+        assert.strictEqual(result.request_id, sendId);
+        assert.strictEqual(result.last.kind, "action");
+        assert.strictEqual(result.last.step, 1n);
+        assert.strictEqual(result.last.request_id, sendStepId(sendId, 1));
+        assert.ok(result.last.result instanceof ActionResult);
 
-    const failingId = crypto.randomUUID();
-    await assert.rejects(
-      rec.send({
-        steps: [
-          { step: 'mark', label: 'applied' },
-          { step: 'pointer', column: 0, row: 0, operation: { kind: 'click', button: 'left' }, strict: true },
-        ],
-        request_id: failingId,
-      }),
-      (error) => {
-        assert.strictEqual(error.step, 1n);
-        assert.strictEqual(error.send_request_id, failingId);
-        assert.strictEqual(error.request_id, sendStepId(failingId, 1));
-        assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.strict_pointer);
-        return true;
-      },
+        const failingId = crypto.randomUUID();
+        await assert.rejects(
+            rec.send({
+                steps: [
+                    { step: "mark", label: "applied" },
+                    {
+                        step: "pointer",
+                        column: 0,
+                        row: 0,
+                        operation: { kind: "click", button: "left" },
+                        strict: true,
+                    },
+                ],
+                request_id: failingId,
+            }),
+            (error) => {
+                assert.strictEqual(error.step, 1n);
+                assert.strictEqual(error.send_request_id, failingId);
+                assert.strictEqual(error.request_id, sendStepId(failingId, 1));
+                assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.strict_pointer);
+                return true;
+            },
+        );
+        const labels = (await rec.readEvents(0n, 1000))
+            .filter((event) => event.type === "marker")
+            .map((event) => event.label);
+        assert.deepStrictEqual(labels, ["before", "applied"]);
+    });
+});
+
+test("raw bytes and wide integers stay exact", async () => {
+    let report;
+    await withFixture("raw_command", undefined, async (rec) => {
+        const raw = Buffer.from(INTERACTION.raw_bytes_hex, "hex");
+        assert.throws(
+            () => rec.send({ steps: [{ step: "input", atoms: [{ bytes: "not bytes!" }] }] }),
+            TypeError,
+        );
+        const result = await rec.actions().sendBytes(new Uint8Array(raw)).run();
+        assert.strictEqual(result.input.bytes_written, BigInt(raw.length));
+        await rec.screen().waitForText(INTERACTION.raw_bytes_echo, 5000);
+        assert.ok(
+            (await rec.readEvents(0n, 1000)).some(
+                (event) =>
+                    event.type === "input_intent" && Buffer.from(event.data ?? []).equals(raw),
+            ),
+        );
+        report = JSON.parse(result.toJson());
+    });
+    report.input.bytes_written = "__WIDE__";
+    const wide = JSON.stringify(report).replace('"__WIDE__"', INTERACTION.wide_decimal);
+    assert.strictEqual(
+        ActionResult.fromJson(wide).input.bytes_written,
+        BigInt(INTERACTION.wide_decimal),
     );
-    const labels = (await rec.readEvents(0n, 1000))
-      .filter((event) => event.type === 'marker')
-      .map((event) => event.label);
-    assert.deepStrictEqual(labels, ['before', 'applied']);
-  });
-});
+    for (const malformed of INTERACTION.malformed_decimals) {
+        report.input.bytes_written = malformed;
+        assert.throws(() => ActionResult.fromJson(JSON.stringify(report)), TypeError);
+    }
 
-test('raw bytes and wide integers stay exact', async () => {
-  let report;
-  await withFixture('raw_command', undefined, async (rec) => {
-    const raw = Buffer.from(INTERACTION.raw_bytes_hex, 'hex');
-    assert.throws(() => rec.send({ steps: [{ step: 'input', atoms: [{ bytes: 'not bytes!' }] }] }), TypeError);
-    const result = await rec.actions().sendBytes(new Uint8Array(raw)).run();
-    assert.strictEqual(result.input.bytes_written, BigInt(raw.length));
-    await rec.screen().waitForText(INTERACTION.raw_bytes_echo, 5000);
-    assert.ok((await rec.readEvents(0n, 1000)).some(event => event.type === 'input_intent' && Buffer.from(event.data ?? []).equals(raw)));
-    report = JSON.parse(result.toJson());
-  });
-  report.input.bytes_written = '__WIDE__';
-  const wide = JSON.stringify(report).replace('"__WIDE__"', INTERACTION.wide_decimal);
-  assert.strictEqual(ActionResult.fromJson(wide).input.bytes_written, BigInt(INTERACTION.wide_decimal));
-  for (const malformed of INTERACTION.malformed_decimals) {
-    report.input.bytes_written = malformed;
-    assert.throws(() => ActionResult.fromJson(JSON.stringify(report)), TypeError);
-  }
-
-  await withFixture('raw_command', undefined, async (rec) => {
-    await rec.actions().sendBytes([...Buffer.from(INTERACTION.raw_bytes_hex, 'hex')]).run();
-    await rec.screen().waitForText(INTERACTION.raw_bytes_echo, 5000);
-  });
-});
-
-test('typed pointer operations report their outcomes', async () => {
-  await withFixture('mouse_command', undefined, async (rec) => {
-    const pointer = rec.pointer();
-    const multi = await pointer.multiClick(3, 0, 2, { strict: true });
-    assert.strictEqual(multi.kind, 'applied');
-    assert.ok(multi.bytes instanceof Uint8Array);
-    assert.strictEqual(count(Buffer.from(multi.bytes).toString('latin1'), '\x1b[<'), 4);
-    assert.strictEqual(multi.bytes_written, BigInt(multi.bytes.length));
-    const drag = await pointer.drag(1, 0, 5, 0, { steps: 3, strict: true });
-    assert.strictEqual(drag.kind, 'applied');
-    assert.ok(Buffer.from(drag.bytes).toString('latin1').includes('<32;'));
-    const activated = await pointer.activate(INTERACTION.activation_text, { unique: true, strict: true });
-    assert.strictEqual(activated.kind, 'activated');
-    assert.deepStrictEqual([activated.text, activated.start_column, activated.row], [INTERACTION.activation_text, 0, 0]);
-    await assert.rejects(pointer.click(-1, 0), RangeError);
-  });
-  await withFixture('echo_command', undefined, async (rec) => {
-    const noop = await rec.pointer().click(0, 0);
-    assert.strictEqual(noop.kind, 'noop');
-    assert.strictEqual(noop.reason, 'pointer_reporting_disabled');
-    assert.strictEqual(await rec.pointerClick(0, 0), undefined);
-  });
-});
-
-test('session controls and status', async () => {
-  await withFixture('echo_command', undefined, async (rec) => {
-    const status = await rec.status();
-    assert.strictEqual(status.kind, 'live');
-    assert.strictEqual(typeof status.boundaries.durable.next_event_seq, 'bigint');
-    const resized = await rec.resize(100, 30);
-    assert.ok(resized.request_id);
-    const frame = await rec.screen().frame();
-    assert.deepStrictEqual([frame.cols, frame.rows], [100, 30]);
-    await rec.signal('interrupt');
-    await rec.screen().waitForText('SIGNAL:INT', 5000);
-    const marked = await rec.mark('checkpoint');
-    assert.strictEqual(marked.label, 'checkpoint');
-    assert.strictEqual(typeof marked.event_seq, 'bigint');
-    const stopId = crypto.randomUUID();
-    const stopped = await rec.requestStop({ requestId: stopId, waitMs: 5000 });
-    assert.strictEqual(stopped.kind, 'completed');
-    assert.strictEqual(stopped.request_id, stopId);
-    assert.strictEqual(rec.isActive(), false);
-    assert.strictEqual((await rec.status()).kind, 'completed');
-  });
-});
-
-test('launch environment is isolated and exact', async () => {
-  process.env.TT_COPY = INTERACTION.copy_value;
-  process.env.TT_SECRET = INTERACTION.secret_value;
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-environment-'));
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.launch(INTERACTION.environment_command, {
-      environment: { base: 'clear', set: { TT_SET: new Uint8Array(Buffer.from(INTERACTION.set_bytes_hex, 'hex')) }, copy: ['TT_COPY'] },
+    await withFixture("raw_command", undefined, async (rec) => {
+        await rec
+            .actions()
+            .sendBytes([...Buffer.from(INTERACTION.raw_bytes_hex, "hex")])
+            .run();
+        await rec.screen().waitForText(INTERACTION.raw_bytes_echo, 5000);
     });
-    try {
-      const text = (await rec.screen().waitForText('DONE', 5000)).text;
-      assert.ok(text.includes(`SET= ${INTERACTION.set_bytes_echo}`));
-      assert.ok(text.includes(`COPY=${INTERACTION.copy_value}`));
-      assert.ok(text.includes('SECRET=absent'));
-      assert.match(text, /TERM=\S+/);
-    } finally {
-      await rec.stop();
-    }
-    assert.throws(() => tt.launch(['/bin/true'], { environment: { set: { TT_SET: 'not bytes!' } } }), TypeError);
-    const secret = Buffer.from(INTERACTION.secret_value);
-    const files = fs.readdirSync(tmpdir, { recursive: true }).map((name) => path.join(tmpdir, name));
-    for (const file of files.filter((name) => fs.statSync(name).isFile())) {
-      assert.ok(!fs.readFileSync(file).includes(secret), file);
-    }
-  } finally {
-    delete process.env.TT_COPY;
-    delete process.env.TT_SECRET;
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
 });
 
-test('launch limits end the session', async () => {
-  for (const limit of ['max_duration', 'idle_timeout']) {
-    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-limit-'));
-    try {
-      const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-      const rec = await tt.launch(['/bin/sh', '-c', 'printf READY; sleep 30'], { [`${limit}_ms`]: 400 });
-      const completion = await rec.waitForCompletion(10000);
-      assert.strictEqual(completion.resource_limit.kind, limit);
-      assert.strictEqual(completion.resource_limit.limit, 400n);
-      assert.strictEqual((await rec.status()).kind, 'completed');
-    } finally {
-      fs.rmSync(tmpdir, { recursive: true, force: true });
-    }
-  }
-});
-
-test('abandoning a run promise keeps the admitted action', async () => {
-  await withFixture('echo_command', undefined, async (rec) => {
-    const builder = rec
-      .actions()
-      .sendText('slow\n')
-      .untilScreenWhere({ predicate: 'contains', text: 'NEVER' }, 800)
-      .allowIncomplete();
-    const requestId = builder.requestId;
-    const original = builder.run();
-    const winner = await Promise.race([original.then(() => 'action'), new Promise((resolve) => setTimeout(resolve, 50, 'timer'))]);
-    assert.strictEqual(winner, 'timer');
-    const settled = await original;
-    const retry = await builder.run();
-    assert.strictEqual(retry.requestId, requestId);
-    assert.deepStrictEqual(retry.input, settled.input);
-    assert.strictEqual(retry.matched, false);
-    assert.strictEqual(count(await rec.screen().text(), 'GOT:slow'), 1);
-  });
-});
-
-test('shared atomic-action fixture matches the Rust summary', async () => {
-  const fixture = JSON.parse(
-    fs.readFileSync(path.resolve(__dirname, '../../../../fixtures/conformance/actions/atomic-action.json'), 'utf8'),
-  );
-  const { region } = fixture;
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-atomic-'));
-  let summary;
-  try {
-    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-    const rec = await tt.launch(fixture.command, { rows: region.height, cols: region.width });
-    try {
-      assert.ok(await rec.waitForOutput(fixture.ready_text, 5000));
-      const initial = await rec.screen().frame();
-      const builder = rec.actions().withRequestId(fixture.request_id).ifState(initial.stateHash);
-      for (const atom of fixture.input) {
-        if (atom.kind === 'text') builder.sendText(atom.text);
-        else builder.sendKey(atom.key);
-      }
-      builder.untilScreenWhere(fixture.predicate, 5000).projection(fixture.frame_detail, {
-        top: region.top, left: region.left, right: region.left + region.width, bottom: region.top + region.height,
-      });
-      const result = await builder.run();
-      const retry = await builder.run();
-      const stable = await rec.screen().captureStable({ stableForMs: 20, timeoutMs: 2000 });
-      const { frame } = result;
-      summary = {
-        state_hash_valid: frame.stateHash.length === 64,
-        atom_count: result.input.atom_count,
-        matched: result.matched && ['matched', 'matched_unsettled'].includes(result.postcondition.quality) && frame.text.includes(fixture.expected_text),
-        presented: frame.presented,
-        retry_exact: retry.toJson() === result.toJson(),
-        stable_quality: stable.quality === 'stable',
-        actor_boundaries: frame.source.source === 'actor' && JSON.stringify(frame.source.boundaries, (_, v) => (typeof v === 'bigint' ? v.toString() : v)) === JSON.stringify(result.boundaries, (_, v) => (typeof v === 'bigint' ? v.toString() : v)),
-      };
-    } finally {
-      await rec.stop();
-    }
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
-  assert.deepStrictEqual(summary, {
-    state_hash_valid: true, atom_count: fixture.expected_atom_count, matched: true, presented: true,
-    retry_exact: true, stable_quality: true, actor_boundaries: true,
-  });
-});
-
-test('nested frame JSON keeps exact integer tokens through Rust', async () => {
-  let encoded;
-  await withFixture('echo_command', undefined, async (rec) => {
-    const result = await rec.actions().sendText('framed\n').untilScreenWhere({ predicate: 'contains', text: 'GOT:framed' }, 5000).run();
-    encoded = result.toJson();
-  });
-  for (const value of [INTERACTION.wide_decimal, INTERACTION.u64_max]) {
-    const changed = encoded.replace(/"observed_monotonic_ns":\d+/, '"observed_monotonic_ns":' + value);
-    const decoded = ActionResult.fromJson(changed);
-    assert.strictEqual(decoded.frame.source.observed_monotonic_ns, BigInt(value));
-    assert.strictEqual(decoded.toJson(), changed);
-  }
-  for (const value of ['-1', '1.5', '18446744073709551616', '"1"']) {
-    assert.throws(() => ActionResult.fromJson(encoded.replace(/"observed_monotonic_ns":\d+/, '"observed_monotonic_ns":' + value)), TypeError);
-  }
-});
-
-test('a rejected stop keeps the recording attached', async () => {
-  await withFixture('echo_command', undefined, async (rec) => {
-    const used = crypto.randomUUID();
-    await rec.mark('before-stop', { requestId: used });
-    await assert.rejects(rec.requestStop({ requestId: used, waitMs: 5000 }), (error) => {
-      assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.collision);
-      assert.strictEqual(error.request_id, used);
-      return true;
+test("typed pointer operations report their outcomes", async () => {
+    await withFixture("mouse_command", undefined, async (rec) => {
+        const pointer = rec.pointer();
+        const multi = await pointer.multiClick(3, 0, 2, { strict: true });
+        assert.strictEqual(multi.kind, "applied");
+        assert.ok(multi.bytes instanceof Uint8Array);
+        assert.strictEqual(count(Buffer.from(multi.bytes).toString("latin1"), "\x1b[<"), 4);
+        assert.strictEqual(multi.bytes_written, BigInt(multi.bytes.length));
+        const drag = await pointer.drag(1, 0, 5, 0, { steps: 3, strict: true });
+        assert.strictEqual(drag.kind, "applied");
+        assert.ok(Buffer.from(drag.bytes).toString("latin1").includes("<32;"));
+        const activated = await pointer.activate(INTERACTION.activation_text, {
+            unique: true,
+            strict: true,
+        });
+        assert.strictEqual(activated.kind, "activated");
+        assert.deepStrictEqual(
+            [activated.text, activated.start_column, activated.row],
+            [INTERACTION.activation_text, 0, 0],
+        );
+        await assert.rejects(pointer.click(-1, 0), RangeError);
     });
-    assert.strictEqual(rec.isActive(), true);
-    assert.strictEqual((await rec.status()).kind, 'live');
-    const after = await rec.actions().sendText('after\n').untilScreen('GOT:after', 5000).run();
-    assert.strictEqual(after.matched, true);
-    await rec.stop();
-    assert.strictEqual(rec.isActive(), false);
-    assert.strictEqual((await rec.status()).kind, 'completed');
-  });
+    await withFixture("echo_command", undefined, async (rec) => {
+        const noop = await rec.pointer().click(0, 0);
+        assert.strictEqual(noop.kind, "noop");
+        assert.strictEqual(noop.reason, "pointer_reporting_disabled");
+        assert.strictEqual(await rec.pointerClick(0, 0), undefined);
+    });
+});
+
+test("session controls and status", async () => {
+    await withFixture("echo_command", undefined, async (rec) => {
+        const status = await rec.status();
+        assert.strictEqual(status.kind, "live");
+        assert.strictEqual(typeof status.boundaries.durable.next_event_seq, "bigint");
+        const resized = await rec.resize(100, 30);
+        assert.ok(resized.request_id);
+        const frame = await rec.screen().frame();
+        assert.deepStrictEqual([frame.cols, frame.rows], [100, 30]);
+        await rec.signal("interrupt");
+        await rec.screen().waitForText("SIGNAL:INT", 5000);
+        const marked = await rec.mark("checkpoint");
+        assert.strictEqual(marked.label, "checkpoint");
+        assert.strictEqual(typeof marked.event_seq, "bigint");
+        const stopId = crypto.randomUUID();
+        const stopped = await rec.requestStop({ requestId: stopId, waitMs: 5000 });
+        assert.strictEqual(stopped.kind, "completed");
+        assert.strictEqual(stopped.request_id, stopId);
+        assert.strictEqual(rec.isActive(), false);
+        assert.strictEqual((await rec.status()).kind, "completed");
+    });
+});
+
+test("launch environment is isolated and exact", async () => {
+    process.env.TT_COPY = INTERACTION.copy_value;
+    process.env.TT_SECRET = INTERACTION.secret_value;
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-environment-"));
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.launch(INTERACTION.environment_command, {
+            environment: {
+                base: "clear",
+                set: { TT_SET: new Uint8Array(Buffer.from(INTERACTION.set_bytes_hex, "hex")) },
+                copy: ["TT_COPY"],
+            },
+        });
+        try {
+            const text = (await rec.screen().waitForText("DONE", 5000)).text;
+            assert.ok(text.includes(`SET= ${INTERACTION.set_bytes_echo}`));
+            assert.ok(text.includes(`COPY=${INTERACTION.copy_value}`));
+            assert.ok(text.includes("SECRET=absent"));
+            assert.match(text, /TERM=\S+/);
+        } finally {
+            await rec.stop();
+        }
+        assert.throws(
+            () => tt.launch(["/bin/true"], { environment: { set: { TT_SET: "not bytes!" } } }),
+            TypeError,
+        );
+        const secret = Buffer.from(INTERACTION.secret_value);
+        const files = fs
+            .readdirSync(tmpdir, { recursive: true })
+            .map((name) => path.join(tmpdir, name));
+        for (const file of files.filter((name) => fs.statSync(name).isFile())) {
+            assert.ok(!fs.readFileSync(file).includes(secret), file);
+        }
+    } finally {
+        delete process.env.TT_COPY;
+        delete process.env.TT_SECRET;
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
+});
+
+test("launch limits end the session", async () => {
+    for (const limit of ["max_duration", "idle_timeout"]) {
+        const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-limit-"));
+        try {
+            const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+            const rec = await tt.launch(["/bin/sh", "-c", "printf READY; sleep 30"], {
+                [`${limit}_ms`]: 400,
+            });
+            const completion = await rec.waitForCompletion(10000);
+            assert.strictEqual(completion.resource_limit.kind, limit);
+            assert.strictEqual(completion.resource_limit.limit, 400n);
+            assert.strictEqual((await rec.status()).kind, "completed");
+        } finally {
+            fs.rmSync(tmpdir, { recursive: true, force: true });
+        }
+    }
+});
+
+test("abandoning a run promise keeps the admitted action", async () => {
+    await withFixture("echo_command", undefined, async (rec) => {
+        const builder = rec
+            .actions()
+            .sendText("slow\n")
+            .untilScreenWhere({ predicate: "contains", text: "NEVER" }, 800)
+            .allowIncomplete();
+        const requestId = builder.requestId;
+        const original = builder.run();
+        const winner = await Promise.race([
+            original.then(() => "action"),
+            new Promise((resolve) => setTimeout(resolve, 50, "timer")),
+        ]);
+        assert.strictEqual(winner, "timer");
+        const settled = await original;
+        const retry = await builder.run();
+        assert.strictEqual(retry.requestId, requestId);
+        assert.deepStrictEqual(retry.input, settled.input);
+        assert.strictEqual(retry.matched, false);
+        assert.strictEqual(count(await rec.screen().text(), "GOT:slow"), 1);
+    });
+});
+
+test("shared atomic-action fixture matches the Rust summary", async () => {
+    const fixture = JSON.parse(
+        fs.readFileSync(
+            path.resolve(__dirname, "../../../../fixtures/conformance/actions/atomic-action.json"),
+            "utf8",
+        ),
+    );
+    const { region } = fixture;
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-atomic-"));
+    let summary;
+    try {
+        const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+        const rec = await tt.launch(fixture.command, { rows: region.height, cols: region.width });
+        try {
+            assert.ok(await rec.waitForOutput(fixture.ready_text, 5000));
+            const initial = await rec.screen().frame();
+            const builder = rec
+                .actions()
+                .withRequestId(fixture.request_id)
+                .ifState(initial.stateHash);
+            for (const atom of fixture.input) {
+                if (atom.kind === "text") builder.sendText(atom.text);
+                else builder.sendKey(atom.key);
+            }
+            builder.untilScreenWhere(fixture.predicate, 5000).projection(fixture.frame_detail, {
+                top: region.top,
+                left: region.left,
+                right: region.left + region.width,
+                bottom: region.top + region.height,
+            });
+            const result = await builder.run();
+            const retry = await builder.run();
+            const stable = await rec.screen().captureStable({ stableForMs: 20, timeoutMs: 2000 });
+            const { frame } = result;
+            summary = {
+                state_hash_valid: frame.stateHash.length === 64,
+                atom_count: result.input.atom_count,
+                matched:
+                    result.matched &&
+                    ["matched", "matched_unsettled"].includes(result.postcondition.quality) &&
+                    frame.text.includes(fixture.expected_text),
+                presented: frame.presented,
+                retry_exact: retry.toJson() === result.toJson(),
+                stable_quality: stable.quality === "stable",
+                actor_boundaries:
+                    frame.source.source === "actor" &&
+                    JSON.stringify(frame.source.boundaries, (_, v) =>
+                        typeof v === "bigint" ? v.toString() : v,
+                    ) ===
+                        JSON.stringify(result.boundaries, (_, v) =>
+                            typeof v === "bigint" ? v.toString() : v,
+                        ),
+            };
+        } finally {
+            await rec.stop();
+        }
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
+    assert.deepStrictEqual(summary, {
+        state_hash_valid: true,
+        atom_count: fixture.expected_atom_count,
+        matched: true,
+        presented: true,
+        retry_exact: true,
+        stable_quality: true,
+        actor_boundaries: true,
+    });
+});
+
+test("nested frame JSON keeps exact integer tokens through Rust", async () => {
+    let encoded;
+    await withFixture("echo_command", undefined, async (rec) => {
+        const result = await rec
+            .actions()
+            .sendText("framed\n")
+            .untilScreenWhere({ predicate: "contains", text: "GOT:framed" }, 5000)
+            .run();
+        encoded = result.toJson();
+    });
+    for (const value of [INTERACTION.wide_decimal, INTERACTION.u64_max]) {
+        const changed = encoded.replace(
+            /"observed_monotonic_ns":\d+/,
+            '"observed_monotonic_ns":' + value,
+        );
+        const decoded = ActionResult.fromJson(changed);
+        assert.strictEqual(decoded.frame.source.observed_monotonic_ns, BigInt(value));
+        assert.strictEqual(decoded.toJson(), changed);
+    }
+    for (const value of ["-1", "1.5", "18446744073709551616", '"1"']) {
+        assert.throws(
+            () =>
+                ActionResult.fromJson(
+                    encoded.replace(
+                        /"observed_monotonic_ns":\d+/,
+                        '"observed_monotonic_ns":' + value,
+                    ),
+                ),
+            TypeError,
+        );
+    }
+});
+
+test("a rejected stop keeps the recording attached", async () => {
+    await withFixture("echo_command", undefined, async (rec) => {
+        const used = crypto.randomUUID();
+        await rec.mark("before-stop", { requestId: used });
+        await assert.rejects(rec.requestStop({ requestId: used, waitMs: 5000 }), (error) => {
+            assert.deepStrictEqual(errorFacts(error), INTERACTION.errors.collision);
+            assert.strictEqual(error.request_id, used);
+            return true;
+        });
+        assert.strictEqual(rec.isActive(), true);
+        assert.strictEqual((await rec.status()).kind, "live");
+        const after = await rec.actions().sendText("after\n").untilScreen("GOT:after", 5000).run();
+        assert.strictEqual(after.matched, true);
+        await rec.stop();
+        assert.strictEqual(rec.isActive(), false);
+        assert.strictEqual((await rec.status()).kind, "completed");
+    });
 });
 
 const VISUAL_PROFILES = JSON.parse(
-  fs.readFileSync(
-    path.resolve(__dirname, '../../../../fixtures/conformance/sdk/visual-profiles.json'),
-    'utf8',
-  ),
+    fs.readFileSync(
+        path.resolve(__dirname, "../../../../fixtures/conformance/sdk/visual-profiles.json"),
+        "utf8",
+    ),
 );
-const SEMANTIC_PROFILE = { version: 1, semantic: { preset: 'bundled-v1' } };
+const SEMANTIC_PROFILE = { version: 1, semantic: { preset: "bundled-v1" } };
 
-test('visual profile vectors agree with the shared contract', async (t) => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-visual-profile-'));
-  t.after(() => fs.rmSync(tmpdir, { recursive: true, force: true }));
-  const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+test("visual profile vectors agree with the shared contract", async (t) => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-visual-profile-"));
+    t.after(() => fs.rmSync(tmpdir, { recursive: true, force: true }));
+    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
 
-  for (const vector of VISUAL_PROFILES.positive) {
-    const report = await tt.preflightVisualProfile(vector.profile, 40, 10);
-    assert.strictEqual(report.version, 1);
-    assert.deepStrictEqual(report.profile, vector.normalized, vector.name);
-    assert.strictEqual(report.profile_hash, vector.profile_hash, vector.name);
-    if (vector.native) {
-      assert.strictEqual(report.native.dpi, 96);
-      assert.deepStrictEqual(report.native.discovered_font_families, ['JetBrains Mono']);
-      assert.deepStrictEqual(
-        [report.native.geometry.required_cols, report.native.geometry.required_rows],
-        [40, 10],
-      );
-    } else {
-      assert.strictEqual(report.native, null);
+    for (const vector of VISUAL_PROFILES.positive) {
+        const report = await tt.preflightVisualProfile(vector.profile, 40, 10);
+        assert.strictEqual(report.version, 1);
+        assert.deepStrictEqual(report.profile, vector.normalized, vector.name);
+        assert.strictEqual(report.profile_hash, vector.profile_hash, vector.name);
+        if (vector.native) {
+            assert.strictEqual(report.native.dpi, 96);
+            assert.deepStrictEqual(report.native.discovered_font_families, ["JetBrains Mono"]);
+            assert.deepStrictEqual(
+                [report.native.geometry.required_cols, report.native.geometry.required_rows],
+                [40, 10],
+            );
+        } else {
+            assert.strictEqual(report.native, null);
+        }
+        if ("semantic" in vector.normalized) {
+            assert.deepStrictEqual(
+                [report.semantic.cell_width, report.semantic.cell_height],
+                [12, 24],
+            );
+        } else {
+            assert.strictEqual(report.semantic, null);
+        }
     }
-    if ('semantic' in vector.normalized) {
-      assert.deepStrictEqual([report.semantic.cell_width, report.semantic.cell_height], [12, 24]);
-    } else {
-      assert.strictEqual(report.semantic, null);
-    }
-  }
 
-  for (const vector of VISUAL_PROFILES.invalid) {
-    await assert.rejects(tt.preflightVisualProfile(vector.profile), (error) => {
-      assert.strictEqual(error.kind, 'invalid_operation', vector.name);
-      assert.strictEqual(error.code, 'invalid_visual_profile', vector.name);
-      return true;
+    for (const vector of VISUAL_PROFILES.invalid) {
+        await assert.rejects(tt.preflightVisualProfile(vector.profile), (error) => {
+            assert.strictEqual(error.kind, "invalid_operation", vector.name);
+            assert.strictEqual(error.code, "invalid_visual_profile", vector.name);
+            return true;
+        });
+    }
+
+    for (const vector of VISUAL_PROFILES.malformed) {
+        assert.throws(
+            () => tt.preflightVisualProfile(vector.profile),
+            (error) => error.message.includes(vector.message),
+            vector.name,
+        );
+    }
+});
+
+test("a semantic visual profile records without native tools", async (t) => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-semantic-profile-"));
+    const searchPath = process.env.PATH;
+    t.after(() => {
+        process.env.PATH = searchPath;
+        fs.rmSync(tmpdir, { recursive: true, force: true });
     });
-  }
+    process.env.PATH = "";
+    const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
 
-  for (const vector of VISUAL_PROFILES.malformed) {
-    assert.throws(
-      () => tt.preflightVisualProfile(vector.profile),
-      (error) => error.message.includes(vector.message),
-      vector.name,
+    const report = await tt.preflightVisualProfile(SEMANTIC_PROFILE);
+    assert.strictEqual(report.native, null);
+    const rec = await tt.launch(["/bin/sh", "-c", "echo SEMANTIC_PROFILE"], {
+        visual_profile: SEMANTIC_PROFILE,
+    });
+    assert.ok(await rec.waitForOutput("SEMANTIC_PROFILE", 5000));
+    await rec.stop();
+    const manifest = JSON.parse(fs.readFileSync(path.join(rec.path, "session.json"), "utf8"));
+    assert.strictEqual(manifest.version, 13);
+    assert.strictEqual(manifest.visual_profile.profile_hash, report.profile_hash);
+    assert.strictEqual(manifest.ghostty_visual, null);
+
+    await assert.rejects(
+        tt.preflightVisualProfile(VISUAL_PROFILES.positive[1].profile),
+        (error) => {
+            assert.strictEqual(error.code, "native_profile_unavailable");
+            return true;
+        },
     );
-  }
 });
 
-test('a semantic visual profile records without native tools', async (t) => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-semantic-profile-'));
-  const searchPath = process.env.PATH;
-  t.after(() => {
-    process.env.PATH = searchPath;
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  });
-  process.env.PATH = '';
-  const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
+test("native visual profile failures stop before the application starts", async (t) => {
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-native-profile-"));
+    t.after(() => fs.rmSync(tmpdir, { recursive: true, force: true }));
+    const root = path.join(tmpdir, "evidence");
+    const marker = path.join(tmpdir, "started");
+    const tt = new Termtrace(TERMTRACE_BIN, root);
+    const command = ["/bin/sh", "-c", 'printf started > "$1"', "probe", marker];
 
-  const report = await tt.preflightVisualProfile(SEMANTIC_PROFILE);
-  assert.strictEqual(report.native, null);
-  const rec = await tt.launch(['/bin/sh', '-c', 'echo SEMANTIC_PROFILE'], {
-    visual_profile: SEMANTIC_PROFILE,
-  });
-  assert.ok(await rec.waitForOutput('SEMANTIC_PROFILE', 5000));
-  await rec.stop();
-  const manifest = JSON.parse(fs.readFileSync(path.join(rec.path, 'session.json'), 'utf8'));
-  assert.strictEqual(manifest.version, 13);
-  assert.strictEqual(manifest.visual_profile.profile_hash, report.profile_hash);
-  assert.strictEqual(manifest.ghostty_visual, null);
-
-  await assert.rejects(tt.preflightVisualProfile(VISUAL_PROFILES.positive[1].profile), (error) => {
-    assert.strictEqual(error.code, 'native_profile_unavailable');
-    return true;
-  });
+    await assert.rejects(
+        tt.launch(command, {
+            visual_profile: {
+                version: 1,
+                native: { font_family: "Termtrace Missing Family 7c1d" },
+            },
+        }),
+        (error) => {
+            assert.deepStrictEqual([error.kind, error.code], ["engine", "font_unavailable"]);
+            return true;
+        },
+    );
+    await assert.rejects(
+        tt.launch(command, { visual_profile: VISUAL_PROFILES.invalid[2].profile }),
+        (error) => {
+            assert.strictEqual(error.code, "invalid_visual_profile");
+            return true;
+        },
+    );
+    assert.strictEqual(fs.existsSync(marker), false);
+    assert.ok(!fs.existsSync(root) || fs.readdirSync(root).length === 0);
 });
 
-test('native visual profile failures stop before the application starts', async (t) => {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-native-profile-'));
-  t.after(() => fs.rmSync(tmpdir, { recursive: true, force: true }));
-  const root = path.join(tmpdir, 'evidence');
-  const marker = path.join(tmpdir, 'started');
-  const tt = new Termtrace(TERMTRACE_BIN, root);
-  const command = ['/bin/sh', '-c', 'printf started > "$1"', 'probe', marker];
+const {
+    Edit,
+    normalizeEdit,
+    outputFramesForSourceFrame,
+    scope,
+    select,
+    sourceForOutputFrame,
+} = require("@termtrace/core");
+const { execFileSync } = require("node:child_process");
 
-  await assert.rejects(
-    tt.launch(command, {
-      visual_profile: { version: 1, native: { font_family: 'Termtrace Missing Family 7c1d' } },
-    }),
-    (error) => {
-      assert.deepStrictEqual([error.kind, error.code], ['engine', 'font_unavailable']);
-      return true;
-    },
-  );
-  await assert.rejects(
-    tt.launch(command, { visual_profile: VISUAL_PROFILES.invalid[2].profile }),
-    (error) => {
-      assert.strictEqual(error.code, 'invalid_visual_profile');
-      return true;
-    },
-  );
-  assert.strictEqual(fs.existsSync(marker), false);
-  assert.ok(!fs.existsSync(root) || fs.readdirSync(root).length === 0);
-});
-
-const { Edit, normalizeEdit, outputFramesForSourceFrame, scope, select, sourceForOutputFrame } =
-  require('@termtrace/core');
-const { execFileSync } = require('node:child_process');
-
-const SDK_FIXTURES = fs.realpathSync(path.resolve(__dirname, '../../../../fixtures/conformance/sdk'));
-const EDITING = JSON.parse(fs.readFileSync(path.join(SDK_FIXTURES, 'editing.json'), 'utf8'));
-const EDIT_ROOT = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'node-editing-')));
-const EDIT_TERMTRACE = new Termtrace(TERMTRACE_BIN, path.join(EDIT_ROOT, 'evidence'));
+const SDK_FIXTURES = fs.realpathSync(
+    path.resolve(__dirname, "../../../../fixtures/conformance/sdk"),
+);
+const EDITING = JSON.parse(fs.readFileSync(path.join(SDK_FIXTURES, "editing.json"), "utf8"));
+const EDIT_ROOT = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "node-editing-")));
+const EDIT_TERMTRACE = new Termtrace(TERMTRACE_BIN, path.join(EDIT_ROOT, "evidence"));
 const U64_MAX = (1n << 64n) - 1n;
 test.after(() => fs.rmSync(EDIT_ROOT, { recursive: true, force: true }));
 
 function fixtureEdit(options = {}) {
-  const { resource_base: base = SDK_FIXTURES, subtitle = 'editing-captions.ass' } = options;
-  const defaultStyle = { font_size: 20, foreground: '#ffffff', background: '#000000', background_opacity: 160, border: 1 };
-  return new Edit({ resource_base: base })
-    .clip(select.marker('intro'), select.marker('middle'), {
-      speed: { numerator: 2, denominator: 3 },
-      hold_ms: 500,
-      caption: 'First part',
-    })
-    .clip(select.marker('middle'), select.marker('outro'), { speed: { numerator: 3, denominator: 2 } })
-    .annotate({ text: 'Example', scope: scope.wholeVideo() })
-    .annotate({
-      template: 'frame {output_frame}',
-      scope: scope.clip(1),
-      position: { anchor: 'bottom_right', x: 8, y: 8 },
-      style: { font_size: 16, foreground: '#ffff00', background: '#202020', background_opacity: 200, border: 0 },
-      z_order: 1,
-    })
-    .annotate({
-      text: 'Range',
-      scope: scope.range(select.marker('intro'), select.marker('middle')),
-      position: { anchor: 'center', x: 0, y: 0 },
-      style: defaultStyle,
-      z_order: 2,
-    })
-    .annotate({
-      text: 'Start',
-      scope: scope.outputFrame(0),
-      position: { anchor: 'top_right', x: 16, y: 16 },
-      z_order: 3,
-    })
-    .subtitles(subtitle)
-    .changes('semantic_cells', 'bounding_box', { hold_frames: 2 })
-    .captionLayout('footer')
-    .branding('Example')
-    .delivery({ codec: 'h264', pixel_format: 'yuv420p', crf: 20, encoder_preset: 'slow' })
-    .cursorMask()
-    .crop(0, 0, 480, 240)
-    .zoom(2, 1)
-    .callout(16, 16, 200, 100, { label: 'note' });
+    const { resource_base: base = SDK_FIXTURES, subtitle = "editing-captions.ass" } = options;
+    const defaultStyle = {
+        font_size: 20,
+        foreground: "#ffffff",
+        background: "#000000",
+        background_opacity: 160,
+        border: 1,
+    };
+    return new Edit({ resource_base: base })
+        .clip(select.marker("intro"), select.marker("middle"), {
+            speed: { numerator: 2, denominator: 3 },
+            hold_ms: 500,
+            caption: "First part",
+        })
+        .clip(select.marker("middle"), select.marker("outro"), {
+            speed: { numerator: 3, denominator: 2 },
+        })
+        .annotate({ text: "Example", scope: scope.wholeVideo() })
+        .annotate({
+            template: "frame {output_frame}",
+            scope: scope.clip(1),
+            position: { anchor: "bottom_right", x: 8, y: 8 },
+            style: {
+                font_size: 16,
+                foreground: "#ffff00",
+                background: "#202020",
+                background_opacity: 200,
+                border: 0,
+            },
+            z_order: 1,
+        })
+        .annotate({
+            text: "Range",
+            scope: scope.range(select.marker("intro"), select.marker("middle")),
+            position: { anchor: "center", x: 0, y: 0 },
+            style: defaultStyle,
+            z_order: 2,
+        })
+        .annotate({
+            text: "Start",
+            scope: scope.outputFrame(0),
+            position: { anchor: "top_right", x: 16, y: 16 },
+            z_order: 3,
+        })
+        .subtitles(subtitle)
+        .changes("semantic_cells", "bounding_box", { hold_frames: 2 })
+        .captionLayout("footer")
+        .branding("Example")
+        .delivery({ codec: "h264", pixel_format: "yuv420p", crf: 20, encoder_preset: "slow" })
+        .cursorMask()
+        .crop(0, 0, 480, 240)
+        .zoom(2, 1)
+        .callout(16, 16, 200, 100, { label: "note" });
 }
 
 let editSession;
 function recordEditSession() {
-  editSession ??= (async () => {
-    const { grid } = EDITING.session;
-    const rec = await EDIT_TERMTRACE.launch(
-      ['/bin/sh', '-c', "trap 'exit 0' TERM; i=0; while :; do i=$((i+1)); printf 'line %s\\n' $i; sleep 0.4; done"],
-      { rows: grid.rows, cols: grid.cols, visual_profile: SEMANTIC_PROFILE },
-    );
-    assert.ok(await rec.waitForOutput('line 1', 5000));
-    for (const [delay, label] of [[300, 'intro'], [600, 'middle'], [100, 'repeat'], [100, 'repeat'], [500, 'outro']]) {
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      await rec.mark(label);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await rec.stop();
-    return rec.path;
-  })();
-  return editSession;
+    editSession ??= (async () => {
+        const { grid } = EDITING.session;
+        const rec = await EDIT_TERMTRACE.launch(
+            [
+                "/bin/sh",
+                "-c",
+                "trap 'exit 0' TERM; i=0; while :; do i=$((i+1)); printf 'line %s\\n' $i; sleep 0.4; done",
+            ],
+            { rows: grid.rows, cols: grid.cols, visual_profile: SEMANTIC_PROFILE },
+        );
+        assert.ok(await rec.waitForOutput("line 1", 5000));
+        for (const [delay, label] of [
+            [300, "intro"],
+            [600, "middle"],
+            [100, "repeat"],
+            [100, "repeat"],
+            [500, "outro"],
+        ]) {
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            await rec.mark(label);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await rec.stop();
+        return rec.path;
+    })();
+    return editSession;
 }
 
 function planSemantic(session, edit) {
-  return EDIT_TERMTRACE.videoPlan(session, edit, { renderer: 'semantic', fps: EDITING.fps });
+    return EDIT_TERMTRACE.videoPlan(session, edit, { renderer: "semantic", fps: EDITING.fps });
 }
 
 function withoutSubtitlePaths(plan) {
-  return { ...plan, subtitles: plan.subtitles.map((subtitle) => ({ ...subtitle, source_path: null })) };
+    return {
+        ...plan,
+        subtitles: plan.subtitles.map((subtitle) => ({ ...subtitle, source_path: null })),
+    };
 }
 
 function editFile(directory, edit, files = {}) {
-  fs.mkdirSync(directory, { recursive: true });
-  for (const [name, contents] of Object.entries(files)) {
-    fs.writeFileSync(path.join(directory, name), contents);
-  }
-  const file = path.join(directory, 'edit.json');
-  fs.writeFileSync(file, JSON.stringify(edit));
-  return file;
+    fs.mkdirSync(directory, { recursive: true });
+    for (const [name, contents] of Object.entries(files)) {
+        fs.writeFileSync(path.join(directory, name), contents);
+    }
+    const file = path.join(directory, "edit.json");
+    fs.writeFileSync(file, JSON.stringify(edit));
+    return file;
 }
 
 function assertEditFailure(error, code, facts, name) {
-  assert.strictEqual(error.kind, 'invalid_operation', name);
-  assert.strictEqual(error.code, code, name);
-  for (const [key, value] of Object.entries(facts)) {
-    const actual = error.details[key];
-    assert.deepStrictEqual(typeof actual === 'bigint' ? Number(actual) : actual, value, `${name} ${key}`);
-  }
-  return true;
+    assert.strictEqual(error.kind, "invalid_operation", name);
+    assert.strictEqual(error.code, code, name);
+    for (const [key, value] of Object.entries(facts)) {
+        const actual = error.details[key];
+        assert.deepStrictEqual(
+            typeof actual === "bigint" ? Number(actual) : actual,
+            value,
+            `${name} ${key}`,
+        );
+    }
+    return true;
 }
 
-test('fixture edit built in TypeScript matches the Rust normalization and file plan', async () => {
-  const session = await recordEditSession();
-  const edit = fixtureEdit();
-  const normalized = await edit.normalize();
-  assert.strictEqual(normalized.edit_plan_hash, EDITING.edit_plan_hash);
+test("fixture edit built in TypeScript matches the Rust normalization and file plan", async () => {
+    const session = await recordEditSession();
+    const edit = fixtureEdit();
+    const normalized = await edit.normalize();
+    assert.strictEqual(normalized.edit_plan_hash, EDITING.edit_plan_hash);
 
-  const copy = path.join(EDIT_ROOT, 'fixture-file');
-  fs.mkdirSync(copy);
-  fs.copyFileSync(path.join(SDK_FIXTURES, 'editing-captions.ass'), path.join(copy, 'editing-captions.ass'));
-  const fromFile = await planSemantic(session, editFile(copy, EDITING.edit));
-  const fromBuilder = await planSemantic(session, edit);
-  assert.strictEqual(fromBuilder.edit_plan_hash, EDITING.edit_plan_hash);
-  assert.deepStrictEqual(withoutSubtitlePaths(fromBuilder), withoutSubtitlePaths(fromFile));
+    const copy = path.join(EDIT_ROOT, "fixture-file");
+    fs.mkdirSync(copy);
+    fs.copyFileSync(
+        path.join(SDK_FIXTURES, "editing-captions.ass"),
+        path.join(copy, "editing-captions.ass"),
+    );
+    const fromFile = await planSemantic(session, editFile(copy, EDITING.edit));
+    const fromBuilder = await planSemantic(session, edit);
+    assert.strictEqual(fromBuilder.edit_plan_hash, EDITING.edit_plan_hash);
+    assert.deepStrictEqual(withoutSubtitlePaths(fromBuilder), withoutSubtitlePaths(fromFile));
 
-  for (let frame = 0n; frame < fromBuilder.output_frame_count; frame += 1n) {
-    const found = sourceForOutputFrame(fromBuilder, frame);
-    const spans = outputFramesForSourceFrame(fromBuilder, found.source_frame);
-    assert.ok(spans.some(([start, end]) => start <= frame && frame < end), `frame ${frame}`);
-  }
-  assert.strictEqual(sourceForOutputFrame(fromBuilder, fromBuilder.output_frame_count), null);
-
-  // Sections the builder never set take the Rust defaults.
-  const defaults = await new Edit().clip(select.atNs(0), select.atNs(1)).normalize();
-  assert.deepStrictEqual(defaults.edit.layout, { caption: 'footer', branding: null });
-  assert.deepStrictEqual(defaults.edit.clips[0].speed, { numerator: 1, denominator: 1 });
-});
-
-test('relative subtitles need an explicit resource base', async () => {
-  const { code, facts } = EDITING.relative_without_base;
-  await assert.rejects(fixtureEdit({ resource_base: null }).normalize(), (error) =>
-    assertEditFailure(error, code, facts, 'relative'));
-
-  const absolute = fixtureEdit({ resource_base: null, subtitle: path.join(SDK_FIXTURES, 'editing-captions.ass') });
-  assert.strictEqual((await absolute.normalize()).edit_plan_hash, EDITING.edit_plan_hash);
-
-  const elsewhere = path.join(EDIT_ROOT, 'elsewhere');
-  const file = editFile(elsewhere, EDITING.edit);
-  fs.copyFileSync(path.join(SDK_FIXTURES, 'editing-captions.ass'), path.join(elsewhere, 'editing-captions.ass'));
-  assert.strictEqual((await normalizeEdit(file)).edit_plan_hash, EDITING.edit_plan_hash);
-});
-
-test('edit files accept byte paths', async () => {
-  const file = editFile(path.join(EDIT_ROOT, 'bytes'), EDITING.edit);
-  fs.copyFileSync(path.join(SDK_FIXTURES, 'editing-captions.ass'), path.join(EDIT_ROOT, 'bytes', 'editing-captions.ass'));
-  const bytes = new TextEncoder().encode(file);
-  assert.ok(!Buffer.isBuffer(bytes));
-  assert.strictEqual((await normalizeEdit(bytes)).edit_plan_hash, EDITING.edit_plan_hash);
-});
-
-test('selectors keep exact 64-bit values and reject inexact numbers', async () => {
-  const wide = 2n ** 63n + 1n;
-  const normalized = await new Edit().clip(select.event(wide), select.state(U64_MAX)).normalize();
-  assert.strictEqual(normalized.edit.clips[0].from.eventSeq, wide);
-  assert.strictEqual(normalized.edit.clips[0].to.stateId, U64_MAX);
-
-  assert.throws(() => select.event(2 ** 60), TypeError);
-  assert.throws(() => select.event(1.5), TypeError);
-  assert.throws(() => select.event('1'), TypeError);
-  assert.throws(() => select.event(-1n), RangeError);
-  assert.throws(() => select.event(U64_MAX + 1n), RangeError);
-  assert.strictEqual(select.event(7).toWire().eventSeq, 7n);
-  assert.throws(
-    () => new Edit().clip(select.marker('a'), select.marker('b'), { speed: { numerator: 0.5, denominator: 1 } }),
-    TypeError,
-  );
-});
-
-test('speeds produce the documented frame counts', async () => {
-  const session = await recordEditSession();
-  const { speeds } = EDITING;
-  const edit = ([numerator, denominator]) => new Edit()
-    .clip(select.atNs(speeds.from_ns), select.atNs(speeds.to_ns), { speed: { numerator, denominator } })
-    .clip(select.atNs(speeds.to_ns), select.atNs(speeds.tail_to_ns));
-
-  for (const { speed, retimed_frame_count: count } of speeds.cases) {
-    const [clip] = (await planSemantic(session, edit(speed))).clips;
-    assert.strictEqual(clip.source_end_frame - clip.source_start_frame, BigInt(speeds.source_frames));
-    assert.strictEqual(clip.retimed_frame_count, BigInt(count), String(speed));
-  }
-
-  for (const speed of speeds.invalid) {
-    await assert.rejects(edit(speed).normalize(), (error) =>
-      assertEditFailure(error, 'invalid_speed', { field: 'clips[0].speed', clip_index: 0 }, String(speed)));
-  }
-});
-
-test('shared negative edits fail with the same codes and facts', async () => {
-  const session = await recordEditSession();
-  for (const { name, edit, files, code, facts } of EDITING.negative) {
-    const file = editFile(path.join(EDIT_ROOT, 'negative', name), edit, files);
-    await assert.rejects(planSemantic(session, file), (error) => assertEditFailure(error, code, facts, name));
-  }
-});
-
-test('semantic preview and every format render from TypeScript', async () => {
-  const session = await recordEditSession();
-  const edit = fixtureEdit();
-  const output = path.join(EDIT_ROOT, 'renders');
-  fs.mkdirSync(output);
-  const options = { renderer: 'semantic', fps: EDITING.fps };
-
-  const preview = await EDIT_TERMTRACE.videoPreview(session, edit, path.join(output, 'preview'), options);
-  assert.ok(fs.statSync(preview.contact_sheet).isFile());
-  assert.strictEqual(preview.plan.edit_plan_hash, EDITING.edit_plan_hash);
-
-  const completion = JSON.parse(fs.readFileSync(path.join(session, 'completion.json'), 'utf8'));
-  for (const [extension, codec] of [['mp4', 'h264'], ['gif', 'gif'], ['webm', 'vp9']]) {
-    const out = path.join(output, `edited.${extension}`);
-    const render = await EDIT_TERMTRACE.videoRender(session, edit, out, options);
-    assert.strictEqual(render.output, out);
-    const probed = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', out], { encoding: 'utf8' });
-    assert.strictEqual(probed.trim(), codec);
-    const manifest = JSON.parse(fs.readFileSync(path.join(render.sidecar, 'manifest.json'), 'utf8'));
-    if (extension === 'mp4') {
-      assert.strictEqual(render.artifact, null);
-      assert.strictEqual(manifest.source_truth_layer, 'semantic_rendering');
-    } else {
-      assert.strictEqual(render.artifact.provenance.source_kind, 'semantic_rendering');
-      assert.strictEqual(render.artifact.source.session_manifest_hash, completion.session_manifest_hash);
+    for (let frame = 0n; frame < fromBuilder.output_frame_count; frame += 1n) {
+        const found = sourceForOutputFrame(fromBuilder, frame);
+        const spans = outputFramesForSourceFrame(fromBuilder, found.source_frame);
+        assert.ok(
+            spans.some(([start, end]) => start <= frame && frame < end),
+            `frame ${frame}`,
+        );
     }
-  }
+    assert.strictEqual(sourceForOutputFrame(fromBuilder, fromBuilder.output_frame_count), null);
 
-  const existing = path.join(output, 'edited.mp4');
-  const before = fs.readFileSync(existing);
-  await assert.rejects(EDIT_TERMTRACE.videoRender(session, edit, existing, options), /already exists/);
-  assert.deepStrictEqual(fs.readFileSync(existing), before);
+    // Sections the builder never set take the Rust defaults.
+    const defaults = await new Edit().clip(select.atNs(0), select.atNs(1)).normalize();
+    assert.deepStrictEqual(defaults.edit.layout, { caption: "footer", branding: null });
+    assert.deepStrictEqual(defaults.edit.clips[0].speed, { numerator: 1, denominator: 1 });
 });
 
-const TERMINAL_PROGRAMS = path.resolve(__dirname, '../../../../fixtures/programs/terminal');
-const INPUT_REPORTER = [path.join(TERMINAL_PROGRAMS, 'input-reporter.py')];
-const LINE_COMMAND = [path.join(TERMINAL_PROGRAMS, 'line-command.sh')];
+test("relative subtitles need an explicit resource base", async () => {
+    const { code, facts } = EDITING.relative_without_base;
+    await assert.rejects(fixtureEdit({ resource_base: null }).normalize(), (error) =>
+        assertEditFailure(error, code, facts, "relative"),
+    );
+
+    const absolute = fixtureEdit({
+        resource_base: null,
+        subtitle: path.join(SDK_FIXTURES, "editing-captions.ass"),
+    });
+    assert.strictEqual((await absolute.normalize()).edit_plan_hash, EDITING.edit_plan_hash);
+
+    const elsewhere = path.join(EDIT_ROOT, "elsewhere");
+    const file = editFile(elsewhere, EDITING.edit);
+    fs.copyFileSync(
+        path.join(SDK_FIXTURES, "editing-captions.ass"),
+        path.join(elsewhere, "editing-captions.ass"),
+    );
+    assert.strictEqual((await normalizeEdit(file)).edit_plan_hash, EDITING.edit_plan_hash);
+});
+
+test("edit files accept byte paths", async () => {
+    const file = editFile(path.join(EDIT_ROOT, "bytes"), EDITING.edit);
+    fs.copyFileSync(
+        path.join(SDK_FIXTURES, "editing-captions.ass"),
+        path.join(EDIT_ROOT, "bytes", "editing-captions.ass"),
+    );
+    const bytes = new TextEncoder().encode(file);
+    assert.ok(!Buffer.isBuffer(bytes));
+    assert.strictEqual((await normalizeEdit(bytes)).edit_plan_hash, EDITING.edit_plan_hash);
+});
+
+test("selectors keep exact 64-bit values and reject inexact numbers", async () => {
+    const wide = 2n ** 63n + 1n;
+    const normalized = await new Edit().clip(select.event(wide), select.state(U64_MAX)).normalize();
+    assert.strictEqual(normalized.edit.clips[0].from.eventSeq, wide);
+    assert.strictEqual(normalized.edit.clips[0].to.stateId, U64_MAX);
+
+    assert.throws(() => select.event(2 ** 60), TypeError);
+    assert.throws(() => select.event(1.5), TypeError);
+    assert.throws(() => select.event("1"), TypeError);
+    assert.throws(() => select.event(-1n), RangeError);
+    assert.throws(() => select.event(U64_MAX + 1n), RangeError);
+    assert.strictEqual(select.event(7).toWire().eventSeq, 7n);
+    assert.throws(
+        () =>
+            new Edit().clip(select.marker("a"), select.marker("b"), {
+                speed: { numerator: 0.5, denominator: 1 },
+            }),
+        TypeError,
+    );
+});
+
+test("speeds produce the documented frame counts", async () => {
+    const session = await recordEditSession();
+    const { speeds } = EDITING;
+    const edit = ([numerator, denominator]) =>
+        new Edit()
+            .clip(select.atNs(speeds.from_ns), select.atNs(speeds.to_ns), {
+                speed: { numerator, denominator },
+            })
+            .clip(select.atNs(speeds.to_ns), select.atNs(speeds.tail_to_ns));
+
+    for (const { speed, retimed_frame_count: count } of speeds.cases) {
+        const [clip] = (await planSemantic(session, edit(speed))).clips;
+        assert.strictEqual(
+            clip.source_end_frame - clip.source_start_frame,
+            BigInt(speeds.source_frames),
+        );
+        assert.strictEqual(clip.retimed_frame_count, BigInt(count), String(speed));
+    }
+
+    for (const speed of speeds.invalid) {
+        await assert.rejects(edit(speed).normalize(), (error) =>
+            assertEditFailure(
+                error,
+                "invalid_speed",
+                { field: "clips[0].speed", clip_index: 0 },
+                String(speed),
+            ),
+        );
+    }
+});
+
+test("shared negative edits fail with the same codes and facts", async () => {
+    const session = await recordEditSession();
+    for (const { name, edit, files, code, facts } of EDITING.negative) {
+        const file = editFile(path.join(EDIT_ROOT, "negative", name), edit, files);
+        await assert.rejects(planSemantic(session, file), (error) =>
+            assertEditFailure(error, code, facts, name),
+        );
+    }
+});
+
+test("semantic preview and every format render from TypeScript", async () => {
+    const session = await recordEditSession();
+    const edit = fixtureEdit();
+    const output = path.join(EDIT_ROOT, "renders");
+    fs.mkdirSync(output);
+    const options = { renderer: "semantic", fps: EDITING.fps };
+
+    const preview = await EDIT_TERMTRACE.videoPreview(
+        session,
+        edit,
+        path.join(output, "preview"),
+        options,
+    );
+    assert.ok(fs.statSync(preview.contact_sheet).isFile());
+    assert.strictEqual(preview.plan.edit_plan_hash, EDITING.edit_plan_hash);
+
+    const completion = JSON.parse(fs.readFileSync(path.join(session, "completion.json"), "utf8"));
+    for (const [extension, codec] of [
+        ["mp4", "h264"],
+        ["gif", "gif"],
+        ["webm", "vp9"],
+    ]) {
+        const out = path.join(output, `edited.${extension}`);
+        const render = await EDIT_TERMTRACE.videoRender(session, edit, out, options);
+        assert.strictEqual(render.output, out);
+        const probed = execFileSync(
+            "ffprobe",
+            [
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=codec_name",
+                "-of",
+                "csv=p=0",
+                out,
+            ],
+            { encoding: "utf8" },
+        );
+        assert.strictEqual(probed.trim(), codec);
+        const manifest = JSON.parse(
+            fs.readFileSync(path.join(render.sidecar, "manifest.json"), "utf8"),
+        );
+        if (extension === "mp4") {
+            assert.strictEqual(render.artifact, null);
+            assert.strictEqual(manifest.source_truth_layer, "semantic_rendering");
+        } else {
+            assert.strictEqual(render.artifact.provenance.source_kind, "semantic_rendering");
+            assert.strictEqual(
+                render.artifact.source.session_manifest_hash,
+                completion.session_manifest_hash,
+            );
+        }
+    }
+
+    const existing = path.join(output, "edited.mp4");
+    const before = fs.readFileSync(existing);
+    await assert.rejects(
+        EDIT_TERMTRACE.videoRender(session, edit, existing, options),
+        /already exists/,
+    );
+    assert.deepStrictEqual(fs.readFileSync(existing), before);
+});
+
+const TERMINAL_PROGRAMS = path.resolve(__dirname, "../../../../fixtures/programs/terminal");
+const INPUT_REPORTER = [path.join(TERMINAL_PROGRAMS, "input-reporter.py")];
+const LINE_COMMAND = [path.join(TERMINAL_PROGRAMS, "line-command.sh")];
 
 function reported(text, event) {
-  const escaped = event.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return [...text.matchAll(new RegExp(`^${escaped} T=(\\d+)`, 'gm'))].map((match) => Number(match[1]));
+    const escaped = event.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return [...text.matchAll(new RegExp(`^${escaped} T=(\\d+)`, "gm"))].map((match) =>
+        Number(match[1]),
+    );
 }
 
 async function withClient(body) {
-  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-behavior-'));
-  try {
-    await body(new Termtrace(TERMTRACE_BIN, path.join(tmpdir, 'sessions')), tmpdir);
-  } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
-  }
+    const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-behavior-"));
+    try {
+        await body(new Termtrace(TERMTRACE_BIN, path.join(tmpdir, "sessions")), tmpdir);
+    } finally {
+        fs.rmSync(tmpdir, { recursive: true, force: true });
+    }
 }
 
 async function withReporter(tt, body) {
-  const rec = await tt.launch(INPUT_REPORTER, { rows: 40, cols: 80 });
-  try {
-    await rec.screen().waitForText('REPORTER_READY', 5000);
-    await body(rec);
-  } finally {
-    if (rec.isActive()) await rec.stop();
-  }
+    const rec = await tt.launch(INPUT_REPORTER, { rows: 40, cols: 80 });
+    try {
+        await rec.screen().waitForText("REPORTER_READY", 5000);
+        await body(rec);
+    } finally {
+        if (rec.isActive()) await rec.stop();
+    }
 }
 
 async function waitForCompleted(session) {
-  const deadline = Date.now() + 10000;
-  for (;;) {
-    const status = await session.status().catch(() => null);
-    if (status && status.kind === 'completed') return status;
-    assert.ok(Date.now() < deadline, 'session did not complete');
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
+    const deadline = Date.now() + 10000;
+    for (;;) {
+        const status = await session.status().catch(() => null);
+        if (status && status.kind === "completed") return status;
+        assert.ok(Date.now() < deadline, "session did not complete");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
 }
 
-test('launch resolves with a ready session and fails past its readiness deadline', async () => {
-  await withClient(async (tt) => {
-    const rec = await tt.launch(['/bin/sh', '-c', 'printf STARTED; sleep 30']);
-    try {
-      assert.strictEqual((await rec.status()).kind, 'live');
-      assert.ok((await rec.screen().waitForText('STARTED', 5000)).text.includes('STARTED'));
-    } finally {
-      await rec.stop();
-    }
-    await assert.rejects(tt.launch(['/bin/sh', '-c', 'sleep 30'], { startup_timeout_ms: 1n }), /readiness timed out/);
-  });
-});
-
-test('launch runs the child in the requested working directory', async () => {
-  await withClient(async (tt, tmpdir) => {
-    const workdir = path.join(tmpdir, 'child-workdir');
-    fs.mkdirSync(workdir);
-    fs.writeFileSync(path.join(workdir, 'marker-file.txt'), 'marker');
-    const rec = await tt.launch(
-      ['/bin/sh', '-c', 'printf "CWD=%s\\r\\n" "$(pwd -P)"; ls; printf DONE; sleep 30'],
-      { cwd: workdir, cols: 200 },
-    );
-    try {
-      const text = (await rec.screen().waitForText('DONE', 5000)).text;
-      assert.ok(text.includes(`CWD=${fs.realpathSync(workdir)}`), text);
-      assert.ok(text.includes('marker-file.txt'), text);
-    } finally {
-      await rec.stop();
-    }
-    await assert.rejects(tt.launch(['/bin/sh', '-c', 'sleep 30'], { cwd: path.join(tmpdir, 'missing') }));
-  });
-});
-
-test('a detached session keeps running and is controlled through its target', async () => {
-  await withClient(async (tt, tmpdir) => {
-    const state = path.join(tmpdir, 'state');
-    const previous = process.env.TERMTRACE_STATE_DIR;
-    process.env.TERMTRACE_STATE_DIR = state;
-    const rec = await tt.launch(LINE_COMMAND);
-    try {
-      await rec.screen().waitForText('LINE_READY', 5000);
-      await tt.registry(state).register('detached-demo', rec.path);
-      rec.detach();
-      assert.strictEqual(rec.isActive(), false);
-      assert.throws(() => rec.detach());
-
-      const byName = await tt.attachTarget('name:detached-demo');
-      const byPath = await tt.attachTarget(`path:${rec.path}`);
-      assert.deepStrictEqual([byName.sessionId, byPath.sessionId], [rec.sessionId, rec.sessionId]);
-      assert.strictEqual((await byName.status()).kind, 'live');
-      assert.ok((await byPath.screen().text()).includes('LINE_READY'));
-
-      const outcome = await byName.actions()
-        .sendText('detached-input')
-        .sendKey('Enter')
-        .untilScreen('LINE_VALUE=detached-input', 5000)
-        .execute();
-      assert.ok(outcome.text.includes('LINE_VALUE=detached-input'));
-      assert.strictEqual((await waitForCompleted(byPath)).completion.exit_code, 0);
-
-      await assert.rejects(tt.attachTarget('name:unregistered-demo'));
-    } finally {
-      if (!fs.existsSync(path.join(rec.path, 'completion.json'))) await (await tt.attach(rec.path)).signal('terminate');
-      if (previous === undefined) delete process.env.TERMTRACE_STATE_DIR;
-      else process.env.TERMTRACE_STATE_DIR = previous;
-    }
-  });
-});
-
-test('paste, focus, and scroll reach an application that reports them', async () => {
-  await withClient(async (tt) => {
-    await withReporter(tt, async (rec) => {
-      const pasted = await rec.actions().paste('pasted words').untilScreen('PASTE=', 5000).execute();
-      assert.strictEqual(reported(pasted.text, 'PASTE=pasted words').length, 1);
-      assert.deepStrictEqual(reported(pasted.text, 'KEY=70'), []);
-
-      const pointer = rec.pointer();
-      assert.strictEqual((await pointer.focus(false, { strict: true })).kind, 'applied');
-      await rec.screen().waitForText('FOCUS=out', 5000);
-      assert.strictEqual((await pointer.focus(true, { strict: true })).kind, 'applied');
-      await rec.screen().waitForText('FOCUS=in', 5000);
-
-      assert.strictEqual((await pointer.scroll(4, 2, { lines: -2, strict: true })).kind, 'applied');
-      assert.strictEqual((await pointer.scroll(9, 7, { lines: 1, strict: true })).kind, 'applied');
-      const text = (await rec.screen().waitForText('WHEEL=down', 5000)).text;
-      assert.strictEqual(reported(text, 'WHEEL=up@5,3').length, 2);
-      assert.strictEqual(reported(text, 'WHEEL=down@10,8').length, 1);
+test("launch resolves with a ready session and fails past its readiness deadline", async () => {
+    await withClient(async (tt) => {
+        const rec = await tt.launch(["/bin/sh", "-c", "printf STARTED; sleep 30"]);
+        try {
+            assert.strictEqual((await rec.status()).kind, "live");
+            assert.ok((await rec.screen().waitForText("STARTED", 5000)).text.includes("STARTED"));
+        } finally {
+            await rec.stop();
+        }
+        await assert.rejects(
+            tt.launch(["/bin/sh", "-c", "sleep 30"], { startup_timeout_ms: 1n }),
+            /readiness timed out/,
+        );
     });
-  });
-  await withFixture('echo_command', undefined, async (rec) => {
-    assert.strictEqual((await rec.pointer().focus(true)).kind, 'noop');
-    assert.strictEqual((await rec.pointer().scroll(0, 0, { lines: 1 })).kind, 'noop');
-    await assert.rejects(rec.pointer().focus(true, { strict: true }));
-  });
 });
 
-test('paced text arrives one character at a time', async () => {
-  await withClient(async (tt) => {
-    await withReporter(tt, async (rec) => {
-      await rec.actions().sendText('abc').untilScreen('KEY=63', 5000).execute();
-      const { text } = await rec.actions().pace(200).sendText('xyz').untilScreen('KEY=7a', 5000).execute();
-      const burst = ['61', '62', '63'].map((key) => reported(text, `KEY=${key}`)[0]);
-      const paced = ['78', '79', '7a'].map((key) => reported(text, `KEY=${key}`)[0]);
-      assert.ok(Math.max(...burst) - Math.min(...burst) < 100, String(burst));
-      assert.ok(paced.slice(1).every((later, index) => later - paced[index] >= 150), String(paced));
+test("launch runs the child in the requested working directory", async () => {
+    await withClient(async (tt, tmpdir) => {
+        const workdir = path.join(tmpdir, "child-workdir");
+        fs.mkdirSync(workdir);
+        fs.writeFileSync(path.join(workdir, "marker-file.txt"), "marker");
+        const rec = await tt.launch(
+            ["/bin/sh", "-c", 'printf "CWD=%s\\r\\n" "$(pwd -P)"; ls; printf DONE; sleep 30'],
+            { cwd: workdir, cols: 200 },
+        );
+        try {
+            const text = (await rec.screen().waitForText("DONE", 5000)).text;
+            assert.ok(text.includes(`CWD=${fs.realpathSync(workdir)}`), text);
+            assert.ok(text.includes("marker-file.txt"), text);
+        } finally {
+            await rec.stop();
+        }
+        await assert.rejects(
+            tt.launch(["/bin/sh", "-c", "sleep 30"], { cwd: path.join(tmpdir, "missing") }),
+        );
     });
-  });
 });
 
-test('waitForIdle resolves after output stops', async () => {
-  await withClient(async (tt) => {
-    const ticker = "i=0; while [ $i -lt 8 ]; do i=$((i+1)); printf 'TICK %d\\r\\n' $i; sleep 0.2; done";
-    const rec = await tt.launch(['/bin/sh', '-c', `${ticker}; printf SETTLED; sleep 30`]);
-    try {
-      const started = Date.now();
-      const state = await rec.screen().waitForIdle(15000);
-      assert.ok(Date.now() - started >= 1400);
-      assert.ok(state.text.includes('TICK 8'));
-      assert.ok(state.text.includes('SETTLED'));
-    } finally {
-      await rec.stop();
-    }
-    const busy = await tt.launch(['/bin/sh', '-c', 'echo BUSY; while :; do date +%s%N; sleep 0.1; done']);
-    try {
-      // A blank screen before the first output would itself be idle.
-      await busy.screen().waitForText('BUSY', 5000);
-      await assert.rejects(busy.screen().waitForIdle(1500), /stable interval/);
-    } finally {
-      await busy.stop();
-    }
-  });
+test("a detached session keeps running and is controlled through its target", async () => {
+    await withClient(async (tt, tmpdir) => {
+        const state = path.join(tmpdir, "state");
+        const previous = process.env.TERMTRACE_STATE_DIR;
+        process.env.TERMTRACE_STATE_DIR = state;
+        const rec = await tt.launch(LINE_COMMAND);
+        try {
+            await rec.screen().waitForText("LINE_READY", 5000);
+            await tt.registry(state).register("detached-demo", rec.path);
+            rec.detach();
+            assert.strictEqual(rec.isActive(), false);
+            assert.throws(() => rec.detach());
+
+            const byName = await tt.attachTarget("name:detached-demo");
+            const byPath = await tt.attachTarget(`path:${rec.path}`);
+            assert.deepStrictEqual(
+                [byName.sessionId, byPath.sessionId],
+                [rec.sessionId, rec.sessionId],
+            );
+            assert.strictEqual((await byName.status()).kind, "live");
+            assert.ok((await byPath.screen().text()).includes("LINE_READY"));
+
+            const outcome = await byName
+                .actions()
+                .sendText("detached-input")
+                .sendKey("Enter")
+                .untilScreen("LINE_VALUE=detached-input", 5000)
+                .execute();
+            assert.ok(outcome.text.includes("LINE_VALUE=detached-input"));
+            assert.strictEqual((await waitForCompleted(byPath)).completion.exit_code, 0);
+
+            await assert.rejects(tt.attachTarget("name:unregistered-demo"));
+        } finally {
+            if (!fs.existsSync(path.join(rec.path, "completion.json")))
+                await (await tt.attach(rec.path)).signal("terminate");
+            if (previous === undefined) delete process.env.TERMTRACE_STATE_DIR;
+            else process.env.TERMTRACE_STATE_DIR = previous;
+        }
+    });
 });
 
-test('cacheStatus reports the checkpoint a completed observation writes', async () => {
-  await withClient(async (tt) => {
-    const rec = await tt.launch(['/bin/sh', '-c', 'printf CACHED-SCREEN']);
-    await rec.output().waitFor(new Uint8Array(Buffer.from('CACHED-SCREEN')), 5000);
-    await rec.stop();
-    const session = await tt.attach(rec.path);
-    const before = await session.analysis().cacheStatus();
-    assert.deepStrictEqual([before.entries, before.compressed_bytes], [0n, 0n]);
+test("paste, focus, and scroll reach an application that reports them", async () => {
+    await withClient(async (tt) => {
+        await withReporter(tt, async (rec) => {
+            const pasted = await rec
+                .actions()
+                .paste("pasted words")
+                .untilScreen("PASTE=", 5000)
+                .execute();
+            assert.strictEqual(reported(pasted.text, "PASTE=pasted words").length, 1);
+            assert.deepStrictEqual(reported(pasted.text, "KEY=70"), []);
 
-    assert.strictEqual((await session.screen().observe()).resolution, 'canonical_replay');
-    const after = await session.analysis().cacheStatus();
-    assert.strictEqual(after.entries, 1n);
-    assert.ok(after.compressed_bytes > 0n);
-    assert.ok(Buffer.from(after.directory).toString().startsWith(rec.path));
-    assert.strictEqual((await session.screen().observe()).resolution, 'validated_checkpoint');
+            const pointer = rec.pointer();
+            assert.strictEqual((await pointer.focus(false, { strict: true })).kind, "applied");
+            await rec.screen().waitForText("FOCUS=out", 5000);
+            assert.strictEqual((await pointer.focus(true, { strict: true })).kind, "applied");
+            await rec.screen().waitForText("FOCUS=in", 5000);
 
-    await session.analysis().cachePrune();
-    assert.strictEqual((await session.analysis().cacheStatus()).entries, 0n);
-  });
+            assert.strictEqual(
+                (await pointer.scroll(4, 2, { lines: -2, strict: true })).kind,
+                "applied",
+            );
+            assert.strictEqual(
+                (await pointer.scroll(9, 7, { lines: 1, strict: true })).kind,
+                "applied",
+            );
+            const text = (await rec.screen().waitForText("WHEEL=down", 5000)).text;
+            assert.strictEqual(reported(text, "WHEEL=up@5,3").length, 2);
+            assert.strictEqual(reported(text, "WHEEL=down@10,8").length, 1);
+        });
+    });
+    await withFixture("echo_command", undefined, async (rec) => {
+        assert.strictEqual((await rec.pointer().focus(true)).kind, "noop");
+        assert.strictEqual((await rec.pointer().scroll(0, 0, { lines: 1 })).kind, "noop");
+        await assert.rejects(rec.pointer().focus(true, { strict: true }));
+    });
 });
 
-test('discardCompleted removes only a completed session', async () => {
-  await withClient(async (tt) => {
-    const rec = await tt.launch(INTERACTION.echo_command);
-    await rec.screen().waitForText(INTERACTION.ready_text, 5000);
-    await assert.rejects(rec.discardCompleted());
-    assert.strictEqual((await rec.status()).kind, 'live');
-    assert.ok(fs.statSync(rec.path).isDirectory());
-    await rec.stop();
+test("paced text arrives one character at a time", async () => {
+    await withClient(async (tt) => {
+        await withReporter(tt, async (rec) => {
+            await rec.actions().sendText("abc").untilScreen("KEY=63", 5000).execute();
+            const { text } = await rec
+                .actions()
+                .pace(200)
+                .sendText("xyz")
+                .untilScreen("KEY=7a", 5000)
+                .execute();
+            const burst = ["61", "62", "63"].map((key) => reported(text, `KEY=${key}`)[0]);
+            const paced = ["78", "79", "7a"].map((key) => reported(text, `KEY=${key}`)[0]);
+            assert.ok(Math.max(...burst) - Math.min(...burst) < 100, String(burst));
+            assert.ok(
+                paced.slice(1).every((later, index) => later - paced[index] >= 150),
+                String(paced),
+            );
+        });
+    });
+});
 
-    assert.strictEqual((await rec.status()).kind, 'completed');
-    await rec.discardCompleted();
-    assert.strictEqual(fs.existsSync(rec.path), false);
-    await assert.rejects(tt.attach(rec.path));
-    await assert.rejects(rec.discardCompleted());
-  });
+test("waitForIdle resolves after output stops", async () => {
+    await withClient(async (tt) => {
+        const ticker =
+            "i=0; while [ $i -lt 8 ]; do i=$((i+1)); printf 'TICK %d\\r\\n' $i; sleep 0.2; done";
+        const rec = await tt.launch(["/bin/sh", "-c", `${ticker}; printf SETTLED; sleep 30`]);
+        try {
+            const started = Date.now();
+            const state = await rec.screen().waitForIdle(15000);
+            assert.ok(Date.now() - started >= 1400);
+            assert.ok(state.text.includes("TICK 8"));
+            assert.ok(state.text.includes("SETTLED"));
+        } finally {
+            await rec.stop();
+        }
+        const busy = await tt.launch([
+            "/bin/sh",
+            "-c",
+            "echo BUSY; while :; do date +%s%N; sleep 0.1; done",
+        ]);
+        try {
+            // A blank screen before the first output would itself be idle.
+            await busy.screen().waitForText("BUSY", 5000);
+            await assert.rejects(busy.screen().waitForIdle(1500), /stable interval/);
+        } finally {
+            await busy.stop();
+        }
+    });
+});
+
+test("cacheStatus reports the checkpoint a completed observation writes", async () => {
+    await withClient(async (tt) => {
+        const rec = await tt.launch(["/bin/sh", "-c", "printf CACHED-SCREEN"]);
+        await rec.output().waitFor(new Uint8Array(Buffer.from("CACHED-SCREEN")), 5000);
+        await rec.stop();
+        const session = await tt.attach(rec.path);
+        const before = await session.analysis().cacheStatus();
+        assert.deepStrictEqual([before.entries, before.compressed_bytes], [0n, 0n]);
+
+        assert.strictEqual((await session.screen().observe()).resolution, "canonical_replay");
+        const after = await session.analysis().cacheStatus();
+        assert.strictEqual(after.entries, 1n);
+        assert.ok(after.compressed_bytes > 0n);
+        assert.ok(Buffer.from(after.directory).toString().startsWith(rec.path));
+        assert.strictEqual((await session.screen().observe()).resolution, "validated_checkpoint");
+
+        await session.analysis().cachePrune();
+        assert.strictEqual((await session.analysis().cacheStatus()).entries, 0n);
+    });
+});
+
+test("discardCompleted removes only a completed session", async () => {
+    await withClient(async (tt) => {
+        const rec = await tt.launch(INTERACTION.echo_command);
+        await rec.screen().waitForText(INTERACTION.ready_text, 5000);
+        await assert.rejects(rec.discardCompleted());
+        assert.strictEqual((await rec.status()).kind, "live");
+        assert.ok(fs.statSync(rec.path).isDirectory());
+        await rec.stop();
+
+        assert.strictEqual((await rec.status()).kind, "completed");
+        await rec.discardCompleted();
+        assert.strictEqual(fs.existsSync(rec.path), false);
+        await assert.rejects(tt.attach(rec.path));
+        await assert.rejects(rec.discardCompleted());
+    });
 });

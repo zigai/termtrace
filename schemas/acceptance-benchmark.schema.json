@@ -50,7 +50,12 @@
     "baseline": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["termtrace_repository", "termtrace_commit", "ghostty_repository", "ghostty_vt_commit"],
+      "required": [
+        "termtrace_repository",
+        "termtrace_commit",
+        "ghostty_repository",
+        "ghostty_vt_commit"
+      ],
       "properties": {
         "termtrace_repository": { "type": "string", "format": "uri" },
         "termtrace_commit": { "$ref": "#/$defs/gitCommit" },
@@ -61,7 +66,21 @@
     "gitCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "environment": {
       "type": "object",
-      "required": ["kind", "identifier", "operating_system", "kernel", "architecture", "cpu", "logical_cpus", "memory_bytes", "rust_toolchain", "ghostty_native", "ffmpeg", "jq", "notes"],
+      "required": [
+        "kind",
+        "identifier",
+        "operating_system",
+        "kernel",
+        "architecture",
+        "cpu",
+        "logical_cpus",
+        "memory_bytes",
+        "rust_toolchain",
+        "ghostty_native",
+        "ffmpeg",
+        "jq",
+        "notes"
+      ],
       "properties": {
         "kind": { "enum": ["host", "oci"] },
         "identifier": { "type": "string", "minLength": 1 },
@@ -82,12 +101,27 @@
     "measurement": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["clock", "warmup_repetitions", "measured_repetitions", "reported_percentiles", "percentile_method", "cold_policy", "warm_policy", "concurrency", "timeout_seconds", "resident_memory_limit_bytes"],
+      "required": [
+        "clock",
+        "warmup_repetitions",
+        "measured_repetitions",
+        "reported_percentiles",
+        "percentile_method",
+        "cold_policy",
+        "warm_policy",
+        "concurrency",
+        "timeout_seconds",
+        "resident_memory_limit_bytes"
+      ],
       "properties": {
         "clock": { "type": "string" },
         "warmup_repetitions": { "type": "integer", "minimum": 0 },
         "measured_repetitions": { "type": "integer", "minimum": 20 },
-        "reported_percentiles": { "type": "array", "items": { "type": "integer", "minimum": 1, "maximum": 100 }, "uniqueItems": true },
+        "reported_percentiles": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "uniqueItems": true
+        },
         "percentile_method": { "type": "string" },
         "cold_policy": { "type": "string" },
         "warm_policy": { "type": "string" },
@@ -99,7 +133,13 @@
     "defaults": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["geometry", "profile", "durability_policy", "durability_max_interval_ms", "durability_max_uncommitted_bytes"],
+      "required": [
+        "geometry",
+        "profile",
+        "durability_policy",
+        "durability_max_interval_ms",
+        "durability_max_uncommitted_bytes"
+      ],
       "properties": {
         "geometry": {
           "type": "object",

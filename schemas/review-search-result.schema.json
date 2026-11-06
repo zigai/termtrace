@@ -24,10 +24,7 @@
           "description": "Canonical event sequence associated with the state.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "presented": {
           "description": "Whether the state was presentation-eligible.",
@@ -48,12 +45,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "state_id",
-        "presented",
-        "state_hash",
-        "selector"
-      ],
+      "required": ["state_id", "presented", "state_hash", "selector"],
       "type": "object"
     }
   },
@@ -78,11 +70,7 @@
       "type": "string"
     }
   },
-  "required": [
-    "canonical_session",
-    "query",
-    "matches"
-  ],
+  "required": ["canonical_session", "query", "matches"],
   "title": "ReviewSearchResult",
   "type": "object"
 }

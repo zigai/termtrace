@@ -63,10 +63,7 @@
       "description": "Built-in policy behavior."
     }
   },
-  "required": [
-    "kind",
-    "environment"
-  ],
+  "required": ["kind", "environment"],
   "title": "ProvenancePolicy",
   "type": "object"
 }

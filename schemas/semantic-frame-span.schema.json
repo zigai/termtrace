@@ -33,13 +33,7 @@
       "type": "integer"
     }
   },
-  "required": [
-    "start_frame",
-    "end_frame",
-    "state_id",
-    "state_hash",
-    "state_monotonic_ns"
-  ],
+  "required": ["start_frame", "end_frame", "state_id", "state_hash", "state_monotonic_ns"],
   "title": "SemanticFrameSpan",
   "type": "object"
 }

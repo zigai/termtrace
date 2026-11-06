@@ -76,17 +76,10 @@
     },
     "value_hash": {
       "description": "BLAKE3 of the exact value bytes for `value` or `hash` capture.",
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     }
   },
-  "required": [
-    "capture",
-    "present",
-    "sensitivity"
-  ],
+  "required": ["capture", "present", "sensitivity"],
   "title": "EnvironmentProvenance",
   "type": "object"
 }

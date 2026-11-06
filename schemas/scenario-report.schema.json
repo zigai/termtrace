@@ -43,12 +43,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "step_index",
-        "step_kind",
-        "request_ids",
-        "message"
-      ],
+      "required": ["step_index", "step_kind", "request_ids", "message"],
       "type": "object"
     },
     "ScenarioInfrastructureError": {
@@ -68,11 +63,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "phase",
-        "code",
-        "message"
-      ],
+      "required": ["phase", "code", "message"],
       "type": "object"
     },
     "ScenarioStatus": {
@@ -119,17 +110,10 @@
         },
         "state_hash": {
           "description": "Matched presented state hash when applicable.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
-      "required": [
-        "index",
-        "kind",
-        "request_ids"
-      ],
+      "required": ["index", "kind", "request_ids"],
       "type": "object"
     }
   },
@@ -194,10 +178,7 @@
     "session_id": {
       "description": "Immutable canonical session identity, absent when launch never returned a session.",
       "format": "uuid",
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     },
     "status": {
       "$ref": "#/$defs/ScenarioStatus",
@@ -218,14 +199,7 @@
       "type": "integer"
     }
   },
-  "required": [
-    "version",
-    "name",
-    "status",
-    "steps",
-    "infrastructure_errors",
-    "artifact_warnings"
-  ],
+  "required": ["version", "name", "status", "steps", "infrastructure_errors", "artifact_warnings"],
   "title": "ScenarioReport",
   "type": "object"
 }

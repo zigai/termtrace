@@ -28,11 +28,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "tracks",
-        "unfinished_tracks",
-        "coverage_gaps"
-      ],
+      "required": ["tracks", "unfinished_tracks", "coverage_gaps"],
       "type": "object"
     },
     "TmuxCompositeTrack": {
@@ -54,9 +50,7 @@
           "description": "Canonical session once the composite client started."
         }
       },
-      "required": [
-        "alias"
-      ],
+      "required": ["alias"],
       "type": "object"
     },
     "TmuxCoverageGap": {
@@ -80,26 +74,16 @@
         },
         "pane_id": {
           "description": "Related pane ID, or none for an aggregate limitation.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "resolved_unix_ns": {
           "description": "Wall-clock time when the gap was first observed to be resolved.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         }
       },
-      "required": [
-        "kind",
-        "first_observed_unix_ns",
-        "last_observed_unix_ns"
-      ],
+      "required": ["kind", "first_observed_unix_ns", "last_observed_unix_ns"],
       "type": "object"
     },
     "TmuxGapKind": {
@@ -153,12 +137,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "version",
-        "bytes",
-        "sequence",
-        "hash"
-      ],
+      "required": ["version", "bytes", "sequence", "hash"],
       "type": "object"
     },
     "TmuxPaneSnapshot": {
@@ -303,12 +282,7 @@
           "description": "Server socket path bytes."
         }
       },
-      "required": [
-        "pid",
-        "socket_path",
-        "socket_device",
-        "socket_inode"
-      ],
+      "required": ["pid", "socket_path", "socket_device", "socket_inode"],
       "type": "object"
     },
     "TmuxSessionLink": {
@@ -324,10 +298,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "session_id",
-        "session"
-      ],
+      "required": ["session_id", "session"],
       "type": "object"
     },
     "TmuxSocket": {
@@ -346,9 +317,7 @@
               "$ref": "#/$defs/Base64Bytes"
             }
           },
-          "required": [
-            "name"
-          ],
+          "required": ["name"],
           "type": "object"
         },
         {
@@ -359,9 +328,7 @@
               "$ref": "#/$defs/Base64Bytes"
             }
           },
-          "required": [
-            "path"
-          ],
+          "required": ["path"],
           "type": "object"
         }
       ]

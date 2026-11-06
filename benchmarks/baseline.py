@@ -67,7 +67,9 @@ class BenchmarkMetric:
         sorted_samples = sorted(self.samples)
         self.median = statistics.median(sorted_samples)
         self.mean = statistics.mean(sorted_samples)
-        self.stddev = statistics.stdev(sorted_samples) if len(sorted_samples) > 1 else 0.0
+        self.stddev = (
+            statistics.stdev(sorted_samples) if len(sorted_samples) > 1 else 0.0
+        )
         self.min_val = sorted_samples[0]
         self.max_val = sorted_samples[-1]
         p95_idx = int(len(sorted_samples) * 0.95)
@@ -90,14 +92,18 @@ class BenchmarkSuite:
     def cleanup(self) -> None:
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def run_cmd(self, args: list[str | Path], check: bool = True) -> tuple[subprocess.CompletedProcess[bytes], float]:
+    def run_cmd(
+        self, args: list[str | Path], check: bool = True
+    ) -> tuple[subprocess.CompletedProcess[bytes], float]:
         cmd = [str(x) for x in args]
         start = time.perf_counter_ns()
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         elapsed = time.perf_counter_ns() - start
         if check and res.returncode != 0:
             err = res.stderr.decode("utf-8", errors="replace")
-            raise RuntimeError(f"Command failed ({res.returncode}): {' '.join(cmd)}\n{err}")
+            raise RuntimeError(
+                f"Command failed ({res.returncode}): {' '.join(cmd)}\n{err}"
+            )
         return res, elapsed
 
     def measure(
@@ -141,17 +147,23 @@ class BenchmarkSuite:
         payload = 5 * 1024 * 1024  # 5 MB
 
         for mode in ["throughput", "bounded", "strict"]:
+
             def run_record() -> float:
                 session = self.temp_dir / f"bench-dur-{mode}.termtrace"
                 if session.exists():
                     shutil.rmtree(session)
                 cmd = [
-                    self.binary, "record",
+                    self.binary,
+                    "record",
                     "--no-input",
-                    "--durability", mode,
-                    "--out", session,
+                    "--durability",
+                    mode,
+                    "--out",
+                    session,
                     "--",
-                    "/bin/sh", "-c", f"head -c {payload} /dev/zero",
+                    "/bin/sh",
+                    "-c",
+                    f"head -c {payload} /dev/zero",
                 ]
                 _, elapsed = self.run_cmd(cmd)
                 shutil.rmtree(session, ignore_errors=True)
@@ -176,15 +188,22 @@ class BenchmarkSuite:
         if session.exists():
             shutil.rmtree(session)
         init_cmd = [
-            self.binary, "record",
+            self.binary,
+            "record",
             "--no-input",
-            "--cols", "120",
-            "--rows", "40",
-            "--cell-width", "10",
-            "--cell-height", "20",
-            "--out", session,
+            "--cols",
+            "120",
+            "--rows",
+            "40",
+            "--cell-width",
+            "10",
+            "--cell-height",
+            "20",
+            "--out",
+            session,
             "--",
-            "/bin/sh", "-c",
+            "/bin/sh",
+            "-c",
             'for i in $(seq 1 60); do printf "\\033[H\\033[1;3%dm[Frame %03d] \\033[44;37mStyled Box Content Row 1234567890\\033[0m\\n" "$((i % 7 + 1))" "$i"; done',
         ]
         self.run_cmd(init_cmd)
@@ -194,11 +213,15 @@ class BenchmarkSuite:
             out = self.temp_dir / "shot-svg"
             shutil.rmtree(out, ignore_errors=True)
             cmd = [
-                self.binary, "screenshot",
+                self.binary,
+                "screenshot",
                 session,
-                "--renderer", "semantic",
-                "--format", "svg",
-                "--out", out,
+                "--renderer",
+                "semantic",
+                "--format",
+                "svg",
+                "--out",
+                out,
             ]
             _, elapsed = self.run_cmd(cmd)
             shutil.rmtree(out, ignore_errors=True)
@@ -218,11 +241,15 @@ class BenchmarkSuite:
             out = self.temp_dir / "shot-png"
             shutil.rmtree(out, ignore_errors=True)
             cmd = [
-                self.binary, "screenshot",
+                self.binary,
+                "screenshot",
                 session,
-                "--renderer", "semantic",
-                "--format", "png",
-                "--out", out,
+                "--renderer",
+                "semantic",
+                "--format",
+                "png",
+                "--out",
+                out,
             ]
             _, elapsed = self.run_cmd(cmd)
             shutil.rmtree(out, ignore_errors=True)
@@ -246,10 +273,15 @@ class BenchmarkSuite:
                 end_ns = last_event["monotonic_ns"]
 
             edit_path = self.temp_dir / "render-edit.json"
-            res, _ = self.run_cmd([
-                sys.executable, str(ROOT / "benchmarks/models.py"),
-                "emit-render-edit", "--end-ns", str(end_ns)
-            ])
+            res, _ = self.run_cmd(
+                [
+                    sys.executable,
+                    str(ROOT / "benchmarks/models.py"),
+                    "emit-render-edit",
+                    "--end-ns",
+                    str(end_ns),
+                ]
+            )
             edit_path.write_bytes(res.stdout)
 
             def run_video_export() -> float:
@@ -257,13 +289,19 @@ class BenchmarkSuite:
                 if out.exists():
                     out.unlink()
                 cmd = [
-                    self.binary, "video",
+                    self.binary,
+                    "video",
                     session,
-                    "--renderer", "semantic",
-                    "--fps", "24",
-                    "--semantic-raster-profile", "direct",
-                    "--edit", edit_path,
-                    "--out", out,
+                    "--renderer",
+                    "semantic",
+                    "--fps",
+                    "24",
+                    "--semantic-raster-profile",
+                    "direct",
+                    "--edit",
+                    edit_path,
+                    "--out",
+                    out,
                 ]
                 _, elapsed = self.run_cmd(cmd)
                 if out.exists():
@@ -283,16 +321,22 @@ class BenchmarkSuite:
                 out = self.temp_dir / "bench-preview"
                 shutil.rmtree(out, ignore_errors=True)
                 cmd = [
-                    self.binary, "video",
+                    self.binary,
+                    "video",
                     session,
-                    "--renderer", "semantic",
-                    "--semantic-raster-profile", "direct",
-                    "--edit", edit_path,
-                    "--preview-out", out,
+                    "--renderer",
+                    "semantic",
+                    "--semantic-raster-profile",
+                    "direct",
+                    "--edit",
+                    edit_path,
+                    "--preview-out",
+                    out,
                 ]
                 _, elapsed = self.run_cmd(cmd)
                 shutil.rmtree(out, ignore_errors=True)
                 return elapsed
+
             self.measure(
                 category="Rendering",
                 name="presentation preview (contact sheet + MP4)",
@@ -301,6 +345,7 @@ class BenchmarkSuite:
                 fn=run_presentation_preview,
                 unit="ms",
             )
+
     # -------------------------------------------------------------------------
     # 3. Replay Engine & Forensics Hit Path
     # -------------------------------------------------------------------------
@@ -311,19 +356,26 @@ class BenchmarkSuite:
         if session.exists():
             shutil.rmtree(session)
         gen_cmd = [
-            self.fixture_binary, "large",
-            "--events", "64",
-            "--output-bytes", "4096",
-            "--out", session,
+            self.fixture_binary,
+            "large",
+            "--events",
+            "64",
+            "--output-bytes",
+            "4096",
+            "--out",
+            session,
         ]
         self.run_cmd(gen_cmd)
 
         # Timeline analysis
         def run_timeline() -> float:
             cmd = [
-                self.binary, "analyze", "timeline",
+                self.binary,
+                "analyze",
+                "timeline",
                 session,
-                "--limit", "100",
+                "--limit",
+                "100",
                 "--jsonl",
             ]
             _, elapsed = self.run_cmd(cmd)
@@ -341,9 +393,11 @@ class BenchmarkSuite:
         # Historical state inspection (screen --state)
         def run_state_screen() -> float:
             cmd = [
-                self.binary, "screen",
+                self.binary,
+                "screen",
                 session,
-                "--state", "30",
+                "--state",
+                "30",
             ]
             _, elapsed = self.run_cmd(cmd)
             return elapsed
@@ -360,11 +414,16 @@ class BenchmarkSuite:
         # Semantic diff between two states
         def run_diff() -> float:
             cmd = [
-                self.binary, "analyze", "diff",
+                self.binary,
+                "analyze",
+                "diff",
                 session,
-                "--from-state", "10",
-                "--to-state", "30",
-                "--format", "text",
+                "--from-state",
+                "10",
+                "--to-state",
+                "30",
+                "--format",
+                "text",
             ]
             _, elapsed = self.run_cmd(cmd)
             return elapsed
@@ -386,19 +445,34 @@ class BenchmarkSuite:
         # Start a background session
         session_name = f"bench-ipc-{os.getpid()}"
         start_cmd = [
-            self.binary, "record",
-            "-d", session_name,
-            "--cols", "120",
-            "--rows", "40",
+            self.binary,
+            "record",
+            "-d",
+            session_name,
+            "--cols",
+            "120",
+            "--rows",
+            "40",
             "--",
-            "/bin/sh", "-c",
+            "/bin/sh",
+            "-c",
             'printf "Ready\\n"; while :; do sleep 0.1; done',
         ]
         self.run_cmd(start_cmd)
 
         try:
             # Synchronize on readiness
-            self.run_cmd([self.binary, "wait", session_name, "--screen", "Ready", "--timeout", "5s"])
+            self.run_cmd(
+                [
+                    self.binary,
+                    "wait",
+                    session_name,
+                    "--screen",
+                    "Ready",
+                    "--timeout",
+                    "5s",
+                ]
+            )
 
             # Measure live screen text query
             def run_live_screen() -> float:
@@ -448,10 +522,14 @@ class BenchmarkSuite:
             # Measure send and wait postcondition
             def run_send_wait() -> float:
                 cmd = [
-                    self.binary, "send", session_name,
+                    self.binary,
+                    "send",
+                    session_name,
                     "text:x",
-                    "--until-screen", "Ready",
-                    "--timeout", "2s",
+                    "--until-screen",
+                    "Ready",
+                    "--timeout",
+                    "2s",
                 ]
                 _, elapsed = self.run_cmd(cmd)
                 return elapsed
@@ -479,7 +557,9 @@ class BenchmarkSuite:
             if m.category != current_cat:
                 current_cat = m.category
                 print(f"\n### {current_cat}")
-                print(f"{'Operation':<45} | {'Median':<10} | {'Mean':<10} | {'P95':<10} | {'Min':<10} | {'Max':<10}")
+                print(
+                    f"{'Operation':<45} | {'Median':<10} | {'Mean':<10} | {'P95':<10} | {'Min':<10} | {'Max':<10}"
+                )
                 print("-" * 105)
 
             med_str = format_ms(m.median)
@@ -488,7 +568,9 @@ class BenchmarkSuite:
             min_str = format_ms(m.min_val)
             max_str = format_ms(m.max_val)
 
-            print(f"{m.name:<45} | {med_str:<10} | {mean_str:<10} | {p95_str:<10} | {min_str:<10} | {max_str:<10}")
+            print(
+                f"{m.name:<45} | {med_str:<10} | {mean_str:<10} | {p95_str:<10} | {min_str:<10} | {max_str:<10}"
+            )
 
         print("\n" + "=" * 80 + "\n")
 
@@ -506,21 +588,48 @@ class BenchmarkSuite:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Termtrace Baseline Benchmark")
-    parser.add_argument("--binary", type=Path, default=ROOT / "target/release/termtrace")
-    parser.add_argument("--fixture-binary", type=Path, default=ROOT / "target/release/termtrace-fixture")
-    parser.add_argument("--output", type=Path, default=ROOT / "benchmarks/results/baseline_pre_optimization.json")
-    parser.add_argument("--quick", action="store_true", help="Run fewer iterations for quick baseline")
+    parser.add_argument(
+        "--binary", type=Path, default=ROOT / "target/release/termtrace"
+    )
+    parser.add_argument(
+        "--fixture-binary", type=Path, default=ROOT / "target/release/termtrace-fixture"
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=ROOT / "benchmarks/results/baseline_pre_optimization.json",
+    )
+    parser.add_argument(
+        "--quick", action="store_true", help="Run fewer iterations for quick baseline"
+    )
     args = parser.parse_args()
 
     if not args.binary.exists():
-        print(f"Error: binary {args.binary} does not exist. Build it with `cargo build --release` first.", file=sys.stderr)
+        print(
+            f"Error: binary {args.binary} does not exist. Build it with `cargo build --release` first.",
+            file=sys.stderr,
+        )
         return 1
 
     if not args.fixture_binary.exists():
         print(f"Building fixture binary {args.fixture_binary}...", flush=True)
-        subprocess.run(["cargo", "build", "--release", "-p", "termtrace-test-fixture", "--bin", "termtrace-fixture"], cwd=ROOT, check=True)
+        subprocess.run(
+            [
+                "cargo",
+                "build",
+                "--release",
+                "-p",
+                "termtrace-test-fixture",
+                "--bin",
+                "termtrace-fixture",
+            ],
+            cwd=ROOT,
+            check=True,
+        )
 
-    suite = BenchmarkSuite(binary=args.binary, fixture_binary=args.fixture_binary, quick=args.quick)
+    suite = BenchmarkSuite(
+        binary=args.binary, fixture_binary=args.fixture_binary, quick=args.quick
+    )
     try:
         suite.bench_durability()
         suite.bench_rendering()

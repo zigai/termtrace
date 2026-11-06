@@ -145,20 +145,31 @@ async def test_async_locator_uses_caller_token() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation,args", [
-    ("run", ()), ("execute", ()), ("pointer_click", (0, 0)),
-    ("pointer_scroll", (0, 0)), ("pointer_focus", (True,)),
-    ("stop", ()), ("wait_for_completion", ()),
-])
-async def test_cancelled_mutations_remain_joinable(operation: str, args: tuple[Any, ...]) -> None:
+@pytest.mark.parametrize(
+    "operation,args",
+    [
+        ("run", ()),
+        ("execute", ()),
+        ("pointer_click", (0, 0)),
+        ("pointer_scroll", (0, 0)),
+        ("pointer_focus", (True,)),
+        ("stop", ()),
+        ("wait_for_completion", ()),
+    ],
+)
+async def test_cancelled_mutations_remain_joinable(
+    operation: str, args: tuple[Any, ...]
+) -> None:
     """Builder and legacy offloads share the recording's pending mutation ownership."""
     started = threading.Event()
     release = threading.Event()
     returned = threading.Event()
+
     def slow(*args: Any) -> None:
         started.set()
         release.wait(2)
         returned.set()
+
     sync = Mock()
     getattr(sync.actions.return_value, operation).side_effect = slow
     getattr(sync, operation).side_effect = slow
@@ -166,7 +177,7 @@ async def test_cancelled_mutations_remain_joinable(operation: str, args: tuple[A
     owner = wrapper.actions() if operation in ("run", "execute") else wrapper
     task = asyncio.create_task(getattr(owner, operation)(*args))
     while not started.is_set():
-        await asyncio.sleep(.001)
+        await asyncio.sleep(0.001)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

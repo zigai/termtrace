@@ -63,10 +63,7 @@
   "properties": {
     "diagnostic": {
       "description": "Focused explanation for incomplete or unhealthy states.",
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     },
     "lifecycle": {
       "$ref": "#/$defs/SessionPhase",
@@ -77,10 +74,7 @@
       "description": "Exact registered or pending session path."
     }
   },
-  "required": [
-    "session",
-    "lifecycle"
-  ],
+  "required": ["session", "lifecycle"],
   "title": "RegistrySessionResolution",
   "type": "object"
 }

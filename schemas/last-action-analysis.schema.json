@@ -24,12 +24,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "number",
-        "ansi",
-        "before",
-        "after"
-      ],
+      "required": ["number", "ansi", "before", "after"],
       "type": "object"
     },
     "ActionOutputSummary": {
@@ -49,10 +44,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "event_count",
-        "byte_count"
-      ],
+      "required": ["event_count", "byte_count"],
       "type": "object"
     },
     "ActionShellCommand": {
@@ -84,10 +76,7 @@
         "exit_code": {
           "description": "Exit code the shell reported with the end mark.",
           "format": "int32",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "started": {
           "anyOf": [
@@ -123,11 +112,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "code",
-        "confidence",
-        "facts"
-      ],
+      "required": ["code", "confidence", "facts"],
       "type": "object"
     },
     "Base64Bytes": {
@@ -152,10 +137,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "event_seq",
-        "event_byte_offset"
-      ],
+      "required": ["event_seq", "event_byte_offset"],
       "type": "object"
     },
     "CursorState": {
@@ -170,10 +152,7 @@
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "in_viewport": {
           "description": "Whether the cursor lies in the viewport.",
@@ -184,10 +163,7 @@
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "style": {
           "$ref": "#/$defs/CursorStyle",
@@ -199,18 +175,10 @@
         },
         "wide_tail": {
           "description": "Whether the cursor is on a wide-character tail.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": ["boolean", "null"]
         }
       },
-      "required": [
-        "visible",
-        "blinking",
-        "in_viewport",
-        "style"
-      ],
+      "required": ["visible", "blinking", "in_viewport", "style"],
       "type": "object"
     },
     "CursorStyle": {
@@ -283,14 +251,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "code",
-        "confidence",
-        "state_ids",
-        "token_ids",
-        "facts",
-        "native_correlations"
-      ],
+      "required": ["code", "confidence", "state_ids", "token_ids", "facts", "native_correlations"],
       "type": "object"
     },
     "ExactPath": {
@@ -342,10 +303,7 @@
         },
         "error_code": {
           "description": "First stable result error code, when any atom failed.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "intended_bytes": {
           "description": "Intended input byte count without the input bytes themselves.",
@@ -382,10 +340,7 @@
         "request_id": {
           "description": "Caller-owned request identifier when the action was durably journaled.",
           "format": "uuid",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "result_event_seq": {
           "description": "Last canonical input-result event sequence.",
@@ -612,10 +567,7 @@
           "description": "Nominal encoded frame when clock mapping supplied one.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "level": {
           "$ref": "#/$defs/NativeEvidenceLevel",
@@ -636,12 +588,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "level",
-        "manifest",
-        "state_id",
-        "limitation"
-      ],
+      "required": ["level", "manifest", "state_id", "limitation"],
       "type": "object"
     },
     "NativeEvidenceLevel": {
@@ -697,10 +644,7 @@
           "description": "Value at the earlier endpoint."
         }
       },
-      "required": [
-        "before",
-        "after"
-      ],
+      "required": ["before", "after"],
       "type": "object"
     }
   },
@@ -718,10 +662,7 @@
       "description": "Compact action diff and warnings."
     }
   },
-  "required": [
-    "inspection",
-    "diagnostics"
-  ],
+  "required": ["inspection", "diagnostics"],
   "title": "LastActionAnalysis",
   "type": "object"
 }

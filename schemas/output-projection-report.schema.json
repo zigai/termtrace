@@ -97,10 +97,7 @@
     },
     "warning": {
       "description": "Stable warning explaining the projection boundary.",
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     }
   },
   "required": [

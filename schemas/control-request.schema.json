@@ -12,9 +12,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "condition"
-          ],
+          "required": ["condition"],
           "type": "object"
         },
         {
@@ -42,12 +40,7 @@
               "type": "integer"
             }
           },
-          "required": [
-            "condition",
-            "stable_for_ns",
-            "timeout_ns",
-            "reaction"
-          ],
+          "required": ["condition", "stable_for_ns", "timeout_ns", "reaction"],
           "type": "object"
         },
         {
@@ -69,11 +62,7 @@
               "type": "integer"
             }
           },
-          "required": [
-            "condition",
-            "predicate",
-            "timeout_ns"
-          ],
+          "required": ["condition", "predicate", "timeout_ns"],
           "type": "object"
         }
       ]
@@ -104,10 +93,7 @@
         "parent_span_id": {
           "description": "Optional parent span in the same process instance.",
           "format": "uuid",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "process_id": {
           "description": "Caller-reported operating-system PID.",
@@ -123,10 +109,7 @@
         "span_id": {
           "description": "Span identity; required for span lifecycle transitions.",
           "format": "uuid",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
       "required": [
@@ -176,9 +159,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "command"
-          ],
+          "required": ["command"],
           "type": "object"
         },
         {
@@ -190,9 +171,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "command"
-          ],
+          "required": ["command"],
           "type": "object"
         },
         {
@@ -210,10 +189,7 @@
               "type": "integer"
             }
           },
-          "required": [
-            "command",
-            "next_event_seq"
-          ],
+          "required": ["command", "next_event_seq"],
           "type": "object"
         },
         {
@@ -225,9 +201,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "command"
-          ],
+          "required": ["command"],
           "type": "object"
         },
         {
@@ -243,10 +217,7 @@
               "description": "Requested rich detail and exact optional viewport region."
             }
           },
-          "required": [
-            "command",
-            "projection"
-          ],
+          "required": ["command", "projection"],
           "type": "object"
         },
         {
@@ -278,13 +249,7 @@
               "type": "integer"
             }
           },
-          "required": [
-            "command",
-            "predicate",
-            "stable_for_ns",
-            "timeout_ns",
-            "projection"
-          ],
+          "required": ["command", "predicate", "stable_for_ns", "timeout_ns", "projection"],
           "type": "object"
         },
         {
@@ -323,12 +288,7 @@
               "type": "integer"
             }
           },
-          "required": [
-            "command",
-            "stable_for_ns",
-            "timeout_ns",
-            "projection"
-          ],
+          "required": ["command", "stable_for_ns", "timeout_ns", "projection"],
           "type": "object"
         },
         {
@@ -337,10 +297,7 @@
           "properties": {
             "caller_intent": {
               "description": "Optional caller-supplied reason for the operation.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "command": {
               "const": "input",
@@ -355,11 +312,7 @@
               "description": "Semantic category retained in the canonical input intent."
             }
           },
-          "required": [
-            "command",
-            "data",
-            "input_kind"
-          ],
+          "required": ["command", "data", "input_kind"],
           "type": "object"
         },
         {
@@ -388,12 +341,7 @@
               "type": "integer"
             }
           },
-          "required": [
-            "command",
-            "atoms",
-            "pace_ns",
-            "include_atom_outcomes"
-          ],
+          "required": ["command", "atoms", "pace_ns", "include_atom_outcomes"],
           "type": "object"
         },
         {
@@ -457,11 +405,7 @@
               "description": "Typed modifier state."
             }
           },
-          "required": [
-            "command",
-            "key",
-            "modifiers"
-          ],
+          "required": ["command", "key", "modifiers"],
           "type": "object"
         },
         {
@@ -477,10 +421,7 @@
               "description": "Paste content before mode-dependent wrapping or newline conversion."
             }
           },
-          "required": [
-            "command",
-            "data"
-          ],
+          "required": ["command", "data"],
           "type": "object"
         },
         {
@@ -500,11 +441,7 @@
               "type": "boolean"
             }
           },
-          "required": [
-            "command",
-            "focused",
-            "strict"
-          ],
+          "required": ["command", "focused", "strict"],
           "type": "object"
         },
         {
@@ -538,13 +475,7 @@
               "type": "boolean"
             }
           },
-          "required": [
-            "command",
-            "column",
-            "row",
-            "operation",
-            "strict"
-          ],
+          "required": ["command", "column", "row", "operation", "strict"],
           "type": "object"
         },
         {
@@ -568,12 +499,7 @@
               "type": "boolean"
             }
           },
-          "required": [
-            "command",
-            "text",
-            "unique",
-            "strict"
-          ],
+          "required": ["command", "text", "unique", "strict"],
           "type": "object"
         },
         {
@@ -613,13 +539,7 @@
               "type": "integer"
             }
           },
-          "required": [
-            "command",
-            "cols",
-            "rows",
-            "pixel_width",
-            "pixel_height"
-          ],
+          "required": ["command", "cols", "rows", "pixel_width", "pixel_height"],
           "type": "object"
         },
         {
@@ -635,10 +555,7 @@
               "description": "Signal to send."
             }
           },
-          "required": [
-            "command",
-            "signal"
-          ],
+          "required": ["command", "signal"],
           "type": "object"
         },
         {
@@ -654,10 +571,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "command",
-            "label"
-          ],
+          "required": ["command", "label"],
           "type": "object"
         },
         {
@@ -673,10 +587,7 @@
               "description": "Bounded caller-reported diagnostic record."
             }
           },
-          "required": [
-            "command",
-            "data"
-          ],
+          "required": ["command", "data"],
           "type": "object"
         },
         {
@@ -688,9 +599,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "command"
-          ],
+          "required": ["command"],
           "type": "object"
         }
       ]
@@ -789,10 +698,7 @@
           "properties": {
             "caller_intent": {
               "description": "Optional caller-supplied reason retained separately from input semantics.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "data": {
               "$ref": "#/$defs/Base64Bytes",
@@ -812,12 +718,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "input",
-            "operation_id",
-            "data",
-            "input_kind"
-          ],
+          "required": ["input", "operation_id", "data", "input_kind"],
           "type": "object"
         },
         {
@@ -826,10 +727,7 @@
           "properties": {
             "caller_intent": {
               "description": "Optional caller-supplied reason retained separately from the symbolic key.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "input": {
               "const": "key",
@@ -849,12 +747,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "input",
-            "operation_id",
-            "key",
-            "modifiers"
-          ],
+          "required": ["input", "operation_id", "key", "modifiers"],
           "type": "object"
         },
         {
@@ -863,10 +756,7 @@
           "properties": {
             "caller_intent": {
               "description": "Optional caller-supplied reason retained separately from paste semantics.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "data": {
               "$ref": "#/$defs/Base64Bytes",
@@ -882,11 +772,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "input",
-            "operation_id",
-            "data"
-          ],
+          "required": ["input", "operation_id", "data"],
           "type": "object"
         }
       ]
@@ -911,12 +797,7 @@
           "type": "boolean"
         }
       },
-      "required": [
-        "shift",
-        "control",
-        "alt",
-        "super_key"
-      ],
+      "required": ["shift", "control", "alt", "super_key"],
       "type": "object"
     },
     "MouseButton": {
@@ -1033,9 +914,7 @@
               "type": "integer"
             }
           },
-          "required": [
-            "function"
-          ],
+          "required": ["function"],
           "type": "object"
         },
         {
@@ -1048,9 +927,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "letter"
-          ],
+          "required": ["letter"],
           "type": "object"
         }
       ]
@@ -1071,10 +948,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind",
-            "button"
-          ],
+          "required": ["kind", "button"],
           "type": "object"
         },
         {
@@ -1097,11 +971,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "kind",
-            "button",
-            "count"
-          ],
+          "required": ["kind", "button", "count"],
           "type": "object"
         },
         {
@@ -1138,13 +1008,7 @@
               "type": "integer"
             }
           },
-          "required": [
-            "kind",
-            "button",
-            "to_column",
-            "to_row",
-            "steps"
-          ],
+          "required": ["kind", "button", "to_column", "to_row", "steps"],
           "type": "object"
         },
         {
@@ -1163,10 +1027,7 @@
               "type": "integer"
             }
           },
-          "required": [
-            "kind",
-            "lines"
-          ],
+          "required": ["kind", "lines"],
           "type": "object"
         }
       ]
@@ -1207,10 +1068,7 @@
       "properties": {
         "changed_from": {
           "description": "Presented-state hash the screen must leave; absent means the state at admission.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "timeout_ns": {
           "description": "How long to wait for a reaction, at least the stable interval, before reporting\n`unchanged`.",
@@ -1219,9 +1077,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "timeout_ns"
-      ],
+      "required": ["timeout_ns"],
       "type": "object"
     },
     "ScreenMode": {
@@ -1236,9 +1092,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "mode"
-          ],
+          "required": ["mode"],
           "type": "object"
         },
         {
@@ -1250,9 +1104,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "mode"
-          ],
+          "required": ["mode"],
           "type": "object"
         },
         {
@@ -1264,9 +1116,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "mode"
-          ],
+          "required": ["mode"],
           "type": "object"
         },
         {
@@ -1278,9 +1128,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "mode"
-          ],
+          "required": ["mode"],
           "type": "object"
         },
         {
@@ -1299,10 +1147,7 @@
               "type": "integer"
             }
           },
-          "required": [
-            "mode",
-            "number"
-          ],
+          "required": ["mode", "number"],
           "type": "object"
         },
         {
@@ -1321,10 +1166,7 @@
               "type": "integer"
             }
           },
-          "required": [
-            "mode",
-            "number"
-          ],
+          "required": ["mode", "number"],
           "type": "object"
         }
       ]
@@ -1345,10 +1187,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "predicate",
-            "text"
-          ],
+          "required": ["predicate", "text"],
           "type": "object"
         },
         {
@@ -1364,10 +1203,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "predicate",
-            "text"
-          ],
+          "required": ["predicate", "text"],
           "type": "object"
         },
         {
@@ -1383,10 +1219,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "predicate",
-            "pattern"
-          ],
+          "required": ["predicate", "pattern"],
           "type": "object"
         },
         {
@@ -1402,10 +1235,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "predicate",
-            "pattern"
-          ],
+          "required": ["predicate", "pattern"],
           "type": "object"
         },
         {
@@ -1428,11 +1258,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "predicate",
-            "row",
-            "text"
-          ],
+          "required": ["predicate", "row", "text"],
           "type": "object"
         },
         {
@@ -1455,11 +1281,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "predicate",
-            "row",
-            "text"
-          ],
+          "required": ["predicate", "row", "text"],
           "type": "object"
         },
         {
@@ -1479,11 +1301,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "predicate",
-            "region",
-            "text"
-          ],
+          "required": ["predicate", "region", "text"],
           "type": "object"
         },
         {
@@ -1503,11 +1321,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "predicate",
-            "region",
-            "text"
-          ],
+          "required": ["predicate", "region", "text"],
           "type": "object"
         },
         {
@@ -1519,10 +1333,7 @@
               "format": "uint16",
               "maximum": 65535,
               "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "type": ["integer", "null"]
             },
             "predicate": {
               "const": "cursor",
@@ -1533,10 +1344,7 @@
               "format": "uint16",
               "maximum": 65535,
               "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
+              "type": ["integer", "null"]
             },
             "shape": {
               "anyOf": [
@@ -1551,15 +1359,10 @@
             },
             "visible": {
               "description": "Optional cursor visibility requirement.",
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "type": ["boolean", "null"]
             }
           },
-          "required": [
-            "predicate"
-          ],
+          "required": ["predicate"],
           "type": "object"
         },
         {
@@ -1579,11 +1382,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "predicate",
-            "mode",
-            "enabled"
-          ],
+          "required": ["predicate", "mode", "enabled"],
           "type": "object"
         },
         {
@@ -1603,11 +1402,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "predicate",
-            "hash",
-            "comparison"
-          ],
+          "required": ["predicate", "hash", "comparison"],
           "type": "object"
         },
         {
@@ -1626,10 +1421,7 @@
               "type": "array"
             }
           },
-          "required": [
-            "predicate",
-            "predicates"
-          ],
+          "required": ["predicate", "predicates"],
           "type": "object"
         },
         {
@@ -1648,10 +1440,7 @@
               "type": "array"
             }
           },
-          "required": [
-            "predicate",
-            "predicates"
-          ],
+          "required": ["predicate", "predicates"],
           "type": "object"
         }
       ]
@@ -1676,9 +1465,7 @@
           "description": "Exact absolute region, or the complete viewport for text/spans."
         }
       },
-      "required": [
-        "detail"
-      ],
+      "required": ["detail"],
       "type": "object"
     },
     "ScreenRegion": {
@@ -1714,12 +1501,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "top",
-        "left",
-        "right",
-        "bottom"
-      ],
+      "required": ["top", "left", "right", "bottom"],
       "type": "object"
     },
     "StateHashComparison": {
@@ -1749,10 +1531,7 @@
     },
     "expected_presented_state_hash": {
       "description": "Optional optimistic guard over the actor's latest presented state.",
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     },
     "request_id": {
       "description": "Caller-generated correlation identifier.",
@@ -1766,11 +1545,7 @@
       "type": "integer"
     }
   },
-  "required": [
-    "version",
-    "request_id",
-    "command"
-  ],
+  "required": ["version", "request_id", "command"],
   "title": "ControlRequest",
   "type": "object"
 }

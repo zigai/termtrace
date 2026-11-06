@@ -22,10 +22,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "width",
-        "height"
-      ],
+      "required": ["width", "height"],
       "type": "object"
     },
     "GeometryProbeAttempt": {
@@ -41,10 +38,7 @@
           "description": "Whole native viewport supplied to Ghostty."
         }
       },
-      "required": [
-        "target",
-        "report"
-      ],
+      "required": ["target", "report"],
       "type": "object"
     },
     "TerminalGeometryReport": {
@@ -93,14 +87,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "cols",
-        "rows",
-        "cell_width",
-        "cell_height",
-        "text_width",
-        "text_height"
-      ],
+      "required": ["cols", "rows", "cell_width", "cell_height", "text_width", "text_height"],
       "type": "object"
     },
     "WindowPadding": {
@@ -122,10 +109,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "x",
-        "y"
-      ],
+      "required": ["x", "y"],
       "type": "object"
     }
   },
@@ -160,12 +144,7 @@
       "description": "Exact-grid selected viewport."
     }
   },
-  "required": [
-    "required_cols",
-    "required_rows",
-    "attempts",
-    "selected"
-  ],
+  "required": ["required_cols", "required_rows", "attempts", "selected"],
   "title": "GeometrySolveReport",
   "type": "object"
 }

@@ -13,10 +13,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "revision",
-        "target"
-      ],
+      "required": ["revision", "target"],
       "type": "object"
     },
     "DoctorCheck": {
@@ -25,10 +22,7 @@
       "properties": {
         "code": {
           "description": "Stable diagnostic code of the underlying probe, when it reports one.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "details": {
           "description": "One line per finding when the check found several.",
@@ -72,12 +66,7 @@
           "description": "Check outcome."
         }
       },
-      "required": [
-        "id",
-        "group",
-        "status",
-        "message"
-      ],
+      "required": ["id", "group", "status", "message"],
       "type": "object"
     },
     "DoctorFix": {
@@ -90,22 +79,14 @@
         },
         "command": {
           "description": "Shell command that repairs the problem.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "manual": {
           "description": "Manual step when no single command repairs the problem.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
-      "required": [
-        "automatic"
-      ],
+      "required": ["automatic"],
       "type": "object"
     },
     "DoctorFixOutcome": {
@@ -118,10 +99,7 @@
         },
         "error": {
           "description": "Failure message when the action failed.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "id": {
           "description": "Check the repair belongs to.",
@@ -132,11 +110,7 @@
           "description": "Whether the action succeeded."
         }
       },
-      "required": [
-        "id",
-        "action",
-        "result"
-      ],
+      "required": ["id", "action", "result"],
       "type": "object"
     },
     "DoctorFixResult": {
@@ -160,17 +134,11 @@
       "properties": {
         "executable": {
           "description": "Running executable, with the home directory shown as `~`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "method": {
           "description": "Installer that placed the executable, when recognizable.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
       "type": "object"
@@ -185,15 +153,10 @@
         },
         "source": {
           "description": "Environment variable that selected the directory; absent for the default.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
-      "required": [
-        "path"
-      ],
+      "required": ["path"],
       "type": "object"
     },
     "DoctorPaths": {
@@ -279,13 +242,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "ok",
-        "info",
-        "warn",
-        "fail",
-        "skip"
-      ],
+      "required": ["ok", "info", "warn", "fail", "skip"],
       "type": "object"
     }
   },
@@ -336,15 +293,7 @@
       "type": "string"
     }
   },
-  "required": [
-    "version",
-    "build",
-    "install",
-    "paths",
-    "env",
-    "checks",
-    "summary"
-  ],
+  "required": ["version", "build", "install", "paths", "env", "checks", "summary"],
   "title": "DoctorReport",
   "type": "object"
 }

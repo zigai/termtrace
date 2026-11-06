@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Interactive query-heavy PTY workload; bulk growth retains the real recorder path."""
+
 from __future__ import annotations
 
 import argparse
@@ -14,7 +15,7 @@ import tty
 def emit(data: bytes) -> None:
     remaining = memoryview(data)
     while remaining:
-        remaining = remaining[os.write(sys.stdout.fileno(), remaining):]
+        remaining = remaining[os.write(sys.stdout.fileno(), remaining) :]
 
 
 def main() -> None:
@@ -49,12 +50,18 @@ def main() -> None:
                         emit(b"\x1b[H" + b"x" * 4089 + b"\x1b[6n")
                         reply = b""
                         while not reply.endswith(b"R"):
-                            readable, _, _ = select.select([sys.stdin.fileno()], [], [], 30)
+                            readable, _, _ = select.select(
+                                [sys.stdin.fileno()], [], [], 30
+                            )
                             if not readable:
-                                raise TimeoutError("recorder did not answer cursor query")
+                                raise TimeoutError(
+                                    "recorder did not answer cursor query"
+                                )
                             reply += os.read(sys.stdin.fileno(), 4096)
                     emit(b"\x1b[2J\x1b[HREADY GROWN\n")
-                    args.control.with_suffix(".ack").write_text(str(count), encoding="ascii")
+                    args.control.with_suffix(".ack").write_text(
+                        str(count), encoding="ascii"
+                    )
     finally:
         os.close(control)
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, original)

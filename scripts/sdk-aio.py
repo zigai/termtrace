@@ -132,13 +132,19 @@ def parameters(function: ast.FunctionDef) -> tuple[str, list[str]]:
     defaults = [None] * (len(positional) - len(args.defaults)) + list(args.defaults)
     for arg, default in zip(positional[1:], defaults[1:]):
         text = arg.arg + (f": {annotation(arg.annotation)}" if arg.annotation else "")
-        rendered.append(text + (f" = {ast.unparse(default)}" if default is not None else ""))
+        rendered.append(
+            text + (f" = {ast.unparse(default)}" if default is not None else "")
+        )
         forwarded.append(arg.arg)
     if args.kwonlyargs:
         rendered.append("*")
         for arg, default in zip(args.kwonlyargs, args.kw_defaults):
-            text = arg.arg + (f": {annotation(arg.annotation)}" if arg.annotation else "")
-            rendered.append(text + (f" = {ast.unparse(default)}" if default is not None else ""))
+            text = arg.arg + (
+                f": {annotation(arg.annotation)}" if arg.annotation else ""
+            )
+            rendered.append(
+                text + (f" = {ast.unparse(default)}" if default is not None else "")
+            )
             forwarded.append(f"{arg.arg}={arg.arg}")
     return ", ".join(rendered), forwarded
 
@@ -150,7 +156,11 @@ def docstring(function: ast.FunctionDef, indent: str) -> list[str]:
     lines = text.strip().splitlines()
     if len(lines) == 1:
         return [f'{indent}r"""{lines[0]}"""']
-    return [f'{indent}r"""{lines[0]}', *[f"{indent}{line}".rstrip() for line in lines[1:]], f'{indent}"""']
+    return [
+        f'{indent}r"""{lines[0]}',
+        *[f"{indent}{line}".rstrip() for line in lines[1:]],
+        f'{indent}"""',
+    ]
 
 
 def wrap(expression: str, cls: str | None) -> str:
@@ -165,7 +175,9 @@ def method(cls: str, function: ast.FunctionDef) -> list[str]:
     signature, forwarded = parameters(function)
     result = annotation(function.returns) or "None"
     target = returned(function.returns)
-    property_ = any(isinstance(d, ast.Name) and d.id == "property" for d in function.decorator_list)
+    property_ = any(
+        isinstance(d, ast.Name) and d.id == "property" for d in function.decorator_list
+    )
     call = f"self._sync.{name}({', '.join(forwarded)})"
     lines: list[str] = []
     if property_:
@@ -173,15 +185,22 @@ def method(cls: str, function: ast.FunctionDef) -> list[str]:
         lines += docstring(function, "        ")
         lines.append(f"        return {wrap(f'self._sync.{name}', target)}")
         return lines
-    cancellable = any(arg.arg == "cancel" for arg in function.args.args + function.args.kwonlyargs)
+    cancellable = any(
+        arg.arg == "cancel" for arg in function.args.args + function.args.kwonlyargs
+    )
     if cls == "ActionBuilder" and name == "run":
         # Sealing happens now, so the request cannot change while it is in flight.
         lines.append(f"    def {name}({signature}) -> Coroutine[Any, Any, {result}]:")
         lines += docstring(function, "        ")
-        lines += ["        self._sync.seal()", f"        return offload_mutation(self._pending, lambda: {call})"]
+        lines += [
+            "        self._sync.seal()",
+            f"        return offload_mutation(self._pending, lambda: {call})",
+        ]
         return lines
     if listed(IMMEDIATE, cls, name) and not listed(MUTATIONS, cls, name):
-        lines.append(f"    def {name}({signature}) -> {'Self' if target == cls else result}:")
+        lines.append(
+            f"    def {name}({signature}) -> {'Self' if target == cls else result}:"
+        )
         lines += docstring(function, "        ")
         if target == cls:
             lines += [f"        {call}", "        return self"]
@@ -191,7 +210,14 @@ def method(cls: str, function: ast.FunctionDef) -> list[str]:
     lines.append(f"    async def {name}({signature}) -> {result}:")
     lines += docstring(function, "        ")
     if cancellable:
-        tokened = ["cancel=token" if arg == "cancel=cancel" else "token" if arg == "cancel" else arg for arg in forwarded]
+        tokened = [
+            "cancel=token"
+            if arg == "cancel=cancel"
+            else "token"
+            if arg == "cancel"
+            else arg
+            for arg in forwarded
+        ]
         inner = f"self._sync.{name}({', '.join(tokened)})"
         lines += [
             "        def call(token: CancelToken) -> typing.Any:",
@@ -202,9 +228,13 @@ def method(cls: str, function: ast.FunctionDef) -> list[str]:
     elif listed(LAUNCHES, cls, name):
         lines.append(f"        return {wrap(f'await launch(lambda: {call})', target)}")
     elif listed(MUTATIONS, cls, name):
-        lines.append(f"        return {wrap(f'await offload_mutation(self._pending, lambda: {call})', target)}")
+        lines.append(
+            f"        return {wrap(f'await offload_mutation(self._pending, lambda: {call})', target)}"
+        )
     else:
-        lines.append(f"        return {wrap(f'await asyncio.to_thread(lambda: {call})', target)}")
+        lines.append(
+            f"        return {wrap(f'await asyncio.to_thread(lambda: {call})', target)}"
+        )
     return lines
 
 
@@ -226,7 +256,9 @@ def base_methods() -> dict[str, set[str]]:
     for node in runtime.body:
         if isinstance(node, ast.ClassDef):
             methods[node.name] = {
-                item.name for item in ast.walk(node) if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                item.name
+                for item in ast.walk(node)
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
             }
     return methods
 
@@ -280,7 +312,8 @@ def generate(stub: ast.Module) -> str:
             if cls in BASES and function.name in inherited[BASES[cls]] - {"wait_for"}:
                 continue
             if function.name in SKIPPED or any(
-                isinstance(d, ast.Name) and d.id == "staticmethod" for d in function.decorator_list
+                isinstance(d, ast.Name) and d.id == "staticmethod"
+                for d in function.decorator_list
             ):
                 continue
             out += method(cls, function)

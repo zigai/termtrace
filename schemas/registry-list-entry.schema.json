@@ -37,12 +37,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "cols",
-        "rows",
-        "pixel_width",
-        "pixel_height"
-      ],
+      "required": ["cols", "rows", "pixel_width", "pixel_height"],
       "type": "object"
     },
     "SessionPhase": {
@@ -104,17 +99,11 @@
       "items": {
         "$ref": "#/$defs/Base64Bytes"
       },
-      "type": [
-        "array",
-        "null"
-      ]
+      "type": ["array", "null"]
     },
     "diagnostic": {
       "description": "Focused diagnostic for unhealthy entries.",
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     },
     "geometry": {
       "anyOf": [
@@ -146,10 +135,7 @@
       "description": "Session wall-clock origin when the manifest is readable.",
       "format": "uint128",
       "minimum": 0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "type": ["integer", "null"]
     },
     "working_directory": {
       "anyOf": [
@@ -163,13 +149,7 @@
       "description": "Effective working directory when the manifest is readable."
     }
   },
-  "required": [
-    "alias",
-    "canonical_session",
-    "session_id",
-    "registered_unix_ns",
-    "lifecycle"
-  ],
+  "required": ["alias", "canonical_session", "session_id", "registered_unix_ns", "lifecycle"],
   "title": "RegistryListEntry",
   "type": "object"
 }

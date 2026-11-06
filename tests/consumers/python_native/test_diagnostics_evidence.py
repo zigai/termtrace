@@ -670,7 +670,9 @@ def test_nonutf8_source_debug_forensic_verification_paths_and_source_hashes(
 
 def ffmpeg_without_vp9(directory: Path) -> Path:
     directory.mkdir()
-    real = subprocess.run(["sh", "-c", "command -v ffmpeg"], check=True, capture_output=True, text=True)
+    real = subprocess.run(
+        ["sh", "-c", "command -v ffmpeg"], check=True, capture_output=True, text=True
+    )
     wrapper = directory / "ffmpeg"
     wrapper.write_text(
         "#!/bin/sh\n"
@@ -684,8 +686,12 @@ def ffmpeg_without_vp9(directory: Path) -> Path:
 def test_delivery_codec_availability_follows_the_ffmpeg_on_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    client = Termtrace(binary=BINARY, evidence_root=str(evidence_root(tmp_path) / "sessions"))
-    with client.record(["/bin/sh", "-c", "printf READY; IFS= read -r line"], rows=6, cols=30) as rec:
+    client = Termtrace(
+        binary=BINARY, evidence_root=str(evidence_root(tmp_path) / "sessions")
+    )
+    with client.record(
+        ["/bin/sh", "-c", "printf READY; IFS= read -r line"], rows=6, cols=30
+    ) as rec:
         rec.screen().wait_for_text("READY", timeout_secs=5)
         rec.mark("start")
         rec.mark("end")
@@ -713,5 +719,7 @@ def test_delivery_codec_availability_follows_the_ffmpeg_on_path(
         client.video_render(rec.path, edit, out, renderer="semantic")
     assert "derivative_encoder_unavailable" in str(blocked.value)
     assert not out.exists()
-    gif = client.video_render(rec.path, edit, tmp_path / "allowed.gif", renderer="semantic")
+    gif = client.video_render(
+        rec.path, edit, tmp_path / "allowed.gif", renderer="semantic"
+    )
     assert Path(gif["output"]).is_file()

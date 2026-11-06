@@ -85,12 +85,7 @@
       "type": "integer"
     }
   },
-  "required": [
-    "directory",
-    "removed_entries",
-    "removed_bytes",
-    "remaining"
-  ],
+  "required": ["directory", "removed_entries", "removed_bytes", "remaining"],
   "title": "ReplayCachePruneReport",
   "type": "object"
 }

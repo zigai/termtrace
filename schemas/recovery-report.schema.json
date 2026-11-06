@@ -23,10 +23,7 @@
           "description": "Intended input byte count.",
           "format": "uint64",
           "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "intent_seq": {
           "description": "Intent sequence number.",
@@ -44,11 +41,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "operation_id",
-        "kind",
-        "intent_seq"
-      ],
+      "required": ["operation_id", "kind", "intent_seq"],
       "type": "object"
     },
     "RecoveryIssue": {
@@ -65,10 +58,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "line",
-        "reason"
-      ],
+      "required": ["line", "reason"],
       "type": "object"
     }
   },
@@ -109,12 +99,7 @@
       "type": "integer"
     }
   },
-  "required": [
-    "source",
-    "recovered",
-    "valid_events",
-    "pending_operations"
-  ],
+  "required": ["source", "recovered", "valid_events", "pending_operations"],
   "title": "RecoveryReport",
   "type": "object"
 }
