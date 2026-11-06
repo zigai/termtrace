@@ -66,15 +66,20 @@ termtrace-process = { path = "crates/process" }
 termtrace-render = { path = "crates/render" }
 termtrace-scenario = { path = "crates/scenario" }
 termtrace-schema = { path = "crates/schema" }
-    termtrace-service = { path = "crates/service" }
-    termtrace-sdk = { path = "crates/sdk", features = ["in-process"] }
+termtrace-service = { path = "crates/service" }
+termtrace-sdk = { path = "crates/sdk", features = ["in-process"] }
 termtrace-terminal = { path = "crates/terminal" }
 termtrace-tmux = { path = "crates/tmux" }
 tracing = "0.1.41"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
 uuid = { version = "1.18.1", features = ["serde", "v7"] }
-rmcp = { version = "3.5.1", default-features = false, features = ["server", "macros", "schemars", "transport-io"] }
+rmcp = { version = "3.5.1", default-features = false, features = [
+    "server",
+    "macros",
+    "schemars",
+    "transport-io",
+] }
 tokio = { version = "1", features = ["macros", "process", "rt", "time"] }
 schemars = "1.1.0"
 base64 = "0.22.1"
@@ -89,7 +94,10 @@ roxmltree = "0.20.0"
 portable-pty = "0.9.0"
 zstd = "0.13.3"
 cargo_metadata = "0.23.1"
-rmcp = { version = "3.5.1", default-features = false, features = ["client", "transport-child-process"] }
+rmcp = { version = "3.5.1", default-features = false, features = [
+    "client",
+    "transport-child-process",
+] }
 
 [lints]
 workspace = true

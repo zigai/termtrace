@@ -1,3 +1,3 @@
 # Termtrace
 
-- The full check is `just lint validate test integration bindings-test native-test`. Run `just check` only when asked.
+- The commit check is `just check`; `just checkfull` adds native integration, sanitizers, Miri, fuzzing, mutation and benchmarks. Run only when asked.

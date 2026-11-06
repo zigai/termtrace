@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "tsc -p tsconfig.examples.json && node --test test/*.test.js .examples/*.test.js"
+    "test": "tsc -p tsconfig.examples.json && node --test test/*.test.js .examples/*.test.js",
+    "coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@termtrace/core": "file:../../../crates/bindings-node"
@@ -11,6 +12,7 @@
   "devDependencies": {
     "@types/node": "26.6.5",
     "typescript": "5.9.3",
-    "vitest": "4.1.12"
+    "vitest": "4.1.12",
+    "@vitest/coverage-v8": "4.1.12"
   }
 }
