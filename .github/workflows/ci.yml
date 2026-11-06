@@ -21,7 +21,7 @@ env:
 
 jobs:
   check:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -53,7 +53,7 @@ jobs:
       - run: just check
 
   native:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     env:
       LIBGL_ALWAYS_SOFTWARE: "1"
@@ -78,17 +78,8 @@ jobs:
           sudo apt-get install --yes --no-install-recommends build-essential pkg-config ripgrep jq xz-utils \
             tmux ncurses-term ffmpeg fonts-dejavu-core imagemagick xvfb xauth x11-utils dbus-daemon dbus-x11 \
             libgtk-4-dev libadwaita-1-dev libx11-dev libfontconfig1-dev libfreetype-dev libgl1-mesa-dri libegl-mesa0 \
-            gettext meson ninja-build python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
+            gettext blueprint-compiler python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
       - run: just setup
-      # Ubuntu 24.04 ships Blueprint 0.12; this Ghostty checkout needs 0.16 or newer.
-      - name: Install Blueprint
-        run: |
-          git init "$RUNNER_TEMP/blueprint"
-          git -C "$RUNNER_TEMP/blueprint" fetch --depth 1 https://gitlab.gnome.org/GNOME/blueprint-compiler.git 04ef0944db56ab01307a29aaa7303df6067cb3c0
-          git -C "$RUNNER_TEMP/blueprint" checkout --detach FETCH_HEAD
-          meson setup "$RUNNER_TEMP/blueprint/build" "$RUNNER_TEMP/blueprint" --prefix "$RUNNER_TEMP/tools" -Ddocs=false
-          meson install -C "$RUNNER_TEMP/blueprint/build"
-          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
       - name: Build Ghostty
         working-directory: vendor/ghostty
         run: |
