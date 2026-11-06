@@ -41,7 +41,7 @@ jobs:
         with:
           tool: just@1.59.0,cargo-nextest@0.9.143,cargo-machete@0.9.2,cargo-audit@0.22.2,shfmt@3.14.1,editorconfig-checker@3.11.3
       - name: Install system packages
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends build-essential pkg-config ripgrep jq xz-utils tmux ncurses-term
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends build-essential pkg-config ripgrep jq xz-utils tmux ncurses-term ffmpeg
       - name: Install formatters
         run: |
           uv tool install ruff==0.17.3
@@ -78,8 +78,17 @@ jobs:
           sudo apt-get install --yes --no-install-recommends build-essential pkg-config ripgrep jq xz-utils \
             tmux ncurses-term ffmpeg fonts-dejavu-core imagemagick xvfb xauth x11-utils dbus-daemon dbus-x11 \
             libgtk-4-dev libadwaita-1-dev libx11-dev libfontconfig1-dev libfreetype-dev libgl1-mesa-dri libegl-mesa0 \
-            gettext blueprint-compiler python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
+            gettext meson ninja-build python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
       - run: just setup
+      # Ubuntu 26.04 ships Blueprint 0.19; this Ghostty checkout needs 0.20 or newer.
+      - name: Install Blueprint
+        run: |
+          git init "$RUNNER_TEMP/blueprint"
+          git -C "$RUNNER_TEMP/blueprint" fetch --depth 1 https://gitlab.gnome.org/GNOME/blueprint-compiler.git 31b62c24a72c1670d2d93dcdf2d130f1ae12778e
+          git -C "$RUNNER_TEMP/blueprint" checkout --detach FETCH_HEAD
+          meson setup "$RUNNER_TEMP/blueprint/build" "$RUNNER_TEMP/blueprint" --prefix "$RUNNER_TEMP/tools" -Ddocs=false
+          meson install -C "$RUNNER_TEMP/blueprint/build"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
       - name: Build Ghostty
         working-directory: vendor/ghostty
         run: |
