@@ -76,7 +76,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends build-essential pkg-config ripgrep jq xz-utils \
-            tmux ncurses-term ffmpeg fonts-dejavu-core imagemagick xvfb xauth x11-utils dbus-daemon dbus-x11 \
+            tmux ncurses-term ffmpeg fonts-dejavu-core fonts-jetbrains-mono imagemagick xvfb xauth x11-utils dbus-daemon dbus-x11 \
             libgtk-4-dev libadwaita-1-dev libx11-dev libfontconfig1-dev libfreetype-dev libgl1-mesa-dri libegl-mesa0 \
             gettext meson ninja-build python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
       - run: just setup

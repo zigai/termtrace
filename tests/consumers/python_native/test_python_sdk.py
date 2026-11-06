@@ -58,9 +58,7 @@ _U64_MAX = 2**64 - 1
 def test_sync_recording_lifecycle() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(
-            ["/bin/sh", "-norc", "-c", "echo PY_SYNC_OK"], rows=24, cols=80
-        ) as rec:
+        with tt.record(["/bin/sh", "-c", "echo PY_SYNC_OK"], rows=24, cols=80) as rec:
             assert rec.is_active()
             assert len(rec.session_id) > 0
             screen = rec.screen()
@@ -74,7 +72,7 @@ def test_screen_frame_and_text() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
         with tt.record(
-            ["/bin/sh", "-norc", "-c", "echo FRAME_TEST_LINE"], rows=30, cols=100
+            ["/bin/sh", "-c", "echo FRAME_TEST_LINE"], rows=30, cols=100
         ) as rec:
             screen = rec.screen()
             screen.wait_for_text("FRAME_TEST_LINE", timeout_secs=5.0)
@@ -89,7 +87,7 @@ def test_screen_frame_and_text() -> None:
 def test_action_builder_state_guarded_input() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(["/bin/sh", "-norc"], rows=24, cols=80) as rec:
+        with tt.record(["/bin/sh"], rows=24, cols=80) as rec:
             screen = rec.screen()
             state = screen.wait_for_text("$", timeout_secs=5.0)
 
@@ -106,7 +104,7 @@ def test_action_builder_state_guarded_input() -> None:
 def test_pointer_actions() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(["/bin/sh", "-norc"], rows=24, cols=80) as rec:
+        with tt.record(["/bin/sh"], rows=24, cols=80) as rec:
             rec.screen().wait_for_text("$", timeout_secs=5.0)
             # Send pointer click, scroll, and focus
             rec.pointer_click(column=10, row=5, button="left")
@@ -118,7 +116,7 @@ def test_visual_snapshot_save() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
         with tt.record(
-            ["/bin/sh", "-norc", "-c", "echo VISUAL_SAVE_TEST"], rows=24, cols=80
+            ["/bin/sh", "-c", "echo VISUAL_SAVE_TEST"], rows=24, cols=80
         ) as rec:
             rec.screen().wait_for_text("VISUAL_SAVE_TEST", timeout_secs=5.0)
             save_dir = os.path.join(tmpdir, "snapshot_out")
@@ -137,7 +135,7 @@ def test_raw_output_streaming() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
         with tt.record(
-            ["/bin/sh", "-norc", "-c", "echo OUTPUT_STREAM_LINE"], rows=24, cols=80
+            ["/bin/sh", "-c", "echo OUTPUT_STREAM_LINE"], rows=24, cols=80
         ) as rec:
             rec.screen().wait_for_text("OUTPUT_STREAM_LINE", timeout_secs=5.0)
             # Read output bytes
@@ -153,9 +151,7 @@ def test_raw_output_streaming() -> None:
 def test_event_log_reading() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(
-            ["/bin/sh", "-norc", "-c", "echo EVENT_TEST"], rows=24, cols=80
-        ) as rec:
+        with tt.record(["/bin/sh", "-c", "echo EVENT_TEST"], rows=24, cols=80) as rec:
             rec.screen().wait_for_text("EVENT_TEST", timeout_secs=5.0)
             events = rec.read_events(cursor=0, limit=50)
             assert isinstance(events, list)
@@ -165,7 +161,7 @@ def test_event_log_reading() -> None:
 def test_replay_analysis_services() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(["/bin/sh", "-norc"], rows=24, cols=80) as rec:
+        with tt.record(["/bin/sh"], rows=24, cols=80) as rec:
             state = rec.screen().wait_for_text("$", timeout_secs=5.0)
             rec.actions().send_text("echo ACTION_FOR_ANALYSIS").send_key(
                 "Enter"
@@ -195,7 +191,7 @@ def test_registry_operations() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
         with tt.record(
-            ["/bin/sh", "-norc", "-c", "echo REGISTRY_TEST"], rows=24, cols=80
+            ["/bin/sh", "-c", "echo REGISTRY_TEST"], rows=24, cols=80
         ) as rec:
             session_path = rec.path
             alias = f"test-alias-{os.getpid()}"
@@ -220,7 +216,7 @@ def test_session_integrity_verification() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
         with tt.record(
-            ["/bin/sh", "-norc", "-c", "echo INTEGRITY_TEST"], rows=24, cols=80
+            ["/bin/sh", "-c", "echo INTEGRITY_TEST"], rows=24, cols=80
         ) as rec:
             session_path = rec.path
         # Once closed, verify structure
@@ -233,9 +229,7 @@ def test_session_integrity_verification() -> None:
 async def test_async_recording_lifecycle() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = AsyncTermtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        async with await tt.record(
-            ["/bin/sh", "-norc", "-c", "echo PY_ASYNC_OK"]
-        ) as rec:
+        async with await tt.record(["/bin/sh", "-c", "echo PY_ASYNC_OK"]) as rec:
             assert await rec.is_active()
             screen = rec.screen()
             state = await screen.wait_for_text("PY_ASYNC_OK", timeout_secs=5.0)
@@ -344,7 +338,7 @@ def test_asciicast_export() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
         with tt.record(
-            ["/bin/sh", "-norc", "-c", "echo ASCIICAST_TEST"], rows=24, cols=80
+            ["/bin/sh", "-c", "echo ASCIICAST_TEST"], rows=24, cols=80
         ) as rec:
             screen = rec.screen()
             screen.wait_for_text("ASCIICAST_TEST", timeout_secs=5.0)
@@ -357,7 +351,7 @@ def test_asciicast_export() -> None:
 
 def test_pytest_plugin_fixture(termtrace_session: Any) -> None:
     rec = termtrace_session(
-        ["/bin/sh", "-norc", "-c", "echo PYTEST_FIXTURE_OK"], rows=24, cols=80
+        ["/bin/sh", "-c", "echo PYTEST_FIXTURE_OK"], rows=24, cols=80
     )
     screen = rec.screen()
     state = screen.wait_for_text("PYTEST_FIXTURE_OK", timeout_secs=5.0)
@@ -367,7 +361,7 @@ def test_pytest_plugin_fixture(termtrace_session: Any) -> None:
 def test_timeout_error_raised() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tt = Termtrace(binary=TERMTRACE_BIN, evidence_root=tmpdir)
-        with tt.record(["/bin/sh", "-norc", "-c", "sleep 10"], rows=24, cols=80) as rec:
+        with tt.record(["/bin/sh", "-c", "sleep 10"], rows=24, cols=80) as rec:
             screen = rec.screen()
             with pytest.raises(TimeoutError) as raised:
                 screen.wait_for_text("NON_EXISTENT_STRING_XYZ", timeout_secs=0.2)

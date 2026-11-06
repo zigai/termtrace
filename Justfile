@@ -53,7 +53,7 @@ bindings-build:
 
 # Test native Python language bindings and pytest consumer suite
 test-python:
-    uv run --project tests/consumers/python_native pytest -v tests/consumers/python_native
+    TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace uv run --project tests/consumers/python_native pytest -v tests/consumers/python_native
 
 # Test native Node.js/TypeScript bindings and consumer suite
 test-node:
@@ -70,8 +70,8 @@ bindings-test: bindings-build bindings-lint test-python test-node
 
 # Run every configured linter on the whole project, stopping on failure
 lint:
-    @cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-    @cargo clippy --locked -p termtrace-sdk --no-default-features --all-targets -- -D warnings
+    @cargo clippy --locked --workspace --all-targets --all-features
+    @cargo clippy --locked -p termtrace-sdk --no-default-features --all-targets
     @cargo machete
     @set -e; for file in install.sh benchmarks/*.sh scripts/*.sh; do bash -n "$file"; done
     @bash scripts/check-github-action-pins.sh

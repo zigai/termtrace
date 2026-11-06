@@ -15,7 +15,7 @@ test("sync and async recording lifecycle", async () => {
     const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-consumer-"));
     try {
         const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo NODE_CONSUMER_OK"], 24, 80);
+        const rec = await tt.record(["/bin/sh", "-c", "echo NODE_CONSUMER_OK"], 24, 80);
         assert.strictEqual(rec.isActive(), true);
         assert.ok(rec.sessionId.length > 0);
 
@@ -35,7 +35,7 @@ test("screen frame geometry and text retrieval", async () => {
     const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-frame-"));
     try {
         const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo FRAME_GEOMETRY_OK"], 32, 96);
+        const rec = await tt.record(["/bin/sh", "-c", "echo FRAME_GEOMETRY_OK"], 32, 96);
         const screen = rec.screen();
         await screen.waitForText("FRAME_GEOMETRY_OK", 5000);
 
@@ -57,7 +57,7 @@ test("action builder state-guarded input", async () => {
     const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-actions-"));
     try {
         const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-        const rec = await tt.record(["/bin/sh", "-norc"], 24, 80);
+        const rec = await tt.record(["/bin/sh"], 24, 80);
         const screen = rec.screen();
         const readyState = await screen.waitForText("$", 5000);
 
@@ -81,7 +81,7 @@ test("pointer actions (click, scroll, focus)", async () => {
     const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-pointer-"));
     try {
         const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-        const rec = await tt.record(["/bin/sh", "-norc"], 24, 80);
+        const rec = await tt.record(["/bin/sh"], 24, 80);
         await rec.screen().waitForText("$", 5000);
 
         await rec.pointerClick(10, 5, "left");
@@ -98,7 +98,7 @@ test("visual snapshot save (PNG, SVG, HTML, TXT, JSON)", async () => {
     const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-save-"));
     try {
         const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo VISUAL_SAVE_NODE"], 24, 80);
+        const rec = await tt.record(["/bin/sh", "-c", "echo VISUAL_SAVE_NODE"], 24, 80);
         await rec.screen().waitForText("VISUAL_SAVE_NODE", 5000);
 
         const saveDir = path.join(tmpdir, "snapshot_out");
@@ -121,7 +121,7 @@ test("raw output streaming and wait", async () => {
     const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-output-"));
     try {
         const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo RAW_OUTPUT_NODE"], 24, 80);
+        const rec = await tt.record(["/bin/sh", "-c", "echo RAW_OUTPUT_NODE"], 24, 80);
         await rec.screen().waitForText("RAW_OUTPUT_NODE", 5000);
 
         const page = await rec.readOutput(0n, 4096);
@@ -142,7 +142,7 @@ test("event log reading and pagination", async () => {
     const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-events-"));
     try {
         const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo EVENT_NODE_TEST"], 24, 80);
+        const rec = await tt.record(["/bin/sh", "-c", "echo EVENT_NODE_TEST"], 24, 80);
         await rec.screen().waitForText("EVENT_NODE_TEST", 5000);
 
         const eventsJson = await rec.readEvents(0n, 50);
@@ -160,7 +160,7 @@ test("replay analysis services (explain, diagnose, last_action, timeline)", asyn
     const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-analysis-"));
     try {
         const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-        const rec = await tt.record(["/bin/sh", "-norc"], 24, 80);
+        const rec = await tt.record(["/bin/sh"], 24, 80);
         const state = await rec.screen().waitForText("$", 5000);
 
         const actions = rec.actions();
@@ -201,7 +201,7 @@ test("registry operations (register, resolve, list, remove, gc)", async () => {
     const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-registry-"));
     try {
         const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo REGISTRY_NODE"], 24, 80);
+        const rec = await tt.record(["/bin/sh", "-c", "echo REGISTRY_NODE"], 24, 80);
         const sessionPath = rec.path;
         const alias = `node-alias-${process.pid}`;
 
@@ -230,7 +230,7 @@ test("session integrity verification", async () => {
     const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-integrity-"));
     try {
         const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo INTEGRITY_NODE"], 24, 80);
+        const rec = await tt.record(["/bin/sh", "-c", "echo INTEGRITY_NODE"], 24, 80);
         await rec.screen().waitForText("INTEGRITY_NODE", 5000);
         const sessionPath = rec.path;
         await rec.stop();
@@ -244,7 +244,7 @@ test("session integrity verification", async () => {
 test("withTermtrace testing helper lifecycle", async () => {
     await withTermtrace(
         async ({ record }) => {
-            const rec = await record(["/bin/sh", "-norc", "-c", "echo HELPER_TEST_OK"]);
+            const rec = await record(["/bin/sh", "-c", "echo HELPER_TEST_OK"]);
             const screen = rec.screen();
             const state = await screen.waitForText("HELPER_TEST_OK", 5000);
             assert.ok(state.text.includes("HELPER_TEST_OK"));
@@ -257,7 +257,7 @@ test("asciicast export writes valid playback file", async () => {
     const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-export-"));
     try {
         const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-        const rec = await tt.record(["/bin/sh", "-norc", "-c", "echo EXPORT_NODE_OK"], 24, 80);
+        const rec = await tt.record(["/bin/sh", "-c", "echo EXPORT_NODE_OK"], 24, 80);
         const screen = rec.screen();
         await screen.waitForText("EXPORT_NODE_OK", 5000);
 
@@ -278,7 +278,7 @@ test("failures carry typed kind, code, effect, and retry", async () => {
     const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "node-timeout-"));
     try {
         const tt = new Termtrace(TERMTRACE_BIN, tmpdir);
-        const rec = await tt.record(["/bin/sh", "-norc", "-c", "sleep 10"], 24, 80);
+        const rec = await tt.record(["/bin/sh", "-c", "sleep 10"], 24, 80);
         const screen = rec.screen();
 
         await assert.rejects(
