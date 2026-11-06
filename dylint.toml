@@ -1,6 +1,8 @@
 [statement_spacing]
 schema_version = 1
 enable = ["layout"]
+exclude = ["crates/terminal/src/ghostty_vt/bindings.rs"]
+include_generated = false
 
 [statement_spacing.grouping]
 bindings = "multiline"
