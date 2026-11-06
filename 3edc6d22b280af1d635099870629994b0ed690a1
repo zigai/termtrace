@@ -1,0 +1,7 @@
+Verified just --list and just --dry-run install resolve for changed concrete Justfiles and Sprout-generated template samples; report-install/restart-services hidden where present. Supplied report helper byte-for-byte; no real-home installs or service changes.  Full stamp check skipped as requested.
+Verification: just --list and just --dry-run check/step resolution passed for changed concrete Justfiles.
+Final working-tree check (includes the separate intent edits): {"exit": 1, "seconds": 472.1, "log": "/home/zigai/.cache/check-standard/termtrace-bindings-fast-check.log", "repo": "termtrace", "result": "fail"}
+Template/full/nested evidence: {"generated": [], "checkfull": [], "nested": []}
+Not committed (pre-existing untracked files):
+Full report: /home/zigai/.cache/check-standard/report.md.
+Commits ran in the existing main checkout with a private index and our own ordinary main-index lock. Original pre-commit hooks ran on an immutable staged export; every other original hook retained the main-checkout context. No stash, branch, registered worktree, push, or main working-file replacement was used for committing. Unrelated changes excluded.
