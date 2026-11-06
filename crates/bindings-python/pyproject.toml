@@ -8,9 +8,7 @@ version = "0.1.0"
 description = "Native Python bindings for Termtrace terminal recording and semantic debugging"
 requires-python = ">=3.10"
 license = "MIT"
-authors = [
-    { name = "Ziga Ivansek" }
-]
+authors = [{ name = "Ziga Ivansek" }]
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
@@ -37,12 +35,7 @@ python-source = "python"
 strip = true
 
 [dependency-groups]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.24",
-    "ruff==0.16.10",
-    "mypy>=1.14.0",
-]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.24", "ruff==0.16.10", "mypy>=1.14.0"]
 
 [tool.ruff]
 extend-exclude = ["python/termtrace/_termtrace.pyi"]
