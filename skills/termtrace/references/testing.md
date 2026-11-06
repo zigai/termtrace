@@ -29,4 +29,4 @@ add generated scaffolding to the application repository.
 
 A test run is complete only when every attempt has a distinct canonical path. For
 each failure, report the failed step, canonical path, final observation, and
-atomic failure directory. `examples/sdk/*/workflow*` show this report in each SDK.
+atomic failure directory.

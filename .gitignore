@@ -31,7 +31,6 @@ dist/
 
 # JavaScript and TypeScript package outputs
 node_modules/
-/tests/consumers/node_native/.examples/
 *.tsbuildinfo
 
 # Coverage, profiling, and crash outputs

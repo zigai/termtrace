@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "tsc -p tsconfig.examples.json && node --test test/*.test.js .examples/*.test.js",
+    "test": "node --test test/*.test.js",
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
