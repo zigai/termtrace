@@ -31,6 +31,14 @@ struct Position {
     byte_offset: u64,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct SequenceBoundary {
+    escape: bool,
+    ground: bool,
+    start: Option<StringStart>,
+    end: Option<StringEnd>,
+}
+
 impl Position {
     fn advance(&mut self, bytes: usize) {
         self.byte_offset = self
@@ -160,7 +168,17 @@ impl VtFramer {
                     ground,
                     start,
                     end,
-                } => self.sequence(position, consumed, escape, ground, start, end, emitted)?,
+                } => self.sequence(
+                    position,
+                    consumed,
+                    SequenceBoundary {
+                        escape,
+                        ground,
+                        start,
+                        end,
+                    },
+                    emitted,
+                )?,
             }
 
             position.advance(consumed.len());
@@ -200,20 +218,20 @@ impl VtFramer {
         return Ok(());
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the arguments are the fields of one parser step"
-    )]
     fn sequence(
         &mut self,
         mut position: Position,
         mut bytes: &[u8],
-        escape: bool,
-        ground: bool,
-        start: Option<StringStart>,
-        end: Option<StringEnd>,
+        boundary: SequenceBoundary,
         emitted: &mut Vec<VtToken>,
     ) -> Result<()> {
+        let SequenceBoundary {
+            escape,
+            ground,
+            start,
+            end,
+        } = boundary;
+
         if let Open::String { kind, escape: true } = self.open {
             if !escape && bytes.first() == Some(&b'\\') {
                 self.push(position, bytes)?;
