@@ -1,0 +1,3 @@
+- The committed concrete Justfile projection passes just --list, just --dry-run lint and just --fmt --check.
+- The real just lint run through commit.py stamp fails with exit 1; exact input snapshot output: /home/zigai/.cache/lint-standard/runs/termtrace-lint-stamp.log.
+- Only journalled lint/caller/autofix deltas are committed through a private cached patch; unrelated working and staged changes remain. Original hooks run in a guarded plain staged export, with no stash, source reset, new branch, commit worktree or push.
