@@ -62,14 +62,16 @@ use termtrace_model::{
 };
 use termtrace_process::poll_until;
 
-/// Variables the private display, its D-Bus session and the Ghostty profile set for the
-/// terminal; the recorded application should see the caller's values instead.
+/// Variables the private display, its D-Bus session, the Ghostty profile and the per-launch
+/// Ghostty surface set for the terminal; the recorded application should see the caller's
+/// values instead.
 pub const CAPTURE_ENVIRONMENT: &[&str] = &[
     "DISPLAY",
     "GDK_BACKEND",
     "LIBGL_ALWAYS_SOFTWARE",
     "XDG_CONFIG_HOME",
     "DBUS_SESSION_BUS_ADDRESS",
+    "GHOSTTY_SURFACE_ID",
 ];
 const ACQUISITION_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const TERMINAL_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
