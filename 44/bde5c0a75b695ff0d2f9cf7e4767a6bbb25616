@@ -1,0 +1,3 @@
+- Every README quick-start command runs on a fixture app with the debug build: record, screen, analyze timeline, send with a screen wait, screenshot, MP4 video, and bundle
+- The Python SDK example records a fixture, waits for its ready text, sends input, and prints the final screen
+- The README command test passes
