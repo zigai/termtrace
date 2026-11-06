@@ -3577,6 +3577,7 @@ dependencies = [
 name = "termtrace-node"
 version = "0.1.0"
 dependencies = [
+ "fs-err",
  "napi",
  "napi-build",
  "napi-derive",
@@ -3602,6 +3603,7 @@ dependencies = [
  "fs-err",
  "pyo3",
  "pyo3-stub-gen",
+ "rustpython-parser",
  "schemars",
  "serde",
  "serde_json",

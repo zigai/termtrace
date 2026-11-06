@@ -48,7 +48,7 @@ jobs:
           TERMTRACE_BUILD_REVISION: ${{ github.sha }}
       - run: scripts/check-glibc-compat.sh "target/${{ matrix.target }}/release/termtrace" 2.28
       - name: Test standalone Rust process client
-        run: bash scripts/ci-rust-consumer.sh
+        run: bash scripts/test-rust-consumer.sh
         env:
           TERMTRACE_BIN: ${{ github.workspace }}/target/${{ matrix.target }}/release/termtrace
       - name: Package deterministic archive

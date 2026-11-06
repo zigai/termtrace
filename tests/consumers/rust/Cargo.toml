@@ -22,11 +22,6 @@ path = "src/bin/local.rs"
 required-features = ["local"]
 
 [[bin]]
-name = "conformance"
-path = "src/bin/conformance.rs"
-required-features = ["local"]
-
-[[bin]]
 name = "testing_helpers"
 path = "src/bin/testing_helpers.rs"
 required-features = ["local"]
@@ -51,24 +46,14 @@ name = "delivery"
 path = "src/bin/delivery.rs"
 required-features = ["local"]
 
-[[bin]]
-name = "workflow"
-path = "../../../examples/sdk/rust/workflow.rs"
-required-features = ["local"]
-
-[[test]]
-name = "workflow"
-path = "tests/workflow.rs"
-required-features = ["local"]
-
-[[bin]]
-name = "demo"
-path = "../../../examples/sdk/rust/demo.rs"
-required-features = ["local"]
-
 [[test]]
 name = "session"
 path = "tests/session.rs"
+required-features = ["local"]
+
+[[test]]
+name = "conformance"
+path = "tests/conformance.rs"
 required-features = ["local"]
 
 [[test]]

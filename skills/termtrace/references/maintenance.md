@@ -11,11 +11,8 @@ After the CLI graph changes:
   broader tests once at the repository level rather than as part of a skill
   refresh.
 
-After an SDK surface changes, update the row's `evidence` in
-`fixtures/conformance/sdk/matrix.json`, re-render the table with
-`python3 scripts/sdk-conformance.py --profile inventory --render-table FILE` and paste it
-between the `sdk-matrix` markers of `docs/sdk-capability-contract.md`, record the
-contract hash with `--record-contract-hash`, and run `just conformance`.
+After an SDK surface changes, update the row's per-language `status` in
+`fixtures/conformance/sdk/matrix.json` and run `cargo test --locked --test cli sdk_contract`.
 
 The refresh is complete only when examples invoke the tested CLI graph and the
 skill explains clean text and JSON output, presented-screen truth, Python SDK

@@ -18,6 +18,10 @@ mod launch_validation_and_stdio;
 mod live_session_control;
 #[path = "cli/integration/mcp.rs"]
 mod mcp;
+#[path = "cli/integration/native_capabilities.rs"]
+mod native_capabilities;
+#[path = "cli/integration/native_capture.rs"]
+mod native_capture;
 #[path = "cli/integration/original_native.rs"]
 mod original_native;
 #[path = "cli/integration/output_events_and_postprocessing.rs"]

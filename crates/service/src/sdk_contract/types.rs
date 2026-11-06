@@ -5,6 +5,8 @@
 //! same definitions as produced on output, where every optional field is present. Python and
 //! TypeScript declarations are generated from it, so a binding method can name any listed type.
 
+pub mod declarations;
+
 use super::{
     control::{
         CommandOutcome, ErrorReport, LaunchOptions, OriginalLaunchOptions, PostconditionSummary,

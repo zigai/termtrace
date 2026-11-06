@@ -17,9 +17,8 @@ install: setup && (report-install env("CARGO_INSTALL_ROOT", env("CARGO_HOME", ho
 # Regenerate public schemas and the generated Python and TypeScript SDK sources
 generate:
     cargo run --locked --quiet -- schema --out schemas
-    cargo run --locked --quiet -p termtrace-python --bin stub_gen
-    python3 scripts/sdk-types.py
-    python3 scripts/sdk-aio.py
+    cargo run --locked --quiet -p termtrace-python --bin generate
+    cargo run --locked --quiet -p termtrace-node --bin generate
     uv run --project crates/bindings-python ruff check --fix --quiet crates/bindings-python/python/termtrace/types.py crates/bindings-python/python/termtrace/aio.py crates/bindings-python/python/termtrace/_termtrace.pyi
     uv run --project crates/bindings-python ruff format crates/bindings-python/python/termtrace/types.py crates/bindings-python/python/termtrace/aio.py crates/bindings-python/python/termtrace/_termtrace.pyi
 
@@ -44,7 +43,7 @@ test *args:
 # Run CLI/tmux integration on each pull request (requires bootstrap, tmux, and Ghostty on PATH)
 integration:
     cargo test --locked --test cli
-    scripts/ci-rust-consumer.sh
+    scripts/test-rust-consumer.sh
     cargo nextest run --locked --workspace --lib --bins --test execution_lifecycle --test architecture --ignore-default-filter -E '{{ INTEGRATION_FILTER }}'
 
 # Build native Python and Node.js language bindings
@@ -55,9 +54,8 @@ bindings-build:
 # Test native Python language bindings and pytest consumer suite
 test-python:
     uv run --project tests/consumers/python_native pytest -v tests/consumers/python_native
-    TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace uv run --project tests/consumers/python_native pytest -v examples/sdk/python
 
-# Test native Node.js/TypeScript bindings, the type-checked examples, and consumer suite
+# Test native Node.js/TypeScript bindings and consumer suite
 test-node:
     node --test crates/bindings-node/test/*.test.js
     TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace npm --prefix tests/consumers/node_native test
@@ -75,8 +73,7 @@ lint:
     @cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
     @cargo clippy --locked -p termtrace-sdk --no-default-features --all-targets -- -D warnings
     @cargo machete
-    @set -e; for file in install.sh benchmarks/*.sh scripts/*.sh examples/*.sh; do bash -n "$file"; done
-    @python3 -m py_compile examples/apps/terminal_showcase.py
+    @set -e; for file in install.sh benchmarks/*.sh scripts/*.sh; do bash -n "$file"; done
     @bash scripts/check-github-action-pins.sh
     @uv run --project crates/bindings-python --group dev ruff check .
 
@@ -91,21 +88,15 @@ format:
 
 # Run the complete native recording, replay, video, and screenshot verification test
 native-check:
-    @scripts/native-capture-check.sh
+    cargo test --locked --test cli native_capture:: -- --ignored --test-threads=1
 
 # Exercise native capability failures, retained export, and original capture (requires Ghostty, Xvfb, dbus-run-session, ImageMagick, and FFmpeg)
 native-test:
-    bash scripts/native-capability-test.sh
+    cargo test --locked --test cli native_capabilities:: -- --ignored --test-threads=1
     cargo test --locked --test cli retained_native_video_exports_without_native_capture_tools -- --ignored
     cargo test --locked --test cli original_native -- --ignored
     cargo test --locked -p termtrace-service --test original_recording -- --ignored --test-threads=1
     TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace cargo test --locked --manifest-path tests/consumers/rust/Cargo.toml --features local --tests -- --ignored --test-threads=1
-    scripts/sdk-demos.sh
-    TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace bash examples/demo.sh "$(mktemp -d -p target demo.XXXXXX)"
-
-# Certify every SDK capability row against executed Rust, Python, and TypeScript tests (requires native tools)
-conformance:
-    scripts/ci-sdk-conformance.sh
 
 # Run performance and resource benchmarks on demand (requires native capture tooling)
 bench:
@@ -131,15 +122,14 @@ coverage:
     export TERMTRACE_BINARY="$TERMTRACE_BIN"
     cargo build --locked --workspace
     cargo llvm-cov --no-report --no-clean nextest --locked --workspace --ignore-default-filter
-    cargo llvm-cov --no-report --no-clean nextest --locked --workspace --run-ignored only --test-threads=1
+    cargo llvm-cov --no-report --no-clean nextest --locked --workspace --run-ignored only --test-threads=1 -E 'not test(/noisy_/)'
     eval "$(cargo llvm-cov show-env --sh)"
     cargo build --locked --workspace
     export TERMTRACE_BIN="$CARGO_TARGET_DIR/debug/termtrace"
     export TERMTRACE_BINARY="$TERMTRACE_BIN"
     cargo test --locked -p termtrace-sdk --no-default-features
-    scripts/ci-rust-consumer.sh
+    scripts/test-rust-consumer.sh
     bash tests/install.sh
-    scripts/native-capture-check.sh
     (
         cd benchmarks
         export COVERAGE_FILE="$PWD/.coverage"
@@ -153,11 +143,10 @@ coverage:
         cd tests/consumers/python_native
         export COVERAGE_FILE="$PWD/.coverage"
         uv run --group dev coverage erase
-        uv run --group dev coverage run -m pytest -c pyproject.toml -v . ../../../examples/sdk/python || [[ $? -eq 5 ]]
+        uv run --group dev coverage run -m pytest -c pyproject.toml -v . || [[ $? -eq 5 ]]
         uv run --group dev coverage combine
         uv run --group dev coverage report
     )
-    TERMTRACE_SKIP_NOISY_PROBES=1 bash scripts/native-capability-test.sh
     bunx @napi-rs/cli build --cwd crates/bindings-node
     npm --prefix tests/consumers/node_native run coverage
     cargo llvm-cov report --package '*'
@@ -203,7 +192,7 @@ typecheck: validate
 check: (run-checks "formatcheck" "lockcheck" "audit" "lint" "bindings-lint" "typecheck" "bindings-build" "test")
 
 # Remove generated output, caches, and dependencies
-clean: (remove "node_modules" "vendor/ghostty/zig-out" "vendor/ghostty/.zig-cache" ".venv" "dist" "build" ".pytest_cache" ".pyrefly" ".ruff_cache" ".coverage" "htmlcov" ".coverage.*" "coverage.xml" "coverage" ".tools" ".zig-cache" "zig-cache" "zig-out" "fuzz/target" "fuzz/coverage" "tests/consumers/rust/target" "crates/bindings-python/.venv" "crates/bindings-python/dist" "crates/bindings-python/build" "crates/bindings-python/.pytest_cache" "crates/bindings-python/.pyrefly" "crates/bindings-python/.ruff_cache" "crates/bindings-python/.mypy_cache" "crates/bindings-python/.coverage" "crates/bindings-python/htmlcov" "crates/bindings-python/python/termtrace/*.so" "crates/bindings-node/node_modules" "crates/bindings-node/dist" "crates/bindings-node/coverage" "crates/bindings-node/*.node" "tests/consumers/python_native/.venv" "tests/consumers/python_native/.pytest_cache" "tests/consumers/node_native/node_modules" "tests/consumers/node_native/dist" "tests/consumers/node_native/coverage" "tests/consumers/node_native/.examples" "benchmarks/.venv" "benchmarks/.pytest_cache" "mutants.out" "mutants.out.old" "**/__pycache__" "crates/bindings-node/**/*.tsbuildinfo" "tests/consumers/node_native/**/*.tsbuildinfo" "target/llvm-cov-target" "benchmarks/.coverage" "benchmarks/.coverage.*" "tests/consumers/python_native/.coverage" "tests/consumers/python_native/.coverage.*")
+clean: (remove "node_modules" "vendor/ghostty/zig-out" "vendor/ghostty/.zig-cache" ".venv" "dist" "build" ".pytest_cache" ".pyrefly" ".ruff_cache" ".coverage" "htmlcov" ".coverage.*" "coverage.xml" "coverage" ".tools" ".zig-cache" "zig-cache" "zig-out" "fuzz/target" "fuzz/coverage" "tests/consumers/rust/target" "crates/bindings-python/.venv" "crates/bindings-python/dist" "crates/bindings-python/build" "crates/bindings-python/.pytest_cache" "crates/bindings-python/.pyrefly" "crates/bindings-python/.ruff_cache" "crates/bindings-python/.mypy_cache" "crates/bindings-python/.coverage" "crates/bindings-python/htmlcov" "crates/bindings-python/python/termtrace/*.so" "crates/bindings-node/node_modules" "crates/bindings-node/dist" "crates/bindings-node/coverage" "crates/bindings-node/*.node" "tests/consumers/python_native/.venv" "tests/consumers/python_native/.pytest_cache" "tests/consumers/node_native/node_modules" "tests/consumers/node_native/dist" "tests/consumers/node_native/coverage" "benchmarks/.venv" "benchmarks/.pytest_cache" "mutants.out" "mutants.out.old" "**/__pycache__" "crates/bindings-node/**/*.tsbuildinfo" "tests/consumers/node_native/**/*.tsbuildinfo" "target/llvm-cov-target" "benchmarks/.coverage" "benchmarks/.coverage.*" "tests/consumers/python_native/.coverage" "tests/consumers/python_native/.coverage.*")
     @cargo clean
 
 # Check the same files and tools without writing

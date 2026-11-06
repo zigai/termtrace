@@ -12,7 +12,7 @@ termtrace = { path = "../../../crates/bindings-python", editable = true }
 asyncio_mode = "auto"
 
 [dependency-groups]
-dev = ["coverage>=7.14.1"]
+dev = ["coverage>=7.14.1", "mypy>=1.14.0"]
 
 [tool.coverage.run]
 source = ["../../../crates/bindings-python/python/termtrace"]

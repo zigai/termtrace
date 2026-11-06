@@ -5,9 +5,8 @@ two or three actions. Beyond that, use an SDK in the caller's language (Rust `te
 `termtrace`, or TypeScript `@termtrace/core`) so repeated observations and actions do not pay process
 startup and discovery costs. All three call the same Rust services. Use `termtrace test`
 when assertions should be repeatable scenarios. SDK workflows are appropriate for branching, loops,
-multiple sessions, or caller-owned retry IDs. Runnable versions of one test workflow and one edited
-demo in each language are in `examples/sdk/`; `docs/sdk-capability-contract.md` lists which
-capabilities each language has tests for.
+multiple sessions, or caller-owned retry IDs. `fixtures/conformance/sdk/matrix.json` lists each
+capability's status in each language.
 
 ## Rust SDK for Stateful Workflows
 

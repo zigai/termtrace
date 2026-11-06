@@ -20,6 +20,7 @@ napi = { version = "3.12.5", default-features = false, features = [
     "tokio_rt",
     "serde-json",
 ] }
+fs-err = "3.2.0"
 napi-derive = "3.6.6"
 tokio = { version = "1.44", features = ["rt", "sync", "rt-multi-thread"] }
 serde = "1.0.228"
