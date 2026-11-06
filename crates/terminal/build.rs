@@ -20,37 +20,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     let crate_root = PathBuf::from(manifest_dir);
     let repository_root = crate_root.join("../..");
 
-    println!(
-        "cargo:rerun-if-changed={}",
-        repository_root.join("vendor/ghostty/.git").display()
-    );
     println!("cargo:rerun-if-changed=src/ghostty_vt/bindings.rs");
-    println!(
-        "cargo:rerun-if-changed={}",
-        repository_root.join(".git/HEAD").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        repository_root.join(".git/index").display()
-    );
+    watch_git_state(&repository_root, &["HEAD", "index", "packed-refs"]);
+    watch_git_state(&repository_root.join("vendor/ghostty"), &["HEAD"]);
 
-    let build_revision = Command::new("git")
-        .args(["rev-parse", "--short=12", "HEAD"])
-        .current_dir(&repository_root)
-        .output()
-        .ok()
-        .filter(|output| return output.status.success())
-        .and_then(|output| return String::from_utf8(output.stdout).ok())
-        .map_or_else(
-            || return "unknown".to_owned(),
-            |value| return value.trim().to_owned(),
-        );
+    let build_revision = git_output(&repository_root, &["rev-parse", "--short=12", "HEAD"])
+        .unwrap_or_else(|| return "unknown".to_owned());
 
     println!("cargo:rustc-env=TERMTRACE_BUILD_REVISION={build_revision}");
 
     let ghostty_revision = fs::read_to_string(crate_root.join("ghostty-revision"))?
         .trim()
         .to_owned();
+
+    println!("cargo:rustc-env=TERMTRACE_GHOSTTY_REVISION={ghostty_revision}");
 
     check_submodule_pin(&repository_root, &ghostty_revision)?;
 
@@ -66,6 +49,39 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-link-lib=dylib=pthread");
 
     return Ok(());
+}
+
+fn git_output(directory: &Path, arguments: &[&str]) -> Option<String> {
+    return Command::new("git")
+        .args(arguments)
+        .current_dir(directory)
+        .output()
+        .ok()
+        .filter(|output| return output.status.success())
+        .and_then(|output| return String::from_utf8(output.stdout).ok())
+        .map(|value| return value.trim().to_owned());
+}
+
+// In a worktree or submodule `.git` is a file pointing elsewhere, so git resolves each path;
+// the current branch ref is watched too because a commit moves it without touching HEAD.
+fn watch_git_state(directory: &Path, files: &[&str]) {
+    let branch = git_output(directory, &["symbolic-ref", "-q", "HEAD"]);
+    let mut arguments = vec!["rev-parse"];
+
+    for file in files.iter().copied().chain(branch.as_deref()) {
+        arguments.extend(["--git-path", file]);
+    }
+
+    let Some(paths) = git_output(directory, &arguments) else {
+        return;
+    };
+
+    for path in paths.lines() {
+        let path = directory.join(path);
+        if path.is_file() {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
 }
 
 fn check_submodule_pin(repository_root: &Path, revision: &str) -> Result<(), Box<dyn Error>> {
