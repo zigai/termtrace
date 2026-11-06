@@ -956,8 +956,17 @@ const CHECKPOINT_FRAGMENTS: &[&[u8]] = &[
     b"\x1b\\",
 ];
 
+#[test]
+fn checkpoint_between_escape_and_osc_body_resumes_canonically() {
+    let events = vec![output(b"\x1b"), output(b"]10;rgb:11/22/33\x07")];
+    assert_every_checkpoint_resumes_canonically(&event_log(6, 3, events));
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(32))]
+    #![proptest_config(ProptestConfig {
+        failure_persistence: None,
+        ..ProptestConfig::with_cases(32)
+    })]
 
     #[test]
     fn arbitrary_checkpoint_resumes_the_canonical_state_sequence(
