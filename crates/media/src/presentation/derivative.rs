@@ -883,9 +883,10 @@ fn verify_gif(path: &Path, plan: &PresentationPlan, looping: GifLoop) -> Result<
             }
             0x2c => {
                 let descriptor = read(9)?;
-                // FFmpeg 8 repeats the global palette as the first frame's local palette.
+                // FFmpeg 8 repeats the global palette, trimmed to the colors in use, as the
+                // first frame's local palette.
                 if descriptor[8] & 0x80 != 0
-                    && read(3 * (1usize << ((descriptor[8] & 7) + 1)))? != palette
+                    && !palette.starts_with(&read(3 * (1usize << ((descriptor[8] & 7) + 1)))?)
                 {
                     return Err(plan_error("GIF contains per-frame palettes"));
                 }
