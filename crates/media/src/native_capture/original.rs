@@ -774,7 +774,7 @@ fn capture_staged(
     // All user paths and arguments are positional shell parameters, never shell source.
     let mut ghostty = ManagedChild::spawn_logged("ghostty", command
         .args(&overrides).arg("-e").arg("/bin/sh")
-        .args(["-c", "finished=$1; log=$2; gate=$3; device=$4; shift 4; tty >\"$device\"; while ! test -f \"$gate\"; do sleep 0.02; done; \"$@\" 2>\"$log\"; status=$?; printf '%s\\n' \"$status\" >\"$finished\"; while :; do sleep 1; done", "termtrace-original"])
+        .args(["-c", "finished=$1; log=$2; gate=$3; device=$4; shift 4; printf '%s\\n' \"$(tty)\" >\"$device\"; while ! test -f \"$gate\"; do sleep 0.02; done; \"$@\" 2>\"$log\"; status=$?; printf '%s\\n' \"$status\" >\"$finished\"; while :; do sleep 1; done", "termtrace-original"])
         .arg(&finished).arg(staging.join("recorder.stderr.log")).arg(&gate).arg(&tty_file).arg(helper)
         .args(recorder_arguments)
         .env("XDG_CONFIG_HOME", &root)
