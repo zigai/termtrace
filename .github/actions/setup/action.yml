@@ -1,0 +1,58 @@
+name: Set up Termtrace
+description: Install system packages, toolchains, caches, and the prebuilt Ghostty from the ghostty job.
+
+inputs:
+  packages:
+    description: Space-separated apt package names.
+    required: true
+  ghostty-key:
+    description: Cache key of the Ghostty build.
+    required: true
+  rust-cache:
+    description: Shared Rust build cache name.
+    required: true
+  components:
+    description: Extra rustup components.
+    default: ""
+  tools:
+    description: Tools for taiki-e/install-action.
+    default: just@1.59.0,cargo-nextest@0.9.143
+  ghostty-on-path:
+    description: Put the Ghostty app and its terminfo on PATH.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/apt
+      with:
+        packages: ${{ inputs.packages }}
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: vendor/ghostty/zig-out
+        key: ${{ inputs.ghostty-key }}
+        fail-on-cache-miss: true
+    - if: inputs.ghostty-on-path == 'true'
+      shell: bash
+      run: |
+        echo "$GITHUB_WORKSPACE/vendor/ghostty/zig-out/bin" >> "$GITHUB_PATH"
+        echo "TERMINFO_DIRS=$GITHUB_WORKSPACE/vendor/ghostty/zig-out/share/terminfo:/usr/share/terminfo:/lib/terminfo" >> "$GITHUB_ENV"
+    - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+      with:
+        components: ${{ inputs.components }}
+    - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      with:
+        shared-key: ${{ inputs.rust-cache }}
+        cache-on-failure: true
+        cache-workspace-crates: true
+        workspaces: |
+          . -> target
+          tests/consumers/rust -> target
+    - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: 24
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+    - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+      with:
+        tool: ${{ inputs.tools }}

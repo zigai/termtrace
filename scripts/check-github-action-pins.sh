@@ -2,7 +2,7 @@
 set -euo pipefail
 
 readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly workflow_root="$root/.github/workflows"
+readonly github_root="$root/.github"
 status=0
 
 command -v rg >/dev/null 2>&1 || {
@@ -26,7 +26,7 @@ done < <(
     rg --line-number --no-heading \
         --glob '*.yml' --glob '*.yaml' \
         '^[[:space:]]*(-[[:space:]]*)?uses:' \
-        "$workflow_root"
+        "$github_root"
 )
 
 exit "$status"
