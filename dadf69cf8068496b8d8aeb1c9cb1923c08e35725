@@ -1,0 +1,1 @@
+- Removes the sync-skill recipe and script; the skills repo already pulls this skill with just sources-update termtrace (kind library in skills.toml).
