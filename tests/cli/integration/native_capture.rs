@@ -289,15 +289,24 @@ fn full_ranged_and_point_captures_of_a_timed_recording_are_consistent() {
     let from = format!("{RANGE_FROM_NS}ns");
     let to = format!("{RANGE_TO_NS}ns");
     let termtrace = || return Command::cargo_bin("termtrace").expect("binary should build");
-    termtrace()
+    let doctor = termtrace()
         .args([
             "doctor",
             "--json",
             "--require",
             "native-screenshot,native-video",
         ])
-        .assert()
-        .success();
+        .output()
+        .expect("doctor runs");
+
+    let report: serde_json::Value = serde_json::from_slice(&doctor.stdout).expect("doctor JSON");
+    let failing: Vec<&serde_json::Value> = report["checks"]
+        .as_array()
+        .expect("doctor checks")
+        .iter()
+        .filter(|check| return check["status"] == "fail")
+        .collect();
+    assert!(doctor.status.success(), "doctor failed: {failing:#?}");
 
     fs_err::write(
         &profile,
