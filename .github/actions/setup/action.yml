@@ -32,6 +32,13 @@ runs:
         path: vendor/ghostty/zig-out
         key: ${{ inputs.ghostty-key }}
         fail-on-cache-miss: true
+    # Matches the shared libghostty-vt cache that scripts/bootstrap-ghostty-vt.sh fills, which
+    # builds of copied checkouts (cargo statement-spacing) look up.
+    - shell: bash
+      run: |
+        cache="${XDG_CACHE_HOME:-$HOME/.cache}/termtrace/libghostty-vt/$(<crates/terminal/ghostty-revision)"
+        mkdir -p "$cache"
+        cp -R vendor/ghostty/zig-out/lib vendor/ghostty/zig-out/include vendor/ghostty/zig-out/ghostty-revision "$cache/"
     - if: inputs.ghostty-on-path == 'true'
       shell: bash
       run: |
