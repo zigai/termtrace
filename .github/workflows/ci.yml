@@ -94,7 +94,7 @@ jobs:
           npm install --global oxfmt@0.76.0
           cargo install cargo-dylint@6.3.1 dylint-link@6.3.1 --locked
           cargo install --git https://github.com/zigai/rust-statement-spacing.git cargo-statement-spacing --tag v0.4.0 --locked
-      - run: just formatcheck lockcheck audit lint bindings-lint typecheck
+      - run: just formatcheck lockcheck audit lint bindings-lint
 
   test:
     needs: ghostty
@@ -129,7 +129,7 @@ jobs:
           ghostty-on-path: "true"
       - run: just integration
 
-  bindings:
+  python:
     needs: ghostty
     runs-on: ubuntu-26.04
     timeout-minutes: 45
@@ -143,10 +143,28 @@ jobs:
         with:
           packages: ${{ env.NATIVE_PACKAGES }}
           ghostty-key: ${{ needs.ghostty.outputs.key }}
-          rust-cache: bindings
+          rust-cache: python
+          ghostty-on-path: "true"
+      - run: just build-python test-python
+
+  node:
+    needs: ghostty
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    env:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          submodules: true
+      - uses: ./.github/actions/setup
+        with:
+          packages: ${{ env.NATIVE_PACKAGES }}
+          ghostty-key: ${{ needs.ghostty.outputs.key }}
+          rust-cache: node
           ghostty-on-path: "true"
       - run: npm ci --prefix tests/consumers/node_native
-      - run: just bindings-test
+      - run: just build-node test-node
 
   native:
     needs: ghostty

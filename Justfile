@@ -47,8 +47,14 @@ integration:
     cargo nextest run --locked --workspace --lib --bins --test execution_lifecycle --test architecture --ignore-default-filter -E '{{ INTEGRATION_FILTER }}'
 
 # Build native Python and Node.js language bindings
-bindings-build:
+bindings-build: build-python build-node
+
+# Build the native Python binding into its project environment
+build-python:
     uv run --project crates/bindings-python --with maturin maturin develop --manifest-path crates/bindings-python/Cargo.toml
+
+# Build the native Node.js binding
+build-node:
     bunx @napi-rs/cli build --cwd crates/bindings-node
 
 # Test native Python language bindings and pytest consumer suite
