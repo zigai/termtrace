@@ -175,7 +175,7 @@ fn probe_staged(
     let display = format!(":{}", lease.number);
     let mut xvfb = spawn_xvfb(None, &lease, WIDTH, HEIGHT, staging, None)?;
     let socket = lease.socket();
-    probe.wait_until(&mut xvfb, || return socket.exists())?;
+    probe.wait_until(&mut xvfb, probe.remaining()?, || return socket.exists())?;
 
     let ready = staging.join("fixture-ready");
     // The fixture is a shell builtin-only program, not the caller's executable: library hosts
@@ -193,7 +193,11 @@ fn probe_staged(
         .env("LIBGL_ALWAYS_SOFTWARE", "1")
         .stdin(Stdio::null());
     let mut ghostty = ManagedChild::spawn_group("ghostty", &mut command)?;
-    probe.wait_until(&mut ghostty, || return ready.is_file())?;
+    // A first Ghostty launch on a fresh machine (GTK, fonts, software GL) can outlast one
+    // step, so it may use the rest of the probe deadline.
+    probe.wait_until(&mut ghostty, probe.until_deadline()?, || {
+        return ready.is_file();
+    })?;
     ghostty.check_running()?;
 
     let screenshot_result = if screenshot {
@@ -228,17 +232,25 @@ impl Probe<'_> {
         return check_cancelled(self.cancelled, PROBE);
     }
 
-    fn remaining(&self) -> Result<Duration> {
+    fn until_deadline(&self) -> Result<Duration> {
         return self
             .deadline
             .checked_duration_since(Instant::now())
-            .map(|duration| return duration.min(STEP_TIMEOUT))
             .ok_or_else(|| return external_error(PROBE, "20 second deadline expired"));
     }
 
-    fn wait_until(&self, process: &mut ManagedChild, ready: impl Fn() -> bool) -> Result<()> {
-        let timeout = self.remaining()?;
+    fn remaining(&self) -> Result<Duration> {
+        return self
+            .until_deadline()
+            .map(|duration| return duration.min(STEP_TIMEOUT));
+    }
 
+    fn wait_until(
+        &self,
+        process: &mut ManagedChild,
+        timeout: Duration,
+        ready: impl Fn() -> bool,
+    ) -> Result<()> {
         return wait_while_running(
             process,
             timeout,
