@@ -11,8 +11,8 @@ build: setup
     cargo build --locked
 
 # Install Termtrace from this checkout
-install: setup && (report-install env("CARGO_INSTALL_ROOT", env("CARGO_HOME", home_directory() / ".cargo")) / "bin/termtrace")
-    cargo install --locked --path . --force
+install: setup && (report-install home_directory() / ".local/bin/termtrace")
+    TERMTRACE_BUILD_VERSION="$(git describe --tags --dirty --always)" cargo install --locked --path . --force --root "$HOME/.local"
 
 # Regenerate public schemas and the generated Python and TypeScript SDK sources
 generate:

@@ -1,38 +1,57 @@
-//! Embed the source revision owned by the root package.
+//! Embed the source identity owned by the root package.
 
-use std::{env, error::Error, io, path::PathBuf, process::Command};
+use std::{env, error::Error, io, process::Command};
+
+fn git(args: &[&str]) -> Result<String, Box<dyn Error>> {
+    let output = Command::new("git").args(args).output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(String::from_utf8_lossy(&output.stderr)).into());
+    }
+    return Ok(String::from_utf8(output.stdout)?.trim().to_owned());
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-env-changed=TERMTRACE_BUILD_REVISION");
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    println!("cargo:rerun-if-changed=.git/index");
+    for name in [
+        "TERMTRACE_BUILD_VERSION",
+        "TERMTRACE_BUILD_REVISION",
+        "TERMTRACE_BUILD_DIRTY",
+    ] {
+        println!("cargo:rerun-if-env-changed={name}");
+    }
 
-    let Some(manifest_dir) = env::var_os("CARGO_MANIFEST_DIR") else {
-        return Err(io::Error::other("CARGO_MANIFEST_DIR is not set").into());
+    let version = match env::var("TERMTRACE_BUILD_VERSION") {
+        Ok(value) => value,
+        Err(_) => git(&["describe", "--tags", "--dirty", "--always"])?,
     };
-    let manifest_dir = PathBuf::from(manifest_dir);
 
-    let build_revision = env::var("TERMTRACE_BUILD_REVISION")
-        .ok()
-        .filter(|value| return !value.trim().is_empty())
-        .or_else(|| {
-            let output = Command::new("git")
-                .args(["rev-parse", "--short=12", "HEAD"])
-                .current_dir(&manifest_dir)
-                .output()
-                .ok()?;
+    let commit = match env::var("TERMTRACE_BUILD_REVISION") {
+        Ok(value) => value,
+        Err(_) => git(&["rev-parse", "--short=12", "HEAD"])?,
+    };
 
-            if !output.status.success() {
-                return None;
-            }
-            return String::from_utf8(output.stdout).ok();
-        })
-        .map_or_else(
-            || return "unknown".to_owned(),
-            |value| return value.trim().to_owned(),
-        );
+    let dirty = match env::var("TERMTRACE_BUILD_DIRTY") {
+        Ok(value) => value.parse::<bool>()?,
+        Err(_) => !git(&["diff", "--name-only", "HEAD"])?.is_empty(),
+    };
 
-    println!("cargo:rustc-env=TERMTRACE_BUILD_REVISION={build_revision}");
+    if let Ok(root) = git(&["rev-parse", "--show-toplevel"]) {
+        for path in git(&["-C", &root, "ls-files"])?.lines() {
+            println!("cargo:rerun-if-changed={root}/{path}");
+        }
+
+        for name in ["HEAD", "index", "refs", "packed-refs"] {
+            println!(
+                "cargo:rerun-if-changed={}",
+                git(&["rev-parse", "--path-format=absolute", "--git-path", name])?
+            );
+        }
+    }
+
+    let suffix = if dirty { ", dirty" } else { "" };
+
+    println!("cargo:rustc-env=TERMTRACE_BUILD_VERSION={version}");
+    println!("cargo:rustc-env=TERMTRACE_BUILD_REVISION={commit}");
+    println!("cargo:rustc-env=TERMTRACE_BUILD_DIRTY_SUFFIX={suffix}");
 
     return Ok(());
 }

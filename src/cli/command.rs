@@ -20,7 +20,7 @@ use termtrace_process::owned;
 #[derive(Debug, Parser)]
 #[command(
     name = "termtrace",
-    version = concat!(env!("CARGO_PKG_VERSION"), " (build ", env!("TERMTRACE_BUILD_REVISION"), ")"),
+    version = concat!(env!("TERMTRACE_BUILD_VERSION"), " (", env!("TERMTRACE_BUILD_REVISION"), env!("TERMTRACE_BUILD_DIRTY_SUFFIX"), ")"),
     about = "Record native terminal pixels and every semantic terminal state",
 
     disable_help_flag = true
