@@ -17,10 +17,17 @@ from test_evidence_pages import BINARY, evidence_root
 
 def wait_until(operation, predicate, timeout=8):
     deadline = time.monotonic() + timeout
-    result = operation()
-    while not predicate(result) and time.monotonic() < deadline:
+    while True:
+        try:
+            result = operation()
+        except TermtraceError:
+            # A new private server creates its socket after record returns.
+            if time.monotonic() >= deadline:
+                raise
+        else:
+            if predicate(result) or time.monotonic() >= deadline:
+                break
         time.sleep(0.025)
-        result = operation()
     assert predicate(result), result
     return result
 

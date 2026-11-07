@@ -12,13 +12,21 @@ function command(socket, ...args) {
 }
 async function until(operation, predicate) {
     const deadline = Date.now() + 8000;
-    let value = await operation();
-    while (!predicate(value) && Date.now() < deadline) {
+    for (;;) {
+        try {
+            const value = await operation();
+            if (predicate(value)) {
+                return value;
+            }
+        } catch (error) {
+            // A new private server creates its socket after record returns.
+            if (Date.now() >= deadline) {
+                throw error;
+            }
+        }
+        assert.ok(Date.now() < deadline, "private tmux condition did not become true");
         await new Promise((resolve) => setTimeout(resolve, 25));
-        value = await operation();
     }
-    assert.ok(predicate(value), "private tmux condition did not become true");
-    return value;
 }
 
 test("native Node private-socket track lifecycle selects Termtrace, never the Node host", async () => {
