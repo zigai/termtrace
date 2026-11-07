@@ -2,8 +2,10 @@
 
 use crate::support::*;
 
+// The shell may print its first line up to two seconds after the session clock starts, so the
+// range keeps that much slack before "Selected range" (12 s in) and the tail (15 s in).
 const RANGE_FROM_NS: u64 = 11_000_000_000;
-const RANGE_TO_NS: u64 = 12_350_000_000;
+const RANGE_TO_NS: u64 = 14_500_000_000;
 const WIDTH: u64 = 1280;
 const HEIGHT: u64 = 720;
 
@@ -343,7 +345,7 @@ fn full_ranged_and_point_captures_of_a_timed_recording_are_consistent() {
             "--",
             "/bin/sh",
             "-c",
-            r#"printf "\033[2J\033[H\033[38;2;255;0;0mLong preroll\033[0m\n"; sleep 12; printf "\033[38;2;0;255;0mSelected range\033[0m\n"; sleep 0.5; printf "excluded tail\n""#,
+            r#"printf "\033[2J\033[H\033[38;2;255;0;0mLong preroll\033[0m\n"; sleep 12; printf "\033[38;2;0;255;0mSelected range\033[0m\n"; sleep 3; printf "excluded tail\n""#,
         ])
         .timeout(Duration::from_secs(60))
         .assert()
