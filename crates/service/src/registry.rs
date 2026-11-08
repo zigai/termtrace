@@ -1,7 +1,6 @@
 //! Friendly session registry, retention, garbage collection, and restart services.
 
 use crate::error::{Error, Result};
-use std::io::ErrorKind::NotFound as StdNotFound;
 use std::path::{Path, PathBuf};
 use termtrace_engine::registry::SessionRegistry;
 use termtrace_model::registry::{
@@ -100,14 +99,7 @@ impl RegistryService {
     pub fn resolve_optional(&self, alias: &str) -> Result<Option<RegistryEntry>> {
         match self.registry.resolve(alias) {
             Ok(entry) => return Ok(Some(entry)),
-            Err(termtrace_engine::Error::Filesystem { path, source })
-                if source.kind() == StdNotFound
-                    && path
-                        == self
-                            .state_root()
-                            .join("registry")
-                            .join(format!("{alias}.json")) =>
-            {
+            Err(termtrace_engine::Error::SessionNotFound { .. }) => {
                 SessionRegistry::validate_owner_directory(&self.state_root().join("registry"))?;
 
                 return Ok(None);

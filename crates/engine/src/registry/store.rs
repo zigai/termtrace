@@ -2,6 +2,19 @@ use super::*;
 use directories::BaseDirs;
 
 impl SessionRegistry {
+    fn named_record(&self, alias: &str) -> Result<RegistryRecord> {
+        return read_registry_record_nofollow(&self.entry_path(alias)).map_err(|error| {
+            return match error {
+                Error::Filesystem { source, .. } if source.kind() == ErrorKind::NotFound => {
+                    Error::SessionNotFound {
+                        name: alias.to_owned(),
+                    }
+                }
+                error => error,
+            };
+        });
+    }
+
     /// Open the default owner-only session registry.
     ///
     /// [`STATE_DIR_ENV`] overrides the platform user state directory.
@@ -178,8 +191,7 @@ impl SessionRegistry {
     /// incompatible, or no longer names the registered immutable session ID.
     pub fn resolve(&self, alias: &str) -> Result<RegistryEntry> {
         validate_alias(alias)?;
-        let path = self.entry_path(alias);
-        let entry = match read_registry_record_nofollow(&path)? {
+        let entry = match self.named_record(alias)? {
             RegistryRecord::Entry(entry) => entry,
             RegistryRecord::Reservation(_) => {
                 return Err(registry_error(
@@ -234,7 +246,7 @@ impl SessionRegistry {
     /// Returns an error when the registry record itself is missing, insecure, or malformed.
     pub fn resolve_lifecycle(&self, alias: &str) -> Result<RegistrySessionResolution> {
         validate_alias(alias)?;
-        let record = read_registry_record_nofollow(&self.entry_path(alias))?;
+        let record = self.named_record(alias)?;
 
         return match record {
             RegistryRecord::Entry(entry) => {

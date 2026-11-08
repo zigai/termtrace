@@ -14,6 +14,11 @@ use uuid::Uuid;
 /// Failure from recording, replay, observation, analysis, or registry coordination.
 #[derive(Debug)]
 pub enum Error {
+    /// No registry alias exists with the requested name.
+    SessionNotFound {
+        /// Requested alias.
+        name: String,
+    },
     /// A filesystem operation failed for the named path.
     Filesystem {
         /// Path involved in the failed operation.
@@ -225,6 +230,12 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::SessionNotFound { name } => {
+                return write!(
+                    f,
+                    "no session named {name:?}; run termtrace status to list sessions"
+                )
+            }
             Self::Filesystem { path, source } => {
                 return write!(
                     f,
