@@ -46,6 +46,7 @@ use termtrace_sdk::{
         diagnostics::{self as core, TmuxCatalog, TmuxEvents},
         timeout_from_ms,
     },
+    defaults,
     instrumentation::Instrumentation,
     locator::WaitCancellation,
     registry::RegistryService,
@@ -95,11 +96,6 @@ pub(crate) fn timeout(timeout_ms: Option<f64>, default: Duration) -> napi::Resul
 
 fn value<T>(argument: Option<Arg<T>>, default: T) -> T {
     return argument.map_or(default, |argument| return argument.0);
-}
-
-fn default_binary() -> PathBuf {
-    return std::env::var_os("TERMTRACE_BIN")
-        .map_or_else(|| PathBuf::from("termtrace"), PathBuf::from);
 }
 
 fn registry(root: Option<PathBuf>) -> termtrace_sdk::Result<RegistryService> {
@@ -442,7 +438,7 @@ impl JsRegistry {
     pub fn new(root: Option<Arg<ExactPath>>, binary: Option<Arg<ExactPath>>) -> Self {
         return Self {
             root: root.map(path),
-            binary: binary.map_or_else(default_binary, path),
+            binary: binary.map_or_else(defaults::binary, path),
         };
     }
 
@@ -596,7 +592,7 @@ impl JsTmux {
 
         return Self {
             root: root.map(path),
-            binary: binary.map_or_else(default_binary, path),
+            binary: binary.map_or_else(defaults::binary, path),
             client: TmuxClient {
                 executable: tmux.map_or_else(|| return PathBuf::from("tmux"), path),
                 socket,

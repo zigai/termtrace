@@ -1,6 +1,6 @@
 //! The one set of defaults every Termtrace interface uses.
 
-use std::time::Duration;
+use std::{env, fs, path::PathBuf, time::Duration};
 
 /// Initial terminal columns for a fresh recording.
 pub const COLS: u16 = 160;
@@ -32,3 +32,37 @@ pub const COMPLETION_GRACE: Duration = Duration::from_secs(2);
 pub const GC_OLDER_THAN_DAYS: u64 = 30;
 /// Garbage collection always keeps this many newest completed sessions.
 pub const GC_KEEP_LATEST: u64 = 20;
+
+/// The Termtrace CLI that clients launch: `TERMTRACE_BIN`, else a `termtrace` file beside
+/// the executable or shared library that contains this code, else `termtrace` on `PATH`.
+#[must_use]
+pub fn binary() -> PathBuf {
+    if let Some(path) = env::var_os("TERMTRACE_BIN") {
+        return PathBuf::from(path);
+    }
+
+    let bundled = containing_object()
+        .map(|object| return object.with_file_name("termtrace"))
+        .filter(|candidate| return candidate.is_file());
+
+    return bundled.unwrap_or_else(|| return PathBuf::from("termtrace"));
+}
+
+// Language packages ship the CLI next to their native library, which `current_exe` (the
+// interpreter) cannot locate.
+fn containing_object() -> Option<PathBuf> {
+    let address = (binary as fn() -> PathBuf as *const ()).addr();
+    let maps = fs::read_to_string("/proc/self/maps").ok()?;
+
+    return maps.lines().find_map(|line| {
+        let (range, _) = line.split_once(' ')?;
+        let (start, end) = range.split_once('-')?;
+        let start = usize::from_str_radix(start, 16).ok()?;
+        let end = usize::from_str_radix(end, 16).ok()?;
+        let path = line.get(line.find('/')?..)?;
+
+        return (start..end)
+            .contains(&address)
+            .then(|| return PathBuf::from(path));
+    });
+}

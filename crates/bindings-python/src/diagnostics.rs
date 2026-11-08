@@ -49,6 +49,7 @@ use termtrace_sdk::{
         diagnostics::{self as core, TmuxCatalog, TmuxEvents},
         timeout_from_ms,
     },
+    defaults,
     instrumentation::Instrumentation,
     locator::WaitCancellation,
     registry::RegistryService,
@@ -75,11 +76,6 @@ fn timeout(timeout_ms: Option<f64>, default: std::time::Duration) -> PyResult<st
     return timeout_ms.map_or(Ok(default), |ms| {
         return timeout_from_ms(ms).map_err(PyValueError::new_err);
     });
-}
-
-fn default_binary() -> PathBuf {
-    return std::env::var_os("TERMTRACE_BIN")
-        .map_or_else(|| PathBuf::from("termtrace"), PathBuf::from);
 }
 
 fn registry(root: Option<PathBuf>) -> PyResult<RegistryService> {
@@ -449,7 +445,7 @@ impl PyRegistry {
     pub fn new(root: Option<PathArg>, binary: Option<PathArg>) -> Self {
         return Self {
             root: root.map(|root| return root.0),
-            binary: binary.map_or_else(default_binary, |binary| return binary.0),
+            binary: binary.map_or_else(defaults::binary, |binary| return binary.0),
         };
     }
 
@@ -630,7 +626,7 @@ impl PyTmux {
 
         return Self {
             root: root.map(|root| return root.0),
-            binary: binary.map_or_else(default_binary, |binary| return binary.0),
+            binary: binary.map_or_else(defaults::binary, |binary| return binary.0),
             client: TmuxClient {
                 executable: tmux.map_or_else(|| return PathBuf::from("tmux"), |tmux| return tmux.0),
                 socket,

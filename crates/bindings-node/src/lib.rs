@@ -189,21 +189,6 @@ fn timeout_or_default(timeout_ms: Option<u32>) -> Duration {
     });
 }
 
-fn default_termtrace_bin() -> PathBuf {
-    if let Ok(bin) = std::env::var("TERMTRACE_BIN") {
-        return PathBuf::from(bin);
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        let candidate = exe.with_file_name("termtrace");
-        if candidate.is_file() {
-            return candidate;
-        }
-    }
-
-    return PathBuf::from("termtrace");
-}
-
 fn default_evidence_root() -> PathBuf {
     if let Ok(root) = std::env::var("TERMTRACE_ROOT") {
         return PathBuf::from(root);
@@ -2274,7 +2259,7 @@ impl Termtrace {
     /// Create a new Termtrace instance with optional binary and evidence root paths.
     #[napi(constructor)]
     pub fn new(binary: Option<String>, evidence_root: Option<String>) -> Self {
-        let bin_path = binary.map_or_else(default_termtrace_bin, PathBuf::from);
+        let bin_path = binary.map_or_else(defaults::binary, PathBuf::from);
         let root_path = evidence_root.map_or_else(default_evidence_root, PathBuf::from);
         return Self {
             terminal: Terminal::new(bin_path, root_path),
