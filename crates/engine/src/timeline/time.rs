@@ -63,8 +63,8 @@ impl StdError for TimeOffsetError {
 
 /// Parse a human-readable non-negative source offset into nanoseconds.
 ///
-/// Accepted forms are a decimal number with an optional `ns`, `us`, `ms`,
-/// `s`, `m`, or `h` suffix (bare numbers are seconds), plus `MM:SS.fraction`
+/// Accepted forms are a decimal number with an explicit `ns`, `us`, `ms`,
+/// `s`, `m`, or `h` suffix, plus `MM:SS.fraction`
 /// and `HH:MM:SS.fraction` clock notation.
 ///
 /// # Errors
@@ -95,7 +95,11 @@ pub fn parse_time_offset_ns(value: &str) -> StdResult<u64, TimeOffsetError> {
             .strip_suffix(suffix)
             .map(|number| return (number, scale));
     })
-    .unwrap_or((value, NANOS_PER_SECOND));
+    .ok_or_else(|| {
+        return TimeOffsetError::new(format!(
+            "time offset `{value}` requires a unit (ns, us, ms, s, m, or h)"
+        ));
+    })?;
 
     return parse_scaled_decimal(number, scale).map_err(|error| return error.in_value(value));
 }
@@ -223,7 +227,7 @@ mod tests {
         assert_eq!(parse_time_offset_ns("2m"), Ok(120_000_000_000));
         assert_eq!(parse_time_offset_ns("01:02.25"), Ok(62_250_000_000));
         assert_eq!(parse_time_offset_ns("01:01:02.25"), Ok(3_662_250_000_000));
-        assert_eq!(parse_time_offset_ns("2"), Ok(2_000_000_000));
+        assert!(parse_time_offset_ns("2").is_err());
     }
 
     #[test]
