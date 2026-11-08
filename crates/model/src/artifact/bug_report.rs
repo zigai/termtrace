@@ -42,6 +42,8 @@ pub struct BugReportMetadata {
 #[serde(deny_unknown_fields)]
 pub struct BugReportSessionReference {
     /// Canonical source path bytes.
+    #[serde(with = "crate::value::path_bytes")]
+    #[schemars(with = "crate::value::path_bytes::PathValue")]
     pub canonical_session: ByteString,
     /// Canonical session identity.
     pub session_id: Uuid,
@@ -62,6 +64,8 @@ pub struct BugReportManifest {
     /// Canonical source identity.
     pub session_id: Uuid,
     /// Exact canonical source path bytes.
+    #[serde(with = "crate::value::path_bytes")]
+    #[schemars(with = "crate::value::path_bytes::PathValue")]
     pub canonical_session: ByteString,
     /// Final canonical source hash.
     pub source_final_event_hash: String,

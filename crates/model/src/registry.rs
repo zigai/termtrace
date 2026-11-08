@@ -16,7 +16,7 @@ use uuid::Uuid;
 /// Registry-entry format identifier.
 pub const REGISTRY_ENTRY_FORMAT: &str = "termtrace-session-registry-entry";
 /// Registry-entry schema version.
-pub const REGISTRY_ENTRY_VERSION: u32 = 1;
+pub const REGISTRY_ENTRY_VERSION: u32 = 2;
 
 /// Exclusive, leased ownership of an alias while detached startup is pending.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -35,6 +35,8 @@ pub struct AliasReservation {
     /// Time after which another owner may reclaim the alias.
     pub lease_expires_unix_ns: u128,
     /// Exact path bytes allocated for the pending canonical session.
+    #[serde(with = "crate::value::path_bytes")]
+    #[schemars(with = "crate::value::path_bytes::PathValue")]
     pub pending_session: ByteString,
 }
 
@@ -56,6 +58,8 @@ pub struct RegistryEntry {
     /// Validated friendly alias.
     pub alias: String,
     /// Exact canonical session-directory path bytes.
+    #[serde(with = "crate::value::path_bytes")]
+    #[schemars(with = "crate::value::path_bytes::PathValue")]
     pub canonical_session: ByteString,
     /// Immutable session ID read from `session.json` during registration.
     pub session_id: Uuid,
@@ -85,12 +89,16 @@ pub struct RegistryListEntry {
     /// Friendly alias.
     pub alias: String,
     /// Exact canonical session path bytes.
+    #[serde(with = "crate::value::path_bytes")]
+    #[schemars(with = "crate::value::path_bytes::PathValue")]
     pub canonical_session: ByteString,
     /// Immutable registered session ID.
     pub session_id: Uuid,
     /// Effective command bytes when the manifest is readable.
     pub command: Option<Vec<ByteString>>,
     /// Effective working directory when the manifest is readable.
+    #[serde(with = "crate::value::path_bytes::option")]
+    #[schemars(with = "Option<crate::value::path_bytes::PathValue>")]
     pub working_directory: Option<ByteString>,
     /// Initial grid and pixel geometry when the manifest is readable.
     pub geometry: Option<SessionGeometry>,
@@ -227,6 +235,8 @@ pub enum RestartProvenance {
 )]
 pub struct RestartConfiguration {
     /// New exact working directory, absent to keep.
+    #[serde(with = "crate::value::path_bytes::option")]
+    #[schemars(with = "Option<crate::value::path_bytes::PathValue>")]
     pub cwd: Option<ByteString>,
     /// New columns, absent to keep.
     pub cols: Option<u16>,
@@ -316,8 +326,12 @@ pub struct RestartReport {
     /// New binding.
     pub successor: RegistryEntry,
     /// Exact owner-only stdout log path.
+    #[serde(with = "crate::value::path_bytes")]
+    #[schemars(with = "crate::value::path_bytes::PathValue")]
     pub stdout_log: ByteString,
     /// Exact owner-only stderr log path.
+    #[serde(with = "crate::value::path_bytes")]
+    #[schemars(with = "crate::value::path_bytes::PathValue")]
     pub stderr_log: ByteString,
     /// True only after successful retargeting.
     pub ready: bool,

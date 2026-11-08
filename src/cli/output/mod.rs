@@ -4,6 +4,8 @@ use miette::{IntoDiagnostic as _, Result};
 use std::{
     fmt::{self, Display, Write as _},
     io::{self, Write as _},
+    os::unix::ffi::OsStrExt as _,
+    path::Path,
     process::ExitCode,
 };
 use termtrace_model::{
@@ -14,8 +16,12 @@ use termtrace_model::{
         screen::ScreenFrame,
         state::RowState,
     },
-    value::pagination::OutputPage,
+    value::{pagination::OutputPage, path_bytes::PathValue, ByteString},
 };
+
+pub(in crate::cli) fn path_value(path: &Path) -> PathValue {
+    return PathValue::from_bytes(&ByteString::from(path.as_os_str().as_bytes()));
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::cli) enum ResponseMode {

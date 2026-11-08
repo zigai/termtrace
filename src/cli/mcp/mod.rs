@@ -16,7 +16,11 @@ use rmcp::{
     ErrorData, RoleServer, ServiceExt as _,
 };
 use serde_json::Value;
-use std::{process::ExitCode, result::Result as StdResult};
+use std::{
+    ffi::OsString, os::unix::ffi::OsStringExt as _, path::PathBuf, process::ExitCode,
+    result::Result as StdResult,
+};
+use termtrace_model::value::path_bytes::PathValue;
 use tokio::runtime::Builder;
 use tools::{
     AnalyzeInput, BundleInput, Invocation, ScreenInput, ScreenshotInput, SendInput, StartInput,
@@ -32,7 +36,7 @@ const INSTRUCTIONS: &str = "Termtrace records terminal programs and lets you dri
 Call `start` to launch a program in a recorded terminal, `send` to type keys and wait for the \
 screen to react, `screen` or `wait` to read it, and `stop` when done. Completed sessions \
 support `analyze`, `screenshot`, and `bundle`. Sessions are shared with the `termtrace` CLI \
-by name, and each one is also readable as `termtrace://sessions/{session}` resources.";
+by name, and each one is also readable as `termtrace://sessions/{session}` resources. To drive several sessions at once, send without `until`, then call `wait` on each session in parallel. Mutating `send` calls may be serialized by the MCP client.";
 
 pub(in crate::cli) fn run_mcp() -> Result<ExitCode> {
     let runtime = Builder::new_current_thread()
@@ -88,7 +92,7 @@ impl Server {
 
     #[tool(
         title = "Send input",
-        description = "Send keys, text, clicks, resizes, or signals to a live session, optionally wait for a condition. Returns the resulting state hash, plus changed rows with `screen: diff`; call `screen` for the full text.",
+        description = "Send input to a live session, optionally wait for a condition and settle the screen. Returns full screen text by default. For several sessions, send without `until`, then call `wait` in parallel.",
         output_schema = outputs::send(),
         annotations(
             read_only_hint = false,
@@ -121,7 +125,7 @@ impl Server {
 
     #[tool(
         title = "Wait for condition",
-        description = "Wait until a live session's screen or output meets a condition, then return the screen.",
+        description = "Wait until a session's screen or output meets a condition, then return the screen. To drive several sessions, send without `until`, then run these read-only waits in parallel.",
         output_schema = outputs::wait(),
         annotations(read_only_hint = true, open_world_hint = false)
     )]
@@ -307,10 +311,12 @@ async fn call(
 
 fn screenshot_png(output: &Value) -> StdResult<Vec<u8>, String> {
     let path = output
-        .get("image_display")
-        .or_else(|| return output.get("image"))
-        .and_then(Value::as_str)
+        .get("image")
         .ok_or_else(|| return "screenshot output has no image path".to_owned())?;
+
+    let path: PathValue =
+        serde_json::from_value(path.clone()).map_err(|error| return error.to_string())?;
+    let path = PathBuf::from(OsString::from_vec(path.into_bytes().into_bytes()));
 
     return fs_err::read(path).map_err(|error| return error.to_string());
 }

@@ -7,12 +7,43 @@ use crate::{
         CaptureQuality, ObservationIntegrity, ObservationResolution, ObservationSourceKind,
         StatePoint,
     },
-    terminal::state::{CellStyle, ColorState, CursorState, ModeState, Rgb, WideKind},
+    terminal::state::{
+        CellStyle, ColorState, CursorState, ModeState, Rgb, SemanticState, WideKind,
+    },
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{error::Error as StdError, fmt};
 use uuid::Uuid;
+
+/// Text for screen matching with soft wraps joined and byte offsets mapped to viewport rows.
+pub fn screen_match_text(state: &SemanticState) -> (String, Vec<(usize, u16)>) {
+    let mut text = String::new();
+    let mut starts = Vec::with_capacity(state.grid.len());
+
+    for row in &state.grid {
+        let start = text.len();
+        starts.push((start, row.row));
+
+        for cell in row.cells.iter() {
+            if !cell.grapheme.is_empty() {
+                text.push_str(&cell.grapheme);
+            } else if cell.wide_kind == WideKind::Narrow {
+                text.push(' ');
+            }
+        }
+
+        if !row.soft_wrapped {
+            while text.len() > start && text.ends_with(' ') {
+                text.pop();
+            }
+
+            text.push('\n');
+        }
+    }
+
+    return (text, starts);
+}
 
 /// Rich screen projection format version.
 pub const SCREEN_FRAME_VERSION: u32 = 2;
@@ -33,6 +64,7 @@ pub const SDK_WIDE_UNSIGNED_FIELDS: &[&str] = &[
     "event_seq",
     "first_match_monotonic_ns",
     "first_observed_monotonic_ns",
+    "minimum",
     "monotonic_ns",
     "next_event_seq",
     "observed_monotonic_ns",
@@ -42,7 +74,7 @@ pub const SDK_WIDE_UNSIGNED_FIELDS: &[&str] = &[
 ];
 /// Raw byte field names in the same observation types, serialized as standard padded Base64
 /// and carried by SDK bindings as host byte strings.
-pub const SDK_BYTE_FIELDS: &[&str] = &["canonical_session", "semantic_state_zstd"];
+pub const SDK_BYTE_FIELDS: &[&str] = &["base64", "semantic_state_zstd"];
 
 /// Stable snapshot fields optionally retained by pure normalizers.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

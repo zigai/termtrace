@@ -157,6 +157,7 @@ pub(super) enum RuntimeMessage {
         request: ControlRequest,
         response: mpsc::SyncSender<ControlResponse>,
     },
+    ControlDisconnected(uuid::Uuid),
     ControlServerFailed(String),
     /// The control server thread finished and accepts no further requests.
     ControlServerStopped,

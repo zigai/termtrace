@@ -1130,6 +1130,27 @@
       "oneOf": [
         {
           "additionalProperties": false,
+          "description": "Pause before the following input atom.",
+          "properties": {
+            "duration_ns": {
+              "description": "Requested delay in nanoseconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "sleep",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "duration_ns"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Uninterpreted caller or host bytes.",
           "properties": {
             "kind": {
@@ -1463,6 +1484,11 @@
     "InputKind": {
       "description": "User-facing interpretation of an input byte sequence.",
       "oneOf": [
+        {
+          "const": "sleep",
+          "description": "Pause in an ordered input sequence, with no PTY bytes.",
+          "type": "string"
+        },
         {
           "const": "raw",
           "description": "Uninterpreted bytes.",

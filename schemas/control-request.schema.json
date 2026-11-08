@@ -62,6 +62,12 @@
               "$ref": "#/$defs/ScreenPredicate",
               "description": "Exact screen predicate."
             },
+            "stable_for_ns": {
+              "description": "Required unchanged interval after a match; zero returns immediately.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
             "timeout_ns": {
               "description": "Server-side monotonic deadline interval.",
               "format": "uint64",
@@ -72,7 +78,8 @@
           "required": [
             "condition",
             "predicate",
-            "timeout_ns"
+            "timeout_ns",
+            "stable_for_ns"
           ],
           "type": "object"
         }
@@ -167,6 +174,25 @@
     "ControlCommand": {
       "description": "One command sent to the live session actor.",
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Journal the pre-send match count so a mixed send reuses it on retry.",
+          "properties": {
+            "command": {
+              "const": "match_baseline",
+              "type": "string"
+            },
+            "predicate": {
+              "$ref": "#/$defs/ScreenPredicate",
+              "description": "Literal or regex predicate whose occurrences are counted."
+            }
+          },
+          "required": [
+            "command",
+            "predicate"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "description": "Verify that the host and protocol are responsive.",
@@ -749,6 +775,11 @@
       "description": "User-facing interpretation of an input byte sequence.",
       "oneOf": [
         {
+          "const": "sleep",
+          "description": "Pause in an ordered input sequence, with no PTY bytes.",
+          "type": "string"
+        },
+        {
           "const": "raw",
           "description": "Uninterpreted bytes.",
           "type": "string"
@@ -783,6 +814,33 @@
     "InputSequenceAtom": {
       "description": "One input atom accepted inside an admission-guarded sequence.",
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Pause between input atoms without pacing the text within them.",
+          "properties": {
+            "duration_ns": {
+              "description": "Delay before applying the next atom.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "input": {
+              "const": "sleep",
+              "type": "string"
+            },
+            "operation_id": {
+              "description": "Caller-owned operation identifier retained in canonical events.",
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "operation_id",
+            "duration_ns"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "description": "Exact caller bytes with an explicit semantic category.",
@@ -1332,6 +1390,32 @@
     "ScreenPredicate": {
       "description": "Exact predicate evaluated against the latest presented viewport.",
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Require a minimum number of literal or regex matches across reconstructed wrapped lines.",
+          "properties": {
+            "matching": {
+              "$ref": "#/$defs/ScreenPredicate",
+              "description": "A contains or matches-regex predicate."
+            },
+            "minimum": {
+              "description": "Minimum number of non-overlapping matches.",
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "predicate": {
+              "const": "text_count",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "matching",
+            "minimum"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "description": "Viewport text contains an exact UTF-8 substring.",

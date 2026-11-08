@@ -159,6 +159,7 @@ pub(super) fn preserve_terminal(
             Err(RecvTimeoutError::Disconnected) => output_closed = true,
             Ok(
                 RuntimeMessage::InputFailed(_)
+                | RuntimeMessage::ControlDisconnected(_)
                 | RuntimeMessage::ResizeFailed(_)
                 | RuntimeMessage::ControlServerFailed(_)
                 | RuntimeMessage::ControlServerStopped

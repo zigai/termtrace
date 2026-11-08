@@ -23,7 +23,7 @@ use termtrace_model::{
     execution::provenance::ProvenancePolicy,
     execution::session::*,
     execution::visual_profile::VisualProfile,
-    value::ByteString,
+    value::{path_bytes::PathValue, ByteString},
 };
 use uuid::Uuid;
 
@@ -571,7 +571,8 @@ fn recovery_non_utf8_binds_exact_bytes_for_both_paths_without_rewriting_source()
         (&serialized["source"], report.source.as_path()),
         (&serialized["recovered"], report.recovered.as_path()),
     ] {
-        assert_eq!(*value, serde_json::json!(path.as_os_str().as_bytes()));
+        let decoded: PathValue = serde_json::from_value(value.clone()).expect("exact path");
+        assert_eq!(decoded.into_bytes().as_bytes(), path.as_os_str().as_bytes());
     }
 
     assert_eq!(diagnostic["recovery"], serialized);

@@ -996,6 +996,32 @@
       "oneOf": [
         {
           "additionalProperties": false,
+          "description": "Require a minimum number of literal or regex matches across reconstructed wrapped lines.",
+          "properties": {
+            "matching": {
+              "$ref": "#/$defs/ScreenPredicate",
+              "description": "A contains or matches-regex predicate."
+            },
+            "minimum": {
+              "description": "Minimum number of non-overlapping matches.",
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "predicate": {
+              "const": "text_count",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "matching",
+            "minimum"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "Viewport text contains an exact UTF-8 substring.",
           "properties": {
             "predicate": {

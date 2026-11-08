@@ -40,7 +40,7 @@ const REGISTRY_DIRECTORY: &str = "registry";
 const SESSIONS_DIRECTORY: &str = "sessions";
 const SUPERVISOR_DIRECTORY: &str = "supervisor";
 const REGISTRY_RESERVATION_FORMAT: &str = "termtrace-session-registry-reservation";
-const REGISTRY_RESERVATION_VERSION: u32 = 1;
+const REGISTRY_RESERVATION_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RegistryRecord {
@@ -111,7 +111,7 @@ mod lossless_record_tests {
     use super::*;
     use std::io::Cursor;
 
-    const ENTRY: &str = r#"{"format":"termtrace-session-registry-entry","version":1,"alias":"sample","canonical_session":"L3RtcC//","session_id":"00000000-0000-0000-0000-000000000000","recorder_pid":null,"recorder_process_start_ticks":null,"control_protocol_version":19,"registered_unix_ns":340282366920938463463374607431768211455}"#;
+    const ENTRY: &str = r#"{"format":"termtrace-session-registry-entry","version":2,"alias":"sample","canonical_session":{"base64":"L3RtcC//"},"session_id":"00000000-0000-0000-0000-000000000000","recorder_pid":null,"recorder_process_start_ticks":null,"control_protocol_version":21,"registered_unix_ns":340282366920938463463374607431768211455}"#;
 
     #[test]
     fn typed_reparse_keeps_u128_numeric_tokens_and_exact_canonical_hashes() {
@@ -158,7 +158,7 @@ mod lossless_record_tests {
         assert_eq!(entry.recorder_process_start_ticks, None);
         assert_eq!(serde_json::to_string(&entry).unwrap(), ENTRY);
 
-        let text = r#"{"format":"termtrace-session-registry-reservation","version":1,"alias":"sample","owner_token":"00000000-0000-0000-0000-000000000000","created_unix_ns":340282366920938463463374607431768211455,"lease_expires_unix_ns":340282366920938463463374607431768211455,"pending_session":"L3RtcC//"}"#;
+        let text = r#"{"format":"termtrace-session-registry-reservation","version":2,"alias":"sample","owner_token":"00000000-0000-0000-0000-000000000000","created_unix_ns":340282366920938463463374607431768211455,"lease_expires_unix_ns":340282366920938463463374607431768211455,"pending_session":{"base64":"L3RtcC//"}}"#;
         let RegistryRecord::Reservation(record) =
             serde_json::from_reader(Cursor::new(text)).unwrap()
         else {
@@ -173,13 +173,13 @@ mod lossless_record_tests {
     #[test]
     fn rejects_unknown_versions_formats_overflow_and_duplicate_identity() {
         for text in [
-            ENTRY.replace("\"version\":1", "\"version\":2"),
+            ENTRY.replace("\"version\":2", "\"version\":3"),
             ENTRY.replace("termtrace-session-registry-entry", "unknown"),
             ENTRY.replace(
                 "340282366920938463463374607431768211455",
                 "340282366920938463463374607431768211456",
             ),
-            ENTRY.replace("\"version\":1", "\"version\":1,\"version\":1"),
+            ENTRY.replace("\"version\":2", "\"version\":2,\"version\":2"),
         ] {
             assert!(
                 serde_json::from_str::<RegistryRecord>(&text).is_err(),

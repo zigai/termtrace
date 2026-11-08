@@ -7,6 +7,8 @@ use super::{
     MutationEffect, PendingInputSequence, Result, ScreenWaiter, SessionActor, WaiterReaction,
     CONTROL_PROTOCOL_VERSION, MAX_SCREEN_WAITERS,
 };
+use termtrace_model::terminal::screen::screen_match_text;
+use termtrace_model::{execution::event::InputKind, protocol::control::InputSequenceAtom};
 
 impl SessionActor<'_> {
     pub(in crate::recording) fn handle_control_request(
@@ -81,10 +83,13 @@ impl SessionActor<'_> {
             Some(hash)
         };
 
-        if self
-            .pending_input_sequence
-            .as_ref()
-            .is_some_and(PendingInputSequence::exclusive)
+        let stopping = matches!(request.command, ControlCommand::Stop);
+        if !read_only
+            && !stopping
+            && self
+                .pending_input_sequence
+                .as_ref()
+                .is_some_and(PendingInputSequence::exclusive)
         {
             let response = control_error_response(
                 request.request_id,
@@ -216,7 +221,7 @@ impl SessionActor<'_> {
             return Ok(());
         }
 
-        if self.pending_input_sequence.is_some() && !read_only {
+        if self.pending_input_sequence.is_some() && !read_only && !stopping {
             let response = control_error_response(
                 request.request_id,
                 "input_sequence_busy",
@@ -238,6 +243,13 @@ impl SessionActor<'_> {
         let invalid_guard = guard.is_some_and(|hash| return !is_lowercase_blake3_hex(hash));
 
         if !invalid_guard && !stale {
+            if stopping {
+                self.interrupt_input_sequence(
+                    "action_stopped",
+                    "stop preempted the pending action",
+                )?;
+            }
+
             let sequence = match &request.command {
                 ControlCommand::InputSequence {
                     atoms,
@@ -264,6 +276,49 @@ impl SessionActor<'_> {
                     .map(|(postcondition, projection)| {
                         let postcondition =
                             admitted_postcondition(postcondition, validated.into_predicate())?;
+                        let excluded_matches =
+                            if let super::AdmittedPostcondition::Screen { predicate, .. } =
+                                &postcondition
+                            {
+                                let (before, _) = screen_match_text(&self.live.presented);
+                                let mut typed = String::new();
+
+                                let mut atom_matches = 0;
+                                for atom in atoms {
+                                    match atom {
+                                        InputSequenceAtom::Bytes {
+                                            data,
+                                            input_kind: InputKind::Text,
+                                            ..
+                                        }
+                                        | InputSequenceAtom::Paste { data, .. } => {
+                                            let text = String::from_utf8_lossy(data.as_bytes());
+                                            atom_matches += predicate
+                                                .text_matches(&text)
+                                                .map_or(0, |matches| return matches.len());
+
+                                            typed.push_str(&text);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+
+                                predicate.minimum_text_matches().map_or_else(
+                                    || {
+                                        return predicate
+                                            .text_matches(&before)
+                                            .map_or(0, |matches| return matches.len())
+                                            + atom_matches.max(
+                                                predicate
+                                                    .text_matches(&typed)
+                                                    .map_or(0, |matches| return matches.len()),
+                                            );
+                                    },
+                                    |minimum| return minimum.saturating_sub(1),
+                                )
+                            } else {
+                                0
+                            };
 
                         validate_screen_region(
                             projection,
@@ -277,6 +332,7 @@ impl SessionActor<'_> {
                             projection: *projection,
                             baseline_state_hash: current_state_hash.clone(),
                             baseline_output_bytes: self.progress.output_bytes,
+                            excluded_matches,
                         });
                     })
                     .transpose();

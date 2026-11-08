@@ -598,7 +598,7 @@ fn original_restart_waits_for_the_predecessor_capture_and_keeps_its_grid() {
         serde_json::from_slice(&restarted.get_output().stdout).expect("restart report");
 
     let successor = PathBuf::from(
-        report["successor"]["canonical_session_display"]
+        report["successor"]["canonical_session"]
             .as_str()
             .expect("successor path"),
     );

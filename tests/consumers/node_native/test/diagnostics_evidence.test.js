@@ -527,7 +527,7 @@ test("nonUTF8 source debug/forensic bundles retain exact verification paths and 
         const file = Buffer.concat([destination, bytes("/verification.json")]);
         const encoded = fs.readFileSync(file);
         const value = JSON.parse(encoded.toString("utf8"));
-        assert.deepEqual(Buffer.from(value.session), source);
+        assert.deepEqual(Buffer.from(value.session.base64, "base64"), source);
         assert.equal(value.valid, true);
         assert.equal(value.session_id, native.session_id);
         fs.appendFileSync(file, "TAMPER");

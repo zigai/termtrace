@@ -263,10 +263,10 @@ fn screenshots_serialize_non_utf8_output_paths_without_panicking() {
     let response: serde_json::Value =
         serde_json::from_slice(&output).expect("non-UTF-8 screenshot response JSON");
     assert_eq!(response["kind"], "semantic_screenshot");
-    assert_eq!(
-        response["directory_display"],
-        destination.display().to_string()
-    );
+
+    let directory: ByteString = serde_json::from_value(response["directory"]["base64"].clone())
+        .expect("exact directory bytes");
+    assert_eq!(directory.as_bytes(), destination.as_os_str().as_bytes());
     assert!(destination.join("screen.png").is_file());
 }
 

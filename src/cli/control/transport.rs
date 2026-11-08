@@ -3,6 +3,7 @@ use std::{ffi::OsString, fmt::Write as _, os::unix::ffi::OsStringExt as _};
 use termtrace_engine::registry::SessionRegistry;
 use termtrace_model::artifact::original::{original_capture_status_path, OriginalCaptureStatus};
 use termtrace_model::protocol::control::ClockSample;
+use termtrace_model::value::path_bytes::PathValue;
 use termtrace_sdk::session::{original_capture_status, SessionStatus};
 
 pub(in crate::cli) fn run_status(
@@ -42,8 +43,8 @@ pub(in crate::cli) fn run_status(
                 response,
                 &serde_json::json!({
                     "alias": entry.alias,
-                    "canonical_session": entry.canonical_session,
-                    "canonical_session_display": canonical_session_display,
+                    "canonical_session": PathValue::from_bytes(&entry.canonical_session),
+
                     "session_id": entry.session_id,
                     "evidence_preserved": true,
                 }),

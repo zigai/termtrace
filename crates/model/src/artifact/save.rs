@@ -142,6 +142,8 @@ pub struct SaveManifest {
     /// Canonical session identity.
     pub session_id: Uuid,
     /// Exact canonical session path bytes.
+    #[serde(with = "crate::value::path_bytes")]
+    #[schemars(with = "crate::value::path_bytes::PathValue")]
     pub canonical_session: ByteString,
     /// Requested semantic point.
     pub state_point: StatePoint,

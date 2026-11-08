@@ -1,9 +1,9 @@
+use crate::cli::output::path_value;
 use crate::cli::output::ResponseWriter;
 use crate::cli::{analysis::args::TimeRangeArgs, output::write_json_line};
 use miette::{IntoDiagnostic as _, Result};
 use std::{
     env,
-    os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     process::ExitCode,
 };
@@ -11,10 +11,7 @@ use termtrace_engine::{
     timeline::{resolve_session_prefix_source_selection, resolve_session_source_selection},
     Result as EngineResult,
 };
-use termtrace_model::{
-    terminal::{observation::StatePoint, replay::SourceRange},
-    value::ByteString,
-};
+use termtrace_model::terminal::{observation::StatePoint, replay::SourceRange};
 pub(super) use termtrace_sdk::session::LocatedSession as ResolvedSessionRef;
 use termtrace_sdk::session::{Session, SessionStatus, SessionTarget};
 
@@ -49,8 +46,7 @@ pub(super) fn write_session_lifecycle(
             "kind": "session_lifecycle",
             "operation": operation,
             "lifecycle": resolved.phase.as_str(),
-            "session": ByteString::from(resolved.path.as_os_str().as_bytes()),
-            "session_display": resolved.path.display().to_string(),
+            "session": path_value(&resolved.path),
             "diagnostic": resolved.diagnostic,
         }),
     )?;

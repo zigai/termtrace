@@ -1,5 +1,10 @@
 {
   "$defs": {
+    "Base64Bytes": {
+      "contentEncoding": "base64",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+      "type": "string"
+    },
     "DiagnosticCheck": {
       "description": "Stable detector selectable by `diagnose --check`.",
       "oneOf": [
@@ -101,17 +106,9 @@
       "type": "object"
     },
     "ExactPath": {
-      "anyOf": [
+      "allOf": [
         {
-          "type": "string"
-        },
-        {
-          "items": {
-            "maximum": 255,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "type": "array"
+          "$ref": "#/$defs/PathValue"
         }
       ],
       "x-termtrace-path": true
@@ -271,6 +268,28 @@
         "truncated"
       ],
       "type": "object"
+    },
+    "PathValue": {
+      "anyOf": [
+        {
+          "description": "A path that is valid UTF-8.",
+          "type": "string"
+        },
+        {
+          "description": "A path whose bytes are not valid UTF-8.",
+          "properties": {
+            "base64": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Exact path bytes encoded as Base64."
+            }
+          },
+          "required": [
+            "base64"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "One exact filesystem path in text output."
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/diagnose-report.schema.json",

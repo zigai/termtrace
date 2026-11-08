@@ -48,6 +48,7 @@ pub(super) async fn execute(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0)
+        .kill_on_drop(true)
         .spawn()
         .map_err(|error| return unavailable(&error))?;
 

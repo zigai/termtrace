@@ -4,9 +4,12 @@ use super::{
     ActionPostcondition, ControlCommand, ReactionRequirement, ScreenMode, ScreenPredicate,
     StateHashComparison,
 };
-use crate::terminal::{screen::ScreenRegion, state::SemanticState};
+use crate::terminal::{
+    screen::{screen_match_text, ScreenRegion},
+    state::SemanticState,
+};
 use regex::{Regex, RegexBuilder};
-use std::{collections::BTreeMap, error::Error as StdError, fmt, time::Duration};
+use std::{collections::BTreeMap, error::Error as StdError, fmt, ops::Range, time::Duration};
 
 /// Longest server-side wait or postcondition timeout a control command may request.
 pub const MAX_CONTROL_WAIT: Duration = Duration::from_secs(3_600);
@@ -40,6 +43,8 @@ pub fn is_lowercase_blake3_hex(hash: &str) -> bool {
 /// A screen predicate that violates its size or shape limits.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PredicateError {
+    /// A text-count predicate has a non-text operand or a zero minimum.
+    TextCount,
     /// Composition is deeper than 4 levels or has more than 32 nodes.
     TooLarge,
     /// Text operand is empty or longer than 16 KiB.
@@ -64,6 +69,10 @@ pub enum PredicateError {
 impl fmt::Display for PredicateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         return match self {
+            Self::TextCount => write!(
+                f,
+                "text count requires a contains or matches-regex predicate and a positive minimum"
+            ),
             Self::TooLarge => write!(f, "screen predicate composition is too deep or large"),
             Self::TextLength => write!(f, "screen predicate text must contain 1-16384 bytes"),
             Self::PatternLength => {
@@ -174,6 +183,19 @@ pub struct CompiledScreenPredicate {
 }
 
 impl CompiledScreenPredicate {
+    /// Byte ranges of literal or regex matches; `None` for non-text predicates.
+    pub fn text_matches(&self, text: &str) -> Option<Vec<Range<usize>>> {
+        return text_matches(&self.predicate, &self.regexes, text);
+    }
+
+    /// Minimum count explicitly requested for a text-count predicate.
+    pub fn minimum_text_matches(&self) -> Option<usize> {
+        return match self.predicate {
+            ScreenPredicate::TextCount { minimum, .. } => Some(minimum),
+            _ => None,
+        };
+    }
+
     /// The predicate as requested.
     pub const fn predicate(&self) -> &ScreenPredicate {
         return &self.predicate;
@@ -230,6 +252,11 @@ pub struct ValidatedCommand<'command> {
 }
 
 impl<'command> ValidatedCommand<'command> {
+    /// Compiled screen predicate, when this command evaluates one.
+    pub const fn predicate(&self) -> Option<&CompiledScreenPredicate> {
+        return self.predicate.as_ref();
+    }
+
     /// The validated command.
     pub const fn command(&self) -> &'command ControlCommand {
         return self.command;
@@ -249,6 +276,11 @@ impl ControlCommand {
     /// Returns the violated rule; [`CommandError::code`] gives its wire rejection code.
     pub fn validate(&self) -> Result<ValidatedCommand<'_>, CommandError> {
         let predicate = match self {
+            Self::MatchBaseline { predicate } => Some(
+                predicate
+                    .compile()
+                    .map_err(CommandError::PostconditionPredicate)?,
+            ),
             Self::WaitScreen {
                 predicate,
                 stable_for_ns,
@@ -308,8 +340,9 @@ impl ControlCommand {
                 ActionPostcondition::Screen {
                     predicate,
                     timeout_ns,
+                    stable_for_ns,
                 } => {
-                    if !within_wait(*timeout_ns) {
+                    if !within_wait(*timeout_ns) || *stable_for_ns > *timeout_ns {
                         return Err(CommandError::PostconditionTimeout);
                     }
 
@@ -375,6 +408,21 @@ fn check_predicate(
     }
 
     match predicate {
+        ScreenPredicate::TextCount {
+            matching: predicate,
+            minimum,
+        } => {
+            if *minimum == 0
+                || !matches!(
+                    predicate.as_ref(),
+                    ScreenPredicate::Contains { .. } | ScreenPredicate::MatchesRegex { .. }
+                )
+            {
+                return Err(PredicateError::TextCount);
+            }
+
+            check_predicate(predicate, depth + 1, nodes, regexes)?;
+        }
         ScreenPredicate::Contains { text }
         | ScreenPredicate::Absent { text }
         | ScreenPredicate::RowContains { text, .. }
@@ -441,8 +489,34 @@ fn check_text(text: &str) -> Result<(), PredicateError> {
     return Ok(());
 }
 
+fn text_matches(
+    predicate: &ScreenPredicate,
+    regexes: &BTreeMap<String, Regex>,
+    text: &str,
+) -> Option<Vec<Range<usize>>> {
+    return match predicate {
+        ScreenPredicate::TextCount {
+            matching: predicate,
+            ..
+        } => text_matches(predicate, regexes, text),
+        ScreenPredicate::Contains { text: needle } => Some(
+            text.match_indices(needle)
+                .map(|(start, matched)| start..start + matched.len())
+                .collect(),
+        ),
+        ScreenPredicate::MatchesRegex { pattern } => regexes.get(pattern).map(|regex| {
+            return regex
+                .find_iter(text)
+                .map(|matched| return matched.range())
+                .collect();
+        }),
+        _ => None,
+    };
+}
+
 fn needs_viewport_text(predicate: &ScreenPredicate) -> bool {
     return match predicate {
+        ScreenPredicate::TextCount { .. } => true,
         ScreenPredicate::Contains { .. }
         | ScreenPredicate::Absent { .. }
         | ScreenPredicate::MatchesRegex { .. }
@@ -468,6 +542,11 @@ fn evaluate(
     state_hash: &str,
 ) -> bool {
     return match predicate {
+        ScreenPredicate::TextCount {
+            matching: predicate,
+            minimum,
+        } => text_matches(predicate, regexes, &screen_match_text(state).0)
+            .is_some_and(|matches| return matches.len() >= *minimum),
         ScreenPredicate::Contains { text } => viewport_text.contains(text),
         ScreenPredicate::Absent { text } => !viewport_text.contains(text),
         ScreenPredicate::MatchesRegex { pattern } => regexes
@@ -716,10 +795,12 @@ mod tests {
             ActionPostcondition::Screen {
                 predicate: contains("done"),
                 timeout_ns: 0,
+                stable_for_ns: 0,
             },
             ActionPostcondition::Screen {
                 predicate: ScreenPredicate::All { predicates: vec![] },
                 timeout_ns: 1,
+                stable_for_ns: 0,
             },
         ];
 
@@ -733,6 +814,7 @@ mod tests {
         let screen = act(ActionPostcondition::Screen {
             predicate: contains("done"),
             timeout_ns: HOUR_NS,
+            stable_for_ns: 0,
         });
         assert!(screen
             .validate()

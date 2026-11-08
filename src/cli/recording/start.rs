@@ -1,4 +1,6 @@
 use super::*;
+use crate::cli::output::path_value;
+use termtrace_model::value::path_bytes::PathValue;
 
 pub(super) fn run_detached_record(
     response: &mut ResponseWriter,
@@ -125,18 +127,17 @@ pub(super) fn report_start_outcome(
         Some(_) => "completed_failure",
     };
 
-    let canonical_session_display = entry.session_path().display().to_string();
     let mut output = serde_json::json!({
         "kind": "started",
         "startup_state": startup_state,
         "alias": entry.alias,
-        "canonical_session": entry.canonical_session,
-        "canonical_session_display": canonical_session_display,
+        "canonical_session": PathValue::from_bytes(&entry.canonical_session),
+
         "session_id": entry.session_id,
         "recorder_pid": entry.recorder_pid,
         "recorder_process_start_ticks": entry.recorder_process_start_ticks,
-        "stdout_log": paths.stdout_log,
-        "stderr_log": paths.stderr_log,
+        "stdout_log": path_value(&paths.stdout_log),
+        "stderr_log": path_value(&paths.stderr_log),
         "ready": completion.is_none(),
         "completion": completion,
     });

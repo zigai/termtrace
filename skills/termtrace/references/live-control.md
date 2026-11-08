@@ -12,6 +12,9 @@ termtrace screen app --since STATE
 it needs no follow-up `screen` call. Keep that output; redirecting it to
 `/dev/null` hides why a step failed.
 
+For several MCP sessions, send without `until`, then call `wait` on each session
+in parallel. MCP clients may serialize mutating sends, but can run read-only waits together.
+
 Pass `--json` to receive structured JSON objects on stdout:
 
 ```sh
@@ -30,10 +33,13 @@ termtrace screen app --json --since STATE
   counts as a reaction, and loading pauses can return a partial screen.
 - Pass `--screen diff` to `send` to print only moved row blocks and changed rows
   since just before the send; it prints the full screen when most rows changed.
+- Send defaults to full `text`; use `state` for only the hash. Deadline results
+  include the screen. `--settle 200ms` (MCP `settle_ms`) requires a stable screen after a match.
 - Never `sleep` before reading the screen. When something outside Termtrace
   changes the app (tmux keys, a file edit, a reload), use
   `termtrace wait app --screen TEXT`.
-- Waits default to 30s. Pass `--timeout` shorter than your shell tool's command
+- Waits default to 30s. Durations require units, such as `1500ms` or `20s`.
+  Pass `--timeout` shorter than your shell tool's command
   timeout, so Termtrace reports the miss and the screen instead of being killed.
 
 `--until-screen` observes the presented viewport. It is not a search of all
@@ -52,6 +58,7 @@ Supported input forms include:
 - **Keys**: named keys like `enter`, `tab`, `escape`, `backspace`, arrow keys (`up`, `down`, `left`, `right`), function keys (`f1`..`f24`).
 - **Modifiers**: `ctrl+f`, `ctrl-c`, `alt-enter`, `shift-tab`, stacked as `ctrl+shift+x` or `super-f5`. The Python and Node `send_key`/`sendKey` accept the same grammar.
 - **Pacing**: `--pace 20ms` types `text:` atoms one character at a time.
+- **Delay**: `text:hello sleep:200ms enter` pauses before Enter; this lets Codex submit typed text instead of treating Enter as part of a paste.
 - **Text**: `text:any UTF-8 text`, `paste:pasted text`.
 - **Mouse**: `click:COL,ROW` (e.g. `click:10,20`).
 - **Activation**: `activate:"Button Text"` (finds visible row-contained text and activates it).

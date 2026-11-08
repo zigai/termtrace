@@ -193,7 +193,8 @@ fn send_applies_steps_in_order_and_reports_the_failed_step() {
                 text: "GOT:second".to_owned(),
             },
             timeout: TIMEOUT,
-        },
+        settle: Duration::ZERO,
+},
         ..SendRequest::default()
     };
 

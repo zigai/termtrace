@@ -79,6 +79,8 @@ class ActionPostconditionResultScreen(TypedDict):
     frame: NotRequired[ScreenFrame | None]
     kind: Literal["screen"]
     matched: bool
+    matched_row: NotRequired[int | None]
+    matched_text: NotRequired[str | None]
     quality: ScreenPostconditionQuality
     state_hash: NotRequired[str | None]
 
@@ -334,7 +336,7 @@ Base64Bytes: TypeAlias = "bytes"
 class BundleManifest(TypedDict):
     "Top-level whole-file bundle manifest."
 
-    canonical_session: Base64Bytes
+    canonical_session: PathValue
     format: str
     includes_canonical_evidence: bool
     members: list[ArtifactMember]
@@ -1320,7 +1322,7 @@ class GeometrySolveReport(TypedDict):
 GifLoop: TypeAlias = "Literal['infinite', 'once']"
 
 
-InputDescriptor: TypeAlias = "InputDescriptorRaw | InputDescriptorText | InputDescriptorKey | InputDescriptorPaste | InputDescriptorFocus | InputDescriptorPointer | InputDescriptorActivate"
+InputDescriptor: TypeAlias = "InputDescriptorSleep | InputDescriptorRaw | InputDescriptorText | InputDescriptorKey | InputDescriptorPaste | InputDescriptorFocus | InputDescriptorPointer | InputDescriptorActivate"
 
 
 class InputDescriptorActivate(TypedDict):
@@ -1395,13 +1397,22 @@ class InputDescriptorRaw(TypedDict):
     kind: Literal["raw"]
 
 
+class InputDescriptorSleep(TypedDict):
+    "Pause before the following input atom."
+
+    duration_ns: int
+    kind: Literal["sleep"]
+
+
 class InputDescriptorText(TypedDict):
     "UTF-8 text intentionally entered as textual content."
 
     kind: Literal["text"]
 
 
-InputKind: TypeAlias = "Literal['raw', 'text', 'keys', 'paste', 'focus', 'pointer']"
+InputKind: TypeAlias = (
+    "Literal['sleep', 'raw', 'text', 'keys', 'paste', 'focus', 'pointer']"
+)
 
 
 class InputSequenceAtomOutcome(TypedDict):
@@ -1810,7 +1821,7 @@ class Observation(TypedDict):
     "Truth-labeled observation of one terminal state."
 
     boundary: CanonicalBoundary
-    canonical_session: Base64Bytes | None
+    canonical_session: PathValue | None
     capture_quality: CaptureQuality
     event_seq: int | None
     frame: ObservationFrame
@@ -1873,7 +1884,7 @@ class OriginalCaptureFacts(TypedDict):
     code: OriginalCaptureFailure | None
     completion: SessionCompletion | None
     reason: str
-    session: Base64Bytes
+    session: PathValue
     state: OriginalCaptureState
     surviving: list[SurvivingPathRecord]
 
@@ -1998,6 +2009,15 @@ class PageSource(TypedDict):
     session_id: str
     session_path: Base64Bytes
     session_path_display: str
+
+
+PathValue: TypeAlias = "str | PathValueBase64"
+
+
+class PathValueBase64(TypedDict):
+    "A path whose bytes are not valid UTF-8."
+
+    base64: Base64Bytes
 
 
 class PayloadDigest(TypedDict):
@@ -2455,7 +2475,7 @@ class RegistryEntry(TypedDict):
     "One friendly name bound to an immutable canonical session identity."
 
     alias: str
-    canonical_session: Base64Bytes
+    canonical_session: PathValue
     control_protocol_version: int
     format: str
     recorder_pid: int | None
@@ -2469,7 +2489,7 @@ class RegistryListEntry(TypedDict):
     "One registry listing row with evidence-derived session summary."
 
     alias: str
-    canonical_session: Base64Bytes
+    canonical_session: PathValue
     command: list[Base64Bytes] | None
     diagnostic: str | None
     geometry: SessionGeometry | None
@@ -2477,7 +2497,7 @@ class RegistryListEntry(TypedDict):
     registered_unix_ns: int
     session_id: str
     started_unix_ns: int | None
-    working_directory: Base64Bytes | None
+    working_directory: PathValue | None
 
 
 class RegistrySessionResolution(TypedDict):
@@ -2539,7 +2559,7 @@ class RestartConfiguration(TypedDict):
     clear_output_byte_budget: bool
     cols: int | None
     command: list[Base64Bytes] | None
-    cwd: Base64Bytes | None
+    cwd: PathValue | None
     durability: RestartDurability | None
     durability_max_interval_ms: int | None
     durability_max_uncommitted_bytes: int | None
@@ -2563,7 +2583,7 @@ class RestartConfigurationInput(TypedDict):
     clear_output_byte_budget: NotRequired[bool]
     cols: NotRequired[int | None]
     command: NotRequired[list[Base64Bytes] | None]
-    cwd: NotRequired[Base64Bytes | None]
+    cwd: NotRequired[PathValue | None]
     durability: NotRequired[RestartDurability | None]
     durability_max_interval_ms: NotRequired[int | None]
     durability_max_uncommitted_bytes: NotRequired[int | None]
@@ -2601,8 +2621,8 @@ class RestartReport(TypedDict):
     alias: str
     predecessor: RegistryEntry
     ready: bool
-    stderr_log: Base64Bytes
-    stdout_log: Base64Bytes
+    stderr_log: PathValue
+    stdout_log: PathValue
     successor: RegistryEntry
 
 
@@ -2695,7 +2715,7 @@ SaveFormat: TypeAlias = (
 class SaveManifest(TypedDict):
     "Manifest binding every saved representation to one source state."
 
-    canonical_session: Base64Bytes
+    canonical_session: PathValue
     files: list[SavedFile]
     format: str
     semantic_image_resources: list[SemanticImageResource]
@@ -3042,7 +3062,7 @@ class ScreenModeWraparound(TypedDict):
 ScreenPostconditionQuality: TypeAlias = "Literal['matched', 'matched_unsettled', 'child_completed', 'output_closed', 'deadline']"
 
 
-ScreenPredicate: TypeAlias = "ScreenPredicateContains | ScreenPredicateAbsent | ScreenPredicateMatchesRegex | ScreenPredicateExcludesRegex | ScreenPredicateRowContains | ScreenPredicateRowAbsent | ScreenPredicateRegionContains | ScreenPredicateRegionAbsent | ScreenPredicateCursor | ScreenPredicateMode | ScreenPredicateStateHash | ScreenPredicateAll | ScreenPredicateAny"
+ScreenPredicate: TypeAlias = "ScreenPredicateTextCount | ScreenPredicateContains | ScreenPredicateAbsent | ScreenPredicateMatchesRegex | ScreenPredicateExcludesRegex | ScreenPredicateRowContains | ScreenPredicateRowAbsent | ScreenPredicateRegionContains | ScreenPredicateRegionAbsent | ScreenPredicateCursor | ScreenPredicateMode | ScreenPredicateStateHash | ScreenPredicateAll | ScreenPredicateAny"
 
 
 class ScreenPredicateAbsent(TypedDict):
@@ -3090,7 +3110,7 @@ class ScreenPredicateExcludesRegex(TypedDict):
     predicate: Literal["excludes_regex"]
 
 
-ScreenPredicateInput: TypeAlias = "ScreenPredicateInputContains | ScreenPredicateInputAbsent | ScreenPredicateInputMatchesRegex | ScreenPredicateInputExcludesRegex | ScreenPredicateInputRowContains | ScreenPredicateInputRowAbsent | ScreenPredicateInputRegionContains | ScreenPredicateInputRegionAbsent | ScreenPredicateInputCursor | ScreenPredicateInputMode | ScreenPredicateInputStateHash | ScreenPredicateInputAll | ScreenPredicateInputAny"
+ScreenPredicateInput: TypeAlias = "ScreenPredicateInputTextCount | ScreenPredicateInputContains | ScreenPredicateInputAbsent | ScreenPredicateInputMatchesRegex | ScreenPredicateInputExcludesRegex | ScreenPredicateInputRowContains | ScreenPredicateInputRowAbsent | ScreenPredicateInputRegionContains | ScreenPredicateInputRegionAbsent | ScreenPredicateInputCursor | ScreenPredicateInputMode | ScreenPredicateInputStateHash | ScreenPredicateInputAll | ScreenPredicateInputAny"
 
 
 class ScreenPredicateInputAbsent(TypedDict):
@@ -3193,6 +3213,14 @@ class ScreenPredicateInputStateHash(TypedDict):
     predicate: Literal["state_hash"]
 
 
+class ScreenPredicateInputTextCount(TypedDict):
+    "Require a minimum number of literal or regex matches across reconstructed wrapped lines."
+
+    matching: ScreenPredicateInput
+    minimum: int
+    predicate: Literal["text_count"]
+
+
 class ScreenPredicateMatchesRegex(TypedDict):
     "Viewport text matches a bounded linear-time regular expression."
 
@@ -3246,6 +3274,14 @@ class ScreenPredicateStateHash(TypedDict):
     comparison: StateHashComparison
     hash: str
     predicate: Literal["state_hash"]
+
+
+class ScreenPredicateTextCount(TypedDict):
+    "Require a minimum number of literal or regex matches across reconstructed wrapped lines."
+
+    matching: ScreenPredicate
+    minimum: int
+    predicate: Literal["text_count"]
 
 
 class ScreenRegion(TypedDict):
@@ -3802,7 +3838,7 @@ class SurvivingPathRecord(TypedDict):
     "A path verified to exist when the failure was reported."
 
     kind: SurvivingKind
-    path: Base64Bytes
+    path: PathValue
 
 
 TerminalEffect: TypeAlias = "TerminalEffectBell | TerminalEffectTitleChanged | TerminalEffectWorkingDirectoryChanged | TerminalEffectClipboardWrite | TerminalEffectDesktopNotification | TerminalEffectProgressReport | TerminalEffectFullReset | TerminalEffectWindowResizeRequest | TerminalEffectPromptStart | TerminalEffectInputStart | TerminalEffectCommandStart | TerminalEffectCommandEnd | TerminalEffectUnknownSequence | TerminalEffectProcessingError"

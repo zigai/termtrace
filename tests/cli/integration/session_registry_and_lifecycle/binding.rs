@@ -40,7 +40,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let registered = compact_json_line(&registered);
     assert_eq!(registered["session_id"], manifest.session_id.to_string());
     assert_eq!(
-        registered["canonical_session_display"],
+        registered["canonical_session"],
         session
             .canonicalize()
             .expect("canonical")
@@ -116,9 +116,13 @@ fn registry_binds_alias_to_canonical_session_identity() {
 
     validate_json_value("registry-list-entry.schema.json", row);
 
-    assert!(
-        row.get("canonical_session_display").is_none(),
-        "machine registry-list contract changed unexpectedly: {row}"
+    assert_eq!(
+        row["canonical_session"],
+        session
+            .canonicalize()
+            .expect("canonical path")
+            .display()
+            .to_string()
     );
 
     let mut human = Command::cargo_bin("termtrace").expect("binary should build");
@@ -184,7 +188,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
     let removed = compact_json_line(&removed);
     assert_eq!(removed["evidence_preserved"], true);
     assert_eq!(
-        removed["canonical_session_display"],
+        removed["canonical_session"],
         session
             .canonicalize()
             .expect("canonical")

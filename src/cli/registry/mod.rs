@@ -1,4 +1,5 @@
 use crate::cli::output::ResponseWriter;
+use termtrace_model::value::path_bytes::PathValue;
 
 pub(super) mod args;
 
@@ -13,7 +14,6 @@ use std::{
     process::ExitCode,
 };
 use termtrace_engine::registry::SessionRegistry;
-use termtrace_model::registry::RegistryEntry;
 
 pub(super) fn run_register(
     response: &mut ResponseWriter,
@@ -24,22 +24,7 @@ pub(super) fn run_register(
         .register(&arguments.name, &arguments.session)
         .into_diagnostic()?;
 
-    let display_path = entry.session_path();
-
-    return write_json_line(
-        response,
-        &RegistryMutationResult {
-            entry: &entry,
-            canonical_session_display: display_path.display().to_string(),
-        },
-    );
-}
-
-#[derive(serde::Serialize)]
-struct RegistryMutationResult<'entry> {
-    #[serde(flatten)]
-    entry: &'entry RegistryEntry,
-    canonical_session_display: String,
+    return write_json_line(response, &entry);
 }
 
 pub(super) fn run_resolve(
@@ -125,14 +110,13 @@ pub(super) fn run_list(response: &mut ResponseWriter, arguments: ListArgs) -> Re
 pub(super) fn run_remove(response: &mut ResponseWriter, arguments: RemoveArgs) -> Result<ExitCode> {
     let registry = SessionRegistry::open_default().into_diagnostic()?;
     let entry = registry.remove(&arguments.name).into_diagnostic()?;
-    let canonical_session_display = entry.session_path().display().to_string();
 
     return write_json_line(
         response,
         &serde_json::json!({
             "alias": entry.alias,
-            "canonical_session": entry.canonical_session,
-            "canonical_session_display": canonical_session_display,
+            "canonical_session": PathValue::from_bytes(&entry.canonical_session),
+
             "session_id": entry.session_id,
             "evidence_preserved": true,
         }),

@@ -1,4 +1,5 @@
 use super::*;
+use termtrace_model::value::path_bytes::PathValue;
 use termtrace_model::{
     artifact::original::original_capture_status_path,
     execution::layout,
@@ -54,20 +55,17 @@ pub(in crate::cli) fn run_restart(
 
     let predecessor_entry = report.predecessor;
     let successor = report.successor;
-    let predecessor = predecessor_entry.session_path();
-    let predecessor_display = predecessor.display().to_string();
-    let successor_display = successor.session_path().display().to_string();
 
     let payload = serde_json::json!({
         "alias": arguments.name,
         "predecessor": {
-            "canonical_session": predecessor_entry.canonical_session,
-            "canonical_session_display": predecessor_display,
+            "canonical_session": PathValue::from_bytes(&predecessor_entry.canonical_session),
+
             "session_id": predecessor_entry.session_id,
         },
         "successor": {
-            "canonical_session": successor.canonical_session,
-            "canonical_session_display": successor_display,
+            "canonical_session": PathValue::from_bytes(&successor.canonical_session),
+
             "session_id": successor.session_id,
             "recorder_pid": successor.recorder_pid,
             "recorder_process_start_ticks": successor.recorder_process_start_ticks,

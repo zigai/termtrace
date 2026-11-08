@@ -821,7 +821,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
     let result = compact_json_line(&output);
     assert_eq!(result["kind"], "asciicast");
     assert!(result["output"].is_string());
-    assert_eq!(result["output_display"], cast.display().to_string());
+    assert_eq!(result["output"], cast.display().to_string());
     assert!(cast.is_file());
 
     let damaged = temporary.path().join("damaged-events.jsonl");
@@ -866,10 +866,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
     let first = compact_json_line(&first);
     assert_eq!(first["kind"], "schema_generation");
     assert!(first["directory"].is_string());
-    assert_eq!(
-        first["directory_display"],
-        schema_directory.display().to_string()
-    );
+    assert_eq!(first["directory"], schema_directory.display().to_string());
     assert_eq!(first["replaced_existing_files"], false);
 
     let mut second = Command::cargo_bin("termtrace").expect("binary should build");

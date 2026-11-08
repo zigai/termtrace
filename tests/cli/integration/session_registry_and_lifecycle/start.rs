@@ -36,19 +36,12 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         .and_then(serde_json::Value::as_u64)
         .is_some());
 
-    let canonical: ByteString = serde_json::from_value(
-        response
-            .pointer("/canonical_session")
-            .expect("canonical session")
-            .clone(),
-    )
-    .expect("canonical path bytes");
-
-    let session = PathBuf::from(OsString::from_vec(canonical.as_bytes().to_vec()));
-    assert_eq!(
-        response["canonical_session_display"],
-        session.display().to_string()
+    let session = PathBuf::from(
+        response["canonical_session"]
+            .as_str()
+            .expect("canonical path"),
     );
+    assert_eq!(response["canonical_session"], session.display().to_string());
 
     let manifest = read_manifest(&session).expect("started manifest");
     assert_eq!(manifest.creation_alias.as_deref(), Some("demo"));
@@ -133,7 +126,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
     assert_eq!(failed["startup_state"], "completed_failure");
 
     let failed_session = PathBuf::from(
-        failed["canonical_session_display"]
+        failed["canonical_session"]
             .as_str()
             .or_else(|| return failed["path"].as_str())
             .expect("failed session path"),

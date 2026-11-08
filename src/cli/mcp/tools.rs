@@ -97,7 +97,7 @@ pub(super) struct StartInput {
     rows: Option<u16>,
     /// Readiness condition to wait for before returning.
     until: Option<Until>,
-    /// Maximum wait for `until` in milliseconds; defaults to 30000.
+    /// Maximum wait for `until` in milliseconds; defaults to 30000. Keep below the MCP client's tool timeout.
     timeout_ms: Option<u64>,
     /// Environment variables set for the command, on top of the server's environment.
     #[serde(default)]
@@ -149,8 +149,10 @@ impl StartInput {
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum SendScreen {
-    /// Only the resulting state hash.
+    /// Full trimmed screen text.
     Text,
+    /// Only the resulting state hash.
+    State,
     /// Only the rows that changed since just before the send.
     Diff,
 }
@@ -161,13 +163,16 @@ pub(super) struct SendInput {
     /// Session name or path.
     session: String,
     /// Inputs in order: key names such as `enter`, `ctrl+c`, or `up`; `text:VALUE`;
-    /// `paste:VALUE`; `raw:VALUE`; `raw-file:PATH`; one printable character;
+    /// `paste:VALUE`; `sleep:200ms` to pause between atoms without splitting text;
+    /// `raw:VALUE`; `raw-file:PATH`; one printable character;
     /// `click:COL,ROW`; `activate:TEXT`; `resize:COLSxROWS`; `signal:INT`; or `mark:LABEL`.
     inputs: Vec<String>,
     /// Condition to wait for after the input.
     until: Option<Until>,
-    /// Maximum wait for `until` in milliseconds; defaults to 30000.
+    /// Maximum wait for `until` in milliseconds; defaults to 30000. Keep below the MCP client's tool timeout.
     timeout_ms: Option<u64>,
+    /// Require the matched screen to stay unchanged for this many milliseconds before returning.
+    settle_ms: Option<u64>,
     /// With idle `until`, how long to wait for the screen to react before reporting
     /// `unchanged`, in milliseconds; defaults to 2000.
     reaction_timeout_ms: Option<u64>,
@@ -177,6 +182,8 @@ pub(super) struct SendInput {
     intent: Option<String>,
     /// Screen report after the send; defaults to `text`.
     screen: Option<SendScreen>,
+    /// Include canonical event boundaries and per-atom identifiers.
+    verbose: Option<bool>,
 }
 
 impl SendInput {
@@ -195,6 +202,7 @@ impl SendInput {
         }
 
         push_millis(&mut arguments, "--timeout", self.timeout_ms);
+        push_millis(&mut arguments, "--settle", self.settle_ms);
         push_millis(
             &mut arguments,
             "--reaction-timeout",
@@ -203,9 +211,14 @@ impl SendInput {
         push_optional(&mut arguments, "--if-state", self.if_state);
         push_optional(&mut arguments, "--intent", self.intent);
 
+        if self.verbose == Some(true) {
+            arguments.push("--verbose".to_owned());
+        }
+
         if let Some(screen) = self.screen {
             let screen = match screen {
                 SendScreen::Text => "text",
+                SendScreen::State => "state",
                 SendScreen::Diff => "diff",
             };
             push_value(&mut arguments, "--screen", screen);
@@ -301,7 +314,7 @@ pub(super) struct WaitInput {
     session: String,
     /// Condition to wait for.
     r#for: WaitFor,
-    /// Maximum wait in milliseconds; defaults to 30000.
+    /// Maximum wait in milliseconds; defaults to 30000. Keep below the MCP client's tool timeout.
     timeout_ms: Option<u64>,
 }
 

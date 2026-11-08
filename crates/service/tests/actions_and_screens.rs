@@ -56,6 +56,7 @@ fn act_request_builds_a_composite_sequence() {
                 text: "hello".to_owned()
             },
             timeout: Duration::from_secs(5),
+            settle: Duration::ZERO,
         }
     );
     assert_eq!(request.projection.detail, FrameDetail::Text);

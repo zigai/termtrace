@@ -28,7 +28,7 @@ use zstd::stream::encode_all;
 pub(super) const MAX_SCREEN_WAITERS: usize = 128;
 
 pub(in crate::recording) struct ScreenWaiter {
-    pub(super) request_id: Uuid,
+    pub(in crate::recording) request_id: Uuid,
     pub(super) predicate: Option<CompiledScreenPredicate>,
     pub(super) stable_for: Duration,
     pub(super) deadline: Instant,

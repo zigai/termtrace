@@ -554,7 +554,7 @@ test("live locator parity, rich frames, and waits", async () => {
             includeHidden: true,
         });
         assert.strictEqual(observed.state_id, 0n);
-        assert.ok(observed.canonical_session instanceof Uint8Array);
+        assert.strictEqual(observed.canonical_session, rec.path);
         // Argument conversion fails before the promise exists.
         assert.throws(() => completed.frameAt({ selector: "state_id", state_id: -1n }), TypeError);
         const final = await completed.frame();

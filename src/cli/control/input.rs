@@ -1,8 +1,15 @@
 use super::*;
+use crate::cli::parsers::parse_stability_duration;
 
 /// Parse one `send` input atom: a key chord, `text:`, `paste:`, `raw:`, `raw-file:`, or one
 /// printable character.
 pub(super) fn parse_atom(atom: &str) -> Result<InputAtom> {
+    if let Some(duration) = atom.strip_prefix("sleep:") {
+        return Ok(InputAtom::Sleep(
+            parse_stability_duration(duration).map_err(|error| miette::miette!("{error}"))?,
+        ));
+    }
+
     if let Some(chord) = KeyChord::parse(atom).into_diagnostic()? {
         return Ok(InputAtom::Key(chord));
     }

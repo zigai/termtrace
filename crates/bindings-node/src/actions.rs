@@ -393,6 +393,7 @@ impl JsActionBuilder {
             request.postcondition = ActionCondition::Screen {
                 predicate: ScreenPredicate::Contains { text: pattern },
                 timeout,
+                settle: Duration::ZERO,
             };
         });
     }
@@ -413,7 +414,11 @@ impl JsActionBuilder {
         let timeout = host::millis(timeout_ms, defaults::WAIT_TIMEOUT)?;
 
         return self.edit(|request| {
-            request.postcondition = ActionCondition::Screen { predicate, timeout };
+            request.postcondition = ActionCondition::Screen {
+                predicate,
+                timeout,
+                settle: Duration::ZERO,
+            };
         });
     }
 

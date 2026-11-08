@@ -581,7 +581,7 @@ pub struct TmuxPaneProvenance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution::layout;
+    use crate::{execution::layout, value::path_bytes::PathValue};
     use std::{
         ffi::OsString,
         os::unix::ffi::{OsStrExt as _, OsStringExt as _},
@@ -695,7 +695,8 @@ mod tests {
         assert_eq!(decoded.session.as_os_str().as_bytes(), bytes);
 
         let value: serde_json::Value = serde_json::from_slice(&encoded).expect("metadata");
-        assert_eq!(value["session"], serde_json::json!(bytes.to_vec()));
+        let path: PathValue = serde_json::from_value(value["session"].clone()).expect("exact path");
+        assert_eq!(path.into_bytes().as_bytes(), bytes);
         assert!(value["artifact_roots_verified"].is_u64());
     }
 }

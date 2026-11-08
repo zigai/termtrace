@@ -192,12 +192,13 @@ impl<'py> Host<'py> {
             return Ok(repr);
         }
 
-        let bytes: Vec<u8> = repr.extract()?;
+        let encoded = repr
+            .cast::<PyDict>()
+            .map_err(PyErr::from)?
+            .get_item("base64")?
+            .ok_or_else(|| return PyValueError::new_err("encoded path has no Base64 bytes"))?;
 
-        return Ok(self
-            .py
-            .import("os")?
-            .call_method1("fsdecode", (PyBytes::new(self.py, &bytes),))?);
+        return Ok(self.py.import("os")?.call_method1("fsdecode", (encoded,))?);
     }
 }
 

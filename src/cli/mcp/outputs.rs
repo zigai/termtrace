@@ -23,7 +23,7 @@ use termtrace_model::{
         screen::{ScreenFrame, ScreenGeometry},
         timeline::TimelineEntry,
     },
-    value::{pagination::OutputPage, ByteString},
+    value::{pagination::OutputPage, path_bytes::PathValue},
 };
 
 // Each schema lists the shapes a command prints, so a client can validate any result,
@@ -37,7 +37,6 @@ pub(super) fn start() -> Arc<JsonObject> {
             "startup_state",
             "alias",
             "canonical_session",
-            "canonical_session_display",
             "session_id",
             "ready",
             "completion",
@@ -46,13 +45,13 @@ pub(super) fn start() -> Arc<JsonObject> {
             "kind": {"const": "started"},
             "startup_state": {"enum": ["live", "completed_success", "completed_failure"]},
             "alias": {"type": "string"},
-            "canonical_session": schemas.typed::<ByteString>(),
-            "canonical_session_display": {"type": "string"},
+            "canonical_session": schemas.typed::<PathValue>(),
+
             "session_id": {"type": "string", "format": "uuid"},
             "recorder_pid": {"type": ["integer", "null"]},
             "recorder_process_start_ticks": {"type": ["integer", "null"]},
-            "stdout_log": {"type": "string"},
-            "stderr_log": {"type": "string"},
+            "stdout_log": schemas.typed::<PathValue>(),
+            "stderr_log": schemas.typed::<PathValue>(),
             "ready": {"type": "boolean"},
             "completion": schemas.typed::<Option<SessionCompletion>>(),
             "postcondition": object(
@@ -84,6 +83,8 @@ pub(super) fn send() -> Arc<JsonObject> {
             "kind": {"enum": ["none", "idle", "screen"]},
             "matched": {"type": "boolean"},
             "outcome": {"type": "string"},
+            "matched_row": {"type": "integer", "minimum": 0},
+            "matched_text": {"type": "string"},
         }),
     );
     let applied = object(
@@ -96,7 +97,6 @@ pub(super) fn send() -> Arc<JsonObject> {
             "postcondition",
             "observation",
             "ended",
-            "boundaries",
         ],
         json!({
             "v": {"const": 1},
@@ -125,6 +125,8 @@ pub(super) fn send() -> Arc<JsonObject> {
             "boundaries": schemas.typed::<ActorBoundaries>(),
             "code": {"const": "postcondition_failed"},
             "changes": schemas.typed::<ScreenChanges>(),
+            "screen": {"type": "string"},
+            "size": size(),
         }),
     );
     let rejected = object(
@@ -138,7 +140,6 @@ pub(super) fn send() -> Arc<JsonObject> {
             "input",
             "observation",
             "ended",
-            "boundaries",
         ],
         json!({
             "v": {"const": 1},
@@ -179,6 +180,8 @@ pub(super) fn send() -> Arc<JsonObject> {
             "request_id": {"type": "string", "format": "uuid"},
             "postcondition": postcondition,
             "changes": schemas.typed::<ScreenChanges>(),
+            "screen": {"type": "string"},
+            "size": size(),
         }),
     );
     let lifecycle = lifecycle(&mut schemas);
@@ -399,26 +402,22 @@ pub(super) fn screenshot() -> Arc<JsonObject> {
             "kind",
             "truth_layer",
             "directory",
-            "directory_display",
             "image",
-            "image_display",
             "manifest",
-            "manifest_display",
             "state_hash",
         ],
         json!({
             "kind": {"const": "semantic_screenshot"},
             "truth_layer": {"const": "semantic_rendering"},
-            "directory": schemas.typed::<ByteString>(),
-            "directory_display": {"type": "string"},
-            "image": schemas.typed::<ByteString>(),
-            "image_display": {"type": "string"},
-            "manifest": schemas.typed::<ByteString>(),
-            "manifest_display": {"type": "string"},
+            "directory": schemas.typed::<PathValue>(),
+
+            "image": schemas.typed::<PathValue>(),
+
+            "manifest": schemas.typed::<PathValue>(),
+
             "state_hash": {"type": "string"},
         }),
     );
-
     let native = object(
         &[
             "kind",
@@ -432,10 +431,10 @@ pub(super) fn screenshot() -> Arc<JsonObject> {
         json!({
             "kind": {"const": "native_screenshot"},
             "truth_layer": {"const": "native"},
-            "directory": {"type": "string"},
-            "image": {"type": "string"},
-            "manifest": {"type": "string"},
-            "endpoint": {"type": "string"},
+            "directory": schemas.typed::<PathValue>(),
+            "image": schemas.typed::<PathValue>(),
+            "manifest": schemas.typed::<PathValue>(),
+            "endpoint": schemas.typed::<PathValue>(),
             "presentation_evidence": {"const": "post_endpoint_stable_capture"},
         }),
     );
@@ -466,7 +465,7 @@ pub(super) fn bundle() -> Arc<JsonObject> {
         json!({
             "kind": {"const": "bundle"},
             "profile": {"const": "debug"},
-            "directory": {"type": "string"},
+            "directory": schemas.typed::<PathValue>(),
             "manifest": schemas.typed::<BugReportManifest>(),
         }),
     );
@@ -474,7 +473,7 @@ pub(super) fn bundle() -> Arc<JsonObject> {
         &["kind", "directory", "manifest"],
         json!({
             "kind": {"const": "bundle"},
-            "directory": {"type": "string"},
+            "directory": schemas.typed::<PathValue>(),
             "manifest": schemas.typed::<BundleManifest>(),
         }),
     );
@@ -526,20 +525,13 @@ fn size() -> Value {
 
 fn lifecycle(schemas: &mut Schemas) -> Value {
     return object(
-        &[
-            "kind",
-            "operation",
-            "lifecycle",
-            "session",
-            "session_display",
-            "diagnostic",
-        ],
+        &["kind", "operation", "lifecycle", "session", "diagnostic"],
         json!({
             "kind": {"const": "session_lifecycle"},
             "operation": {"type": "string"},
             "lifecycle": schemas.typed::<SessionPhase>(),
-            "session": schemas.typed::<ByteString>(),
-            "session_display": {"type": "string"},
+            "session": schemas.typed::<PathValue>(),
+
             "diagnostic": {"type": ["string", "null"]},
         }),
     );

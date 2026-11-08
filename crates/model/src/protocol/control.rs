@@ -37,7 +37,7 @@ pub struct ClockSample {
 }
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 20;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 21;
 /// Maximum encoded request or response size.
 pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 16 * 1024 * 1024;
 /// Response deadline for commands that do not wait or pace input.
@@ -125,6 +125,13 @@ pub enum PointerOperation {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "predicate", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ScreenPredicate {
+    /// Require a minimum number of literal or regex matches across reconstructed wrapped lines.
+    TextCount {
+        /// A contains or matches-regex predicate.
+        matching: Box<ScreenPredicate>,
+        /// Minimum number of non-overlapping matches.
+        minimum: usize,
+    },
     /// Viewport text contains an exact UTF-8 substring.
     Contains {
         /// Exact UTF-8 substring.
@@ -322,6 +329,11 @@ pub enum ScreenPostconditionQuality {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlCommand {
+    /// Journal the pre-send match count so a mixed send reuses it on retry.
+    MatchBaseline {
+        /// Literal or regex predicate whose occurrences are counted.
+        predicate: ScreenPredicate,
+    },
     /// Verify that the host and protocol are responsive.
     Ping,
     /// Return current process and event counters.
@@ -476,7 +488,8 @@ impl ControlCommand {
             | Self::ScreenFrame { .. }
             | Self::WaitScreen { .. }
             | Self::CaptureStable { .. } => false,
-            Self::Input { .. }
+            Self::MatchBaseline { .. }
+            | Self::Input { .. }
             | Self::InputSequence { .. }
             | Self::Act { .. }
             | Self::Key { .. }
@@ -539,6 +552,7 @@ impl ControlCommand {
             }
             Self::Ping
             | Self::Status
+            | Self::MatchBaseline { .. }
             | Self::EventCursor { .. }
             | Self::Snapshot
             | Self::ScreenFrame { .. }
@@ -560,8 +574,16 @@ impl ControlCommand {
 fn input_sequence_response_timeout(atoms: &[InputSequenceAtom], pace_ns: u64) -> Duration {
     let gaps = u64::try_from(atoms.len().saturating_sub(1)).unwrap_or(u64::MAX);
     let pacing = Duration::from_nanos(pace_ns.saturating_mul(gaps)).min(MAX_INPUT_SEQUENCE_PACING);
+    let delay = atoms.iter().fold(Duration::ZERO, |total, atom| {
+        return total.saturating_add(match atom {
+            InputSequenceAtom::Sleep { duration_ns, .. } => Duration::from_nanos(*duration_ns),
+            _ => Duration::ZERO,
+        });
+    });
 
-    return DEFAULT_CONTROL_RESPONSE_TIMEOUT.saturating_add(pacing);
+    return DEFAULT_CONTROL_RESPONSE_TIMEOUT
+        .saturating_add(pacing)
+        .saturating_add(delay);
 }
 
 /// Request envelope carried as one JSON line.
@@ -618,6 +640,11 @@ pub struct LiveEventCursor {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(rename = "ControlData")]
 pub enum ControlPayload {
+    /// Retry-stable match count from before a send's first step.
+    MatchBaseline {
+        /// Number of matching occurrences in the presented screen.
+        matches: usize,
+    },
     /// Read-only actor authority for a durable event-file suffix.
     EventCursor {
         /// Device of the writer's open file descriptor.
@@ -826,6 +853,8 @@ pub enum ActionPostcondition {
         predicate: ScreenPredicate,
         /// Server-side monotonic deadline interval.
         timeout_ns: u64,
+        /// Required unchanged interval after a match; zero returns immediately.
+        stable_for_ns: u64,
     },
 }
 
@@ -896,6 +925,12 @@ pub enum ActionPostconditionResult {
         matched: bool,
         /// Closed completion classification.
         quality: ScreenPostconditionQuality,
+        /// Zero-based row containing the first byte of the accepted text match.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        matched_row: Option<u16>,
+        /// Exact accepted literal or regex match.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        matched_text: Option<String>,
         /// Exact terminating state hash when known.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         state_hash: Option<String>,
@@ -909,6 +944,13 @@ pub enum ActionPostconditionResult {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "input", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InputSequenceAtom {
+    /// Pause between input atoms without pacing the text within them.
+    Sleep {
+        /// Caller-owned operation identifier retained in canonical events.
+        operation_id: Uuid,
+        /// Delay before applying the next atom.
+        duration_ns: u64,
+    },
     /// Exact caller bytes with an explicit semantic category.
     Bytes {
         /// Caller-owned operation identifier retained in canonical events.

@@ -98,9 +98,11 @@ fn retention_never_terminates_an_authenticated_idle_recorder() {
     let response: serde_json::Value =
         serde_json::from_slice(&started.get_output().stdout).expect("start response");
 
-    let canonical: ByteString =
-        serde_json::from_value(response["canonical_session"].clone()).expect("session path");
-    let session = PathBuf::from(OsString::from_vec(canonical.into_bytes()));
+    let session = PathBuf::from(
+        response["canonical_session"]
+            .as_str()
+            .expect("session path"),
+    );
 
     File::open(session.join("events.jsonl"))
         .expect("event log")

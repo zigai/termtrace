@@ -90,6 +90,10 @@ export interface ActionPostconditionResultScreen {
   kind: "screen"
   /** Whether the predicate matched before termination. */
   matched: boolean
+  /** Zero-based row containing the first byte of the accepted text match. */
+  matched_row?: number | null
+  /** Exact accepted literal or regex match. */
+  matched_text?: string | null
   /** Closed completion classification. */
   quality: ScreenPostconditionQuality
   /** Exact terminating state hash when known. */
@@ -331,7 +335,7 @@ export type Base64Bytes = Uint8Array
 /** Top-level whole-file bundle manifest. */
 export interface BundleManifest {
   /** Exact source session path bytes. */
-  canonical_session: Base64Bytes
+  canonical_session: PathValue
   /** Stable manifest format. */
   format: string
   /** Whether canonical raw evidence is included. */
@@ -1445,7 +1449,7 @@ export interface GeometrySolveReport {
 export type GifLoop = "infinite" | "once"
 
 /** Structured semantic provenance for exact input bytes. */
-export type InputDescriptor = InputDescriptorRaw | InputDescriptorText | InputDescriptorKey | InputDescriptorPaste | InputDescriptorFocus | InputDescriptorPointer | InputDescriptorActivate
+export type InputDescriptor = InputDescriptorSleep | InputDescriptorRaw | InputDescriptorText | InputDescriptorKey | InputDescriptorPaste | InputDescriptorFocus | InputDescriptorPointer | InputDescriptorActivate
 
 /** Semantic visible-text resolution followed by a mode-aware click. */
 export interface InputDescriptorActivate {
@@ -1549,13 +1553,20 @@ export interface InputDescriptorRaw {
   kind: "raw"
 }
 
+/** Pause before the following input atom. */
+export interface InputDescriptorSleep {
+  /** Requested delay in nanoseconds. */
+  duration_ns: bigint
+  kind: "sleep"
+}
+
 /** UTF-8 text intentionally entered as textual content. */
 export interface InputDescriptorText {
   kind: "text"
 }
 
 /** User-facing interpretation of an input byte sequence. */
-export type InputKind = "raw" | "text" | "keys" | "paste" | "focus" | "pointer"
+export type InputKind = "sleep" | "raw" | "text" | "keys" | "paste" | "focus" | "pointer"
 
 /** Canonical result coordinates for one atom in a successful input sequence. */
 export interface InputSequenceAtomOutcome {
@@ -2064,7 +2075,7 @@ export interface Observation {
   /** Source boundary observed or validated. */
   boundary: CanonicalBoundary
   /** Exact canonical session path bytes when evidence exists. */
-  canonical_session?: Base64Bytes | null
+  canonical_session?: PathValue | null
   /** Settlement quality. */
   capture_quality: CaptureQuality
   /** Responsible canonical event sequence when known. */
@@ -2154,7 +2165,7 @@ export interface OriginalCaptureFacts {
   /** Primary failure description. */
   reason: string
   /** Exact canonical session path bytes. */
-  session: Base64Bytes
+  session: PathValue
   /** Supervisor state observed when the error was built, including derived `abandoned`. */
   state: OriginalCaptureState
   /** Paths verified to exist when the error was built. */
@@ -2305,6 +2316,15 @@ export interface PageSource {
   session_path: Base64Bytes
   /** Non-authoritative display only; never used to select or authenticate a source. */
   session_path_display: string
+}
+
+/** One exact filesystem path in text output. */
+export type PathValue = string | PathValueBase64
+
+/** A path whose bytes are not valid UTF-8. */
+export interface PathValueBase64 {
+  /** Exact path bytes encoded as Base64. */
+  base64: Base64Bytes
 }
 
 /** Length and short hash of a payload that may hold a secret, without the payload. */
@@ -2781,7 +2801,7 @@ export interface RegistryEntry {
   /** Validated friendly alias. */
   alias: string
   /** Exact canonical session-directory path bytes. */
-  canonical_session: Base64Bytes
+  canonical_session: PathValue
   /** Control protocol expected by the registering build. */
   control_protocol_version: number
   /** Stable entry format identifier. */
@@ -2803,7 +2823,7 @@ export interface RegistryListEntry {
   /** Friendly alias. */
   alias: string
   /** Exact canonical session path bytes. */
-  canonical_session: Base64Bytes
+  canonical_session: PathValue
   /** Effective command bytes when the manifest is readable. */
   command?: Array<Base64Bytes> | null
   /** Focused diagnostic for unhealthy entries. */
@@ -2819,7 +2839,7 @@ export interface RegistryListEntry {
   /** Session wall-clock origin when the manifest is readable. */
   started_unix_ns?: bigint | null
   /** Effective working directory when the manifest is readable. */
-  working_directory?: Base64Bytes | null
+  working_directory?: PathValue | null
 }
 
 /** A named session path paired with the registry's evidence-derived lifecycle. */
@@ -2904,7 +2924,7 @@ export interface RestartConfiguration {
   /** New exact executable/arguments; absent to keep. */
   command?: Array<Base64Bytes> | null
   /** New exact working directory, absent to keep. */
-  cwd?: Base64Bytes | null
+  cwd?: PathValue | null
   /** New durability mode, absent to keep. */
   durability?: RestartDurability | null
   /** Bounded durability interval override. */
@@ -2959,9 +2979,9 @@ export interface RestartReport {
   /** True only after successful retargeting. */
   ready: boolean
   /** Exact owner-only stderr log path. */
-  stderr_log: Base64Bytes
+  stderr_log: PathValue
   /** Exact owner-only stdout log path. */
-  stdout_log: Base64Bytes
+  stdout_log: PathValue
   /** New binding. */
   successor: RegistryEntry
 }
@@ -3079,7 +3099,7 @@ export type SaveFormat = "txt" | "json" | "deep-json" | "vt" | "html" | "svg" | 
 /** Manifest binding every saved representation to one source state. */
 export interface SaveManifest {
   /** Exact canonical session path bytes. */
-  canonical_session: Base64Bytes
+  canonical_session: PathValue
   /** Manifested representations. */
   files: Array<SavedFile>
   /** Stable manifest format. */
@@ -3462,7 +3482,7 @@ export interface ScreenModeWraparound {
 export type ScreenPostconditionQuality = "matched" | "matched_unsettled" | "child_completed" | "output_closed" | "deadline"
 
 /** Exact predicate evaluated against the latest presented viewport. */
-export type ScreenPredicate = ScreenPredicateContains | ScreenPredicateAbsent | ScreenPredicateMatchesRegex | ScreenPredicateExcludesRegex | ScreenPredicateRowContains | ScreenPredicateRowAbsent | ScreenPredicateRegionContains | ScreenPredicateRegionAbsent | ScreenPredicateCursor | ScreenPredicateMode | ScreenPredicateStateHash | ScreenPredicateAll | ScreenPredicateAny
+export type ScreenPredicate = ScreenPredicateTextCount | ScreenPredicateContains | ScreenPredicateAbsent | ScreenPredicateMatchesRegex | ScreenPredicateExcludesRegex | ScreenPredicateRowContains | ScreenPredicateRowAbsent | ScreenPredicateRegionContains | ScreenPredicateRegionAbsent | ScreenPredicateCursor | ScreenPredicateMode | ScreenPredicateStateHash | ScreenPredicateAll | ScreenPredicateAny
 
 /** Viewport text excludes an exact UTF-8 substring. */
 export interface ScreenPredicateAbsent {
@@ -3571,6 +3591,15 @@ export interface ScreenPredicateStateHash {
   /** Lowercase BLAKE3 state hash. */
   hash: string
   predicate: "state_hash"
+}
+
+/** Require a minimum number of literal or regex matches across reconstructed wrapped lines. */
+export interface ScreenPredicateTextCount {
+  /** A contains or matches-regex predicate. */
+  matching: ScreenPredicate
+  /** Minimum number of non-overlapping matches. */
+  minimum: bigint
+  predicate: "text_count"
 }
 
 /** Absolute zero-based half-open terminal region. */
@@ -4197,7 +4226,7 @@ export interface SurvivingPathRecord {
   /** What the path holds. */
   kind: SurvivingKind
   /** Exact Linux path bytes. */
-  path: Base64Bytes
+  path: PathValue
 }
 
 /** A side effect the program asked the terminal for, as libghostty-vt reported it. */

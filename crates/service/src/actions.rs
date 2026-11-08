@@ -19,6 +19,8 @@ use uuid::Uuid;
 /// One immutable user-intent atom applied by `Session::act`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InputAtom {
+    /// Pause before the next atom without splitting textual content.
+    Sleep(Duration),
     /// UTF-8 terminal text; typed one scalar per atom when the action is paced.
     Text(String),
     /// Exact raw terminal bytes.
@@ -50,6 +52,8 @@ pub enum ActionCondition {
         predicate: ScreenPredicate,
         /// Maximum time to wait for a matching screen.
         timeout: Duration,
+        /// Required unchanged interval after a match.
+        settle: Duration,
     },
 }
 
@@ -78,9 +82,14 @@ impl ActionCondition {
                 timeout_ns: duration_ns(*timeout),
                 reaction: reaction.to_wire(),
             },
-            Self::Screen { predicate, timeout } => ActionPostcondition::Screen {
+            Self::Screen {
+                predicate,
+                timeout,
+                settle,
+            } => ActionPostcondition::Screen {
                 predicate: predicate.clone(),
                 timeout_ns: duration_ns(*timeout),
+                stable_for_ns: duration_ns(*settle),
             },
         };
     }
@@ -238,7 +247,11 @@ impl ActRequest {
     /// Await a screen predicate after input application.
     #[must_use]
     pub fn until_screen(mut self, predicate: ScreenPredicate, timeout: Duration) -> Self {
-        self.postcondition = ActionCondition::Screen { predicate, timeout };
+        self.postcondition = ActionCondition::Screen {
+            predicate,
+            timeout,
+            settle: Duration::ZERO,
+        };
 
         return self;
     }
@@ -298,6 +311,10 @@ fn wire_atom(
     caller_intent: Option<String>,
 ) -> InputSequenceAtom {
     return match atom {
+        InputAtom::Sleep(duration) => InputSequenceAtom::Sleep {
+            operation_id,
+            duration_ns: duration_ns(*duration),
+        },
         InputAtom::Text(text) => InputSequenceAtom::Bytes {
             operation_id,
             data: ByteString::new(text.as_bytes().to_vec()),

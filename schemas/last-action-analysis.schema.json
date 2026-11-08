@@ -294,17 +294,9 @@
       "type": "object"
     },
     "ExactPath": {
-      "anyOf": [
+      "allOf": [
         {
-          "type": "string"
-        },
-        {
-          "items": {
-            "maximum": 255,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "type": "array"
+          "$ref": "#/$defs/PathValue"
         }
       ],
       "x-termtrace-path": true
@@ -683,6 +675,28 @@
           "type": "string"
         }
       ]
+    },
+    "PathValue": {
+      "anyOf": [
+        {
+          "description": "A path that is valid UTF-8.",
+          "type": "string"
+        },
+        {
+          "description": "A path whose bytes are not valid UTF-8.",
+          "properties": {
+            "base64": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Exact path bytes encoded as Base64."
+            }
+          },
+          "required": [
+            "base64"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "One exact filesystem path in text output."
     },
     "ValueChange": {
       "additionalProperties": false,

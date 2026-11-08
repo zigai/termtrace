@@ -341,6 +341,202 @@ async fn failed_calls_return_tool_errors_and_leave_the_server_usable() {
 }
 
 #[tokio::test]
+async fn send_ignores_typed_matches_and_returns_the_deadline_screen() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let client = connect(&temporary.path().join("state")).await;
+    start_waiting_shell(&client, "echo").await;
+
+    let sent = call(
+        &client,
+        "send",
+        json!({
+            "session": "echo",
+            "inputs": ["text:COMPLETE"],
+            "until": {"kind": "screen_regex", "pattern": "COMPLETE"},
+            "timeout_ms": 100,
+        }),
+    )
+    .await;
+    let marked = call(
+        &client,
+        "send",
+        json!({
+            "session": "echo", "inputs": ["paste:RESULT", "mark:submitted"],
+            "until": {"kind": "screen", "text": "RESULT"}, "timeout_ms": 100,
+        }),
+    )
+    .await;
+    let reply = call(
+        &client,
+        "send",
+        json!({
+            "session": "echo", "inputs": ["enter"],
+            "until": {"kind": "screen", "text": "hello COMPLETERESULT"}, "timeout_ms": 1000,
+            "settle_ms": 100,
+        }),
+    )
+    .await;
+    let stopped = call(&client, "stop", json!({"session": "echo", "wait": true})).await;
+    client.cancel().await.expect("close client");
+
+    assert!(!failed(&stopped), "{stopped:?}");
+    assert!(failed(&sent), "{sent:?}");
+    assert_eq!(structured(&sent)["postcondition"]["outcome"], "deadline");
+    assert_eq!(structured(&sent)["screen"], "name? COMPLETE");
+    assert!(failed(&marked), "{marked:?}");
+    assert_eq!(structured(&marked)["postcondition"]["outcome"], "deadline");
+    assert_eq!(structured(&marked)["screen"], "name? COMPLETERESULT");
+    assert!(!failed(&reply), "{reply:?}");
+    assert_eq!(structured(&reply)["postcondition"]["matched_row"], 1);
+    assert_eq!(
+        structured(&reply)["postcondition"]["matched_text"],
+        "hello COMPLETERESULT"
+    );
+    assert_eq!(structured(&reply)["postcondition"]["outcome"], "matched");
+}
+
+#[tokio::test]
+async fn wrapped_typed_matches_do_not_satisfy_a_send() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let client = connect(&temporary.path().join("state")).await;
+    let started = call(
+        &client,
+        "start",
+        json!({
+            "name": "wrapped", "command": ["/bin/sh", "-c", WAITING_SHELL],
+            "cols": 12, "rows": 6, "until": {"kind": "screen", "text": "name?"}, "timeout_ms": 1000,
+        }),
+    )
+    .await;
+    let sent = call(
+        &client,
+        "send",
+        json!({
+            "session": "wrapped", "inputs": ["text:prefix WRAPPEDTARGET end"],
+            "until": {"kind": "screen", "text": "WRAPPEDTARGET"}, "timeout_ms": 100,
+        }),
+    )
+    .await;
+    let spaced = call(
+        &client,
+        "send",
+        json!({
+            "session": "wrapped", "inputs": ["text:hello world"],
+            "until": {"kind": "screen_regex", "pattern": "helloworld"}, "timeout_ms": 100,
+        }),
+    )
+    .await;
+    let separated = call(
+        &client,
+        "send",
+        json!({
+            "session": "wrapped", "inputs": ["enter", "text:world", "enter", "text:world"],
+            "until": {"kind": "screen_regex", "pattern": "(?m)^world$"}, "timeout_ms": 100,
+        }),
+    )
+    .await;
+    let stopped = call(&client, "stop", json!({"session": "wrapped", "wait": true})).await;
+    client.cancel().await.expect("close client");
+
+    assert!(!failed(&started), "{started:?}");
+    assert!(!failed(&stopped), "{stopped:?}");
+    assert!(failed(&sent), "{sent:?}");
+    assert_eq!(structured(&sent)["postcondition"]["outcome"], "deadline");
+    assert_eq!(
+        structured(&sent)["screen"]
+            .as_str()
+            .expect("screen")
+            .replace('\n', ""),
+        "name? prefix WRAPPEDTARGET end"
+    );
+    assert!(failed(&spaced), "{spaced:?}");
+    assert_eq!(structured(&spaced)["postcondition"]["outcome"], "deadline");
+    assert!(failed(&separated), "{separated:?}");
+    assert_eq!(
+        structured(&separated)["postcondition"]["outcome"],
+        "deadline"
+    );
+}
+
+#[tokio::test]
+async fn pending_sends_allow_reads_and_are_preempted_by_stop() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let client = connect(&temporary.path().join("state")).await;
+    start_waiting_shell(&client, "pending").await;
+    let request = CallToolRequestParams::new("send").with_arguments(arguments(json!({
+        "session": "pending", "inputs": ["text:hello"],
+        "until": {"kind": "screen", "text": "unreachable"}, "timeout_ms": 20_000,
+    })));
+    let handle = client
+        .send_cancellable_request(
+            ClientRequest::CallToolRequest(CallToolRequest::new(request)),
+            PeerRequestOptions::no_options(),
+        )
+        .await
+        .expect("send input");
+
+    let waited = call(&client, "wait", json!({"session": "pending", "for": {"kind": "screen", "text": "hello"}, "timeout_ms": 1000})).await;
+    let screen = call(&client, "screen", json!({"session": "pending"})).await;
+    let status = call(&client, "status", json!({"session": "pending"})).await;
+    let stopped = call(&client, "stop", json!({"session": "pending", "wait": true})).await;
+    let sent = handle
+        .await_response()
+        .await
+        .expect("interrupted send response");
+    let sent = serde_json::to_value(sent).expect("send JSON");
+    client.cancel().await.expect("close client");
+
+    assert!(!failed(&waited), "{waited:?}");
+    assert_eq!(structured(&screen)["screen"], "name? hello");
+    assert_eq!(structured(&status)["lifecycle"], "live");
+    assert!(!failed(&stopped), "{stopped:?}");
+    assert_eq!(sent["structuredContent"]["code"], "action_stopped");
+    assert_eq!(
+        sent["structuredContent"]["input"]["effect"]["kind"],
+        "applied"
+    );
+}
+
+#[tokio::test]
+async fn cancelling_a_send_releases_its_pending_postcondition() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let client = connect(&temporary.path().join("state")).await;
+    start_waiting_shell(&client, "cancel-send").await;
+    let request = CallToolRequestParams::new("send").with_arguments(arguments(json!({
+        "session": "cancel-send", "inputs": ["text:world"],
+        "until": {"kind": "screen", "text": "unreachable"}, "timeout_ms": 20_000,
+    })));
+    let handle = client
+        .send_cancellable_request(
+            ClientRequest::CallToolRequest(CallToolRequest::new(request)),
+            PeerRequestOptions::no_options(),
+        )
+        .await
+        .expect("send input");
+    let waited = call(&client, "wait", json!({"session": "cancel-send", "for": {"kind": "screen", "text": "world"}, "timeout_ms": 1000})).await;
+    handle.cancel(None).await.expect("cancel send");
+    let screen = call(
+        &client,
+        "screen",
+        json!({"session": "cancel-send", "stable_for_ms": 100, "timeout_ms": 1000}),
+    )
+    .await;
+    let submitted = call(&client, "send", json!({"session": "cancel-send", "inputs": ["enter"], "until": {"kind": "screen", "text": "hello world"}, "timeout_ms": 1000})).await;
+    let stopped = call(
+        &client,
+        "stop",
+        json!({"session": "cancel-send", "wait": true}),
+    )
+    .await;
+    client.cancel().await.expect("close client");
+
+    assert!(!failed(&waited), "{waited:?}");
+    assert!(!failed(&screen), "{screen:?}");
+    assert!(!failed(&submitted), "{submitted:?}");
+    assert!(!failed(&stopped), "{stopped:?}");
+}
+
+#[tokio::test]
 async fn screenshot_of_a_completed_session_returns_png_image_content() {
     let temporary = TempDir::new().expect("temporary directory");
     let client = connect(&temporary.path().join("state")).await;

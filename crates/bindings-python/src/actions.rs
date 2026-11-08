@@ -385,6 +385,7 @@ impl PyActionBuilder {
             request.postcondition = ActionCondition::Screen {
                 predicate: ScreenPredicate::Contains { text: pattern },
                 timeout,
+                settle: Duration::ZERO,
             };
         });
     }
@@ -404,7 +405,11 @@ impl PyActionBuilder {
         let predicate = predicate.0;
         let timeout = timeout_ms.map_or(Ok(defaults::WAIT_TIMEOUT), wait_millis)?;
         return Self::edit(slf, |request| {
-            request.postcondition = ActionCondition::Screen { predicate, timeout };
+            request.postcondition = ActionCondition::Screen {
+                predicate,
+                timeout,
+                settle: Duration::ZERO,
+            };
         });
     }
 

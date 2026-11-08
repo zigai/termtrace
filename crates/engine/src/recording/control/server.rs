@@ -331,6 +331,17 @@ fn handle_control_connection(
                     return Ok(());
                 }
 
+                let mut descriptors = [PollFd::new(stream.as_fd(), PollFlags::empty())];
+                if poll(&mut descriptors, PollTimeout::ZERO).is_ok()
+                    && descriptors[0].revents().is_some_and(|events| {
+                        return events.intersects(PollFlags::POLLHUP | PollFlags::POLLERR);
+                    })
+                {
+                    let _delivered = sender.send(RuntimeMessage::ControlDisconnected(request_id));
+
+                    return Ok(());
+                }
+
                 if Instant::now() >= deadline {
                     let response = ControlResponse {
                         version: CONTROL_PROTOCOL_VERSION,
@@ -876,6 +887,8 @@ mod tests {
                         atoms: Vec::new(),
                     },
                     postcondition: ActionPostconditionResult::Screen {
+                        matched_row: None,
+                        matched_text: None,
                         matched: true,
                         quality: ScreenPostconditionQuality::MatchedUnsettled,
                         state_hash: None,
@@ -936,6 +949,8 @@ mod tests {
                         atoms: Vec::new(),
                     },
                     postcondition: ActionPostconditionResult::Screen {
+                        matched_row: None,
+                        matched_text: None,
                         matched: true,
                         quality: ScreenPostconditionQuality::MatchedUnsettled,
                         state_hash: None,
@@ -982,6 +997,8 @@ mod tests {
                         atoms: Vec::new(),
                     },
                     postcondition: ActionPostconditionResult::Screen {
+                        matched_row: None,
+                        matched_text: None,
                         matched: true,
                         quality: ScreenPostconditionQuality::MatchedUnsettled,
                         state_hash: None,

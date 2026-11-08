@@ -614,7 +614,7 @@ def test_live_locator_parity_rich_frame_and_waits() -> None:
             {"selector": "state_id", "state_id": 0}, include_hidden=True
         )
         assert observed["state_id"] == 0 and observed["source_completed"] is True
-        assert isinstance(observed["canonical_session"], bytes)
+        assert observed["canonical_session"] == rec.path
         final = completed.frame()
         assert final.presented and "END" in final.text
         assert completed.get_by_text("Save").count() == 2

@@ -1,3 +1,4 @@
+use crate::cli::output::path_value;
 use crate::cli::output::ResponseWriter;
 use termtrace_model::execution::layout::SessionLayout;
 
@@ -26,7 +27,6 @@ use signal_hook::{
 use std::{
     env,
     io::{self, Read as _},
-    os::unix::ffi::OsStrExt as _,
     path::Path,
     process::{Command as ProcessCommand, ExitCode, Stdio},
     sync::{
@@ -55,7 +55,7 @@ use termtrace_model::{
     artifact::bundle::BundleVerificationPolicy, artifact::save::SaveFormat,
     artifact::sdk::DecimalU64, execution::event::Event, execution::session::CaptureTarget,
     execution::session::SessionPhase, protocol::capability::NATIVE_VIDEO_CAPABILITY,
-    terminal::observation::StatePoint, terminal::replay::StateSelection, value::ByteString,
+    terminal::observation::StatePoint, terminal::replay::StateSelection,
 };
 use termtrace_service::{
     artifacts::{
@@ -85,8 +85,7 @@ pub(super) fn run_export_asciicast(
         response,
         &serde_json::json!({
             "kind": "asciicast",
-            "output": ByteString::from(output.as_os_str().as_bytes()),
-            "output_display": output.display().to_string(),
+            "output": path_value(&output),
         }),
     );
 }
@@ -340,8 +339,7 @@ fn write_render(
             response,
             &serde_json::json!({
                 "kind": "video",
-                "output": ByteString::from(output.as_os_str().as_bytes()),
-                "output_display": output.display().to_string(),
+                "output": path_value(output),
                 "artifact": artifact,
                 "fps": plan.fps,
                 "width": plan.output_width,
@@ -354,8 +352,7 @@ fn write_render(
             response,
             &serde_json::json!({
                 "kind": "video",
-                "output": ByteString::from(output.as_os_str().as_bytes()),
-                "output_display": output.display().to_string(),
+                "output": path_value(output),
                 "manifest": sidecar.join("manifest.json"),
                 "artifact_directory": sidecar,
                 "renderer": source_name(&plan.source),
@@ -584,10 +581,8 @@ pub(super) fn run_screenshot(
             &serde_json::json!({
                 "kind": "semantic_screenshot_batch",
                 "truth_layer": "semantic_rendering",
-                "directory": ByteString::from(arguments.out.as_os_str().as_bytes()),
-                "directory_display": arguments.out.display().to_string(),
-                "manifest": ByteString::from(manifest_path.as_os_str().as_bytes()),
-                "manifest_display": manifest_path.display().to_string(),
+                "directory": path_value(&arguments.out),
+                "manifest": path_value(&manifest_path),
                 "entries": manifest.entries,
             }),
         );
@@ -616,12 +611,9 @@ pub(super) fn run_screenshot(
         &serde_json::json!({
             "kind": "semantic_screenshot",
             "truth_layer": "semantic_rendering",
-            "directory": ByteString::from(outcome.directory.as_os_str().as_bytes()),
-            "directory_display": outcome.directory.display().to_string(),
-            "image": ByteString::from(image_path.as_os_str().as_bytes()),
-            "image_display": image_path.display().to_string(),
-            "manifest": ByteString::from(manifest_path.as_os_str().as_bytes()),
-            "manifest_display": manifest_path.display().to_string(),
+            "directory": path_value(&outcome.directory),
+            "image": path_value(&image_path),
+            "manifest": path_value(&manifest_path),
             "state_hash": outcome.manifest.state_hash,
         }),
     );

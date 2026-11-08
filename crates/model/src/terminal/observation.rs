@@ -256,6 +256,8 @@ pub struct Observation {
     /// Canonical session ID when evidence exists.
     pub session_id: Option<Uuid>,
     /// Exact canonical session path bytes when evidence exists.
+    #[serde(with = "crate::value::path_bytes::option")]
+    #[schemars(with = "Option<crate::value::path_bytes::PathValue>")]
     pub canonical_session: Option<ByteString>,
     /// Whether canonical execution evidence was durably completed.
     pub source_completed: bool,

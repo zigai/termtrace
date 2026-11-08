@@ -1,11 +1,11 @@
 //! Serde support for paths that keeps non-UTF-8 Linux path bytes exact.
 //!
-//! Text formats see a UTF-8 path as a plain string and any other path as its byte array.
+//! Text formats see a UTF-8 path as a plain string and other path bytes as tagged Base64.
 //! Native host converters recognize the marker name and produce their language's exact
 //! path value instead.
 
-use super::PATH_MARKER;
-use serde::{de, ser::SerializeSeq as _, Deserializer, Serialize, Serializer};
+use super::{path_bytes::PathValue, ByteString, PATH_MARKER};
+use serde::{de, Deserialize as _, Deserializer, Serialize, Serializer};
 use std::{
     borrow::Cow,
     ffi::OsString,
@@ -22,18 +22,8 @@ impl Serialize for Repr<'_> {
     where
         S: Serializer,
     {
-        if let Some(text) = self.0.to_str() {
-            return serializer.serialize_str(text);
-        }
-
-        let bytes = self.0.as_os_str().as_bytes();
-        let mut seq = serializer.serialize_seq(Some(bytes.len()))?;
-
-        for byte in bytes {
-            seq.serialize_element(byte)?;
-        }
-
-        return seq.end();
+        return PathValue::from_bytes(&ByteString::from(self.0.as_os_str().as_bytes()))
+            .serialize(serializer);
     }
 }
 
@@ -55,7 +45,7 @@ impl<'de> de::Visitor<'de> for PathVisitor {
     type Value = PathBuf;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        return formatter.write_str("a path string or its byte array");
+        return formatter.write_str("a path string, tagged Base64, or native bytes");
     }
 
     fn visit_str<E: de::Error>(self, v: &str) -> StdResult<PathBuf, E> {
@@ -82,6 +72,14 @@ impl<'de> de::Visitor<'de> for PathVisitor {
         return Ok(PathBuf::from(OsString::from_vec(bytes)));
     }
 
+    fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> StdResult<PathBuf, A::Error> {
+        let value = PathValue::deserialize(de::value::MapAccessDeserializer::new(map))?;
+
+        return Ok(PathBuf::from(OsString::from_vec(
+            value.into_bytes().into_bytes(),
+        )));
+    }
+
     fn visit_newtype_struct<D>(self, deserializer: D) -> StdResult<PathBuf, D::Error>
     where
         D: Deserializer<'de>,
@@ -90,11 +88,11 @@ impl<'de> de::Visitor<'de> for PathVisitor {
     }
 }
 
-/// Deserialize one exact path from a string or byte array.
+/// Deserialize an exact path from text, tagged Base64, or native bytes.
 ///
 /// # Errors
 ///
-/// Rejects values that are neither a string nor bytes.
+/// Rejects values that are neither path strings nor encoded path bytes.
 pub fn deserialize<'de, D>(deserializer: D) -> StdResult<PathBuf, D::Error>
 where
     D: Deserializer<'de>,
@@ -140,7 +138,7 @@ pub mod option {
         type Value = Option<PathBuf>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            return formatter.write_str("null, a path string, or its byte array");
+            return formatter.write_str("null, a path string, tagged Base64, or native bytes");
         }
 
         fn visit_none<E: de::Error>(self) -> StdResult<Option<PathBuf>, E> {
@@ -199,16 +197,10 @@ impl schemars::JsonSchema for ExactPath {
         return Cow::Borrowed("ExactPath");
     }
 
-    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         return schemars::json_schema!({
             "x-termtrace-path": true,
-            "anyOf": [
-                { "type": "string" },
-                {
-                    "type": "array",
-                    "items": { "type": "integer", "minimum": 0, "maximum": 255 }
-                }
-            ]
+            "allOf": [generator.subschema_for::<PathValue>()],
         });
     }
 }

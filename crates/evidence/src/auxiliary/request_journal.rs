@@ -609,7 +609,8 @@ fn response_boundaries(response: &ControlResponse) -> Option<&ActorBoundaries> {
             | ControlPayload::Snapshot { boundaries, .. }
             | ControlPayload::Status { boundaries, .. }
             | ControlPayload::Marked { boundaries, .. } => Some(boundaries),
-            ControlPayload::ScreenFrame { .. }
+            ControlPayload::MatchBaseline { .. }
+            | ControlPayload::ScreenFrame { .. }
             | ControlPayload::EventCursor { .. }
             | ControlPayload::StableSnapshot { .. }
             | ControlPayload::ScreenWait { .. } => None,

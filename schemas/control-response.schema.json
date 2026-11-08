@@ -162,6 +162,23 @@
               "description": "Whether the predicate matched before termination.",
               "type": "boolean"
             },
+            "matched_row": {
+              "description": "Zero-based row containing the first byte of the accepted text match.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "matched_text": {
+              "description": "Exact accepted literal or regex match.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "quality": {
               "$ref": "#/$defs/ScreenPostconditionQuality",
               "description": "Closed completion classification."
@@ -454,6 +471,27 @@
     "ControlData": {
       "description": "Successful response payload.",
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Retry-stable match count from before a send's first step.",
+          "properties": {
+            "kind": {
+              "const": "match_baseline",
+              "type": "string"
+            },
+            "matches": {
+              "description": "Number of matching occurrences in the presented screen.",
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "matches"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "description": "Read-only actor authority for a durable event-file suffix.",
@@ -1303,6 +1341,11 @@
     "InputKind": {
       "description": "User-facing interpretation of an input byte sequence.",
       "oneOf": [
+        {
+          "const": "sleep",
+          "description": "Pause in an ordered input sequence, with no PTY bytes.",
+          "type": "string"
+        },
         {
           "const": "raw",
           "description": "Uninterpreted bytes.",
@@ -2377,6 +2420,32 @@
     "ScreenPredicate": {
       "description": "Exact predicate evaluated against the latest presented viewport.",
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Require a minimum number of literal or regex matches across reconstructed wrapped lines.",
+          "properties": {
+            "matching": {
+              "$ref": "#/$defs/ScreenPredicate",
+              "description": "A contains or matches-regex predicate."
+            },
+            "minimum": {
+              "description": "Minimum number of non-overlapping matches.",
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "predicate": {
+              "const": "text_count",
+              "type": "string"
+            }
+          },
+          "required": [
+            "predicate",
+            "matching",
+            "minimum"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "description": "Viewport text contains an exact UTF-8 substring.",

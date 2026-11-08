@@ -109,7 +109,7 @@ def test_typed_diagnostics_all_saves_selectors_cache_profiles_and_rejection(
     )
     assert exported["canonical_session"] == rec.path
     saved = evidence.save(os.fsencode(root / "all-formats"), FIXTURE["save_formats"])
-    assert saved["manifest"]["canonical_session"] == os.fsencode(rec.path)
+    assert saved["manifest"]["canonical_session"] == rec.path
     assert len(saved["manifest"]["files"]) == len(FIXTURE["save_formats"])
     assert saved["manifest"]["semantic_image_resources"]
     png = next(
@@ -387,8 +387,8 @@ def test_native_restart_success_and_failed_admission_preserve_predecessor(
         registry.resolve("demo")["session_id"] == successor["successor"]["session_id"]
     )
     manifest = json.loads(
-        Path(
-            os.fsdecode(successor["successor"]["canonical_session"] + b"/session.json")
+        (
+            Path(successor["successor"]["canonical_session"]) / "session.json"
         ).read_bytes()
     )
     assert manifest["lineage"]["predecessor_session_id"] == predecessor["session_id"]
@@ -646,7 +646,7 @@ def test_nonutf8_source_debug_forensic_verification_paths_and_source_hashes(
         verification = destination + b"/verification.json"
         encoded = Path(os.fsdecode(verification)).read_bytes()
         value = json.loads(encoded)
-        assert bytes(value["session"]) == source
+        assert base64.b64decode(value["session"]["base64"]) == source
         assert value["valid"] and value["session_id"] == native["session_id"]
         Path(os.fsdecode(verification)).write_bytes(encoded + b"TAMPER")
         with pytest.raises(TermtraceError):

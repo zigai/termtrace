@@ -8,6 +8,7 @@ use super::{
     SessionActor, TerminalGeometry, Uuid, ValidatedCommand,
 };
 use crate::recording::process::host_signal;
+use termtrace_model::terminal::screen::screen_match_text;
 use termtrace_process::ProcessGroup;
 
 impl SessionActor<'_> {
@@ -16,6 +17,24 @@ impl SessionActor<'_> {
         request_id: Uuid,
         command: &ValidatedCommand<'_>,
     ) -> Result<ControlPayload> {
+        if matches!(command.command(), ControlCommand::MatchBaseline { .. }) {
+            let predicate = command.predicate().ok_or_else(|| {
+                return terminal_error("capture send baseline", "missing compiled predicate");
+            })?;
+
+            let (text, _) = screen_match_text(&self.live.presented);
+            let matches = predicate.text_matches(&text).ok_or_else(|| {
+                return control_rejected(
+                    "invalid_action_postcondition",
+                    "send baseline requires a literal or regex predicate",
+                );
+            })?;
+
+            return Ok(ControlPayload::MatchBaseline {
+                matches: matches.len(),
+            });
+        }
+
         let command = command.command();
 
         if let Some(outcome) = self.execute_observation_command(request_id, command) {
@@ -674,7 +693,8 @@ impl SessionActor<'_> {
                     boundaries: actor_boundaries(&self.event_log),
                 });
             }
-            ControlCommand::Ping
+            ControlCommand::MatchBaseline { .. }
+            | ControlCommand::Ping
             | ControlCommand::Status
             | ControlCommand::EventCursor { .. }
             | ControlCommand::Snapshot

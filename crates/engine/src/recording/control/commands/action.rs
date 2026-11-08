@@ -6,9 +6,10 @@ use super::{
     EventLogWriter, InputSequenceExecution, InputSequenceFailureDetails, Instant, MutationEffect,
     Result, SessionActor, Uuid, CONTROL_PROTOCOL_VERSION,
 };
+use std::result::Result as StdResult;
 
 pub(in crate::recording) struct PendingInputSequence {
-    pub(super) request: ControlRequest,
+    pub(in crate::recording) request: ControlRequest,
     pub(super) response_sender: mpsc::SyncSender<ControlResponse>,
     pub(super) command_hash: String,
     pub(super) event_start_seq: u64,
@@ -53,8 +54,19 @@ impl PendingInputSequence {
                         })
                         .min(deadline);
                 }
-                AdmittedPostcondition::Screen { timeout_ns, .. } => {
-                    return waiting.started_at + Duration::from_nanos(*timeout_ns);
+                AdmittedPostcondition::Screen {
+                    timeout_ns,
+                    stable_for_ns,
+                    ..
+                } => {
+                    let deadline = waiting.started_at + Duration::from_nanos(*timeout_ns);
+
+                    return waiting
+                        .matching_state
+                        .as_ref()
+                        .map_or(deadline, |(_, since)| {
+                            return (*since + Duration::from_nanos(*stable_for_ns)).min(deadline);
+                        });
                 }
             },
         };
@@ -159,8 +171,56 @@ impl SessionActor<'_> {
                 }
             }
         };
+
+        return self.finish_input_sequence(
+            pending.request,
+            pending.response_sender,
+            pending.command_hash,
+            pending.event_start_seq,
+            terminal_outcome,
+        );
+    }
+
+    pub(in crate::recording) fn interrupt_input_sequence(
+        &mut self,
+        code: &str,
+        message: &str,
+    ) -> Result<()> {
+        let Some(pending) = self.pending_input_sequence.take() else {
+            return Ok(());
+        };
+        let (error, effect) = match &pending.phase {
+            InputSequencePhase::Applying { execution, .. } => {
+                execution.interrupted(message, &self.event_log)
+            }
+            InputSequencePhase::Waiting(_) => (
+                Error::ControlRejected {
+                    code: code.to_owned(),
+                    message: message.to_owned(),
+                },
+                MutationEffect::Applied,
+            ),
+        };
+
+        return self.finish_input_sequence(
+            pending.request,
+            pending.response_sender,
+            pending.command_hash,
+            pending.event_start_seq,
+            Err((error, effect)),
+        );
+    }
+
+    fn finish_input_sequence(
+        &mut self,
+        request: ControlRequest,
+        response_sender: mpsc::SyncSender<ControlResponse>,
+        command_hash: String,
+        event_start_seq: u64,
+        terminal_outcome: StdResult<ControlPayload, (Error, MutationEffect)>,
+    ) -> Result<()> {
         let current_state_hash = presented_state_hash(&self.live)?;
-        let atom_count = match &pending.request.command {
+        let atom_count = match &request.command {
             ControlCommand::InputSequence { atoms, .. } | ControlCommand::Act { atoms, .. } => {
                 u32::try_from(atoms.len()).unwrap_or(u32::MAX)
             }
@@ -171,14 +231,14 @@ impl SessionActor<'_> {
             Ok(data) => (
                 ControlResponse {
                     version: CONTROL_PROTOCOL_VERSION,
-                    request_id: pending.request.request_id,
+                    request_id: request.request_id,
                     result: ControlResult::Ok { data },
                 },
                 None,
             ),
             Err((error, effect)) => {
                 let response = input_sequence_error_response(
-                    pending.request.request_id,
+                    request.request_id,
                     atom_count,
                     &error,
                     effect,
@@ -190,18 +250,18 @@ impl SessionActor<'_> {
             }
         };
         self.mutation_history.remember(
-            pending.request.request_id,
-            &pending.request.command,
-            pending.command_hash,
-            pending.event_start_seq,
+            request.request_id,
+            &request.command,
+            command_hash,
+            event_start_seq,
             self.event_log.next_seq(),
             self.event_log.current_hash(),
             response.clone(),
         )?;
 
-        if pending.response_sender.send(response).is_err() {
+        if response_sender.send(response).is_err() {
             tracing::warn!(
-                request_id = %pending.request.request_id,
+                request_id = %request.request_id,
                 "input sequence response receiver disconnected"
             );
         }
@@ -333,6 +393,7 @@ mod tests {
                 },
                 baseline_state_hash: "baseline".to_owned(),
                 baseline_output_bytes: 0,
+                excluded_matches: 0,
             },
             started_at,
             matching_state,
@@ -427,6 +488,7 @@ mod tests {
             AdmittedPostcondition::Screen {
                 predicate,
                 timeout_ns,
+                stable_for_ns: 0,
             },
             started_at,
             None,

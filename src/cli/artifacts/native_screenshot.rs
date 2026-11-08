@@ -1,5 +1,5 @@
 use crate::cli::{
-    output::{write_json_line, ResponseWriter},
+    output::{path_value, write_json_line, ResponseWriter},
     session_helpers::attach_session,
     tooling::{capability_report, require_cli_capability},
 };
@@ -100,9 +100,9 @@ pub(super) fn run(
         return write_json_line(
             response,
             &serde_json::json!({
-                "kind": "native_screenshot_batch", "truth_layer": "native", "directory": destination,
-                "manifest": destination.join("batch-manifest.json"),
-                "images": captures.iter().map(|capture| return &capture.screenshot).collect::<Vec<_>>(),
+                "kind": "native_screenshot_batch", "truth_layer": "native", "directory": path_value(destination),
+                "manifest": path_value(&destination.join("batch-manifest.json")),
+                "images": captures.iter().map(|capture| return path_value(&capture.screenshot)).collect::<Vec<_>>(),
                 "presentation_evidence": "post_endpoint_stable_capture",
             }),
         );
@@ -125,9 +125,9 @@ fn write_single(
     return write_json_line(
         response,
         &serde_json::json!({
-            "kind": "native_screenshot", "truth_layer": "native", "directory": capture.directory,
-            "image": capture.screenshot, "manifest": destination.join("manifest.json"),
-            "endpoint": destination.join("replay-endpoint.json"),
+            "kind": "native_screenshot", "truth_layer": "native", "directory": path_value(&capture.directory),
+            "image": path_value(&capture.screenshot), "manifest": path_value(&destination.join("manifest.json")),
+            "endpoint": path_value(&destination.join("replay-endpoint.json")),
             "presentation_evidence": "post_endpoint_stable_capture",
         }),
     );

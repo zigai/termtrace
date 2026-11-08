@@ -115,6 +115,8 @@ pub enum SurvivingKind {
 #[serde(deny_unknown_fields)]
 pub struct SurvivingPathRecord {
     /// Exact Linux path bytes.
+    #[serde(with = "crate::value::path_bytes")]
+    #[schemars(with = "crate::value::path_bytes::PathValue")]
     pub path: ByteString,
     /// What the path holds.
     pub kind: SurvivingKind,
@@ -147,6 +149,8 @@ pub struct OriginalCaptureFacts {
     /// Supervisor state observed when the error was built, including derived `abandoned`.
     pub state: OriginalCaptureState,
     /// Exact canonical session path bytes.
+    #[serde(with = "crate::value::path_bytes")]
+    #[schemars(with = "crate::value::path_bytes::PathValue")]
     pub session: ByteString,
     /// Validated canonical completion, when one exists.
     pub completion: Option<Box<SessionCompletion>>,

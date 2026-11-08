@@ -89,6 +89,8 @@ pub struct BundleManifest {
     /// Immutable canonical session identity.
     pub session_id: Uuid,
     /// Exact source session path bytes.
+    #[serde(with = "crate::value::path_bytes")]
+    #[schemars(with = "crate::value::path_bytes::PathValue")]
     pub canonical_session: ByteString,
     /// Final canonical event hash.
     pub source_final_event_hash: String,

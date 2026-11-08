@@ -12,7 +12,7 @@ use crate::{
 use std::{error::Error as StdError, fmt, result::Result as StdResult, time::Duration};
 use termtrace_engine::diff::screen_changes;
 use termtrace_model::{
-    protocol::control::{ControlCommand, ControlPayload},
+    protocol::control::{ControlCommand, ControlPayload, ScreenPredicate},
     terminal::{
         diff::ScreenChanges,
         inspection::ScreenWaitOutcome,
@@ -172,6 +172,26 @@ impl Session {
             request.projection
         };
 
+        let screen_predicate = match &request.postcondition {
+            ActionCondition::Screen { predicate, .. } if !actor_admits_last_step => {
+                Some(predicate.compile().map_err(|error| {
+                    return SendFailure {
+                        step: 0,
+                        request_id: send_request_id,
+                        error: Box::new(client_error(error.to_string())),
+                    };
+                })?)
+            }
+            _ => None,
+        };
+
+        let screen_needs_start = screen_predicate.as_ref().is_some_and(|predicate| {
+            return matches!(
+                predicate.predicate(),
+                ScreenPredicate::Contains { .. } | ScreenPredicate::MatchesRegex { .. }
+            );
+        });
+
         let start_frame = if request.report_changes || idle_needs_start_state {
             let start_projection =
                 if request.report_changes { projection } else { hash_only_projection() };
@@ -190,6 +210,82 @@ impl Session {
         };
 
         let postcondition = match &request.postcondition {
+            ActionCondition::Screen {
+                predicate,
+                timeout,
+                settle,
+            } if screen_needs_start => {
+                let compiled = screen_predicate.as_ref().ok_or_else(|| {
+                    return SendFailure {
+                        step: 0,
+                        request_id: send_request_id,
+                        error: Box::new(client_error("missing compiled text predicate")),
+                    };
+                })?;
+
+                let mut typed = String::new();
+
+                let mut atom_matches = 0;
+                for step in &request.steps {
+                    if let SendStep::Input(atoms) = step {
+                        for atom in atoms {
+                            if let InputAtom::Text(text) | InputAtom::Paste(text) = atom {
+                                atom_matches += compiled
+                                    .text_matches(text)
+                                    .map_or(0, |matches| return matches.len());
+
+                                typed.push_str(text);
+                            }
+                        }
+                    }
+                }
+
+                let request_id = Uuid::new_v5(
+                    &Uuid::NAMESPACE_URL,
+                    format!("termtrace/send-baseline/{send_request_id}").as_bytes(),
+                );
+
+                let guard = MutationGuard {
+                    request_id: Some(request_id),
+                    if_state: request.guard.if_state.clone(),
+                };
+                let baseline = self
+                    .control(&guard.request(ControlCommand::MatchBaseline {
+                        predicate: predicate.clone(),
+                    }))
+                    .map_err(|error| {
+                        return SendFailure {
+                            step: 0,
+                            request_id,
+                            error: Box::new(error),
+                        };
+                    })?;
+
+                let ControlPayload::MatchBaseline { matches } = baseline else {
+                    return Err(SendFailure {
+                        step: 0,
+                        request_id,
+                        error: Box::new(client_error(
+                            "actor returned the wrong send baseline payload",
+                        )),
+                    });
+                };
+                let minimum = matches
+                    + atom_matches.max(
+                        compiled
+                            .text_matches(&typed)
+                            .map_or(0, |matches| return matches.len()),
+                    )
+                    + 1;
+                ActionCondition::Screen {
+                    predicate: ScreenPredicate::TextCount {
+                        matching: Box::new(predicate.clone()),
+                        minimum,
+                    },
+                    timeout: *timeout,
+                    settle: *settle,
+                }
+            }
             ActionCondition::Idle {
                 stable_for,
                 timeout,
@@ -328,9 +424,13 @@ impl Session {
                 allow_incomplete: true,
                 reaction: Some(reaction.clone()),
             })),
-            ActionCondition::Screen { predicate, timeout } => CommandPostcondition::Screen(
-                self.wait_screen(predicate.clone(), Duration::ZERO, *timeout),
-            ),
+            ActionCondition::Screen {
+                predicate,
+                timeout,
+                settle,
+            } => {
+                CommandPostcondition::Screen(self.wait_screen(predicate.clone(), *settle, *timeout))
+            }
         };
 
         return Some(Box::new(postcondition));

@@ -300,6 +300,7 @@ impl ConditionSpec {
             } => ActionCondition::Screen {
                 predicate: predicate.clone(),
                 timeout: optional_millis(*timeout_ms, defaults::WAIT_TIMEOUT, "timeout")?,
+                settle: Duration::ZERO,
             },
         });
     }
@@ -924,6 +925,7 @@ mod tests {
                     text: "x".to_owned()
                 },
                 timeout: Duration::from_millis(1250),
+                settle: Duration::ZERO,
             }
         );
         assert_eq!(request.steps.len(), 7);

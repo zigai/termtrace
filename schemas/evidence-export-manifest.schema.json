@@ -87,6 +87,28 @@
           "type": "string"
         }
       ]
+    },
+    "PathValue": {
+      "anyOf": [
+        {
+          "description": "A path that is valid UTF-8.",
+          "type": "string"
+        },
+        {
+          "description": "A path whose bytes are not valid UTF-8.",
+          "properties": {
+            "base64": {
+              "$ref": "#/$defs/Base64Bytes",
+              "description": "Exact path bytes encoded as Base64."
+            }
+          },
+          "required": [
+            "base64"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "One exact filesystem path in text output."
     }
   },
   "$id": "https://github.com/zigai/termtrace/schemas/evidence-export-manifest.schema.json",
@@ -95,7 +117,7 @@
   "description": "Top-level whole-file bundle manifest.",
   "properties": {
     "canonical_session": {
-      "$ref": "#/$defs/Base64Bytes",
+      "$ref": "#/$defs/PathValue",
       "description": "Exact source session path bytes."
     },
     "format": {

@@ -1,7 +1,7 @@
 use super::args::{SendArgs, SendScreen};
 use super::input::parse_atom;
 use super::*;
-use std::mem::take;
+use std::{fmt::Write as _, mem::take};
 use termtrace_model::{
     protocol::control::{PointerOperation, ProcessSignal},
     protocol::mutation::{MutationEffect, Retry},
@@ -188,7 +188,7 @@ pub(in crate::cli) fn run_send(
         intent: arguments.intent.clone(),
         pace: arguments.pace,
         verbose_atom_outcomes: arguments.verbose,
-        postcondition: postcondition.clone(),
+        postcondition,
         projection: projection(&arguments),
         report_changes: arguments.screen == SendScreen::Diff,
     };
@@ -220,6 +220,7 @@ pub(in crate::cli) fn run_send(
             return write_trailing_postcondition(
                 response,
                 &arguments,
+                &session,
                 label,
                 request_id,
                 postcondition,
@@ -229,24 +230,13 @@ pub(in crate::cli) fn run_send(
         SendLastStep::Action(outcome) => outcome,
     };
 
-    let direct_stream = arguments.atoms.is_empty()
-        && (arguments.file.is_some() || arguments.stdin || arguments.text.is_some())
-        && postcondition == ActionCondition::None;
-
-    if direct_stream {
-        return write_json_line(
-            response,
-            &serde_json::json!({
-                "kind": "input_sent",
-                "request_id": outcome.input.sequence_id,
-                "bytes_written": outcome.input.bytes_written,
-            }),
-        );
-    }
-
     let report_changes = arguments.screen == SendScreen::Diff;
 
-    let mut output = applied_response(&outcome, !report_changes)?;
+    let mut output = applied_response(&outcome, arguments.verbose)?;
+    if arguments.screen == SendScreen::Text || !outcome.is_matched() {
+        insert_screen(&mut output, outcome.frame());
+    }
+
     if arguments.json {
         if report_changes {
             insert_changes(&mut output, changes.as_ref())?;
@@ -255,6 +245,12 @@ pub(in crate::cli) fn run_send(
         write_json_pretty(response, &output)?;
     } else {
         let mut summary = human_action_summary(&output);
+        if arguments.screen == SendScreen::State
+            && let Some(state) = outcome.state_hash()
+        {
+            writeln!(summary, "State: {state}").into_diagnostic()?;
+        }
+
         summary.push_str(&human_send_screen(
             arguments.screen,
             changes.as_ref(),
@@ -267,6 +263,15 @@ pub(in crate::cli) fn run_send(
 }
 
 fn human_frame_summary(frame: &ScreenFrame) -> String {
+    return human_screen_summary(&serde_json::json!({
+        "state": frame.state_hash,
+        "size": [frame.geometry.cols, frame.geometry.rows],
+        "quality": frame.capture_quality,
+        "screen": frame_text(frame),
+    }));
+}
+
+fn frame_text(frame: &ScreenFrame) -> String {
     let rows: Vec<&str> = match &frame.data {
         ScreenFrameContent::None => Vec::new(),
         ScreenFrameContent::Text { rows } => {
@@ -286,12 +291,17 @@ fn human_frame_summary(frame: &ScreenFrame) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
-    return human_screen_summary(&serde_json::json!({
-        "state": frame.state_hash,
-        "size": [frame.geometry.cols, frame.geometry.rows],
-        "quality": frame.capture_quality,
-        "screen": viewport.trim_end_matches('\n'),
-    }));
+    return viewport.trim_end_matches('\n').to_owned();
+}
+
+fn insert_screen(output: &mut serde_json::Value, frame: Option<&ScreenFrame>) {
+    if let (Some(object), Some(frame)) = (output.as_object_mut(), frame) {
+        object.insert("screen".to_owned(), serde_json::json!(frame_text(frame)));
+        object.insert(
+            "size".to_owned(),
+            serde_json::json!([frame.geometry.cols, frame.geometry.rows]),
+        );
+    }
 }
 
 fn human_send_screen(
@@ -300,6 +310,7 @@ fn human_send_screen(
     frame: Option<&ScreenFrame>,
 ) -> Result<String> {
     return Ok(match (screen, changes, frame) {
+        (SendScreen::State, _, _) => String::new(),
         (SendScreen::Diff, Some(changes), Some(frame))
             if !changes_need_full_screen(changes, frame) =>
         {
@@ -339,6 +350,7 @@ fn insert_changes(output: &mut serde_json::Value, changes: Option<&ScreenChanges
 fn write_trailing_postcondition(
     response: &mut ResponseWriter,
     arguments: &SendArgs,
+    session: &Session,
     label: &'static str,
     request_id: uuid::Uuid,
     postcondition: Option<Box<CommandPostcondition>>,
@@ -347,7 +359,7 @@ fn write_trailing_postcondition(
     let frame = match postcondition.as_deref() {
         Some(CommandPostcondition::Idle(Ok(capture))) => Some(capture.frame.clone()),
         Some(CommandPostcondition::Screen(Ok(wait))) => Some(wait.frame.clone()),
-        _ => None,
+        _ => session.frame(projection(arguments)).ok(),
     };
 
     let (matched, kind, outcome) = match postcondition.map(|postcondition| return *postcondition) {
@@ -384,6 +396,46 @@ fn write_trailing_postcondition(
             insert_changes(&mut output, changes)?;
         }
 
+        if arguments.screen == SendScreen::Text || !matched {
+            insert_screen(&mut output, frame.as_ref());
+        }
+
+        if let Some(frame) = &frame
+            && let Some(object) = output.as_object_mut()
+        {
+            object.insert(
+                "observation".to_owned(),
+                serde_json::json!({"state": frame.state_hash, "state_hash": frame.state_hash}),
+            );
+        }
+
+        if matched && let Some(frame) = &frame {
+            let predicate = arguments
+                .until_screen
+                .as_ref()
+                .map(|text| return ScreenPredicate::Contains { text: text.clone() })
+                .or_else(|| {
+                    return arguments.until_screen_regex.as_ref().map(|pattern| {
+                        return ScreenPredicate::MatchesRegex {
+                            pattern: pattern.clone(),
+                        };
+                    });
+                });
+
+            if let Some(predicate) = predicate
+                && let Some((row, text)) = frame_match(frame, &predicate)?
+            {
+                let postcondition = output
+                    .get_mut("postcondition")
+                    .and_then(serde_json::Value::as_object_mut)
+                    .ok_or_else(|| {
+                        return miette::miette!("send response has no postcondition object");
+                    })?;
+                postcondition.insert("matched_row".to_owned(), serde_json::json!(row));
+                postcondition.insert("matched_text".to_owned(), serde_json::json!(text));
+            }
+        }
+
         write_json_pretty(response, &output)?;
     } else {
         let status = if matched { "completed" } else { "failed" };
@@ -391,18 +443,66 @@ fn write_trailing_postcondition(
             "Send command {status} ({label}); postcondition {kind} matched={matched}, outcome={outcome}\n"
         );
 
-        if report_changes {
-            summary.push_str(&human_send_screen(
-                arguments.screen,
-                changes,
-                frame.as_ref(),
-            )?);
+        if arguments.screen == SendScreen::State
+            && let Some(frame) = &frame
+        {
+            writeln!(summary, "State: {}", frame.state_hash).into_diagnostic()?;
         }
 
+        summary.push_str(&human_send_screen(
+            arguments.screen,
+            changes,
+            frame.as_ref(),
+        )?);
         write_stdout(response, summary)?;
     }
 
     return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
+}
+
+fn frame_match(frame: &ScreenFrame, predicate: &ScreenPredicate) -> Result<Option<(u16, String)>> {
+    let rows: Vec<(&str, u16, bool)> = match &frame.data {
+        ScreenFrameContent::Text { rows } => rows
+            .iter()
+            .map(|row| return (row.text.as_str(), row.row, row.soft_wrapped))
+            .collect(),
+        ScreenFrameContent::Spans { rows } => rows
+            .iter()
+            .map(|row| return (row.text.as_str(), row.row, row.soft_wrapped))
+            .collect(),
+        ScreenFrameContent::Cells { rows } => rows
+            .iter()
+            .map(|row| return (row.text.as_str(), row.row, row.soft_wrapped))
+            .collect(),
+        ScreenFrameContent::None => Vec::new(),
+    };
+
+    let mut text = String::new();
+    let mut starts = Vec::new();
+
+    for (line, row, wrapped) in rows {
+        starts.push((text.len(), row));
+        text.push_str(if wrapped { line } else { line.trim_end_matches(' ') });
+
+        if !wrapped {
+            text.push('\n');
+        }
+    }
+
+    let compiled = predicate.compile().into_diagnostic()?;
+    let matched = compiled
+        .text_matches(&text)
+        .and_then(|matches| return matches.last().cloned());
+
+    return Ok(matched.and_then(|matched| {
+        let row = starts
+            .iter()
+            .rev()
+            .find(|(offset, _)| return *offset <= matched.start)?
+            .1;
+
+        return Some((row, text.get(matched)?.to_owned()));
+    }));
 }
 
 fn write_send_failure(
@@ -417,7 +517,14 @@ fn write_send_failure(
         .completion()
         .is_ok_and(|completion| return completion.is_some());
 
-    let output = error_response(request_id, error, ended);
+    let mut output = error_response(request_id, error, ended, arguments.verbose);
+    let frame = session
+        .frame(ScreenProjectionRequest {
+            detail: FrameDetail::Text,
+            region: None,
+        })
+        .ok();
+    insert_screen(&mut output, frame.as_ref());
 
     if arguments.json {
         write_json_pretty(response, &output)?;
@@ -448,6 +555,7 @@ pub(super) fn condition(arguments: &SendArgs) -> ActionCondition {
         return ActionCondition::Screen {
             predicate: ScreenPredicate::Contains { text: text.clone() },
             timeout,
+            settle: arguments.settle.unwrap_or_default(),
         };
     }
 
@@ -457,6 +565,7 @@ pub(super) fn condition(arguments: &SendArgs) -> ActionCondition {
                 pattern: pattern.clone(),
             },
             timeout,
+            settle: arguments.settle.unwrap_or_default(),
         };
     }
     return ActionCondition::None;
@@ -467,7 +576,11 @@ pub(super) fn projection(arguments: &SendArgs) -> ScreenProjectionRequest {
         return ScreenProjectionRequest::default();
     }
 
-    if arguments.json {
+    if arguments.screen == SendScreen::State
+        && arguments.until_screen.is_none()
+        && arguments.until_screen_regex.is_none()
+        && arguments.until_idle.is_none()
+    {
         return hash_only_projection();
     }
     return ScreenProjectionRequest {
@@ -510,6 +623,10 @@ pub(super) enum ActionPostconditionSummary<'data> {
     Screen {
         matched: bool,
         outcome: &'data ScreenPostconditionQuality,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        matched_row: Option<u16>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        matched_text: Option<&'data str>,
     },
 }
 
@@ -524,14 +641,15 @@ pub(super) struct ActionAppliedOutput<'data> {
     pub(super) postcondition: ActionPostconditionSummary<'data>,
     pub(super) observation: ActionObservation<'data>,
     pub(super) ended: bool,
-    pub(super) boundaries: &'data ActorBoundaries,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) boundaries: Option<&'data ActorBoundaries>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) code: Option<&'static str>,
 }
 
 pub(super) fn applied_response(
     outcome: &ActOutcome,
-    include_frame: bool,
+    include_details: bool,
 ) -> Result<serde_json::Value> {
     let input = &outcome.input;
     let matched = outcome.is_matched();
@@ -556,11 +674,17 @@ pub(super) fn applied_response(
             ),
         ),
         ActionPostconditionResult::Screen {
-            matched, quality, ..
+            matched,
+            quality,
+            matched_row,
+            matched_text,
+            ..
         } => (
             ActionPostconditionSummary::Screen {
                 matched: *matched,
                 outcome: quality,
+                matched_row: *matched_row,
+                matched_text: matched_text.as_deref(),
             },
             matches!(
                 quality,
@@ -587,10 +711,10 @@ pub(super) fn applied_response(
         observation: ActionObservation {
             state: state_hash,
             state_hash,
-            frame: outcome.frame().filter(|_| return include_frame),
+            frame: outcome.frame().filter(|_| return include_details),
         },
         ended,
-        boundaries: &outcome.boundaries,
+        boundaries: include_details.then_some(&outcome.boundaries),
         code: (!matched).then_some("postcondition_failed"),
     };
 
@@ -637,6 +761,7 @@ pub(super) struct ActionErrorOutput<'data> {
     pub(super) input: ActionFailedInputSummary,
     pub(super) observation: Option<ActionErrorObservation<'data>>,
     pub(super) ended: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) boundaries: Option<&'data ActorBoundaries>,
 }
 
@@ -644,6 +769,7 @@ pub(super) fn error_response(
     request_id: uuid::Uuid,
     error: &SessionError,
     ended: bool,
+    verbose: bool,
 ) -> serde_json::Value {
     let effect = error.effect();
     let details = error.details();
@@ -684,7 +810,9 @@ pub(super) fn error_response(
             };
         }),
         ended,
-        boundaries: details.map(|details| return &details.boundaries),
+        boundaries: details
+            .filter(|_| return verbose)
+            .map(|details| return &details.boundaries),
     };
 
     #[expect(
@@ -829,7 +957,7 @@ mod action_response_tests {
             details: Some(Box::new(details)),
         });
 
-        let response = error_response(request_id, &error, false);
+        let response = error_response(request_id, &error, false, true);
         assert_eq!(response["code"], "input_sequence_incomplete");
         assert_eq!(response["request_id"], request_id.to_string());
         assert_eq!(response["input"]["effect"]["kind"], "unknown");
@@ -858,6 +986,7 @@ mod action_response_tests {
             until_idle: None,
             reaction_timeout: None,
             timeout: None,
+            settle: None,
             pace: Duration::ZERO,
             intent: None,
             if_state: None,
@@ -866,14 +995,6 @@ mod action_response_tests {
             screen: SendScreen::Text,
             json,
         };
-    }
-
-    #[test]
-    fn action_projection_selects_hash_only_detail_for_json() {
-        assert_eq!(
-            projection(&send_args(false, true)).detail,
-            FrameDetail::None
-        );
     }
 
     #[test]

@@ -23,7 +23,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
             "--",
             "/bin/sh",
             "-c",
-            "trap 'exit 0' TERM; printf READY; while :; do sleep 0.1; done",
+            "trap 'exit 0' TERM; stty -icanon; printf READY; dd bs=1 count=4 of=/dev/null 2>/dev/null; printf PONG; while :; do sleep 0.1; done",
         ])
         .assert()
         .success()
@@ -48,7 +48,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
             "--request-id",
             request_id,
             "--until-screen",
-            "PING",
+            "PONG",
             "--timeout",
             "5s",
         ])
@@ -70,7 +70,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
         action["observation"]["state_hash"].as_str().map(str::len),
         Some(64)
     );
-    assert!(action["boundaries"]["observed"]["next_event_seq"].is_number());
+    assert!(action["screen"].is_string());
 
     let mut retry = Command::cargo_bin("termtrace").expect("binary should build");
     let retry_output = retry
@@ -83,7 +83,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
             "--request-id",
             request_id,
             "--until-screen",
-            "PING",
+            "PONG",
             "--timeout",
             "5s",
         ])
@@ -130,7 +130,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
         Some(64)
     );
     assert!(unmet["request_id"].as_str().is_some());
-    assert!(unmet["boundaries"]["observed"]["next_event_seq"].is_number());
+    assert!(unmet["screen"].is_string());
     assert_eq!(unmet["ended"], false);
 
     let mut explicit_wait = Command::cargo_bin("termtrace").expect("binary should build");
@@ -141,7 +141,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
             "--json",
             "workflow",
             "--screen",
-            "PING",
+            "PONG",
             "--timeout",
             "1s",
         ])
@@ -183,11 +183,18 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
         .stdout(predicate::str::contains(r#""source_kind":"live_session""#));
 
     let mut send = Command::cargo_bin("termtrace").expect("binary should build");
-    send.env("TERMTRACE_STATE_DIR", &state)
-        .args(["send", "workflow", "--text", "Y"])
+    let sent = send
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["send", "workflow", "--json", "--text", "Y"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""bytes_written":1"#));
+        .get_output()
+        .stdout
+        .clone();
+
+    let sent: serde_json::Value = serde_json::from_slice(&sent).expect("send JSON");
+    assert_eq!(sent["input"]["bytes"], 1);
+    assert_eq!(sent["input"]["effect"]["kind"], "applied");
 
     let mut wait = Command::cargo_bin("termtrace").expect("binary should build");
     wait.env("TERMTRACE_STATE_DIR", &state)
@@ -400,6 +407,12 @@ fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
     wait_for_output(&session, b"FIRST:41", Duration::from_secs(5))
         .expect("first action input reached fixture");
 
+    let observed = StdCommand::new(binary)
+        .args(["screen", "--json"])
+        .arg(&session)
+        .output()
+        .expect("observe pending action");
+
     let mut interleaved = Command::cargo_bin("termtrace").expect("binary should build");
     let rejected = interleaved
         .args(["send", "--json"])
@@ -428,8 +441,12 @@ fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
     assert_eq!(action["postcondition"]["matched"], false);
     assert_eq!(action["postcondition"]["outcome"], "deadline");
     assert_eq!(action["ended"], false);
+    assert!(observed.status.success(), "{observed:?}");
+    assert!(action["screen"]
+        .as_str()
+        .is_some_and(|text| return text.contains("FIRST:41")));
     assert!(action["observation"]["state_hash"].as_str().is_some());
-    assert!(action["boundaries"]["observed"]["next_event_seq"].is_number());
+    assert!(action["screen"].is_string());
 
     let mut after = Command::cargo_bin("termtrace").expect("binary should build");
     after

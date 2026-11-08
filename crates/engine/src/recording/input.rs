@@ -16,7 +16,10 @@ use std::{
 use termtrace_evidence::event_log::EventLogWriter;
 use termtrace_model::{
     execution::event::{Event, InputDescriptor, InputKind, InputSource, OperationStatus},
-    protocol::control::{ActionInputResult, InputSequenceAtom, InputSequenceAtomOutcome},
+    protocol::{
+        control::{ActionInputResult, InputSequenceAtom, InputSequenceAtomOutcome},
+        mutation::MutationEffect,
+    },
     terminal::state::{KeyModifiers, ModeState, MouseButton, NamedKey},
     value::ByteString,
 };
@@ -251,6 +254,7 @@ pub(super) struct InputSequenceExecution {
     total_bytes_written: u64,
     first_intent_event_seq: Option<u64>,
     last_result_event_seq: Option<u64>,
+    sleeping: bool,
 }
 
 impl InputSequenceExecution {
@@ -273,6 +277,7 @@ impl InputSequenceExecution {
             total_bytes_written: 0,
             first_intent_event_seq: None,
             last_result_event_seq: None,
+            sleeping: false,
         });
     }
 
@@ -292,6 +297,17 @@ impl InputSequenceExecution {
                 "next atom index is outside the validated sequence",
             );
         })?;
+
+        if let InputSequenceAtom::Sleep { duration_ns, .. } = source_atom
+            && !self.sleeping
+        {
+            self.sleeping = true;
+            self.next_deadline = Instant::now() + Duration::from_nanos(*duration_ns);
+
+            return Ok(None);
+        }
+
+        self.sleeping = false;
 
         let atom = match prepare_input_sequence_atom(source_atom, semantic) {
             Ok(atom) => atom,
@@ -328,6 +344,7 @@ impl InputSequenceExecution {
                 InputSequenceAtom::Bytes { caller_intent, .. }
                 | InputSequenceAtom::Key { caller_intent, .. }
                 | InputSequenceAtom::Paste { caller_intent, .. } => caller_intent.clone(),
+                InputSequenceAtom::Sleep { .. } => None,
             },
             &atom.data,
         ) {
@@ -392,6 +409,41 @@ impl InputSequenceExecution {
             atoms: take(&mut self.outcomes),
         }));
     }
+
+    pub(super) fn interrupted(
+        &self,
+        reason: &str,
+        event_log: &EventLogWriter,
+    ) -> (Error, MutationEffect) {
+        let completed_atoms = u32::try_from(self.next_atom_index).unwrap_or(u32::MAX);
+        let error = Error::InputSequenceIncomplete {
+            sequence_id: self.sequence_id,
+            failed_atom_index: completed_atoms,
+            failed_operation_id: self
+                .atoms
+                .get(self.next_atom_index)
+                .map_or(self.sequence_id, sequence_operation_id),
+            atoms_applied: completed_atoms,
+            bytes_written: self.total_bytes_written,
+            failed_atom_bytes_written: 0,
+            first_intent_event_seq: self
+                .first_intent_event_seq
+                .unwrap_or_else(|| return event_log.next_seq()),
+            last_result_event_seq: self
+                .last_result_event_seq
+                .unwrap_or_else(|| return event_log.next_seq()),
+            reason: reason.to_owned(),
+        };
+
+        return (
+            error,
+            if completed_atoms == 0 {
+                MutationEffect::NotApplied
+            } else {
+                MutationEffect::Partial { completed_atoms }
+            },
+        );
+    }
 }
 
 fn validate_input_sequence(atoms: &[InputSequenceAtom], pace_ns: u64) -> Result<()> {
@@ -440,7 +492,7 @@ fn validate_input_sequence(atoms: &[InputSequenceAtom], pace_ns: u64) -> Result<
                 validate_control_input(data.as_bytes(), caller_intent.as_deref())?;
                 encode_paste(data.as_bytes(), false)?;
             }
-            InputSequenceAtom::Key { .. } => {}
+            InputSequenceAtom::Key { .. } | InputSequenceAtom::Sleep { .. } => {}
         }
     }
 
@@ -452,6 +504,15 @@ fn prepare_input_sequence_atom<'data>(
     semantic: &mut GhosttyVt,
 ) -> Result<PreparedInput<'data>> {
     return match atom {
+        InputSequenceAtom::Sleep { duration_ns, .. } => Ok(PreparedInput {
+            input_kind: InputKind::Sleep,
+            descriptor: InputDescriptor::Sleep {
+                duration_ns: *duration_ns,
+            },
+            semantic_input: Some(format!("sleep:{duration_ns}ns")),
+            terminal_modes_hash: mode_hash(&semantic.snapshot()?.modes, "serialize delay modes")?,
+            data: Cow::Borrowed(&[]),
+        }),
         InputSequenceAtom::Bytes {
             data, input_kind, ..
         } => prepare_bytes(data.as_bytes(), *input_kind, semantic),
@@ -480,6 +541,7 @@ pub(super) fn prepare_bytes<'data>(
             | InputKind::Paste
             | InputKind::Focus
             | InputKind::Pointer => InputDescriptor::Raw,
+            InputKind::Sleep => InputDescriptor::Raw,
         },
         terminal_modes_hash: mode_hash(&modes, "serialize input modes")?,
         semantic_input: Some(
@@ -490,6 +552,7 @@ pub(super) fn prepare_bytes<'data>(
                 InputKind::Paste => "paste",
                 InputKind::Focus => "focus",
                 InputKind::Pointer => "pointer",
+                InputKind::Sleep => "sleep",
             }
             .to_owned(),
         ),
@@ -563,7 +626,8 @@ pub(super) fn sequence_operation_id(atom: &InputSequenceAtom) -> Uuid {
     return match atom {
         InputSequenceAtom::Bytes { operation_id, .. }
         | InputSequenceAtom::Key { operation_id, .. }
-        | InputSequenceAtom::Paste { operation_id, .. } => *operation_id,
+        | InputSequenceAtom::Paste { operation_id, .. }
+        | InputSequenceAtom::Sleep { operation_id, .. } => *operation_id,
     };
 }
 

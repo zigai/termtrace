@@ -118,6 +118,8 @@ pub enum InputSource {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum InputKind {
+    /// Pause in an ordered input sequence, with no PTY bytes.
+    Sleep,
     /// Uninterpreted bytes.
     Raw,
     /// Typed textual content.
@@ -136,6 +138,11 @@ pub enum InputKind {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InputDescriptor {
+    /// Pause before the following input atom.
+    Sleep {
+        /// Requested delay in nanoseconds.
+        duration_ns: u64,
+    },
     /// Uninterpreted caller or host bytes.
     Raw,
     /// UTF-8 text intentionally entered as textual content.

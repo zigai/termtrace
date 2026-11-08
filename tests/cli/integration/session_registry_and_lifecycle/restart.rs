@@ -39,8 +39,7 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
 
     let predecessor = PathBuf::from(
         started_json
-            .pointer("/canonical_session_display")
-            .or_else(|| return started_json.pointer("/path"))
+            .pointer("/canonical_session")
             .and_then(serde_json::Value::as_str)
             .expect("predecessor path"),
     );
@@ -56,22 +55,18 @@ fn restart_publishes_an_evidence_bound_successor_without_mutating_predecessor() 
     let response: serde_json::Value =
         serde_json::from_slice(&restarted.get_output().stdout).expect("restart response");
 
-    let successor_bytes: ByteString = serde_json::from_value(
-        response
-            .pointer("/successor/canonical_session")
-            .expect("successor path")
-            .clone(),
-    )
-    .expect("successor path bytes");
-
-    let successor = PathBuf::from(OsString::from_vec(successor_bytes.as_bytes().to_vec()));
+    let successor = PathBuf::from(
+        response["successor"]["canonical_session"]
+            .as_str()
+            .expect("successor path"),
+    );
 
     assert_eq!(
-        response["predecessor"]["canonical_session_display"],
+        response["predecessor"]["canonical_session"],
         predecessor.display().to_string()
     );
     assert_eq!(
-        response["successor"]["canonical_session_display"],
+        response["successor"]["canonical_session"],
         successor.display().to_string()
     );
     assert_ne!(predecessor, successor);
@@ -206,15 +201,12 @@ fn restart_applies_only_explicit_successor_overrides() {
     let response: serde_json::Value =
         serde_json::from_slice(&restarted.get_output().stdout).expect("restart response");
 
-    let successor_bytes: ByteString = serde_json::from_value(
-        response
-            .pointer("/successor/canonical_session")
-            .expect("successor path")
-            .clone(),
-    )
-    .expect("successor path bytes");
+    let successor = PathBuf::from(
+        response["successor"]["canonical_session"]
+            .as_str()
+            .expect("successor path"),
+    );
 
-    let successor = PathBuf::from(OsString::from_vec(successor_bytes.as_bytes().to_vec()));
     let manifest = read_manifest(&successor).expect("successor manifest");
     assert_eq!(
         manifest.working_directory.as_ref().unwrap().as_bytes(),

@@ -757,6 +757,7 @@ impl Write for HashingWriter {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use termtrace_model::value::path_bytes::PathValue;
 
     #[test]
     fn forensic_payload_must_match_the_complete_trusted_top_level_inventory() {
@@ -919,9 +920,12 @@ mod tests {
                 } else {
                     let mut changed: serde_json::Value =
                         serde_json::from_slice(&encoded).expect("metadata");
+
+                    let decoded: PathValue =
+                        serde_json::from_value(changed["session"].clone()).expect("exact path");
                     assert_eq!(
-                        changed["session"],
-                        serde_json::to_value(source.as_os_str().as_bytes()).expect("path bytes")
+                        decoded.into_bytes().as_bytes(),
+                        source.as_os_str().as_bytes()
                     );
                     let mut wrong_path = source.as_os_str().as_bytes().to_vec();
                     let last = wrong_path
@@ -929,7 +933,9 @@ mod tests {
                         .find(|b| return **b == 255)
                         .expect("nonUTF8 byte");
                     *last = 254; // Identical lossy display, different exact path.
-                    changed["session"] = serde_json::to_value(wrong_path).expect("path bytes");
+                    changed["session"] =
+                        serde_json::to_value(PathValue::from_bytes(&ByteString::new(wrong_path)))
+                            .expect("path bytes");
                     let mut tampered = serde_json::to_vec_pretty(&changed).expect("changed member");
                     tampered.push(b'\n');
                     fs_err::write(&path, &tampered).expect("tamper");

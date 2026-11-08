@@ -4,14 +4,13 @@ pub(super) mod args;
 
 use crate::cli::command::completion;
 use crate::cli::{
-    output::{write_json_line, write_stdout},
+    output::{path_value, write_json_line, write_stdout},
     tooling::args::{CompletionsArgs, SchemaArgs, VersionArgs},
 };
 use clap_complete::generate;
 use miette::{IntoDiagnostic as _, Report, Result};
 use std::{
     env,
-    os::unix::ffi::OsStrExt as _,
     process::ExitCode,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -20,7 +19,6 @@ use termtrace_model::{
     execution::event::EVENT_LOG_VERSION,
     protocol::control::CONTROL_PROTOCOL_VERSION,
     terminal::replay::{GHOSTTY_REVISION, STATE_FORMAT_VERSION},
-    value::ByteString,
 };
 use termtrace_service::{system::SystemService, Error as ServiceError};
 
@@ -111,8 +109,7 @@ pub(super) fn run_schemas(
         response,
         &serde_json::json!({
             "kind": "schema_generation",
-            "directory": ByteString::from(directory.as_os_str().as_bytes()),
-            "directory_display": directory.display().to_string(),
+            "directory": path_value(&directory),
             "file_count": paths.len(),
             "replaced_existing_files": replaced_existing_files,
         }),

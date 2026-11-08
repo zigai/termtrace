@@ -12,7 +12,9 @@ use napi::{sys, Env, ValueType};
 use serde::{de::DeserializeOwned, ser, Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
-use termtrace_model::value::{ByteString, BYTES_MARKER, DECIMAL_MARKER, JSON_MARKER, PATH_MARKER};
+use termtrace_model::value::{
+    path_bytes::PathValue, ByteString, BYTES_MARKER, DECIMAL_MARKER, JSON_MARKER, PATH_MARKER,
+};
 
 /// A model value returned to JavaScript as plain data of its generated type.
 ///
@@ -347,10 +349,10 @@ impl Host {
         return match serde_json::to_value(repr).map_err(<HostError as ser::Error>::custom)? {
             serde_json::Value::String(text) => Ok(self.leaf(text)),
             bytes => {
-                let bytes: Vec<u8> =
+                let bytes: PathValue =
                     serde_json::from_value(bytes).map_err(<HostError as ser::Error>::custom)?;
 
-                Ok(NativeValue::Bytes(bytes))
+                Ok(NativeValue::Bytes(bytes.into_bytes().into_bytes()))
             }
         };
     }

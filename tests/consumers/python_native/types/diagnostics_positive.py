@@ -1,6 +1,7 @@
 from termtrace import Termtrace
 from termtrace.types import (
     ApplicationAcknowledgement,
+    PathValue,
     RegistryEntry,
     RestartConfigurationInput,
     SaveOutcome,
@@ -16,9 +17,9 @@ def nested_reports(
     timeline: TimelinePage,
     registered: RegistryEntry,
     ack: ApplicationAcknowledgement,
-) -> tuple[bytes, int, bool]:
+) -> tuple[PathValue, int, bool]:
     directory: str = saved["directory"]
-    canonical: bytes = saved["manifest"]["canonical_session"]
+    canonical: PathValue = saved["manifest"]["canonical_session"]
     size: int = saved["manifest"]["files"][0]["byte_count"]
     timestamp: int = registered["registered_unix_ns"]
     seq: int = ack["boundaries"]["durable"]["next_event_seq"]

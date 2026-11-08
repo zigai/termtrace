@@ -8,6 +8,7 @@ use super::{
 };
 use nix::time::{clock_gettime, ClockId};
 use termtrace_model::protocol::control::{ClockSample, ReactionRequirement};
+use termtrace_model::terminal::screen::screen_match_text;
 use termtrace_model::terminal::screen::FrameDetail;
 
 fn system_monotonic_ns() -> Result<u64> {
@@ -43,6 +44,7 @@ pub(super) enum AdmittedPostcondition {
     Screen {
         predicate: CompiledScreenPredicate,
         timeout_ns: u64,
+        stable_for_ns: u64,
     },
 }
 
@@ -51,6 +53,7 @@ pub(super) struct AdmittedAction {
     pub(super) projection: ScreenProjectionRequest,
     pub(super) baseline_state_hash: String,
     pub(super) baseline_output_bytes: u64,
+    pub(super) excluded_matches: usize,
 }
 
 pub(super) fn admitted_postcondition(
@@ -71,12 +74,18 @@ pub(super) fn admitted_postcondition(
             timeout_ns: *timeout_ns,
             reaction: reaction.clone(),
         }),
-        (ActionPostcondition::Screen { timeout_ns, .. }, Some(predicate)) => {
-            Ok(AdmittedPostcondition::Screen {
-                predicate,
-                timeout_ns: *timeout_ns,
-            })
-        }
+        (
+            ActionPostcondition::Screen {
+                timeout_ns,
+                stable_for_ns,
+                ..
+            },
+            Some(predicate),
+        ) => Ok(AdmittedPostcondition::Screen {
+            predicate,
+            timeout_ns: *timeout_ns,
+            stable_for_ns: *stable_for_ns,
+        }),
         (ActionPostcondition::Screen { .. }, None) => Err(terminal_error(
             "admit action postcondition",
             "validated screen postcondition has no compiled predicate",
@@ -201,17 +210,35 @@ pub(super) fn evaluate_action_postcondition(
         AdmittedPostcondition::Screen {
             predicate,
             timeout_ns,
+            stable_for_ns,
         } => {
             let state_hash = presented_state_hash(live)?;
-            let viewport_text = semantic_viewport_text(&live.presented);
-            let matched = predicate.matches(&live.presented, &viewport_text, &state_hash);
-            let deadline = now >= started_at + Duration::from_nanos(*timeout_ns);
+            let (viewport_text, row_starts) = screen_match_text(&live.presented);
+            let text_matches = predicate.text_matches(&viewport_text);
+            let matched = text_matches.as_ref().map_or_else(
+                || return predicate.matches(&live.presented, &viewport_text, &state_hash),
+                |matches| return matches.len() > waiting.action.excluded_matches,
+            );
+            match &waiting.matching_state {
+                _ if !matched => waiting.matching_state = None,
+                Some((prior, _)) if prior == &state_hash => {}
+                _ => waiting.matching_state = Some((state_hash.clone(), now)),
+            }
 
-            if !matched && !child_completed && !output_closed && !deadline {
+            let settled = matched
+                && waiting.matching_state.as_ref().is_some_and(|(_, since)| {
+                    return since.elapsed() >= Duration::from_nanos(*stable_for_ns);
+                });
+
+            let deadline = now >= started_at + Duration::from_nanos(*timeout_ns);
+            if !settled && !child_completed && !output_closed && !deadline {
                 return Ok(None);
             }
 
-            let quality = if matched {
+            let accepted = settled || (matched && child_completed);
+            let quality = if accepted && *stable_for_ns > 0 {
+                ScreenPostconditionQuality::Matched
+            } else if accepted {
                 ScreenPostconditionQuality::MatchedUnsettled
             } else if child_completed {
                 ScreenPostconditionQuality::ChildCompleted
@@ -221,7 +248,7 @@ pub(super) fn evaluate_action_postcondition(
                 ScreenPostconditionQuality::Deadline
             };
 
-            let capture_quality = if deadline && !matched {
+            let capture_quality = if deadline && !accepted {
                 CaptureQuality::Incomplete
             } else {
                 CaptureQuality::Live
@@ -244,8 +271,25 @@ pub(super) fn evaluate_action_postcondition(
             };
 
             Ok(Some(ActionPostconditionResult::Screen {
-                matched,
+                matched: accepted,
                 quality,
+                matched_row: text_matches
+                    .as_ref()
+                    .and_then(|matches| return matches.last())
+                    .filter(|_| return accepted)
+                    .and_then(|matched| {
+                        return row_starts
+                            .iter()
+                            .rev()
+                            .find(|(start, _)| return *start <= matched.start);
+                    })
+                    .map(|(_, row)| return *row),
+                matched_text: text_matches
+                    .as_ref()
+                    .and_then(|matches| return matches.last())
+                    .filter(|_| return accepted)
+                    .and_then(|matched| return viewport_text.get(matched.clone()))
+                    .map(str::to_owned),
                 state_hash,
                 frame,
             }))

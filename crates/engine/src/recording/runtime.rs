@@ -538,6 +538,21 @@ impl SessionActor<'_> {
                 self.live.ensure_presented()?;
                 self.handle_control_request(request, response)?;
             }
+            RuntimeMessage::ControlDisconnected(request_id) => {
+                if self
+                    .pending_input_sequence
+                    .as_ref()
+                    .is_some_and(|pending| return pending.request.request_id == request_id)
+                {
+                    self.interrupt_input_sequence(
+                        "action_cancelled",
+                        "the action client disconnected",
+                    )?;
+                }
+
+                self.screen_waiters
+                    .retain(|waiter| return waiter.request_id != request_id);
+            }
             RuntimeMessage::ControlServerFailed(reason) => {
                 return Err(terminal_error("serve control socket", reason));
             }

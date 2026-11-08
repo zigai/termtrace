@@ -197,11 +197,12 @@ pub(in crate::cli) struct ScreenArgs {
         .multiple(false)
         .args(["until_idle", "until_screen", "until_screen_regex"])
 ))]
+#[command(group(ArgGroup::new("send_screen_postcondition").args(["until_screen", "until_screen_regex"])))]
 pub(in crate::cli) struct SendArgs {
     /// Live session name or canonical path.
     #[arg(index = 1)]
     pub(in crate::cli) session: PathBuf,
-    /// Named keys, text:VALUE, paste:VALUE, raw:VALUE, or action atoms.
+    /// Named keys, text:VALUE, paste:VALUE, sleep:DURATION, raw:VALUE, or action atoms.
     #[arg(index = 2, value_name = "INPUT", num_args = 0..)]
     pub(in crate::cli) atoms: Vec<String>,
     /// Read raw bytes or atoms from standard input.
@@ -241,6 +242,9 @@ pub(in crate::cli) struct SendArgs {
     /// Maximum postcondition wait duration; defaults to the shared wait timeout.
     #[arg(long, value_parser = parse_wait_deadline_duration)]
     pub(in crate::cli) timeout: Option<Duration>,
+    /// Require an unchanged screen for this interval after a screen match.
+    #[arg(long, value_parser = parse_stability_duration, requires = "send_screen_postcondition")]
+    pub(in crate::cli) settle: Option<Duration>,
     /// How long `--until-idle` waits for output or a changed screen before reporting
     /// `unchanged`; defaults to 2s and is never shorter than the idle interval.
     #[arg(long, value_parser = parse_wait_deadline_duration, requires = "until_idle")]
@@ -270,8 +274,10 @@ pub(in crate::cli) struct SendArgs {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(in crate::cli) enum SendScreen {
-    /// Complete screen text; JSON reports only the state hash.
+    /// Complete trimmed screen text.
     Text,
+    /// Only the resulting state hash.
+    State,
     /// Moved row blocks and changed rows since just before the send; the complete screen
     /// when the geometry, the alternate screen, or most rows changed.
     Diff,

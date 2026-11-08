@@ -5,6 +5,7 @@ pub mod exact_path;
 pub mod geometry;
 pub mod json;
 pub mod pagination;
+pub mod path_bytes;
 
 pub use byte_string::ByteString;
 pub use exact_path::ExactPath;

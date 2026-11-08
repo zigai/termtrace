@@ -127,6 +127,7 @@ fn oversized_action_projection_is_cached_without_replaying_input() {
                 text: "COUNT:1:once".to_owned(),
             },
             timeout: Duration::from_secs(5),
+            settle: Duration::ZERO,
         },
         projection: ScreenProjectionRequest {
             detail: FrameDetail::Cells,
@@ -242,6 +243,7 @@ fn send_applies_mixed_steps_once_and_replays_them_on_retry() {
                 text: "COUNT:2:second".to_owned(),
             },
             timeout: Duration::from_secs(5),
+            settle: Duration::ZERO,
         },
         ..SendRequest::default()
     };
@@ -508,6 +510,7 @@ fn send_reports_screen_changes_for_input_and_command_endings() {
                         text: "DONE:go".to_owned(),
                     },
                     timeout: Duration::from_secs(5),
+                    settle: Duration::ZERO,
                 },
                 report_changes: true,
                 ..SendRequest::default()
@@ -570,6 +573,7 @@ fn action_termination_frame_remains_live_actor_evidence() {
                     text: "never-matches".to_owned(),
                 },
                 timeout: Duration::from_secs(5),
+                settle: Duration::ZERO,
             },
             allow_incomplete: true,
             ..ActRequest::default()
@@ -695,6 +699,7 @@ fn rust_summary(fixture: &Fixture, temporary: &Path) -> SdkSummary {
         postcondition: ActionCondition::Screen {
             predicate: fixture.predicate.clone(),
             timeout: Duration::from_secs(5),
+            settle: Duration::ZERO,
         },
         projection: ScreenProjectionRequest {
             detail: fixture.frame_detail,
@@ -941,6 +946,7 @@ fn interaction_failures_report_the_shared_fixture_facts_without_side_effects() {
                     text: "NEVER".to_owned(),
                 },
                 timeout: Duration::from_millis(200),
+                settle: Duration::ZERO,
             },
             ..ActRequest::new().text("late\n")
         })
