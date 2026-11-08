@@ -112,7 +112,7 @@ impl RegistryService {
                     "detached recorder exited before publishing valid completion evidence with {status}"
                 );
 
-                if let Some(cause) = last_log_line(&paths.stderr_log) {
+                if let Some(cause) = log_tail(&paths.stderr_log) {
                     reason = format!("{reason}: {cause}");
                 }
 
@@ -238,7 +238,7 @@ fn open_log(path: &Path) -> Result<File> {
         });
 }
 
-fn last_log_line(log: &Path) -> Option<String> {
+fn log_tail(log: &Path) -> Option<String> {
     let mut file = File::open(log).ok()?;
     let length = file.metadata().ok()?.len();
     file.seek(SeekFrom::Start(length.saturating_sub(LOG_TAIL_BYTES)))
@@ -246,12 +246,9 @@ fn last_log_line(log: &Path) -> Option<String> {
     let mut tail = Vec::new();
     file.take(LOG_TAIL_BYTES).read_to_end(&mut tail).ok()?;
     let tail = String::from_utf8_lossy(&tail);
-    let line = tail
-        .lines()
-        .rev()
-        .find(|line| return !line.trim().is_empty())?;
+    let tail = tail.trim();
 
-    return Some(line.trim().trim_start_matches("termtrace: ").to_owned());
+    return (!tail.is_empty()).then(|| return tail.to_owned());
 }
 
 fn startup_failure(reason: &str, paths: &DetachedSessionPaths) -> Error {
