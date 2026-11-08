@@ -64,3 +64,6 @@ Thumbs.db
 .coverage.*
 /target/llvm-cov-target/
 coverage/
+
+# Release CLI copied into the Python package while building a wheel
+/crates/bindings-python/python/termtrace/termtrace

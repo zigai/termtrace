@@ -108,7 +108,13 @@ Other clients: run `termtrace mcp` as a stdio server. Agent sessions show up in 
 
 ## SDKs
 
-Rust, Python, and TypeScript. Not published yet: build them with `just bindings-build`, or use `crates/sdk` from Rust.
+Rust, Python, and TypeScript. The Python and npm packages include the `termtrace` CLI.
+
+```sh
+cargo add termtrace-sdk
+pip install termtrace
+npm install @zigai/termtrace
+```
 
 ```python
 import termtrace

@@ -22,13 +22,17 @@ jobs:
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
       - run: sudo apt-get update && sudo apt-get install --yes b3sum
       - run: python3 scripts/check-release-versions.py
       - run: scripts/bootstrap.sh
@@ -61,6 +65,18 @@ jobs:
           TERMTRACE_DOWNLOAD_BASE="file://$PWD/dist" ./install.sh --install-dir "$install_root/bin"
           cmp "target/${{ matrix.target }}/release/termtrace" "$install_root/bin/termtrace"
           "$install_root/bin/termtrace" doctor --require core,semantic
+      - name: Build and test Python wheel
+        run: |
+          scripts/package-python.sh "${{ matrix.target }}" "target/${{ matrix.target }}/release/termtrace"
+          scripts/test-language-packages.sh python dist/python/termtrace-*.whl
+      - name: Pack and test npm packages
+        run: |
+          scripts/package-node.sh "${{ matrix.target }}" "target/${{ matrix.target }}/release/termtrace"
+          scripts/package-node.sh main
+          scripts/test-language-packages.sh node dist/npm/zigai-termtrace-[0-9]*.tgz dist/npm/zigai-termtrace-linux-*.tgz
+      - name: Keep one main npm package
+        if: matrix.target != 'x86_64-unknown-linux-gnu'
+        run: rm dist/npm/zigai-termtrace-[0-9]*.tgz
       - name: Package shell installer
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
@@ -85,10 +101,20 @@ jobs:
             dist/termtrace-${{ matrix.target }}*
             dist/termtrace-installer*
           if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-${{ matrix.target }}
+          path: dist/python/*.whl
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: npm-${{ matrix.target }}
+          path: dist/npm/*.tgz
+          if-no-files-found: error
 
   rust-packages:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
@@ -120,15 +146,48 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           TERMTRACE_GHOSTTY_PREFIX: ${{ github.workspace }}/vendor/ghostty/zig-out
+        run: cargo publish --locked --workspace
+
+  publish-pypi:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, publish-crates]
+    runs-on: ubuntu-24.04
+    environment: pypi
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: python-*
+          path: dist
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+      - run: uv publish --trusted-publishing always dist/*.whl
+
+  publish-npm:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, publish-crates]
+    runs-on: ubuntu-24.04
+    environment: npm
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: npm-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Publish platform packages before the package that depends on them
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          cargo publish --locked \
-            -p termtrace-model -p termtrace-terminal -p termtrace-evidence \
-            -p termtrace-engine -p termtrace-render -p termtrace-media \
-            -p termtrace-export -p termtrace-service -p termtrace-scenario -p termtrace-sdk
+          for tarball in dist/zigai-termtrace-linux-*.tgz dist/zigai-termtrace-[0-9]*.tgz; do
+            npm publish --access public --provenance "$tarball"
+          done
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, rust-packages, publish-crates]
+    needs: [linux, rust-packages, publish-crates, publish-pypi, publish-npm]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5

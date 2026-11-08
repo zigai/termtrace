@@ -1,5 +1,6 @@
-"""Reject mixed binary, SDK, and platform-package release versions."""
+"""Reject mixed CLI, crate, PyPI, and npm release versions."""
 
+import json
 import os
 from pathlib import Path
 
@@ -16,6 +17,15 @@ def main() -> None:
         with manifest.open("rb") as source:
             package = tomllib.load(source)["package"]
         versions[package["name"]] = package["version"]
+    with (root / "crates/bindings-python/pyproject.toml").open("rb") as source:
+        versions["pypi:termtrace"] = tomllib.load(source)["project"]["version"]
+    bindings_node = root / "crates/bindings-node"
+    for manifest in [
+        bindings_node / "package.json",
+        *sorted((bindings_node / "npm").glob("*/package.json")),
+    ]:
+        package = json.loads(manifest.read_text())
+        versions[f"npm:{package['name']}"] = package["version"]
     expected = versions["termtrace"]
     mismatched = {name: value for name, value in versions.items() if value != expected}
     if mismatched:
