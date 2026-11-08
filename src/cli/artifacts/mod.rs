@@ -485,6 +485,14 @@ pub(super) fn run_screenshot(
     response: &mut ResponseWriter,
     arguments: ScreenshotArgs,
 ) -> Result<ExitCode> {
+    if let Some(parent) = arguments
+        .out
+        .parent()
+        .filter(|parent| return !parent.as_os_str().is_empty())
+    {
+        fs_err::create_dir_all(parent).into_diagnostic()?;
+    }
+
     let session = resolve_session_path(arguments.session)?;
     let mut points = Vec::new();
     points.extend(
@@ -627,6 +635,14 @@ pub(super) fn run_bundle(response: &mut ResponseWriter, arguments: BundleArgs) -
     }
 
     let session = resolve_session_path(arguments.session)?;
+
+    if let Some(parent) = arguments
+        .out
+        .parent()
+        .filter(|parent| return !parent.as_os_str().is_empty())
+    {
+        fs_err::create_dir_all(parent).into_diagnostic()?;
+    }
 
     if arguments.archive {
         if arguments.out.exists() {

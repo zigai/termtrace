@@ -10,7 +10,9 @@ use crate::cli::{
 };
 use args::IntegritySubcommand;
 use miette::{IntoDiagnostic as _, Result};
-use std::{fmt::Write as _, mem::take, process::ExitCode};
+use std::{
+    fmt::Write as _, fs::DirBuilder, mem::take, os::unix::fs::DirBuilderExt as _, process::ExitCode,
+};
 use termtrace_evidence::{
     event_log::EventLog,
     receipt::create_ssh_receipt,
@@ -83,6 +85,18 @@ pub(super) fn run_recover(
     response: &mut ResponseWriter,
     arguments: RecoverArgs,
 ) -> Result<ExitCode> {
+    if let Some(parent) = arguments
+        .out
+        .parent()
+        .filter(|parent| return !parent.as_os_str().is_empty())
+    {
+        DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(parent)
+            .into_diagnostic()?;
+    }
+
     let report = if let Some(session) = arguments.session {
         recover_session(&session, &arguments.out).into_diagnostic()?
     } else if let Some(event_log) = arguments.event_log {
