@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { withTermtrace, assertScreenText, normalizedSnapshot } from "@termtrace/core/testing";
+import { withTermtrace, assertScreenText, normalizedSnapshot } from "@zigai/termtrace/testing";
 test("ordinary Vitest test: action -> presented observation -> shared assertion", async () => {
     await withTermtrace(
         async ({ record }) => {

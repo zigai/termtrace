@@ -7,7 +7,7 @@
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@termtrace/core": "file:../../../crates/bindings-node"
+    "@zigai/termtrace": "file:../../../crates/bindings-node"
   },
   "devDependencies": {
     "@types/node": "26.6.5",

@@ -1,0 +1,28 @@
+{
+  "name": "@zigai/termtrace-linux-arm64-gnu",
+  "version": "0.1.0",
+  "description": "Native Termtrace binding and CLI for Linux arm64 (glibc)",
+  "main": "termtrace.linux-arm64-gnu.node",
+  "files": [
+    "termtrace.linux-arm64-gnu.node",
+    "termtrace"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/termtrace.git",
+    "directory": "crates/bindings-node"
+  },
+  "engines": {
+    "node": ">= 18.0.0"
+  }
+}

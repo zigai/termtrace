@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const { Termtrace } = require("@termtrace/core");
+const { Termtrace } = require("@zigai/termtrace");
 
 const repo = path.resolve(__dirname, "../../../..");
 const fixture = JSON.parse(

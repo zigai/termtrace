@@ -1,5 +1,5 @@
-import { Termtrace, type MediaArtifactResult, type TermtraceError } from "@termtrace/core";
-import { decimalUnsigned, timeoutMilliseconds, validateRegion } from "@termtrace/core/contracts";
+import { Termtrace, type MediaArtifactResult, type TermtraceError } from "@zigai/termtrace";
+import { decimalUnsigned, timeoutMilliseconds, validateRegion } from "@zigai/termtrace/contracts";
 
 declare const envelope: MediaArtifactResult;
 const exact: bigint = envelope.members[0].byte_length;

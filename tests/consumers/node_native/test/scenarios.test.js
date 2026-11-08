@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { Termtrace, scenarioCiFailed, writeScenarioJunit } = require("@termtrace/core");
+const { Termtrace, scenarioCiFailed, writeScenarioJunit } = require("@zigai/termtrace");
 
 const binary = process.env.TERMTRACE_BIN
     ? path.resolve(process.env.TERMTRACE_BIN)

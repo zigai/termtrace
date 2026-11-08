@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 
-const { Termtrace, Edit, select } = require("@termtrace/core");
+const { Termtrace, Edit, select } = require("@zigai/termtrace");
 
 const binary = process.env.TERMTRACE_BIN
     ? path.resolve(process.env.TERMTRACE_BIN)

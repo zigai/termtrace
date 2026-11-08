@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const { Termtrace, Events, Output } = require("@termtrace/core");
+const { Termtrace, Events, Output } = require("@zigai/termtrace");
 const root = path.resolve(__dirname, "../../../..");
 const fixture = JSON.parse(
     fs.readFileSync(path.join(root, "fixtures/conformance/sdk/evidence-pages.json"), "utf8"),

@@ -3,8 +3,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
-const { ScreenFrame, LocatorSpec, Termtrace } = require("@termtrace/core");
-const t = require("@termtrace/core/testing");
+const { ScreenFrame, LocatorSpec, Termtrace } = require("@zigai/termtrace");
+const t = require("@zigai/termtrace/testing");
 const repo = path.resolve(__dirname, "../../../..");
 const binary = process.env.TERMTRACE_BIN ?? path.join(repo, "target/debug/termtrace");
 const source = fs.readFileSync(
@@ -256,7 +256,7 @@ test("invalid explicit outcome cannot prevent automatic finalization", async () 
 });
 
 test("native finalize transport also returns its first report on duplicate calls", async () => {
-    const { finalizeRecordings } = require("@termtrace/core");
+    const { finalizeRecordings } = require("@zigai/termtrace");
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "task04-native-finalize-"));
     const rec = await new Termtrace(binary, root).record(command);
     await rec.screen().waitForText("READY", 5000);

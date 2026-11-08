@@ -8,7 +8,7 @@ import {
     type SessionStatus,
     type VisualProfile,
     type VisualProfileReport,
-} from "@termtrace/core";
+} from "@zigai/termtrace";
 
 async function consumer(tt: Termtrace): Promise<void> {
     const options: LaunchOptions = {

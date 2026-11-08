@@ -5,7 +5,7 @@ const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
-const { Termtrace, Instrumentation, Registry } = require("@termtrace/core");
+const { Termtrace, Instrumentation, Registry } = require("@zigai/termtrace");
 const repo = path.resolve(__dirname, "../../../..");
 const binary = process.env.TERMTRACE_BIN || path.join(repo, "target/debug/termtrace");
 const fixture = JSON.parse(
@@ -565,7 +565,7 @@ function ffmpegWithoutVp9(directory) {
 }
 
 test("delivery codec availability follows the ffmpeg on PATH", async (t) => {
-    const { Edit, select } = require("@termtrace/core");
+    const { Edit, select } = require("@zigai/termtrace");
     const root = fs.mkdtempSync(
         path.join(process.env.TASK05_EVIDENCE || os.tmpdir(), "node-codecs-"),
     );

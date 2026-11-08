@@ -4,8 +4,8 @@ const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs");
 
-const { Termtrace } = require("@termtrace/core");
-const { withTermtrace } = require("@termtrace/core/testing");
+const { Termtrace } = require("@zigai/termtrace");
+const { withTermtrace } = require("@zigai/termtrace/testing");
 
 const TERMTRACE_BIN = process.env.TERMTRACE_BIN
     ? path.resolve(process.env.TERMTRACE_BIN)
@@ -346,7 +346,7 @@ test("withTermtrace retains real session evidence after a test failure", async (
     }
 });
 
-const { CancelToken, LocatorSpec, ScreenFrame } = require("@termtrace/core");
+const { CancelToken, LocatorSpec, ScreenFrame } = require("@zigai/termtrace");
 const CAPTURE_QUANTUM_MS = 250;
 const locatorFixtures = path.resolve(__dirname, "../../../../fixtures/conformance/locators");
 const parity = JSON.parse(fs.readFileSync(path.join(locatorFixtures, "parity.json"), "utf8"));
@@ -585,7 +585,7 @@ test("live locator parity, rich frames, and waits", async () => {
 });
 
 const crypto = require("node:crypto");
-const { ActionResult } = require("@termtrace/core");
+const { ActionResult } = require("@zigai/termtrace");
 
 const INTERACTION = JSON.parse(
     fs.readFileSync(
@@ -1211,7 +1211,7 @@ const {
     scope,
     select,
     sourceForOutputFrame,
-} = require("@termtrace/core");
+} = require("@zigai/termtrace");
 const { execFileSync } = require("node:child_process");
 
 const SDK_FIXTURES = fs.realpathSync(

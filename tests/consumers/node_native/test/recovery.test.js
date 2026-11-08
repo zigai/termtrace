@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
-const { Termtrace, Events } = require("@termtrace/core");
+const { Termtrace, Events } = require("@zigai/termtrace");
 const binary =
     process.env.TERMTRACE_BIN || path.resolve(__dirname, "../../../../target/debug/termtrace");
 const join = (base, name) =>

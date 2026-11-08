@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { Tmux } = require("@termtrace/core");
+const { Tmux } = require("@zigai/termtrace");
 const binary =
     process.env.TERMTRACE_BIN || path.resolve(__dirname, "../../../../target/debug/termtrace");
 function command(socket, ...args) {
@@ -173,7 +173,7 @@ test("native Node existing-server track admission failure restores integration o
 });
 
 test("nonUTF8 pane map values and committed aggregate stop have exact non-actor facts", async () => {
-    const { Registry } = require("@termtrace/core");
+    const { Registry } = require("@zigai/termtrace");
     const root = fs.mkdtempSync(path.join(process.env.TASK05_EVIDENCE || os.tmpdir(), "n-tm-"));
     const socket = path.join(root, "s");
     const state = Buffer.concat([Buffer.from(root + "/state-"), Buffer.from([255])]);

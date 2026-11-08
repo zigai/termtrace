@@ -5,7 +5,7 @@ const {
     decimalUnsigned,
     timeoutMilliseconds,
     validateRegion,
-} = require("@termtrace/core/contracts");
+} = require("@zigai/termtrace/contracts");
 
 test("explicit decimal conversion rejects malformed values and overflow", () => {
     assert.equal(decimalUnsigned((2n ** 128n - 1n).toString(), 128), 2n ** 128n - 1n);

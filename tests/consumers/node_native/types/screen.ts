@@ -10,7 +10,7 @@ import {
     type StableScreenCapture,
     type StatePoint,
     type StyleFilter,
-} from "@termtrace/core";
+} from "@zigai/termtrace";
 
 async function screenConsumer(screen: Screen, signal: AbortSignal): Promise<void> {
     const frame = await screen.frame({

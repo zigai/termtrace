@@ -1,4 +1,4 @@
-import { type ScreenFrame, type QueryResult, type ScreenMatch } from "@termtrace/core";
+import { type ScreenFrame, type QueryResult, type ScreenMatch } from "@zigai/termtrace";
 import {
     withTermtrace,
     assertScreenText,
@@ -18,7 +18,7 @@ import {
     assertNot,
     ExpectationMismatchError,
     type FinalizationReport,
-} from "@termtrace/core/testing";
+} from "@zigai/termtrace/testing";
 async function consumer(
     frame: ScreenFrame,
     query: QueryResult,

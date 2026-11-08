@@ -1,4 +1,4 @@
-import { Events, Output, type ProjectedEventPage, type ByteOutputPage } from "@termtrace/core";
+import { Events, Output, type ProjectedEventPage, type ByteOutputPage } from "@zigai/termtrace";
 
 const events = new Events(new Uint8Array([47, 116, 109, 112]));
 const output = new Output(new Uint8Array([47, 116, 109, 112]));

@@ -5,7 +5,7 @@ import {
     type RegistryEntry,
     type ApplicationAcknowledgement,
     type TimelinePage,
-} from "@termtrace/core";
+} from "@zigai/termtrace";
 
 function nested(
     saved: SaveOutcome,
@@ -68,11 +68,11 @@ void surfaces;
 
 function nullableWide(
     registered: RegistryEntry,
-    gap: import("@termtrace/core").TmuxGapCatalogEntry,
+    gap: import("@zigai/termtrace").TmuxGapCatalogEntry,
 ): void {
     const empty: RegistryEntry["recorder_process_start_ticks"] = null;
     const unresolved: typeof gap.gap.resolved_unix_ns = null;
-    const options: import("@termtrace/core").RestartConfiguration = {
+    const options: import("@zigai/termtrace").RestartConfiguration = {
         output_byte_budget: null,
         max_duration_ms: null,
     };

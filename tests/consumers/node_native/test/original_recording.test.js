@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs");
 
-const { Termtrace } = require("@termtrace/core");
+const { Termtrace } = require("@zigai/termtrace");
 
 const TERMTRACE_BIN = process.env.TERMTRACE_BIN
     ? path.resolve(process.env.TERMTRACE_BIN)

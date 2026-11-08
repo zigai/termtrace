@@ -1,5 +1,5 @@
 {
-  "name": "@termtrace/core",
+  "name": "@zigai/termtrace",
   "version": "0.1.0",
   "description": "Native Node.js and TypeScript bindings for Termtrace terminal recording and semantic debugging",
   "main": "index.js",
@@ -32,7 +32,6 @@
     "index.js",
     "index.d.ts",
     "types.d.ts",
-    "termtrace.node",
     "contracts.js",
     "contracts.d.ts",
     "edit.js",
@@ -41,5 +40,13 @@
     "original.js",
     "testing.js",
     "testing.d.ts"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigai/termtrace.git",
+    "directory": "crates/bindings-node"
+  },
+  "os": [
+    "linux"
   ]
 }

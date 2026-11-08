@@ -2,9 +2,10 @@
 
 Use individual CLI commands (`termtrace send`, `termtrace screen --json`, etc.) when a workflow will finish in
 two or three actions. Beyond that, use an SDK in the caller's language (Rust `termtrace_sdk`, Python
-`termtrace`, or TypeScript `@termtrace/core`) so repeated observations and actions do not pay process
-startup and discovery costs. All three call the same Rust services. Use `termtrace test`
-when assertions should be repeatable scenarios. SDK workflows are appropriate for branching, loops,
+`termtrace`, or TypeScript `@zigai/termtrace`) so repeated observations and actions do not pay process
+startup and discovery costs. All three call the same Rust services.
+
+Use `termtrace test` when assertions should be repeatable scenarios. SDK workflows are appropriate for branching, loops,
 multiple sessions, or caller-owned retry IDs. `fixtures/conformance/sdk/matrix.json` lists each
 capability's status in each language.
 
@@ -106,12 +107,12 @@ async def main():
 asyncio.run(main())
 ```
 
-## Native Node.js & TypeScript SDK (`@termtrace/core`)
+## Native Node.js & TypeScript SDK (`@zigai/termtrace`)
 
 For Node.js and TypeScript applications, use the native NAPI-RS binding:
 
 ```typescript
-import { Termtrace } from "@termtrace/core";
+import { Termtrace } from "@zigai/termtrace";
 
 const tt = new Termtrace();
 
@@ -133,7 +134,7 @@ console.log("Output:", frame.text);
 Thrown errors are `TermtraceError`s with `kind`, `code`, `effect`, and `retry`:
 
 ```typescript
-import type { TermtraceError } from "@termtrace/core";
+import type { TermtraceError } from "@zigai/termtrace";
 
 try {
   await actions.execute();
@@ -148,7 +149,7 @@ try {
 For test suites:
 
 ```typescript
-const { withTermtrace } = require("@termtrace/core/testing");
+const { withTermtrace } = require("@zigai/termtrace/testing");
 
 await withTermtrace(async ({ record }) => {
   const rec = await record(["my-cli", "--help"]);

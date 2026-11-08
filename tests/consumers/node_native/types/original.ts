@@ -5,7 +5,7 @@ import {
     type OriginalLaunchOptions,
     type OriginalRecording,
     type RecordOriginalOptions,
-} from "@termtrace/core";
+} from "@zigai/termtrace";
 
 async function consumer(tt: Termtrace, signal: AbortSignal): Promise<boolean> {
     const options: RecordOriginalOptions = {

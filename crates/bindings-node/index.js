@@ -1,14 +1,28 @@
 const { existsSync } = require("fs");
 const { join } = require("path");
 
-let nativeBinding = null;
-const localBinding = join(__dirname, "termtrace.node");
+const PLATFORM_PACKAGES = {
+    x64: "@zigai/termtrace-linux-x64-gnu",
+    arm64: "@zigai/termtrace-linux-arm64-gnu",
+};
 
-if (existsSync(localBinding)) {
-    nativeBinding = require(localBinding);
-} else {
-    throw new Error(`Failed to load native binding: ${localBinding}`);
+// A source build leaves termtrace.node here; an npm install provides it through the platform package.
+function loadNativeBinding() {
+    const localBinding = join(__dirname, "termtrace.node");
+    if (existsSync(localBinding)) {
+        return require(localBinding);
+    }
+    const platformPackage =
+        process.platform === "linux" ? PLATFORM_PACKAGES[process.arch] : undefined;
+    if (platformPackage === undefined) {
+        throw new Error(
+            `Termtrace supports Linux x64 and arm64, not ${process.platform} ${process.arch}`,
+        );
+    }
+    return require(platformPackage);
 }
+
+const nativeBinding = loadNativeBinding();
 
 class ExpectationMismatchError extends Error {}
 
