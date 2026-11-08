@@ -130,7 +130,7 @@ macro_rules! registry {
 fn generate_acceptance_benchmark_schema(filename: &'static str) -> Result<GeneratedSchema> {
     return Ok(GeneratedSchema {
         filename,
-        json: include_bytes!("../../../schemas/acceptance-benchmark.schema.json").to_vec(),
+        json: include_bytes!("acceptance-benchmark.schema.json").to_vec(),
     });
 }
 

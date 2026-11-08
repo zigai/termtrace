@@ -38,11 +38,15 @@ rust-version = "1.97.1"
 description = "Native-Ghostty terminal recording and semantic debugging for humans and agents"
 repository = "https://github.com/zigai/termtrace"
 license-file.workspace = true
+include = ["/src", "/build.rs", "/LICENSE", "/README.md"]
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/termtrace-{ target }.tar.gz"
 bin-dir = "termtrace-{ target }/{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
+
+[build-dependencies]
+serde_json = "1.0.145"
 
 [dependencies]
 blake3 = "1.8.2"
@@ -57,19 +61,19 @@ signal-hook = "0.3.18"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 tempfile = "3.23.0"
-termtrace-engine = { path = "crates/engine" }
-termtrace-evidence = { path = "crates/evidence" }
-termtrace-export = { path = "crates/export" }
-termtrace-media = { path = "crates/media" }
-termtrace-model = { path = "crates/model" }
-termtrace-process = { path = "crates/process" }
-termtrace-render = { path = "crates/render" }
-termtrace-scenario = { path = "crates/scenario" }
-termtrace-schema = { path = "crates/schema" }
-termtrace-service = { path = "crates/service" }
-termtrace-sdk = { path = "crates/sdk", features = ["in-process"] }
-termtrace-terminal = { path = "crates/terminal" }
-termtrace-tmux = { path = "crates/tmux" }
+termtrace-engine = { version = "=0.1.0", path = "crates/engine" }
+termtrace-evidence = { version = "=0.1.0", path = "crates/evidence" }
+termtrace-export = { version = "=0.1.0", path = "crates/export" }
+termtrace-media = { version = "=0.1.0", path = "crates/media" }
+termtrace-model = { version = "=0.1.0", path = "crates/model" }
+termtrace-process = { version = "=0.1.0", path = "crates/process" }
+termtrace-render = { version = "=0.1.0", path = "crates/render" }
+termtrace-scenario = { version = "=0.1.0", path = "crates/scenario" }
+termtrace-schema = { version = "=0.1.0", path = "crates/schema" }
+termtrace-service = { version = "=0.1.0", path = "crates/service" }
+termtrace-sdk = { version = "=0.1.0", path = "crates/sdk", features = ["in-process"] }
+termtrace-terminal = { version = "=0.1.0", path = "crates/terminal" }
+termtrace-tmux = { version = "=0.1.0", path = "crates/tmux" }
 tracing = "0.1.41"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }

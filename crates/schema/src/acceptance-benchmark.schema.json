@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termtrace.dev/schemas/acceptance-benchmark.schema.json",
+  "title": "Termtrace acceptance benchmark manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "baseline",
+    "environment",
+    "measurement",
+    "defaults",
+    "fixtures",
+    "gates",
+    "invariants",
+    "artifact_validators"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format": { "const": "termtrace-acceptance-benchmark" },
+    "version": { "const": 1 },
+    "baseline": { "$ref": "#/$defs/baseline" },
+    "environment": { "$ref": "#/$defs/environment" },
+    "measurement": { "$ref": "#/$defs/measurement" },
+    "defaults": { "$ref": "#/$defs/defaults" },
+    "fixtures": {
+      "type": "array",
+      "minItems": 3,
+      "items": { "$ref": "#/$defs/fixture" }
+    },
+    "gates": {
+      "type": "array",
+      "minItems": 10,
+      "items": { "$ref": "#/$defs/gate" }
+    },
+    "invariants": {
+      "type": "array",
+      "minItems": 8,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "artifact_validators": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/validator" }
+    }
+  },
+  "$defs": {
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "termtrace_repository",
+        "termtrace_commit",
+        "ghostty_repository",
+        "ghostty_vt_commit"
+      ],
+      "properties": {
+        "termtrace_repository": { "type": "string", "format": "uri" },
+        "termtrace_commit": { "$ref": "#/$defs/gitCommit" },
+        "ghostty_repository": { "type": "string", "format": "uri" },
+        "ghostty_vt_commit": { "$ref": "#/$defs/gitCommit" }
+      }
+    },
+    "gitCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "environment": {
+      "type": "object",
+      "required": [
+        "kind",
+        "identifier",
+        "operating_system",
+        "kernel",
+        "architecture",
+        "cpu",
+        "logical_cpus",
+        "memory_bytes",
+        "rust_toolchain",
+        "ghostty_native",
+        "ffmpeg",
+        "jq",
+        "notes"
+      ],
+      "properties": {
+        "kind": { "enum": ["host", "oci"] },
+        "identifier": { "type": "string", "minLength": 1 },
+        "operating_system": { "type": "string" },
+        "kernel": { "type": "string" },
+        "architecture": { "type": "string" },
+        "cpu": { "type": "string" },
+        "logical_cpus": { "type": "integer", "minimum": 1 },
+        "memory_bytes": { "type": "integer", "minimum": 536870912 },
+        "rust_toolchain": { "type": "string" },
+        "ghostty_native": { "type": "string" },
+        "ffmpeg": { "type": "string" },
+        "jq": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clock",
+        "warmup_repetitions",
+        "measured_repetitions",
+        "reported_percentiles",
+        "percentile_method",
+        "cold_policy",
+        "warm_policy",
+        "concurrency",
+        "timeout_seconds",
+        "resident_memory_limit_bytes"
+      ],
+      "properties": {
+        "clock": { "type": "string" },
+        "warmup_repetitions": { "type": "integer", "minimum": 0 },
+        "measured_repetitions": { "type": "integer", "minimum": 20 },
+        "reported_percentiles": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "uniqueItems": true
+        },
+        "percentile_method": { "type": "string" },
+        "cold_policy": { "type": "string" },
+        "warm_policy": { "type": "string" },
+        "concurrency": { "type": "integer", "minimum": 1 },
+        "timeout_seconds": { "type": "integer", "minimum": 1 },
+        "resident_memory_limit_bytes": { "type": "integer", "maximum": 536870912 }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "geometry",
+        "profile",
+        "durability_policy",
+        "durability_max_interval_ms",
+        "durability_max_uncommitted_bytes"
+      ],
+      "properties": {
+        "geometry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cols", "rows", "pixel_width", "pixel_height"],
+          "properties": {
+            "cols": { "const": 120 },
+            "rows": { "const": 40 },
+            "pixel_width": { "type": "integer", "minimum": 1 },
+            "pixel_height": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["term", "colorterm", "locale", "timezone", "ghostty_config"],
+          "properties": {
+            "term": { "type": "string" },
+            "colorterm": { "type": "string" },
+            "locale": { "type": "string" },
+            "timezone": { "type": "string" },
+            "ghostty_config": { "type": "string" }
+          }
+        },
+        "durability_policy": { "enum": ["strict", "bounded", "throughput"] },
+        "durability_max_interval_ms": { "type": "integer", "minimum": 1 },
+        "durability_max_uncommitted_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["line_oriented", "fullscreen_query_heavy", "generated_large"] },
+        "command": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "completion_marker": { "type": "string" },
+        "event_count": { "type": "integer", "minimum": 1 },
+        "output_bytes": { "type": "integer", "minimum": 1 },
+        "generator": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "gate": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["ergonomics", "latency", "latency_delta", "complexity"] },
+        "operation": { "type": "string" },
+        "operations": { "type": "array", "items": { "type": "string" } },
+        "workflows": { "type": "array", "items": { "type": "string" } },
+        "fixture": { "type": "string" },
+        "cache_policy": { "enum": ["cold", "warm"] },
+        "percentile": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "maximum_ms": { "type": "integer", "minimum": 1 },
+        "maximum_delta_ms": { "type": "integer", "minimum": 1 },
+        "maximum_commands_per_workflow": { "type": "integer", "minimum": 1 },
+        "maximum_required_identifiers_per_workflow": { "type": "integer", "minimum": 1 },
+        "reference": { "type": "string" },
+        "requirement": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "validator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact", "command"],
+      "properties": {
+        "artifact": { "type": "string", "minLength": 1 },
+        "command": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
