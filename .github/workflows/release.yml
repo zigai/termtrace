@@ -19,10 +19,8 @@ jobs:
         include:
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-            zig_target: x86_64-linux-gnu.2.28
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            zig_target: aarch64-linux-gnu.2.28
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     steps:
@@ -33,20 +31,14 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - run: sudo apt-get update && sudo apt-get install --yes b3sum
       - run: python3 scripts/check-release-versions.py
-      - run: cargo install cargo-zigbuild --version 0.23.0 --locked
       - run: scripts/bootstrap.sh
         env:
-          TERMTRACE_ZIG_TARGET: ${{ matrix.zig_target }}
-      - name: Add pinned Zig to PATH
-        run: |
-          zig=$(find .tools -type f -path '*/zig' -perm -u+x -print -quit)
-          test -n "$zig"
-          dirname "$zig" >> "$GITHUB_PATH"
+          # Zig otherwise tunes libghostty-vt for the runner's CPU.
+          TERMTRACE_ZIG_EXTRA_ARGS: -Dcpu=baseline
       - run: cargo test --locked --workspace --all-features
-      - run: cargo zigbuild --locked --release --all-features --target "${{ matrix.target }}.2.28"
+      - run: cargo build --locked --release --all-features --target "${{ matrix.target }}"
         env:
           TERMTRACE_BUILD_REVISION: ${{ github.sha }}
-      - run: scripts/check-glibc-compat.sh "target/${{ matrix.target }}/release/termtrace" 2.28
       - name: Test standalone Rust process client
         run: bash scripts/test-rust-consumer.sh
         env:

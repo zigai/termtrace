@@ -20,7 +20,7 @@ a video.
 curl -LsSf https://github.com/zigai/termtrace/raw/main/install.sh | bash
 ```
 
-Linux only (x86_64 or aarch64, glibc 2.28+). Video needs Ghostty and FFmpeg;
+Linux only (x86_64 or aarch64, `glibc` 2.39+). Video needs `ghostty` and `ffmpeg`;
 `termtrace doctor` tells you what's missing.
 
 ## Quick start

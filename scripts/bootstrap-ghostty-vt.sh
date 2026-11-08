@@ -61,11 +61,6 @@ if [[ -n "${TERMTRACE_ZIG_OPTIMIZE:-}" ]]; then
     optimize_mode="${TERMTRACE_ZIG_OPTIMIZE}"
 fi
 
-target_args=()
-if [[ -n "${TERMTRACE_ZIG_TARGET:-}" ]]; then
-    target_args+=("-Dtarget=${TERMTRACE_ZIG_TARGET}")
-fi
-
 extra_args=()
 if [[ -n "${TERMTRACE_ZIG_EXTRA_ARGS:-}" ]]; then
     read -r -a extra_args <<<"${TERMTRACE_ZIG_EXTRA_ARGS}"
@@ -73,7 +68,7 @@ fi
 
 readonly output="${TERMTRACE_GHOSTTY_PREFIX:-$ghostty/zig-out}"
 
-"$zig" build -Demit-lib-vt=true "-Doptimize=${optimize_mode}" --prefix "$output" "${target_args[@]}" "${extra_args[@]}"
+"$zig" build -Demit-lib-vt=true "-Doptimize=${optimize_mode}" --prefix "$output" "${extra_args[@]}"
 
 test -f "$output/lib/libghostty-vt.a"
 test -f "$output/include/ghostty/vt.h"

@@ -65,7 +65,7 @@ fi
 
 for musl_loader in /lib/ld-musl-*.so.1; do
     if [[ -e "$musl_loader" ]]; then
-        echo "Termtrace prebuilt releases currently require glibc 2.28 or newer; musl is not yet supported" >&2
+        echo "Termtrace prebuilt releases require glibc; musl is not yet supported" >&2
         exit 2
     fi
 done
