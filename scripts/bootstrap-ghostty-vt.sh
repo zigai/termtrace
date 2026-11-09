@@ -78,7 +78,7 @@ git -C "$ghostty" rev-parse HEAD >"$output/ghostty-revision"
 
 printf 'libghostty-vt ready at %s\n' "$output"
 
-if [[ "$optimize_mode" != ReleaseFast || ${#target_args[@]} -gt 0 || ${#extra_args[@]} -gt 0 ]]; then
+if [[ "$optimize_mode" != ReleaseFast || ${#extra_args[@]} -gt 0 ]]; then
     exit 0
 fi
 
