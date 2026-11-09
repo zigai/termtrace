@@ -14,7 +14,7 @@ fn fitted_geometry_requires_a_viewport() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "--geometry fit requires --viewport WIDTHxHEIGHT",
+            "required arguments were not provided:\n  --viewport <VIEWPORT>",
         ));
 }
 
