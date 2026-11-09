@@ -47,7 +47,7 @@ use termtrace_export::{
     bundle::{create as create_bundle, plan as plan_bundle, verify_profile},
 };
 use termtrace_media::native_capture::{
-    capture, native_capture_target, CaptureKind, CaptureOptions,
+    capture, check_video_source, native_capture_target, CaptureKind, CaptureOptions,
 };
 use termtrace_media::presentation::PreviewOptions;
 use termtrace_media::save::{save, save_screenshot_batch};
@@ -377,6 +377,20 @@ pub(super) fn run_capture(
 ) -> Result<ExitCode> {
     let session = resolve_session_path(arguments.session)?;
     let (start_monotonic_ns, end_monotonic_ns) = resolve_cli_range(&session, &arguments.range)?;
+    let state_selection = if arguments.presented_only {
+        StateSelection::Presented
+    } else {
+        StateSelection::All
+    };
+
+    check_video_source(
+        &session,
+        start_monotonic_ns,
+        end_monotonic_ns,
+        state_selection,
+    )
+    .into_diagnostic()?;
+
     let cancelled = Arc::new(AtomicBool::new(false));
     let probed = Arc::new(AtomicBool::new(false));
 
@@ -414,11 +428,7 @@ pub(super) fn run_capture(
             fps: arguments.fps,
             start_monotonic_ns,
             end_monotonic_ns,
-            state_selection: if arguments.presented_only {
-                StateSelection::Presented
-            } else {
-                StateSelection::All
-            },
+            state_selection,
             geometry_solver,
             kind: CaptureKind::Video,
             destination: None,

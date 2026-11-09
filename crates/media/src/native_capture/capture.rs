@@ -45,7 +45,7 @@ use termtrace_model::{
     },
     execution::layout::SessionLayout,
     execution::session::{CaptureTarget, GeometrySource, SessionManifest},
-    terminal::replay::SourceRange,
+    terminal::replay::{SourceRange, StateSelection},
 };
 
 /// Capture a completed session in a private display and atomically publish its visual artifacts.
@@ -60,26 +60,11 @@ use termtrace_model::{
 /// native playback or capture fails, or the resulting artifacts cannot be verified and published.
 pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome> {
     validate_options(options)?;
-    let Some(completion) = read_completed(&options.session_directory)? else {
-        return Err(Error::SessionIncomplete {
-            session: options.session_directory.clone(),
-        });
-    };
-
-    let log = EventLogSummary::read(SessionLayout::new(&options.session_directory).event_log())?;
-    validate_completion_summary_candidate(&options.session_directory, &log, &completion)?;
-
-    let final_ns = log
-        .terminal
-        .as_ref()
-        .map_or(0, |record| return record.monotonic_ns);
-
-    let range = resolve_source_range(
+    let (log, range) = completed_source(
+        &options.session_directory,
         options.start_monotonic_ns,
         options.end_monotonic_ns,
-        final_ns,
     )?;
-
     let states = selected_states(options, &log, range)?;
     let destination = options
         .destination
@@ -177,6 +162,49 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
     }
 
     return Ok(outcome(destination, &options.kind));
+}
+
+/// Check that a completed session has the semantic index a native video capture of the
+/// selected range needs, without touching native tools.
+///
+/// # Errors
+///
+/// Returns an error when the session is incomplete or invalid, the range does not resolve, or the
+/// matching semantic index is missing or stale.
+pub fn check_video_source(
+    session: &Path,
+    start_monotonic_ns: Option<u64>,
+    end_monotonic_ns: Option<u64>,
+    selection: StateSelection,
+) -> Result<()> {
+    let (log, range) = completed_source(session, start_monotonic_ns, end_monotonic_ns)?;
+    validate_replay_manifest(session, &log, range, selection)?;
+
+    return Ok(());
+}
+
+fn completed_source(
+    session: &Path,
+    start_monotonic_ns: Option<u64>,
+    end_monotonic_ns: Option<u64>,
+) -> Result<(EventLogSummary, Option<SourceRange>)> {
+    let Some(completion) = read_completed(session)? else {
+        return Err(Error::SessionIncomplete {
+            session: session.to_path_buf(),
+        });
+    };
+
+    let log = EventLogSummary::read(SessionLayout::new(session).event_log())?;
+    validate_completion_summary_candidate(session, &log, &completion)?;
+
+    let final_ns = log
+        .terminal
+        .as_ref()
+        .map_or(0, |record| return record.monotonic_ns);
+
+    let range = resolve_source_range(start_monotonic_ns, end_monotonic_ns, final_ns)?;
+
+    return Ok((log, range));
 }
 
 fn selected_states(

@@ -4,6 +4,7 @@ use super::super::{
 };
 use crate::system::SystemService;
 use std::sync::{atomic::AtomicBool, Arc};
+use termtrace_engine::observation::replay_endpoint_for_session;
 use termtrace_media::native_capture::{native_capture_target, NativeReplayWorker};
 use termtrace_model::{
     execution::session::CaptureTarget, protocol::capability::NATIVE_SCREENSHOT_CAPABILITY,
@@ -45,8 +46,8 @@ impl Native<'_> {
     /// Capture one native screenshot of `point` in this completed session into the new
     /// `destination` directory, holding the PNG, its manifest, and the replay endpoint.
     ///
-    /// Requires the `native-screenshot` capability, then starts a replay worker, captures, and
-    /// closes the worker. `cancelled` is checked during the probe and replay.
+    /// Resolves `point`, requires the `native-screenshot` capability, then starts a replay
+    /// worker, captures, and closes the worker. `cancelled` is checked during the probe and replay.
     ///
     /// # Errors
     /// Returns an error when the capability is blocked, the session is live, `point` does not
@@ -59,9 +60,10 @@ impl Native<'_> {
         cancelled: Arc<AtomicBool>,
         timeout: Duration,
     ) -> Result<CaptureOutcome> {
+        let endpoint = replay_endpoint_for_session(self.session.path(), point, &cancelled)?;
         SystemService::require(NATIVE_SCREENSHOT_CAPABILITY, &cancelled)?;
         let mut worker = self.replay_worker(viewport, cancelled, timeout)?;
-        let capture = worker.capture(point, destination)?;
+        let capture = worker.capture_endpoint(&endpoint, destination)?;
         worker.close();
 
         return Ok(capture);

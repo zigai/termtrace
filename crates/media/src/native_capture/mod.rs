@@ -20,7 +20,7 @@ mod worker;
 
 pub use crate::{Error, Result};
 pub use capability::native_capabilities;
-pub use capture::{capture, resolve_display_scaling, DisplayScaling};
+pub use capture::{capture, check_video_source, resolve_display_scaling, DisplayScaling};
 pub use geometry::{
     native_capture_target, preflight_visual_profile, probe_ghostty_geometry, solve_ghostty_geometry,
 };
