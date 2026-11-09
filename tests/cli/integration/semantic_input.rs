@@ -91,7 +91,7 @@ fn send_writes_text_file_and_stdin_bytes_directly() {
     ] {
         let mut send = Command::cargo_bin("termtrace").expect("binary should build");
         let output = send
-            .args(["send"])
+            .args(["send", "--json"])
             .arg(&session)
             .arg(argument)
             .arg(value)
@@ -103,18 +103,23 @@ fn send_writes_text_file_and_stdin_bytes_directly() {
 
         let response: serde_json::Value =
             serde_json::from_slice(&output).expect("direct send response");
-        assert_eq!(response["bytes_written"], byte_count);
+        assert_eq!(response["input"]["bytes"], byte_count);
     }
 
     let mut stdin_send = Command::cargo_bin("termtrace").expect("binary should build");
-    stdin_send
-        .args(["send"])
+    let output = stdin_send
+        .args(["send", "--json"])
         .arg(&session)
         .arg("--stdin")
         .write_stdin("tail")
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""bytes_written":4"#));
+        .get_output()
+        .stdout
+        .clone();
+
+    let response: serde_json::Value = serde_json::from_slice(&output).expect("stdin send response");
+    assert_eq!(response["input"]["bytes"], 4_u64);
 
     let output = child.wait_with_output().expect("direct input completion");
     assert!(output.status.success(), "fixture failed: {output:?}");
