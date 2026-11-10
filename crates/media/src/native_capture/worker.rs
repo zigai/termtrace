@@ -288,6 +288,16 @@ impl NativeReplayWorker {
         });
     }
 
+    /// Capture a completed source selection at or after the previous endpoint.
+    ///
+    /// # Errors
+    /// Returns selection, replay, acquisition, cancellation, or publication failures.
+    pub fn capture(&mut self, point: &StatePoint, destination: &Path) -> Result<CaptureOutcome> {
+        let endpoint = replay_endpoint_for_session(&self.session, point, &self.cancelled)?;
+
+        return self.capture_endpoint(&endpoint, destination);
+    }
+
     /// Capture the latest presented state within an explicitly committed live prefix.
     ///
     /// # Errors
