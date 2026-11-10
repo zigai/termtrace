@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       # Bump the version when the Ghostty build flags or Blueprint pin change.
       - id: key
-        run: echo "key=ghostty-v1-$ImageOS-$(uname -m)-${{ hashFiles('crates/terminal/ghostty-revision', 'scripts/bootstrap.sh', 'scripts/bootstrap-ghostty-vt.sh') }}" >> "$GITHUB_OUTPUT"
+        run: echo "key=ghostty-v2-$ImageOS-$(uname -m)-${{ hashFiles('crates/terminal/ghostty-revision', 'scripts/bootstrap.sh', 'scripts/bootstrap-ghostty-vt.sh') }}" >> "$GITHUB_OUTPUT"
       - id: cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -57,15 +57,18 @@ jobs:
           meson setup "$RUNNER_TEMP/blueprint/build" "$RUNNER_TEMP/blueprint" --prefix "$RUNNER_TEMP/tools" -Ddocs=false
           meson install -C "$RUNNER_TEMP/blueprint/build"
           echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+      # Runners differ in CPU, so cached builds target the baseline CPU instead of the builder's.
       - name: Build libghostty-vt
         if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          TERMTRACE_ZIG_EXTRA_ARGS: -Dcpu=baseline
         run: scripts/bootstrap.sh
       - name: Build Ghostty
         if: steps.cache.outputs.cache-hit != 'true'
         working-directory: vendor/ghostty
         run: |
           zig=$(find "$GITHUB_WORKSPACE/.tools" -type f -path '*/zig' -perm -u+x -print -quit)
-          "$zig" build -Doptimize=ReleaseFast -Dapp-runtime=gtk -Dgtk-x11=true -Dgtk-wayland=false -Demit-docs=false -Demit-terminfo=true
+          "$zig" build -Dcpu=baseline -Doptimize=ReleaseFast -Dapp-runtime=gtk -Dgtk-x11=true -Dgtk-wayland=false -Demit-docs=false -Demit-terminfo=true
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
