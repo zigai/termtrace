@@ -86,8 +86,12 @@ test("native Node private-socket track lifecycle selects Termtrace, never the No
         const gaps = await api.catalog("native", true);
         assert.equal(gaps.kind, "gaps");
         assert.ok(gaps.entries.length >= 1);
-        const history = await api.events("native", 1n, 1000);
-        assert.ok(history.page.events.length);
+        // Stop refuses a reachable server whose identity the observer has not bound yet.
+        await until(
+            () => api.events("native", 1n, 1000),
+            (history) =>
+                history.page.events.some((event) => event.kind === "server_identity_bound"),
+        );
         const ended = await api.stop("native", true, 10000);
         assert.equal(ended.lifecycle, "completed");
         const again = await api.stop("native", true, 10000);
