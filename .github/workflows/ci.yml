@@ -18,6 +18,8 @@ env:
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
   RUST_BACKTRACE: "1"
+  # Full debug info makes each job's build cache close to 2 GB.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
   BASE_PACKAGES: build-essential pkg-config ripgrep jq xz-utils tmux ncurses-term ffmpeg
   NATIVE_PACKAGES: >-
     build-essential pkg-config ripgrep jq xz-utils tmux ncurses-term ffmpeg
@@ -99,8 +101,6 @@ jobs:
           npm install --global oxfmt@0.76.0
           cargo install cargo-dylint@6.3.1 dylint-link@6.3.1 --locked
           cargo install --git https://github.com/zigai/rust-statement-spacing.git cargo-statement-spacing --tag v0.4.0 --locked
-      - run: just formatcheck lockcheck audit lint bindings-lint
-
       # The Rust cache keeps only Cargo's own profile directories, so the Dylint output of
       # `cargo statement-spacing` and its compiler driver need their own.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -109,6 +109,8 @@ jobs:
             target/statement-spacing
             ~/.dylint_drivers
           key: statement-spacing-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'Cargo.toml') }}
+      - run: just formatcheck lockcheck audit lint bindings-lint
+
   test:
     needs: ghostty
     runs-on: ubuntu-26.04
