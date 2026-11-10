@@ -22,9 +22,9 @@ fn git(args: &[&str]) -> Result<String, Box<dyn Error>> {
     return Ok(String::from_utf8(output.stdout)?.trim().to_owned());
 }
 
-fn watch_checkout() -> Result<(), Box<dyn Error>> {
+fn watch_checkout() -> Result<bool, Box<dyn Error>> {
     let Ok(root) = git(&["rev-parse", "--show-toplevel"]) else {
-        return Ok(());
+        return Ok(false);
     };
     for path in git(&["-C", &root, "ls-files"])?.lines() {
         println!("cargo:rerun-if-changed={root}/{path}");
@@ -37,7 +37,7 @@ fn watch_checkout() -> Result<(), Box<dyn Error>> {
         );
     }
 
-    return Ok(());
+    return Ok(true);
 }
 
 // A crates.io source has no Git checkout; Cargo records the packaged commit instead.
@@ -72,26 +72,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let vcs_info = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?).join(".cargo_vcs_info.json");
-    let published = if vcs_info.is_file() {
+    // A source archive has neither a Git checkout nor Cargo's packaged commit.
+    let recorded = if vcs_info.is_file() {
         Some(published_identity(&vcs_info)?)
-    } else {
-        watch_checkout()?;
+    } else if watch_checkout()? {
         None
+    } else {
+        Some(Identity {
+            version: env::var("CARGO_PKG_VERSION")?,
+            commit: "unknown".to_owned(),
+            dirty: false,
+        })
     };
 
-    let version = match (env::var("TERMTRACE_BUILD_VERSION"), &published) {
+    let version = match (env::var("TERMTRACE_BUILD_VERSION"), &recorded) {
         (Ok(value), _) => value,
         (Err(_), Some(identity)) => identity.version.clone(),
         (Err(_), None) => git(&["describe", "--tags", "--dirty", "--always"])?,
     };
 
-    let commit = match (env::var("TERMTRACE_BUILD_REVISION"), &published) {
+    let commit = match (env::var("TERMTRACE_BUILD_REVISION"), &recorded) {
         (Ok(value), _) => value,
         (Err(_), Some(identity)) => identity.commit.clone(),
         (Err(_), None) => git(&["rev-parse", "--short=12", "HEAD"])?,
     };
 
-    let dirty = match (env::var("TERMTRACE_BUILD_DIRTY"), &published) {
+    let dirty = match (env::var("TERMTRACE_BUILD_DIRTY"), &recorded) {
         (Ok(value), _) => value.parse::<bool>()?,
         (Err(_), Some(identity)) => identity.dirty,
         (Err(_), None) => !git(&["diff", "--name-only", "HEAD"])?.is_empty(),
