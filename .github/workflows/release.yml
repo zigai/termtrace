@@ -189,7 +189,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for tarball in dist/zigai-termtrace-linux-*.tgz dist/zigai-termtrace-[0-9]*.tgz; do
-            npm publish --access public --provenance "$tarball"
+            npm publish --access public --provenance "./$tarball"
           done
 
   publish:
