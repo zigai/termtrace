@@ -34,4 +34,4 @@ test -f "$archive_root/NOTICE"
 session="$work/install-check.termtrace"
 "$binary" record --no-input --out "$session" -- /bin/sh -c 'printf RELEASE-CHECK'
 "$binary" integrity verify "$session" --level content --json >/dev/null
-test "$("$binary" show "$session" --format text | tr -d ' ')" = "RELEASE-CHECK"
+"$binary" screen "$session" --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["screen"] == "RELEASE-CHECK"'
