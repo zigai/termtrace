@@ -33,7 +33,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      - run: sudo apt-get update && sudo apt-get install --yes b3sum
+      - run: sudo apt-get update && sudo apt-get install --yes b3sum ffmpeg
       - run: python3 scripts/check-release-versions.py
       - run: scripts/bootstrap.sh
         env:
