@@ -130,6 +130,7 @@ fn top_level_video_never_falls_back_from_native_to_semantic() {
 }
 
 #[test]
+#[ignore = "requires Ghostty, Xvfb, dbus-run-session, FFmpeg and FFprobe"]
 fn top_level_video_auto_captures_native_and_overwrites_output() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("session");

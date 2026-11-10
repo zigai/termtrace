@@ -102,6 +102,7 @@ native-check:
 native-test:
     cargo test --locked --test cli native_capabilities:: -- --ignored --test-threads=1
     cargo test --locked --test cli retained_native_video_exports_without_native_capture_tools -- --ignored
+    cargo test --locked --test cli top_level_video_auto_captures_native_and_overwrites_output -- --ignored
     cargo test --locked --test cli original_native -- --ignored
     cargo test --locked -p termtrace-service --test original_recording -- --ignored --test-threads=1
     TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace cargo test --locked --manifest-path tests/consumers/rust/Cargo.toml --features local --tests -- --ignored --test-threads=1
