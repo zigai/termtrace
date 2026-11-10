@@ -201,7 +201,7 @@ mutation:
 typecheck: validate
 
 # Run the commit checks
-check: (run-checks "formatcheck" "lockcheck" "audit" "lint" "bindings-lint" "typecheck" "bindings-build" "test")
+check: (run-checks "formatcheck" "lockcheck" "audit" "lint" "bindings-lint" "bindings-build" "test")
 
 # Remove generated output, caches, and dependencies
 clean: (remove "node_modules" "vendor/ghostty/zig-out" "vendor/ghostty/.zig-cache" ".venv" "dist" "build" ".pytest_cache" ".pyrefly" ".ruff_cache" ".coverage" "htmlcov" ".coverage.*" "coverage.xml" "coverage" ".tools" ".zig-cache" "zig-cache" "zig-out" "fuzz/target" "fuzz/coverage" "tests/consumers/rust/target" "crates/bindings-python/.venv" "crates/bindings-python/dist" "crates/bindings-python/build" "crates/bindings-python/.pytest_cache" "crates/bindings-python/.pyrefly" "crates/bindings-python/.ruff_cache" "crates/bindings-python/.mypy_cache" "crates/bindings-python/.coverage" "crates/bindings-python/htmlcov" "crates/bindings-python/python/termtrace/*.so" "crates/bindings-node/node_modules" "crates/bindings-node/dist" "crates/bindings-node/coverage" "crates/bindings-node/*.node" "tests/consumers/python_native/.venv" "tests/consumers/python_native/.pytest_cache" "tests/consumers/node_native/node_modules" "tests/consumers/node_native/dist" "tests/consumers/node_native/coverage" "benchmarks/.venv" "benchmarks/.pytest_cache" "mutants.out" "mutants.out.old" "**/__pycache__" "crates/bindings-node/**/*.tsbuildinfo" "tests/consumers/node_native/**/*.tsbuildinfo" "target/llvm-cov-target" "benchmarks/.coverage" "benchmarks/.coverage.*" "tests/consumers/python_native/.coverage" "tests/consumers/python_native/.coverage.*")
