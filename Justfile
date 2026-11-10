@@ -40,11 +40,14 @@ test *args:
     if (( $# == 0 )); then PYTHONPATH=benchmarks uv run --project benchmarks python3 -m unittest benchmarks/test_acceptance.py; fi
     if (( $# == 0 )); then bash tests/install.sh; fi
 
+# Run the recording lifecycle tests that `test` filters out
+test-recording:
+    cargo nextest run --locked --workspace --lib --bins --test execution_lifecycle --test architecture --ignore-default-filter -E '{{ INTEGRATION_FILTER }}'
+
 # Run CLI/tmux integration on each pull request (requires bootstrap, tmux, and Ghostty on PATH)
 integration:
     cargo test --locked --test cli
     scripts/test-rust-consumer.sh
-    cargo nextest run --locked --workspace --lib --bins --test execution_lifecycle --test architecture --ignore-default-filter -E '{{ INTEGRATION_FILTER }}'
 
 # Build native Python and Node.js language bindings
 bindings-build: build-python build-node
@@ -216,7 +219,7 @@ formatcheck:
     @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r editorconfig-checker -disable-indent-size -disable-indentation -disable-max-line-length -disable-charset -exclude '^fuzz/corpus/'
 
 # Run the commit checks and slow suites
-checkfull: (run-checks "formatcheck" "lockcheck" "audit" "lint" "bindings-lint" "validate" "bindings-build" "test" "integration" "bindings-test" "native-check" "native-test" "sanitize" "race" "miri" "fuzz" "mutation" "bench")
+checkfull: (run-checks "formatcheck" "lockcheck" "audit" "lint" "bindings-lint" "validate" "bindings-build" "test" "test-recording" "integration" "bindings-test" "native-check" "native-test" "sanitize" "race" "miri" "fuzz" "mutation" "bench")
 
 # Synchronize dependency locks without upgrading dependencies
 [no-exit-message]
