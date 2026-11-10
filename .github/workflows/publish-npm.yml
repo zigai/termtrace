@@ -1,0 +1,50 @@
+name: Publish npm packages
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: Release run whose npm tarballs to publish
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    environment: npm
+    steps:
+      - if: inputs.run-id == ''
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: npm-*
+          path: dist
+          merge-multiple: true
+      - if: inputs.run-id != ''
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: npm-*
+          path: dist
+          merge-multiple: true
+          run-id: ${{ inputs.run-id }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Publish platform packages before the package that depends on them
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for tarball in dist/zigai-termtrace-linux-*.tgz dist/zigai-termtrace-[0-9]*.tgz; do
+            package=$(tar -xzOf "$tarball" package/package.json | jq -r '.name + "@" + .version')
+            if npm view "$package" version >/dev/null 2>&1; then
+              echo "$package is already published"
+              continue
+            fi
+            npm publish --access public --provenance "./$tarball"
+          done
