@@ -11,6 +11,9 @@ inputs:
   rust-cache:
     description: Shared Rust build cache name.
     required: true
+  rust-cache-on-failure:
+    description: Save the Rust build cache when the job fails.
+    default: "true"
   components:
     description: Extra rustup components.
     default: ""
@@ -50,7 +53,7 @@ runs:
     - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       with:
         shared-key: ${{ inputs.rust-cache }}
-        cache-on-failure: true
+        cache-on-failure: ${{ inputs.rust-cache-on-failure }}
         cache-workspace-crates: true
         workspaces: |
           . -> target
