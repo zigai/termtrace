@@ -114,7 +114,8 @@ jobs:
           packages: ${{ env.BASE_PACKAGES }}
           ghostty-key: ${{ needs.ghostty.outputs.key }}
           rust-cache: test
-      - run: just test test-recording
+      - run: just test
+      - run: just test-recording
 
   integration:
     needs: ghostty
