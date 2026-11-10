@@ -100,8 +100,14 @@ def exercise_native_lifecycle(
             )
         gaps = api.catalog("native", gaps=True)
         assert gaps["kind"] == "gaps" and gaps["entries"]
-        history = api.events("native", limit=1000)
-        assert history["page"]["events"]
+        # Stop refuses a reachable server whose identity the observer has not bound yet.
+        wait_until(
+            lambda: api.events("native", limit=1000),
+            lambda value: any(
+                event["kind"] == "server_identity_bound"
+                for event in value["page"]["events"]
+            ),
+        )
         ended = api.stop("native", timeout_ms=10000)
         assert ended["lifecycle"] == "completed"
         again = api.stop("native", timeout_ms=10000)
