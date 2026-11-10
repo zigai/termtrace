@@ -63,7 +63,7 @@ build-node:
 # Test native Python language bindings and pytest consumer suite
 test-python:
     cargo build --locked --bin termtrace
-    TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace MATURIN_PEP517_ARGS="--profile dev" uv run --project tests/consumers/python_native pytest -v tests/consumers/python_native
+    TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace MATURIN_PEP517_ARGS="--profile dev" uv run --project tests/consumers/python_native pytest -n auto --dist loadfile -v tests/consumers/python_native
 
 # Test native Node.js/TypeScript bindings and consumer suite
 test-node:

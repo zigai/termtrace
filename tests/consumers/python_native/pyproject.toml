@@ -3,7 +3,7 @@ name = "consumer-python-native"
 version = "0.1.0"
 description = "Consumer test suite for native Python bindings"
 requires-python = ">=3.10"
-dependencies = ["termtrace", "pytest>=8.0.0", "pytest-asyncio>=0.24"]
+dependencies = ["termtrace", "pytest>=8.0.0", "pytest-asyncio>=0.24", "pytest-xdist>=3.8.0"]
 
 [tool.uv.sources]
 termtrace = { path = "../../../crates/bindings-python", editable = true }

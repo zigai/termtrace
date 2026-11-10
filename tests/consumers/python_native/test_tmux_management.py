@@ -7,7 +7,9 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -42,8 +44,17 @@ def tmux(
     )
 
 
-def exercise_native_lifecycle(root: Path, *, bundle_checks: bool) -> None:
-    socket = root / "s"
+# A Unix socket path holds at most 107 bytes, which pytest's per-worker temporary paths exceed.
+@pytest.fixture
+def socket_directory() -> Iterator[Path]:
+    with tempfile.TemporaryDirectory(prefix="tt-") as directory:
+        yield Path(directory)
+
+
+def exercise_native_lifecycle(
+    root: Path, socket_directory: Path, *, bundle_checks: bool
+) -> None:
+    socket = socket_directory / "s"
     # A selected helper alias (not the Python host) and quoted output-root exercise routing/quoting.
     helper = root / "selected ' Termtrace"
     helper.symlink_to(Path(BINARY).resolve())
@@ -135,19 +146,26 @@ def exercise_native_lifecycle(root: Path, *, bundle_checks: bool) -> None:
     assert tmux(socket, "list-sessions", check=False).returncode != 0
 
 
-def test_private_tmux_native_lifecycle_helper(tmp_path: Path) -> None:
-    exercise_native_lifecycle(evidence_root(tmp_path), bundle_checks=False)
+def test_private_tmux_native_lifecycle_helper(
+    tmp_path: Path, socket_directory: Path
+) -> None:
+    exercise_native_lifecycle(
+        evidence_root(tmp_path), socket_directory, bundle_checks=False
+    )
 
 
-def test_private_tmux_native_bundle(tmp_path: Path) -> None:
-    exercise_native_lifecycle(evidence_root(tmp_path), bundle_checks=True)
+def test_private_tmux_native_bundle(tmp_path: Path, socket_directory: Path) -> None:
+    exercise_native_lifecycle(
+        evidence_root(tmp_path), socket_directory, bundle_checks=True
+    )
 
 
 def test_existing_private_server_rolls_back_failed_composite_start(
     tmp_path: Path,
+    socket_directory: Path,
 ) -> None:
     root = evidence_root(tmp_path)
-    socket = root / "r"
+    socket = socket_directory / "r"
     tmux(socket, "-f", "/dev/null", "new-session", "-d", "-s", "external")
     original = tmux(socket, "show-option", "-gv", "default-command").stdout
     api = Tmux(
@@ -180,13 +198,15 @@ def test_existing_private_server_rolls_back_failed_composite_start(
         tmux(socket, "kill-server", check=False)
 
 
-def test_nonutf8_typed_pane_map_and_partially_effected_stop(tmp_path: Path) -> None:
+def test_nonutf8_typed_pane_map_and_partially_effected_stop(
+    tmp_path: Path, socket_directory: Path
+) -> None:
     import signal
 
     from termtrace import Registry
 
     root = evidence_root(tmp_path)
-    socket = root / "s"
+    socket = socket_directory / "s"
     state = os.fsencode(root) + b"/state-\xff"
     api = Tmux(
         root=state,
