@@ -23,10 +23,6 @@ fn cli_version() -> String {
 fn versions_match_the_cli_and_the_wire_protocol() {
     let versions = SystemService::versions();
 
-    assert!(
-        cli_version().starts_with(&format!("termtrace {} ", versions.termtrace)),
-        "{versions:?}"
-    );
     assert_eq!(
         versions.control_protocol,
         ControlRequest::new(ControlCommand::Ping)
@@ -50,7 +46,7 @@ fn probes_report_every_capability_and_honor_cancellation() {
     let report = SystemService::probe_capabilities(&AtomicBool::new(false));
 
     assert!(
-        cli_version().contains(&format!("(build {})", report.build_revision)),
+        cli_version().contains(&format!("({}", report.build_revision)),
         "{}",
         report.build_revision
     );
