@@ -284,6 +284,9 @@ fn doctor_require_passes_ready_capabilities_and_fails_blocked_ones() {
 #[test]
 fn doctor_tmux_integration_applicability_preserves_diagnostics() {
     let script = r#"#!/bin/sh
+if [ "$1" = "-u" ]; then
+    shift
+fi
 if [ "$1" = "-S" ]; then
     printf 'invalid option: pane-launch-command\n' >&2
     exit 1

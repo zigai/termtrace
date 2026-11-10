@@ -93,7 +93,8 @@ impl TmuxClient {
 
     fn command(&self) -> Command {
         let mut command = Command::new(&self.executable);
-        command.args(self.socket_arguments());
+        // Without a UTF-8 locale, tmux replaces control and non-ASCII bytes in output with `_`.
+        command.arg("-u").args(self.socket_arguments());
 
         return command;
     }
