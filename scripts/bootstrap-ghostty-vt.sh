@@ -72,6 +72,7 @@ readonly output="${TERMTRACE_GHOSTTY_PREFIX:-$ghostty/zig-out}"
 
 test -f "$output/lib/libghostty-vt.a"
 test -f "$output/include/ghostty/vt.h"
+TERMTRACE_ZIG="$zig" "$root/scripts/ghostty-terminfo.sh" --check
 
 # crates/terminal/build.rs links only a prefix whose stamp matches the pinned revision.
 git -C "$ghostty" rev-parse HEAD >"$output/ghostty-revision"

@@ -25,3 +25,7 @@ switch_case_indent = true
 
 [**/{fixtures,snapshots,corpus}/**]
 ignore = true
+
+[crates/terminal/terminfo/xterm-ghostty]
+end_of_line = unset
+insert_final_newline = unset

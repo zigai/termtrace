@@ -1,6 +1,6 @@
 //! Deterministic child-environment resolution for the recording process.
 
-use super::support::terminal_error;
+use super::{support::terminal_error, terminfo::ghostty_terminfo_directory};
 use crate::{Error, Result};
 use std::{
     collections::BTreeMap,
@@ -64,14 +64,16 @@ impl EffectiveEnvironment {
         term: &str,
     ) -> Result<Self> {
         let ambient: BTreeMap<OsString, OsString> = env::vars_os().collect();
+        let terminfo = ghostty_terminfo_directory(term)?;
 
-        return Self::resolve_from_snapshot(spec, term, &ambient);
+        return Self::resolve_from_snapshot(spec, term, &ambient, terminfo.as_deref());
     }
 
     fn resolve_from_snapshot(
         spec: &EnvironmentSpec,
         term: &str,
         ambient: &BTreeMap<OsString, OsString>,
+        terminfo: Option<&Path>,
     ) -> Result<Self> {
         let mut variables = match spec.base {
             EnvironmentBase::Inherit => ambient.clone(),
@@ -100,6 +102,19 @@ impl EffectiveEnvironment {
 
         apply_color_policy(&mut variables, spec.color);
         variables.insert(OsString::from("TERM"), OsString::from(term));
+
+        if let Some(directory) = terminfo {
+            // The trailing empty entry keeps the system database searched.
+            let mut directories = directory.as_os_str().to_owned();
+            directories.push(":");
+
+            if let Some(existing) = variables.get(OsStr::new("TERMINFO_DIRS")) {
+                directories.push(existing);
+            }
+
+            variables.insert(OsString::from("TERMINFO_DIRS"), directories);
+        }
+
         variables.insert(OsString::from("COLORTERM"), OsString::from("truecolor"));
         let effective_digest = digest_variables(&variables);
 
@@ -228,9 +243,13 @@ mod tests {
             color: ColorPolicy::Always,
             ..EnvironmentSpec::default()
         };
-        let inherited =
-            EffectiveEnvironment::resolve_from_snapshot(&inherited_spec, "xterm-test", &ambient)
-                .expect("inherit resolution");
+        let inherited = EffectiveEnvironment::resolve_from_snapshot(
+            &inherited_spec,
+            "xterm-test",
+            &ambient,
+            None,
+        )
+        .expect("inherit resolution");
         assert_eq!(
             inherited.variables().get(OsStr::new("PATH")),
             Some(&OsString::from("/host/bin"))
@@ -252,9 +271,13 @@ mod tests {
             color: ColorPolicy::Auto,
             ..EnvironmentSpec::default()
         };
-        let cleared =
-            EffectiveEnvironment::resolve_from_snapshot(&cleared_spec, "xterm-test", &ambient)
-                .expect("clear resolution");
+        let cleared = EffectiveEnvironment::resolve_from_snapshot(
+            &cleared_spec,
+            "xterm-test",
+            &ambient,
+            None,
+        )
+        .expect("clear resolution");
         assert_eq!(
             cleared.variables().get(OsStr::new("PATH")),
             Some(&OsString::from("/host/bin"))

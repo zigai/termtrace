@@ -15,6 +15,7 @@ mod raw_terminal;
 mod runtime;
 mod support;
 mod termination;
+mod terminfo;
 
 pub use crate::analysis::profile::ResolvedGhosttyProfile;
 pub use control::control_socket_name;
