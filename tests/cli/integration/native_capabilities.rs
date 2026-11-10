@@ -179,6 +179,12 @@ fn process_is_live(pid: &str) -> bool {
     return state != Some('Z');
 }
 
+fn display_lock_owner(number: &str) -> Option<String> {
+    return fs_err::read_to_string(format!("/tmp/.X{number}-lock"))
+        .ok()
+        .map(|pid| return pid.trim().to_owned());
+}
+
 #[allow(
     clippy::expect_used,
     clippy::panic,
@@ -229,23 +235,33 @@ fn assert_doctor_case(broken: &str, requirement: &str, expected_exit: i32, code:
         );
     }
 
-    for pid in ProbeCase::lines(&case.pids()) {
-        assert!(!process_is_live(&pid), "leaked live child {pid}");
+    let pids = ProbeCase::lines(&case.pids());
+
+    for pid in &pids {
+        assert!(!process_is_live(pid), "leaked live child {pid}");
     }
 
+    // A concurrent capture may hold the same display number by now. Its server names itself in
+    // the lock and keeps the lock for as long as its socket exists.
     for display in &displays {
         let number = display.trim_start_matches(':');
+        let before = display_lock_owner(number);
+        let socket = PathBuf::from(format!("/tmp/.X11-unix/X{number}"));
+        let socket_exists = socket.symlink_metadata().is_ok();
+        let after = display_lock_owner(number);
 
-        for path in [
-            PathBuf::from(format!("/tmp/.X{number}-lock")),
-            PathBuf::from(format!("/tmp/.X11-unix/X{number}")),
-        ] {
+        for owner in before.iter().chain(&after) {
             assert!(
-                path.symlink_metadata().is_err(),
-                "leaked display resource {}",
-                path.display()
+                !pids.contains(owner),
+                "leaked display lock /tmp/.X{number}-lock of child {owner}"
             );
         }
+
+        assert!(
+            !socket_exists || before.is_some() || after.is_some(),
+            "leaked display resource {}",
+            socket.display()
+        );
     }
 
     let leaked: Vec<OsString> = fs_err::read_dir(case.tmp())
