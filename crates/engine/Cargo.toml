@@ -21,7 +21,7 @@ nix = { version = "0.30.1", features = [
     "user",
 ] }
 portable-pty = "0.9.0"
-rusqlite = { version = "0.40.2", default-features = false, features = [
+rusqlite = { version = "0.41.1", default-features = false, features = [
     "libsqlite3-sys",
     "bundled",
     "fallible_uint",
