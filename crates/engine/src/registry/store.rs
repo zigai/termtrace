@@ -524,12 +524,31 @@ pub(super) fn ensure_owner_directory(path: &Path) -> Result<()> {
         return SessionRegistry::validate_owner_directory(path);
     }
 
-    fs::create_dir_all(path).map_err(|source| {
-        return Error::Filesystem {
-            path: path.to_path_buf(),
-            source,
-        };
-    })?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|source| {
+            return Error::Filesystem {
+                path: parent.to_path_buf(),
+                source,
+            };
+        })?;
+    }
+
+    // A concurrent start validates this directory as soon as it exists, so it is created
+    // with its final mode instead of being narrowed afterwards.
+    match DirBuilder::new().mode(0o700).create(path) {
+        Ok(()) => {}
+        Err(source) if source.kind() == ErrorKind::AlreadyExists => {
+            return SessionRegistry::validate_owner_directory(path);
+        }
+        Err(source) => {
+            return Err(Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    }
+
+    // The process umask can only have cleared bits of the requested mode.
     fs::set_permissions(path, Permissions::from_mode(0o700)).map_err(|source| {
         return Error::Filesystem {
             path: path.to_path_buf(),

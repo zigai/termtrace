@@ -8,11 +8,11 @@ use std::{
     collections::HashSet,
     env,
     ffi::OsStr,
-    fs::{self, File, OpenOptions, Permissions},
+    fs::{self, DirBuilder, File, OpenOptions, Permissions},
     io::ErrorKind,
     os::unix::{
         ffi::OsStrExt as _,
-        fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
+        fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
     },
     path::{Path, PathBuf},
     result::Result as StdResult,
