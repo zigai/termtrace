@@ -3,6 +3,7 @@ use crate::cli::{
     parsers::parse_video_fps,
 };
 use clap::{Args, Subcommand, ValueEnum};
+use miette::{IntoDiagnostic as _, Result};
 use std::{ffi::OsString, os::unix::ffi::OsStrExt as _, path::PathBuf};
 use termtrace_model::value::ByteString;
 use termtrace_tmux::{
@@ -114,14 +115,17 @@ impl From<TmuxCoverageMode> for TmuxRecordingCoverage {
 }
 
 impl TmuxConnectionArgs {
-    pub(super) fn client(&self) -> TmuxClient {
+    pub(super) fn client(&self) -> Result<TmuxClient> {
         let socket = match (&self.socket_name, &self.socket_path) {
             (Some(name), _) => TmuxSocket::Name(ByteString::from(name.as_bytes())),
             (None, Some(path)) => TmuxSocket::Path(ByteString::from(path.as_os_str().as_bytes())),
             (None, None) => TmuxSocket::Default,
         };
 
-        return TmuxClient::new(self.tmux.clone(), socket);
+        let client = TmuxClient::new(self.tmux.clone(), socket);
+        client.require_supported_version().into_diagnostic()?;
+
+        return Ok(client);
     }
 }
 

@@ -56,3 +56,20 @@ fn watchdog_keeps_tmux_format_expressions_in_executable_paths() {
         expected
     );
 }
+
+#[test]
+fn tmux_commands_reject_tmux_older_than_3_6() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let tmux = temporary.path().join("tmux");
+    fs_err::write(&tmux, b"#!/bin/sh\nprintf 'tmux 3.5a\\n'\n").expect("write old tmux");
+    fs_err::set_permissions(&tmux, Permissions::from_mode(0o700)).expect("executable permissions");
+
+    termtrace_in(temporary.path())
+        .args(["tmux", "status", "--json", "--tmux"])
+        .arg(&tmux)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "tmux 3.5a is too old; Termtrace needs tmux 3.6 or newer",
+        ));
+}

@@ -675,6 +675,13 @@ fn tmux_integration_check(tools: &[Tool], home: Option<&Path>) -> Option<DoctorC
         return None;
     }
 
+    if let Err(error) = client.require_supported_version() {
+        return Some(DoctorCheck {
+            fix: Some(manual("Install tmux 3.6 or newer")),
+            ..check(STATE, NAME, DoctorStatus::Fail, error.to_string())
+        });
+    }
+
     let reenable = || return manual("Run `termtrace tmux disable`, then `termtrace tmux enable`");
     if version != INTEGRATION_VERSION {
         return Some(DoctorCheck {

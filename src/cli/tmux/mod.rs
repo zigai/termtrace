@@ -39,7 +39,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
                 RecordRequest {
                     name: arguments.name,
                     new_server: arguments.new,
-                    client: arguments.connection.client(),
+                    client: arguments.connection.client()?,
                     setup: arguments.setup.request(),
                     command: arguments.command,
                 },
@@ -56,7 +56,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
                 write_json_line(response, &manifest)
             }
             None => {
-                let report = status::observe(&arguments.connection.client()).into_diagnostic()?;
+                let report = status::observe(&arguments.connection.client()?).into_diagnostic()?;
                 if arguments.json {
                     write_json_pretty(response, &report)
                 } else {
@@ -137,7 +137,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
         }
         TmuxSubcommand::Enable(arguments) => {
             let tracks = adapter::open(arguments.setup.output_root.as_deref())?;
-            let client = arguments.connection.client();
+            let client = arguments.connection.client()?;
             let mut setup = PreparedTmuxSetup::prepare(
                 arguments.setup.request(),
                 arguments.connection.tmux,
@@ -165,7 +165,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
             )
         }
         TmuxSubcommand::Disable(connection) => {
-            let disabled = setup::disable(&connection.client()).into_diagnostic()?;
+            let disabled = setup::disable(&connection.client()?).into_diagnostic()?;
 
             write_json_line(
                 response,
@@ -183,7 +183,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
             )
         }
         TmuxSubcommand::Scope(arguments) => {
-            let client = arguments.connection.client();
+            let client = arguments.connection.client()?;
             if !client.is_integration_enabled() {
                 return Err(miette::miette!(
                     "tmux recording is not enabled for this server"

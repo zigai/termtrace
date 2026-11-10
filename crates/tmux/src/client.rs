@@ -21,6 +21,8 @@ use std::{
 };
 use termtrace_model::value::ByteString;
 
+/// Oldest supported tmux release as `(major, minor)`.
+pub const MINIMUM_VERSION: (u32, u32) = (3, 6);
 const FIELD: u8 = 0x1f;
 const ROW_END: &[u8] = b"\x1e\n";
 
@@ -144,6 +146,50 @@ impl TmuxClient {
             )));
         }
         return Ok(trim_one_newline(output.stdout));
+    }
+
+    /// Check that the executable is tmux 3.6 or newer, the oldest release that prints format
+    /// output without escaping it.
+    ///
+    /// # Errors
+    /// Returns [`Error::Tmux`] when tmux cannot run, reports no version, or is older.
+    pub fn require_supported_version(&self) -> Result<()> {
+        let output = Command::new(&self.executable)
+            .arg("-V")
+            .output()
+            .map_err(|source| return Error::filesystem(&self.executable, source))?;
+
+        let text = String::from_utf8_lossy(&output.stdout);
+        let reported = text.trim();
+        let version = reported.strip_prefix("tmux ").unwrap_or(reported);
+
+        // Development builds report `master` or `next-3.7`.
+        if version == "master" {
+            return Ok(());
+        }
+
+        let number = version.strip_prefix("next-").unwrap_or(version);
+        let (major, rest) = number.split_once('.').unwrap_or((number, ""));
+        let minor = rest
+            .split(|character: char| return !character.is_ascii_digit())
+            .next()
+            .unwrap_or_default();
+
+        let parsed = major
+            .parse::<u32>()
+            .ok()
+            .zip(minor.parse::<u32>().ok())
+            .ok_or_else(|| {
+                return Error::Tmux(format!("cannot read the tmux version from `{reported}`"));
+            })?;
+
+        if parsed < MINIMUM_VERSION {
+            return Err(Error::Tmux(format!(
+                "{reported} is too old; Termtrace needs tmux {}.{} or newer",
+                MINIMUM_VERSION.0, MINIMUM_VERSION.1
+            )));
+        }
+        return Ok(());
     }
 
     /// Read a global option.
@@ -384,17 +430,15 @@ impl TmuxClient {
     /// # Errors
     /// Returns tmux failures or a socket path that is not a Unix socket.
     pub fn server_identity(&self) -> Result<TmuxServerIdentity> {
-        let format = format!("#{{pid}} {}", encoded_field("#{socket_path}"));
-        let output = unescape_vis(&self.output(["display-message", "-p", format.as_str()])?)?;
+        let output = self.output(["display-message", "-p", "#{pid}\u{1f}#{socket_path}"])?;
         let separator = output
             .iter()
-            .position(|byte| return *byte == b' ')
+            .position(|byte| return *byte == FIELD)
             .ok_or_else(|| {
                 return Error::Tmux("tmux returned an invalid server identity".to_owned());
             })?;
         let (pid, socket) = output.split_at(separator);
-        let socket = percent_decode(socket.get(1..).unwrap_or_default()).collect::<Vec<_>>();
-        let socket = socket.as_slice();
+        let socket = socket.get(1..).unwrap_or_default();
         let pid = str::from_utf8(pid)
             .ok()
             .and_then(|pid| return pid.parse::<u32>().ok())
@@ -429,9 +473,7 @@ impl TmuxClient {
     /// # Errors
     /// Returns tmux failures or malformed rows.
     pub fn list_panes(&self) -> Result<Vec<PaneRow>> {
-        let mut output =
-            unescape_vis(&self.output(["list-panes", "-a", "-F", row_format().as_str()])?)?;
-
+        let mut output = self.output(["list-panes", "-a", "-F", row_format().as_str()])?;
         if !output.is_empty() {
             output.push(b'\n');
         }
@@ -446,7 +488,7 @@ impl TmuxClient {
     pub fn pane_row(&self, pane: &str) -> Result<PaneRow> {
         let pane_id = self.resolve_target(OsStr::new(pane), "#{pane_id}", b'%', "pane")?;
         let filter = format!("#{{==:#{{pane_id}},{pane_id}}}");
-        let mut output = unescape_vis(&self.output([
+        let mut output = self.output([
             "list-panes",
             "-t",
             pane_id.as_str(),
@@ -454,7 +496,7 @@ impl TmuxClient {
             filter.as_str(),
             "-F",
             row_format().as_str(),
-        ])?)?;
+        ])?;
         output.push(b'\n');
 
         return parse_rows(&output)?
@@ -497,66 +539,10 @@ fn row_format() -> String {
         format!("#{{{}}}", options::PANE_SESSION),
     ];
     let fields = fields.map(|field| {
-        return format!(
-            "#{{s|\u{1e}|%1E|:#{{s|\u{1f}|%1F|:{}}}}}",
-            encoded_field(&field)
-        );
+        return format!("#{{s|\u{1e}|%1E|:#{{s|\u{1f}|%1F|:#{{s|%|%25|:{field}}}}}}}");
     });
 
     return format!("{}\u{1e}", fields.join("\u{1f}"));
-}
-
-// Encoding `\` leaves every backslash in the output to the escapes tmux adds.
-fn encoded_field(field: &str) -> String {
-    return format!("#{{s|\\\\|%5C|:#{{s|%|%25|:{field}}}}}");
-}
-
-// tmux 3.5 and older print control and invalid UTF-8 bytes through vis(3) as C escapes or
-// `\ooo`, and tmux 3.4 also prints `\$` before a name that could expand.
-fn unescape_vis(output: &[u8]) -> Result<Vec<u8>> {
-    let mut decoded = Vec::with_capacity(output.len());
-    let mut rest = output;
-
-    while let Some((&byte, tail)) = rest.split_first() {
-        if byte != b'\\' {
-            decoded.push(byte);
-            rest = tail;
-            continue;
-        }
-
-        let octal = tail
-            .get(..3)
-            .filter(|digits| {
-                return digits
-                    .iter()
-                    .all(|digit| return (b'0'..=b'7').contains(digit));
-            })
-            .and_then(|digits| return str::from_utf8(digits).ok())
-            .and_then(|digits| return u8::from_str_radix(digits, 8).ok());
-        if let Some(value) = octal {
-            decoded.push(value);
-            rest = tail.get(3..).unwrap_or_default();
-            continue;
-        }
-
-        let value = match tail.first() {
-            Some(b'n') => b'\n',
-            Some(b'r') => b'\r',
-            Some(b't') => b'\t',
-            Some(b'b') => 0x08,
-            Some(b'a') => 0x07,
-            Some(b'v') => 0x0b,
-            Some(b'f') => 0x0c,
-            Some(b's') => b' ',
-            Some(b'$') => b'$',
-            Some(b'0') => 0,
-            _ => return Err(Error::Tmux("tmux returned an invalid escape".to_owned())),
-        };
-        decoded.push(value);
-        rest = tail.get(1..).unwrap_or_default();
-    }
-
-    return Ok(decoded);
 }
 
 /// Parse `list-panes` output framed by [`row_format`]; option values may contain newlines.
