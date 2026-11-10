@@ -512,7 +512,7 @@ fn encoded_field(field: &str) -> String {
 }
 
 // tmux 3.5 and older print control and invalid UTF-8 bytes through vis(3) as C escapes or
-// `\ooo`.
+// `\ooo`, and tmux 3.4 also prints `\$` before a name that could expand.
 fn unescape_vis(output: &[u8]) -> Result<Vec<u8>> {
     let mut decoded = Vec::with_capacity(output.len());
     let mut rest = output;
@@ -548,6 +548,7 @@ fn unescape_vis(output: &[u8]) -> Result<Vec<u8>> {
             Some(b'v') => 0x0b,
             Some(b'f') => 0x0c,
             Some(b's') => b' ',
+            Some(b'$') => b'$',
             Some(b'0') => 0,
             _ => return Err(Error::Tmux("tmux returned an invalid escape".to_owned())),
         };
