@@ -64,8 +64,7 @@ def failing_scenario(path: Path) -> Path:
         path,
         "never shows done",
         "printf READY; read line",
-        [{"waitScreen": {"contains": "DONE"}}, {"stop": {}}],
-        timeout_ms=500,
+        [{"waitScreen": {"contains": "DONE", "timeoutMs": 500}}, {"stop": {}}],
     )
 
 

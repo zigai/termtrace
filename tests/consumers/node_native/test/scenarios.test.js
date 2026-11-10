@@ -320,8 +320,7 @@ async function mixedReport(directory) {
         path.join(directory, "b-failing.json"),
         "never shows done",
         "printf READY; read line",
-        [{ waitScreen: { contains: "DONE" } }, { stop: {} }],
-        { timeoutMs: 500 },
+        [{ waitScreen: { contains: "DONE", timeoutMs: 500 } }, { stop: {} }],
     );
     return client(directory).runScenarios([passing, failing], {
         failureRoot: path.join(directory, "mixed/failures"),
