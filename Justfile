@@ -19,8 +19,8 @@ generate:
     cargo run --locked --quiet -- schema --out schemas
     cargo run --locked --quiet -p termtrace-python --bin generate
     cargo run --locked --quiet -p termtrace-node --bin generate
-    uv run --project crates/bindings-python ruff check --fix --quiet crates/bindings-python/python/termtrace/types.py crates/bindings-python/python/termtrace/aio.py crates/bindings-python/python/termtrace/_termtrace.pyi
-    uv run --project crates/bindings-python ruff format crates/bindings-python/python/termtrace/types.py crates/bindings-python/python/termtrace/aio.py crates/bindings-python/python/termtrace/_termtrace.pyi
+    uv run --project crates/bindings-python --only-dev ruff check --fix --quiet crates/bindings-python/python/termtrace/types.py crates/bindings-python/python/termtrace/aio.py crates/bindings-python/python/termtrace/_termtrace.pyi
+    uv run --project crates/bindings-python --only-dev ruff format crates/bindings-python/python/termtrace/types.py crates/bindings-python/python/termtrace/aio.py crates/bindings-python/python/termtrace/_termtrace.pyi
 
 # Enforce the complete allowlist of direct internal Cargo dependencies
 architecture:
@@ -51,7 +51,7 @@ bindings-build: build-python build-node
 
 # Build the native Python binding into its project environment
 build-python:
-    uv run --project crates/bindings-python --with maturin maturin develop --manifest-path crates/bindings-python/Cargo.toml
+    uv run --project crates/bindings-python --only-dev --with maturin maturin develop --manifest-path crates/bindings-python/Cargo.toml
 
 # Build the native Node.js binding
 build-node:
@@ -60,7 +60,7 @@ build-node:
 # Test native Python language bindings and pytest consumer suite
 test-python:
     cargo build --locked --bin termtrace
-    TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace uv run --project tests/consumers/python_native pytest -v tests/consumers/python_native
+    TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace MATURIN_PEP517_ARGS="--profile dev" uv run --project tests/consumers/python_native pytest -v tests/consumers/python_native
 
 # Test native Node.js/TypeScript bindings and consumer suite
 test-node:
@@ -70,8 +70,8 @@ test-node:
 
 # Type-check and lint the native Python bindings
 bindings-lint:
-    uv run --project crates/bindings-python ruff check crates/bindings-python/python/termtrace
-    uv run --project crates/bindings-python mypy crates/bindings-python/python/termtrace
+    uv run --project crates/bindings-python --only-dev ruff check crates/bindings-python/python/termtrace
+    uv run --project crates/bindings-python --only-dev mypy crates/bindings-python/python/termtrace
 
 # Test all native language bindings
 bindings-test: bindings-build bindings-lint test-python test-node
@@ -83,7 +83,7 @@ lint:
     @cargo machete
     @set -e; for file in install.sh benchmarks/*.sh scripts/*.sh; do bash -n "$file"; done
     @bash scripts/check-github-action-pins.sh
-    @uv run --project crates/bindings-python --group dev ruff check --extend-exclude vendor/ghostty .
+    @uv run --project crates/bindings-python --only-dev ruff check --extend-exclude vendor/ghostty .
 
 # Format every supported first-party file type
 format:
@@ -118,7 +118,7 @@ fix: && format
     cargo clippy --locked --workspace --all-targets --all-features --fix --allow-dirty --allow-staged
     cargo clippy --locked -p termtrace-sdk --no-default-features --all-targets --fix --allow-dirty --allow-staged
     cargo machete --fix
-    uv run --project crates/bindings-python --group dev ruff check --fix --extend-exclude vendor/ghostty .
+    uv run --project crates/bindings-python --only-dev ruff check --fix --extend-exclude vendor/ghostty .
 
 # Measure all local test suites and print coverage
 coverage:
@@ -147,7 +147,7 @@ coverage:
         uv run --group dev coverage combine
         uv run --group dev coverage report
     )
-    uv run --project crates/bindings-python --with maturin maturin develop --manifest-path crates/bindings-python/Cargo.toml
+    uv run --project crates/bindings-python --only-dev --with maturin maturin develop --manifest-path crates/bindings-python/Cargo.toml
     (
         cd tests/consumers/python_native
         export COVERAGE_FILE="$PWD/.coverage"
