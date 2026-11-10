@@ -1,6 +1,11 @@
 mod support;
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::Path,
+    thread,
+    time::{Duration, Instant},
+};
 use support::{screen_text, stop, terminal, wait_text};
 use termtrace_sdk::{
     output::OutputService,
@@ -64,16 +69,23 @@ fn foundation_case_matches_the_shared_fixture() {
     assert_eq!(error.effect(), MutationEffect::NotApplied);
     assert_eq!(error.retry(), Retry::NewRequest);
 
-    let output = OutputService::read_page(session.path(), None, 4096).expect("output page");
-    let output_hex: String = output
-        .bytes
-        .iter()
-        .map(|b| return format!("{b:02x}"))
-        .collect();
-    assert_eq!(
-        output_hex,
-        fixture["output_hex"].as_str().expect("output_hex")
-    );
+    // The live screen can show output before the recorder has appended it to the event log.
+    let expected_hex = fixture["output_hex"].as_str().expect("output_hex");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let (output, output_hex) = loop {
+        let output = OutputService::read_page(session.path(), None, 4096).expect("output page");
+        let output_hex: String = output
+            .bytes
+            .iter()
+            .map(|b| return format!("{b:02x}"))
+            .collect();
+        if output_hex == expected_hex || Instant::now() >= deadline {
+            break (output, output_hex);
+        }
+
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(output_hex, expected_hex);
 
     let completion = stop(&mut session);
     assert_eq!(completion.output_bytes, output.bytes.len() as u64);
