@@ -33,7 +33,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      - run: sudo apt-get update && sudo apt-get install --yes b3sum ffmpeg bison libevent-dev libncurses-dev pkg-config
+      - run: sudo apt-get update && sudo apt-get install --yes ffmpeg bison libevent-dev libncurses-dev pkg-config
       # Termtrace needs tmux 3.6 or newer; Ubuntu 24.04 ships 3.4.
       - name: Install tmux 3.6a
         run: |
@@ -62,7 +62,6 @@ jobs:
           install -m 0444 LICENSE README.md crates/render/assets/fonts/NOTICE "dist/$root/"
           tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -C dist -cf - "$root" | gzip -9 -n > "dist/$root.tar.gz"
           (cd dist && sha256sum "$root.tar.gz" > "$root.tar.gz.sha256")
-          (cd dist && b3sum "$root.tar.gz" > "$root.tar.gz.blake3")
           rm -rf "dist/$root"
       - run: scripts/validate-release-archive.sh "dist/termtrace-${{ matrix.target }}.tar.gz"
       - name: Test shell installer
@@ -135,7 +134,7 @@ jobs:
           subject-path: dist/rust/*.crate
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: termtrace-rust-packages
+          name: rust-packages
           path: dist/rust/*
           if-no-files-found: error
 
