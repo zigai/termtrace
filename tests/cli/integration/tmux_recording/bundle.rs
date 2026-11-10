@@ -323,7 +323,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
 
         assert!(
             Instant::now() < deadline,
-            "aggregate manifest did not link both track layers"
+            "aggregate manifest did not link both track layers: {value}"
         );
 
         thread::sleep(Duration::from_millis(20));

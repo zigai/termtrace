@@ -337,7 +337,7 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
 
         assert!(
             Instant::now() < deadline,
-            "aggregate manifest did not bind its original server identity"
+            "aggregate manifest did not bind its original server identity: {value}"
         );
 
         thread::sleep(Duration::from_millis(20));
