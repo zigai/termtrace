@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -27,8 +28,8 @@ def assert_path(value: object, expected: bytes) -> None:
     if isinstance(value, str):
         assert value.encode() == expected
     else:
-        assert isinstance(value, list)
-        assert bytes(value) == expected
+        assert isinstance(value, dict)
+        assert base64.b64decode(value["base64"]) == expected
         with pytest.raises(UnicodeDecodeError):
             expected.decode()
 
