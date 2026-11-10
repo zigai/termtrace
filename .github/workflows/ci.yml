@@ -101,6 +101,14 @@ jobs:
           cargo install --git https://github.com/zigai/rust-statement-spacing.git cargo-statement-spacing --tag v0.4.0 --locked
       - run: just formatcheck lockcheck audit lint bindings-lint
 
+      # The Rust cache keeps only Cargo's own profile directories, so the Dylint output of
+      # `cargo statement-spacing` and its compiler driver need their own.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            target/statement-spacing
+            ~/.dylint_drivers
+          key: statement-spacing-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'Cargo.toml') }}
   test:
     needs: ghostty
     runs-on: ubuntu-26.04
