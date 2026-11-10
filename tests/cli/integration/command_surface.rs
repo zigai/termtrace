@@ -1181,6 +1181,7 @@ fn top_level_video_derivatives_use_explicit_sources_and_never_replace() {
 
 #[allow(clippy::expect_used, reason = "test setup")]
 fn record_marked_edit_session(session: &Path) {
+    let spawned = Instant::now();
     let recorder = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
         .args(["record", "--no-input", "--out"])
         .arg(session)
@@ -1197,9 +1198,11 @@ fn record_marked_edit_session(session: &Path) {
         .expect("spawn recorder");
 
     wait_for_control(session);
+    let ready = Instant::now();
 
-    // The edit below selects up to 6.7 s, so the markers follow at about 5.5 s.
-    thread::sleep(Duration::from_millis(5_500));
+    // The edit below selects from the first marker to 6.7 s. Timing from the spawn keeps that
+    // marker before 6.7 s of session time, and timing from control keeps the session past it.
+    thread::sleep(Duration::from_millis(5_500).saturating_sub(spawned.elapsed()));
 
     for label in ["first", "second", "third"] {
         Command::cargo_bin("termtrace")
@@ -1212,6 +1215,8 @@ fn record_marked_edit_session(session: &Path) {
 
         thread::sleep(Duration::from_millis(400));
     }
+
+    thread::sleep(Duration::from_millis(7_000).saturating_sub(ready.elapsed()));
 
     Command::cargo_bin("termtrace")
         .expect("binary should build")
