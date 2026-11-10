@@ -50,8 +50,6 @@ jobs:
           TERMTRACE_ZIG_EXTRA_ARGS: -Dcpu=baseline
       - run: cargo test --locked --workspace --all-features
       - run: cargo build --locked --release --all-features --target "${{ matrix.target }}"
-        env:
-          TERMTRACE_BUILD_REVISION: ${{ github.sha }}
       - name: Test standalone Rust process client
         run: bash scripts/test-rust-consumer.sh
         env:
