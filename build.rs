@@ -26,15 +26,28 @@ fn watch_checkout() -> Result<bool, Box<dyn Error>> {
     let Ok(root) = git(&["rev-parse", "--show-toplevel"]) else {
         return Ok(false);
     };
+    // Cargo scans a watched directory recursively, and a tracked directory is a submodule
+    // holding its own build output.
     for path in git(&["-C", &root, "ls-files"])?.lines() {
-        println!("cargo:rerun-if-changed={root}/{path}");
+        let path = Path::new(&root).join(path);
+        if !path.is_dir() {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
     }
 
-    for name in ["HEAD", "index", "refs", "packed-refs"] {
-        println!(
-            "cargo:rerun-if-changed={}",
-            git(&["rev-parse", "--path-format=absolute", "--git-path", name])?
-        );
+    // A commit on a branch leaves HEAD untouched but appends to its log, and tags change the
+    // described version. Cargo treats a missing path as always changed.
+    for name in ["HEAD", "logs/HEAD", "refs/tags", "packed-refs"] {
+        let path = PathBuf::from(git(&[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            name,
+        ])?);
+
+        if path.exists() {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
     }
 
     return Ok(true);

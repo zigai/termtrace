@@ -21,13 +21,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let repository_root = crate_root.join("../..");
 
     println!("cargo:rerun-if-changed=src/ghostty_vt/bindings.rs");
-    watch_git_state(&repository_root, &["HEAD", "index", "packed-refs"]);
-    watch_git_state(&repository_root.join("vendor/ghostty"), &["HEAD"]);
 
-    let build_revision = git_output(&repository_root, &["rev-parse", "--short=12", "HEAD"])
-        .unwrap_or_else(|| return "unknown".to_owned());
-
-    println!("cargo:rustc-env=TERMTRACE_BUILD_REVISION={build_revision}");
+    // An uninitialized submodule has no repository, and git would answer for this checkout.
+    let ghostty = repository_root.join("vendor/ghostty");
+    if ghostty.join(".git").exists() {
+        watch_git_state(&ghostty, &["HEAD"]);
+    }
 
     let ghostty_revision = fs::read_to_string(crate_root.join("ghostty-revision"))?
         .trim()
