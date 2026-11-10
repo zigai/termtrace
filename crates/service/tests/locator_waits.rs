@@ -118,7 +118,8 @@ fn cancelling_during_a_stalled_capture_reports_cancelled_with_the_last_frame() {
         });
 
         // Let a few polls succeed, then freeze the recorder so the next capture cannot be answered.
-        thread::sleep(Duration::from_millis(200));
+        // Slow machines need well over one 20 ms poll interval for the first poll to finish.
+        thread::sleep(Duration::from_secs(1));
 
         kill(recorder.pid(), Signal::SIGSTOP).expect("stop recorder");
 
