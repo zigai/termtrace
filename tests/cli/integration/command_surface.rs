@@ -1200,9 +1200,10 @@ fn record_marked_edit_session(session: &Path) {
     wait_for_control(session);
     let ready = Instant::now();
 
-    // The edit below selects from the first marker to 6.7 s. Timing from the spawn keeps that
-    // marker before 6.7 s of session time, and timing from control keeps the session past it.
-    thread::sleep(Duration::from_millis(5_500).saturating_sub(spawned.elapsed()));
+    // The edit below selects from the third marker (event 6) to 6.7 s. Timing from the spawn
+    // keeps that marker well before 6.7 s of session time, and timing from control keeps the
+    // session past it.
+    thread::sleep(Duration::from_millis(4_000).saturating_sub(spawned.elapsed()));
 
     for label in ["first", "second", "third"] {
         Command::cargo_bin("termtrace")
