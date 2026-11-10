@@ -34,7 +34,9 @@ function hashes(root, prefix = Buffer.alloc(0)) {
     return result;
 }
 function assertPath(value, expected) {
-    assert.deepEqual(Buffer.from(value), expected);
+    const bytes =
+        typeof value === "string" ? Buffer.from(value) : Buffer.from(value.base64, "base64");
+    assert.deepEqual(bytes, expected);
 }
 
 for (const [sourceSuffix, destinationSuffix] of [
