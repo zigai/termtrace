@@ -189,3 +189,21 @@ jobs:
           rust-cache: native
           ghostty-on-path: "true"
       - run: just native-check native-test
+
+  native-sdk:
+    needs: ghostty
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    env:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          submodules: true
+      - uses: ./.github/actions/setup
+        with:
+          packages: ${{ env.NATIVE_PACKAGES }}
+          ghostty-key: ${{ needs.ghostty.outputs.key }}
+          rust-cache: native-sdk
+          ghostty-on-path: "true"
+      - run: just native-sdk-test

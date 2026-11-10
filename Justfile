@@ -103,11 +103,15 @@ native-check:
 
 # Exercise native capability failures, retained export, and original capture (requires Ghostty, Xvfb, dbus-run-session, ImageMagick, and FFmpeg)
 native-test:
-    cargo test --locked --test cli native_capabilities:: -- --ignored --test-threads=1
+    cargo test --locked --test cli native_capabilities:: -- --ignored
     cargo test --locked --test cli retained_native_video_exports_without_native_capture_tools -- --ignored
     cargo test --locked --test cli top_level_video_auto_captures_native_and_overwrites_output -- --ignored
     cargo test --locked --test cli original_native -- --ignored
-    cargo test --locked -p termtrace-service --test original_recording -- --ignored --test-threads=1
+
+# Exercise original capture through the service and the Rust SDK (requires Ghostty, Xvfb, dbus-run-session, and FFmpeg)
+native-sdk-test:
+    cargo build --locked --bin termtrace
+    cargo test --locked -p termtrace-service --test original_recording -- --ignored
     TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace cargo test --locked --manifest-path tests/consumers/rust/Cargo.toml --features local --tests -- --ignored --test-threads=1
 
 # Run performance and resource benchmarks on demand (requires native capture tooling)
@@ -219,7 +223,7 @@ formatcheck:
     @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r editorconfig-checker -disable-indent-size -disable-indentation -disable-max-line-length -disable-charset -exclude '^fuzz/corpus/'
 
 # Run the commit checks and slow suites
-checkfull: (run-checks "formatcheck" "lockcheck" "audit" "lint" "bindings-lint" "validate" "bindings-build" "test" "test-recording" "integration" "bindings-test" "native-check" "native-test" "sanitize" "race" "miri" "fuzz" "mutation" "bench")
+checkfull: (run-checks "formatcheck" "lockcheck" "audit" "lint" "bindings-lint" "validate" "bindings-build" "test" "test-recording" "integration" "bindings-test" "native-check" "native-test" "native-sdk-test" "sanitize" "race" "miri" "fuzz" "mutation" "bench")
 
 # Synchronize dependency locks without upgrading dependencies
 [no-exit-message]
