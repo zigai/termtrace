@@ -459,7 +459,7 @@ pub(super) fn compose_pixels(
             .ok_or_else(|| return plan_error("FFmpeg source path must be UTF-8"))?
             .to_owned(),
         // A per-cell overlay graph exceeds the kernel's 128 KiB limit for one argument.
-        "-/filter_complex".to_owned(),
+        filter_script_option()?.to_owned(),
         "filter.txt".to_owned(),
         "-map".to_owned(),
         "[outv]".to_owned(),
@@ -518,6 +518,22 @@ pub(super) fn compose_pixels(
     validate_planned_source(&plan.source)?;
 
     return Ok(ffmpeg_arguments);
+}
+
+// FFmpeg 7 reads option values from files with `-/option FILE`; older releases only have
+// `-filter_complex_script FILE`, which FFmpeg 8 removed.
+fn filter_script_option() -> Result<&'static str> {
+    let version = command_version("ffmpeg")?;
+    let major = version
+        .strip_prefix("ffmpeg version ")
+        .map(|number| return number.trim_start_matches('n'))
+        .and_then(|number| return number.split(['.', '-']).next())
+        .and_then(|major| return major.parse::<u32>().ok());
+
+    return Ok(match major {
+        Some(major) if major < 7 => "-filter_complex_script",
+        _ => "-/filter_complex",
+    });
 }
 
 /// Check frame arithmetic before trusting a caller-supplied mutable normalized plan.
