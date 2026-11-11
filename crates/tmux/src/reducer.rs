@@ -42,7 +42,10 @@ pub enum Input {
     /// The composite client track started.
     CompositeLinked(TmuxSessionLink),
     /// A stop was requested.
-    StopRequested,
+    StopRequested {
+        /// Identity of the server that answered, when one did.
+        identity: Option<TmuxServerIdentity>,
+    },
     /// A pane wrapper published its recording.
     TrackLinked(TmuxPaneTrack),
     /// Completion evidence observed after a stop.
@@ -178,8 +181,12 @@ pub fn reduce(name: &str, state: &TmuxRecordingState, input: Input, now: u64) ->
 
             next.updated_unix_ns = now;
         }
-        Input::StopRequested => {
+        Input::StopRequested { identity } => {
             if next.lifecycle.is_open() {
+                if let Some(identity) = identity {
+                    bind_identity(name, &mut next, &mut events, identity)?;
+                }
+
                 let from = next.lifecycle;
                 next.lifecycle = from.advance(LifecycleTrigger::StopRequested)?;
 
@@ -226,6 +233,20 @@ pub fn reduce(name: &str, state: &TmuxRecordingState, input: Input, now: u64) ->
     });
 }
 
+fn bind_identity(
+    name: &str,
+    state: &mut TmuxRecordingState,
+    events: &mut Vec<TmuxEvent>,
+    identity: TmuxServerIdentity,
+) -> Result<()> {
+    if check_identity(name, state.server.as_ref(), &identity)? == IdentityCheck::Unbound {
+        state.server = Some(identity.clone());
+        events.push(TmuxEvent::ServerIdentityBound { identity });
+    }
+
+    return Ok(());
+}
+
 fn observe(
     name: &str,
     state: &mut TmuxRecordingState,
@@ -239,12 +260,8 @@ fn observe(
         uncovered,
         mut links,
     } = observation;
-
-    if let Some(identity) = identity
-        && check_identity(name, state.server.as_ref(), &identity)? == IdentityCheck::Unbound
-    {
-        state.server = Some(identity.clone());
-        events.push(TmuxEvent::ServerIdentityBound { identity });
+    if let Some(identity) = identity {
+        bind_identity(name, state, events, identity)?;
     }
 
     let previous = state

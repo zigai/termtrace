@@ -13,7 +13,7 @@ use crate::{
     catalog::TmuxCatalog,
     client::{same_executable, PaneRow, TmuxClient},
     error::{Error, Result},
-    reducer::{check_identity, permanent_gaps, unlinked_recordings, Input, Observation},
+    reducer::{permanent_gaps, unlinked_recordings, Input, Observation},
     setup::{self, PreparedTmuxSetup, SetupRequest},
     status::{self, Integration, PaneCoverage},
     store::{
@@ -544,25 +544,9 @@ pub fn stop(tracks: &impl Tracks, request: StopRequest<'_>) -> Result<TmuxRecord
             return Ok(locked.into_manifest());
         }
 
-        let manifest = locked.manifest();
-        let client = client_of(manifest);
-        let server_validated = match client.server_identity() {
-            Err(_) => false,
-            Ok(observed) => {
-                if manifest.state.server.is_none() {
-                    return Err(Error::ServerIdentityChanged {
-                        name: manifest.name.clone(),
-                        detail: "manifest has no recorded server identity".to_owned(),
-                    });
-                }
-
-                check_identity(&manifest.name, manifest.state.server.as_ref(), &observed)?;
-
-                true
-            }
-        };
-
-        locked.apply(Input::StopRequested, unix_time_ns())?;
+        let identity = client_of(locked.manifest()).server_identity().ok();
+        let server_validated = identity.is_some();
+        locked.apply(Input::StopRequested { identity }, unix_time_ns())?;
 
         (locked.into_manifest(), server_validated)
     };

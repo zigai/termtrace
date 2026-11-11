@@ -124,13 +124,19 @@ fn stopping_completes_only_when_every_track_completed() {
     let stopping = reduce(
         "test",
         &state(TmuxRecordingLifecycle::Live),
-        Input::StopRequested,
+        Input::StopRequested { identity: None },
         2,
     )
     .expect("stop")
     .state;
 
-    let repeated = reduce("test", &stopping, Input::StopRequested, 3).expect("repeat stop");
+    let repeated = reduce(
+        "test",
+        &stopping,
+        Input::StopRequested { identity: None },
+        3,
+    )
+    .expect("repeat stop");
     assert!(repeated.events.is_empty(), "a repeated stop is idempotent");
     let pending = reduce(
         "test",
@@ -181,7 +187,7 @@ fn completed_recordings_accept_no_further_events() {
     for input in [
         observe(vec![pane("%1", "@1", "a")], &["%1"]),
         Input::ObserverStarted { pid: 3 },
-        Input::StopRequested,
+        Input::StopRequested { identity: None },
         Input::TracksSettled {
             completed: vec![("%1".to_owned(), Uuid::now_v7())],
             remaining: 0,
@@ -217,6 +223,31 @@ fn observations_bind_identity_once_and_reject_another_server() {
     });
     assert!(matches!(
         reduce("test", &bound.state, replacement, 4),
+        Err(Error::ServerIdentityChanged { .. })
+    ));
+}
+
+#[test]
+fn stop_binds_the_answering_server_and_rejects_another() {
+    let live = state(TmuxRecordingLifecycle::Live);
+    let stop = |identity| {
+        return Input::StopRequested {
+            identity: Some(identity),
+        };
+    };
+    let stopping = reduce("test", &live, stop(identity(10)), 2).expect("stop");
+    assert_eq!(stopping.state.server, Some(identity(10)));
+    assert_eq!(
+        kinds(&stopping.events),
+        ["server_identity_bound", "recording_stopping"]
+    );
+
+    let bound = reduce("test", &live, observe(Vec::new(), &[]), 2)
+        .expect("bind")
+        .state;
+
+    assert!(matches!(
+        reduce("test", &bound, stop(identity(11)), 3),
         Err(Error::ServerIdentityChanged { .. })
     ));
 }
