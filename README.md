@@ -1,13 +1,15 @@
 # Termtrace
 
-[![rustc: 1.97.1+](https://img.shields.io/badge/rustc-1.97.1%2B-orange?logo=rust)](Cargo.toml)
-[![Rust Edition: 2024](https://img.shields.io/badge/edition-2024-blue.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/index.html)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
 A flight recorder for terminal programs. Run something under Termtrace and you get
 every byte that went in and out of the terminal, plus every screen the program
 drew. Afterwards you can step through it, diff screens, take screenshots, or render
 a video.
+
+[![tests](https://img.shields.io/github/actions/workflow/status/zigai/termtrace/ci.yml?branch=main&label=tests&logo=githubactions&logoColor=white)](https://github.com/zigai/termtrace/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/termtrace?label=crates.io&color=blue&logo=rust)](https://crates.io/crates/termtrace)
+[![PyPI](https://img.shields.io/pypi/v/termtrace?label=pypi&color=blue&logo=pypi&logoColor=white)](https://pypi.org/project/termtrace/)
+[![npm](https://img.shields.io/npm/v/@zigai/termtrace?label=npm&color=blue&logo=npm)](https://www.npmjs.com/package/@zigai/termtrace)
+[![license](https://img.shields.io/github/license/zigai/termtrace?label=license&logo=opensourceinitiative&logoColor=white)](LICENSE)
 
 - **Debug TUIs:** See what was on screen at any point, and what your last key changed.
 - **Drive programs from scripts:** Send keys and wait for text to appear, instead of `tmux send-keys` and `sleep`.
