@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use zstd::stream::encode_all;
 
 const FONT_BUNDLE_MAGIC: &[u8; 8] = b"TTFONT01";
+
 const FONT_ASSETS: [&str; 5] = [
     "assets/fonts/JetBrainsMono-Regular.ttf",
     "assets/fonts/JetBrainsMono-Bold.ttf",
@@ -19,6 +20,7 @@ const FONT_ASSETS: [&str; 5] = [
 fn main() -> Result<(), Box<dyn Error>> {
     let output_directory = PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is not set")?);
     let font_count = u16::try_from(FONT_ASSETS.len())?;
+
     let mut fonts: Vec<Vec<u8>> = Vec::with_capacity(FONT_ASSETS.len());
 
     for asset in FONT_ASSETS {

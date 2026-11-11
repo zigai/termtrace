@@ -53,7 +53,6 @@ impl LiveTerminal {
                         .map_err(crate::Error::ScreenFrame)?,
                 };
                 *cached = Some(hash);
-
                 return Ok(hash);
             })
             .collect::<Result<Vec<_>>>()?;
@@ -62,7 +61,6 @@ impl LiveTerminal {
             termtrace_terminal::semantic_state_hash_from_row_hashes(&self.presented, &hashes)
                 .map_err(crate::Error::ScreenFrame)?;
         *self.cached_state_hash.borrow_mut() = Some(hash.clone());
-
         return Ok(hash);
     }
 
@@ -76,7 +74,6 @@ impl LiveTerminal {
         self.replace_presented(latest);
         self.presented_stale = false;
         self.presented_position = self.position;
-
         return Ok(());
     }
 
@@ -85,7 +82,6 @@ impl LiveTerminal {
         self.geometry = geometry;
         self.presented_stale = true;
         self.position = self.position.saturating_add(1);
-
         return Ok(());
     }
 
@@ -420,7 +416,6 @@ mod tests {
             self.live
                 .ensure_presented()
                 .expect("refresh presented state");
-
             return semantic_viewport_text(&self.live.presented);
         }
 
@@ -486,7 +481,6 @@ mod tests {
     fn attributes_a_query_split_across_reads_to_the_read_that_ends_it() {
         let mut recording = Recording::new(20, 4);
         recording.read(1, b"x\x1b[");
-
         assert!(recording.child_input.is_empty());
         assert_eq!(recording.live.mirror_output, b"x");
 
@@ -511,7 +505,6 @@ mod tests {
         let output = b"\x1b[6\x18n\x1b[\x1a\x9b6n\xc4";
         recording.read(1, output);
         recording.read(2, b"\x9b5n");
-
         assert!(recording.child_input.is_empty());
         assert_eq!(
             recording.live.mirror_output,
@@ -534,7 +527,6 @@ mod tests {
         assert_eq!(recording.presented_text().trim_end(), "before");
 
         recording.read(3, b"\x1b[?2026l");
-
         assert_eq!(recording.presented_text().trim(), "hidden");
         assert_eq!(recording.responses().len(), 1);
     }
@@ -549,7 +541,6 @@ mod tests {
         assert_eq!(recording.presented_text().trim_end(), "primary");
 
         recording.read(2, b"\x1b[?2026l");
-
         assert_eq!(recording.presented_text().trim(), "alternate");
         assert!(recording.live.presented.modes.alternate_screen);
     }
@@ -558,15 +549,12 @@ mod tests {
     fn presents_again_when_a_reset_or_resize_ends_a_hold() {
         let mut recording = Recording::new(20, 4);
         recording.read(1, b"kept\x1b[?2026hlost");
-
         assert_eq!(recording.presented_text().trim_end(), "kept");
 
         recording.read(2, b"\x1bcafter reset");
-
         assert_eq!(recording.presented_text().trim_end(), "after reset");
 
         recording.read(3, b"\x1b[?2026h\r\x1b[Kresized");
-
         assert_eq!(recording.presented_text().trim_end(), "after reset");
 
         let geometry = TerminalGeometry {
@@ -577,7 +565,6 @@ mod tests {
         };
         recording.live.apply_resize(geometry).expect("resize");
         recording.live.presented_stale = true;
-
         assert_eq!(recording.presented_text().trim_end(), "resized");
     }
 
@@ -611,6 +598,7 @@ mod tests {
                 .expect("presented hash");
 
             drop(recording.event_log);
+
             let log = EventLog::read(&recording.path).expect("event log");
             let replayed =
                 inspect(&log, StateSelector::LatestPresented).expect("latest presented replay");
@@ -629,13 +617,11 @@ mod tests {
         let mut output = b"\x1bP1$t".to_vec();
         output.extend_from_slice(&payload);
         recording.read(1, &output);
-
         assert_eq!(recording.live.mirror_output, output);
         assert!(recording.live.open_sequence.len() <= MAX_QUERY_SEQUENCE_BYTES);
 
         recording.read(2, b"\x1b\\done");
         output.extend_from_slice(b"\x1b\\done");
-
         assert_eq!(recording.live.mirror_output, output);
         assert!(recording.live.open_sequence.is_empty());
     }
@@ -665,7 +651,6 @@ mod tests {
                 pixel_height: 480,
             },
         };
-
         assert!(live.cached_state_hash.borrow().is_none());
         assert!(live.row_hashes.borrow().is_empty());
 
@@ -696,7 +681,6 @@ mod tests {
         assert!(clean.grid.iter().all(|row| return !row.dirty));
 
         live.replace_presented(clean);
-
         assert_eq!(
             live.presented_state_hash().expect("clean snapshot hash"),
             semantic_state_hash(&live.presented).expect("full clean snapshot hash")

@@ -41,7 +41,6 @@ pub(super) fn run(
 ) -> Result<ExitCode> {
     let cancelled = Arc::new(AtomicBool::new(false));
     let mut signals = CancellationSignals(Vec::new());
-
     for signal in [SIGINT, SIGTERM] {
         signals
             .0

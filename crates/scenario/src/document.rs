@@ -34,7 +34,6 @@ pub(super) fn read(path: impl AsRef<Path>) -> Result<Scenario> {
             } else {
                 source
             };
-
             return Error::InvalidJson {
                 path: path.to_path_buf(),
                 json_path,
@@ -50,7 +49,6 @@ pub(super) fn read(path: impl AsRef<Path>) -> Result<Scenario> {
     })?;
 
     validate(&scenario)?;
-
     return Ok(scenario);
 }
 
@@ -124,6 +122,7 @@ pub(super) fn validate(scenario: &Scenario) -> Result<()> {
     }
 
     let mut combinations = 1_usize;
+
     for (key, values) in &scenario.matrix {
         if key.is_empty()
             || !key
@@ -360,7 +359,6 @@ mod tests {
                 let ScenarioStep::MatchScreenSnapshot(snapshot) = &scenario.steps[0] else {
                     panic!("expected snapshot step");
                 };
-
                 return snapshot.name.as_str();
             })
             .collect::<BTreeSet<_>>();

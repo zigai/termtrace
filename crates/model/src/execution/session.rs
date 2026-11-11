@@ -657,7 +657,6 @@ mod tests {
                 obsolete_field.to_owned(),
                 serde_json::json!("obsolete-hash"),
             );
-
             assert!(serde_json::from_value::<GeometryProvenance>(obsolete).is_err());
         }
     }
@@ -674,7 +673,6 @@ mod tests {
 
         let mut actual = serde_json::to_vec_pretty(&report).expect("report serialization");
         actual.push(b'\n');
-
         assert_eq!(actual, golden);
         assert_eq!(blake3::hash(&actual), blake3::hash(golden));
     }

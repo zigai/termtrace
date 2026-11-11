@@ -145,7 +145,6 @@ fn registry_binds_alias_to_canonical_session_identity() {
     );
 
     let row = lines.next().expect("registry table row");
-
     assert!(
         lines.next().is_none(),
         "unexpected registry table:\n{human}"
@@ -186,6 +185,7 @@ fn registry_binds_alias_to_canonical_session_identity() {
         .clone();
 
     let removed = compact_json_line(&removed);
+
     assert_eq!(removed["evidence_preserved"], true);
     assert_eq!(
         removed["canonical_session"],

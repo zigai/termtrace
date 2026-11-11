@@ -454,7 +454,6 @@ pub fn write_all(directory: impl AsRef<Path>) -> Result<Vec<PathBuf>> {
                     source,
                 };
             })?;
-
             return Ok(path);
         })
         .collect();

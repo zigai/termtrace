@@ -133,9 +133,7 @@ mod lossless_record_tests {
         // Ordinary Value serialization/hash semantics must not change with raw_value enabled.
         let value =
             serde_json::json!({"app": {"counter": 9_007_199_254_740_993_u64}, "bytes": "AP8="});
-
         let canonical = r#"{"app":{"counter":9007199254740993},"bytes":"AP8="}"#;
-
         assert_eq!(serde_json::to_string(&value).unwrap(), canonical);
         assert_eq!(
             blake3::hash(&serde_json::to_vec(&value).unwrap()),

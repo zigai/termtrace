@@ -34,7 +34,6 @@ impl Command {
     pub(crate) fn new<S: AsRef<OsStr>>(program: S) -> Self {
         let mut command = AssertCommand::new(program);
         command.env_remove("TERMTRACE_RESPONSE");
-
         return Self(command);
     }
 }
@@ -60,7 +59,6 @@ impl StdCommand {
     pub(crate) fn new<S: AsRef<OsStr>>(program: S) -> Self {
         let mut command = ProcessCommand::new(program.as_ref());
         command.env_remove("TERMTRACE_RESPONSE");
-
         return Self(command);
     }
 }
@@ -88,7 +86,6 @@ impl TempDir {
             env::var_os("TERMTRACE_CI_EVIDENCE_ROOT").map_or_else(tempfile::TempDir::new, |root| {
                 return tempfile::TempDir::new_in(root);
             });
-
         return directory.map(Self);
     }
 
@@ -282,7 +279,6 @@ pub(crate) fn replay_checkpoints(session: &Path) -> Vec<PathBuf> {
         })
         .collect::<Vec<_>>();
     checkpoints.sort();
-
     return checkpoints;
 }
 
@@ -318,7 +314,6 @@ pub(crate) fn read_zstd_text(path: &Path) -> String {
     decoder
         .read_to_string(&mut text)
         .expect("decompress JSONL artifact");
-
     return text;
 }
 
@@ -350,7 +345,6 @@ pub(crate) fn compile_schema(schema: &str) -> jsonschema::Validator {
 
     let schema_value: serde_json::Value =
         serde_json::from_slice(&fs_err::read(path).expect("schema file")).expect("schema JSON");
-
     return jsonschema::validator_for(&schema_value).expect("valid schema");
 }
 

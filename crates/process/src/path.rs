@@ -13,7 +13,6 @@ pub fn executables_on_path(program: impl AsRef<OsStr>) -> Vec<PathBuf> {
     let Some(path) = env::var_os("PATH") else {
         return Vec::new();
     };
-
     return env::split_paths(&path)
         .map(|directory| return directory.join(program))
         .filter(|candidate| return is_executable(candidate))
@@ -25,7 +24,6 @@ pub fn executables_on_path(program: impl AsRef<OsStr>) -> Vec<PathBuf> {
 pub fn find_executable(program: impl AsRef<OsStr>) -> Option<PathBuf> {
     let program = program.as_ref();
     let path = env::var_os("PATH")?;
-
     return env::split_paths(&path)
         .map(|directory| return directory.join(program))
         .find(|candidate| return is_executable(candidate));

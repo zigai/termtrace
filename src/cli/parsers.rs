@@ -35,7 +35,6 @@ pub(super) fn parse_region_predicate(value: &str) -> Result<(ScreenRegion, Strin
                 .wrap_err("region bounds must be zero-based integers");
         })
         .collect::<Result<Vec<_>>>()?;
-
     let [left, top, right, bottom] = values.as_slice() else {
         return Err(miette::miette!(
             "region predicate requires exactly four bounds"
@@ -250,7 +249,6 @@ pub(super) fn parse_rgb_color(value: &str) -> StdResult<String, String> {
 pub(super) fn parse_visual_profile(value: &str) -> StdResult<VisualProfile, String> {
     let profile: VisualProfile = serde_json::from_str(value)
         .map_err(|error| return format!("invalid visual profile: {error}"))?;
-
     return profile
         .normalized()
         .map_err(|error| return error.to_string());

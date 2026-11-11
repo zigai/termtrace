@@ -137,7 +137,6 @@ fn visual_profile_rejects_invalid_requests_before_the_application_starts() {
             .assert()
             .failure()
             .stderr(predicate::str::contains(error));
-
         assert!(!marker.exists(), "{arguments:?} started the application");
         assert!(!session.exists(), "{arguments:?} created a session");
     }

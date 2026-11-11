@@ -46,6 +46,5 @@ pub fn verify(
     let identity = bundle::identity_for_policy(policy)?;
     let manifest = verify_archive(archive.as_ref(), Some(&identity))?;
     bundle::verify_archived_manifest(&manifest, policy)?;
-
     return Ok(manifest);
 }

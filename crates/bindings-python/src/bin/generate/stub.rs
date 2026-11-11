@@ -26,6 +26,5 @@ pub(crate) fn write(package: &Path) -> Result<String, Box<dyn Error>> {
         "# ruff: noqa: E501, F401, F403, F405, PYI036",
     );
     fs_err::write(package.join("_termtrace.pyi"), &stub)?;
-
     return Ok(stub);
 }

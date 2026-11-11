@@ -107,6 +107,7 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
         .clone();
 
     let enabled = compact_json_line(&enabled);
+
     assert_eq!(enabled["existing_panes"], 1);
     assert_eq!(enabled["existing_unrecorded_panes"], 1);
     assert_eq!(enabled["retroactive"], false);
@@ -151,6 +152,7 @@ fn tmux_live_enable_grandfathers_existing_panes_and_records_new_panes() {
     let status = server.wait_for_status("live-enable coverage to settle", |status| {
         return status["unrecorded_panes"] == 1;
     });
+
     assert_eq!(status["enabled"], true);
 
     let mut disable = server.termtrace();
@@ -331,6 +333,7 @@ fn tmux_aggregate_rejects_a_replacement_server_on_the_same_socket() {
         let value: serde_json::Value =
             serde_json::from_slice(&fs::read(&manifest_path).expect("read aggregate manifest"))
                 .expect("aggregate manifest JSON");
+
         if value["server"]["pid"].is_number() && value["server"]["socket_inode"].is_number() {
             break value;
         }

@@ -221,6 +221,7 @@ pub fn validated_visual_manifests(
     entries.sort_unstable_by_key(|entry| return entry.file_name());
 
     let mut validated: Vec<ValidatedVisualManifest> = Vec::new();
+
     for entry in entries {
         let file_type = entry.file_type().map_err(|source| {
             return Error::Filesystem {
@@ -228,6 +229,7 @@ pub fn validated_visual_manifests(
                 source,
             };
         })?;
+
         if !file_type.is_dir() {
             continue;
         }
@@ -351,8 +353,8 @@ pub fn validated_visual_manifests_for_state(
     })?;
 
     let mut validated = Vec::new();
-
     let mut retained_bytes = 0_usize;
+
     for entry in directory {
         check_review_cancelled(cancelled)?;
 
@@ -362,6 +364,7 @@ pub fn validated_visual_manifests_for_state(
                 source,
             };
         })?;
+
         if !entry
             .file_type()
             .map_err(|source| {
@@ -409,6 +412,7 @@ pub fn validated_visual_manifests_for_state(
             .members
             .iter()
             .any(|member| return member.path == "replay-endpoint.json");
+
         if manifest.session_id != session_manifest.session_id
             || !replay_screenshot
                 && manifest.source_event_hash.as_deref()
@@ -465,6 +469,7 @@ pub fn validated_visual_manifests_for_state(
                                 source,
                             };
                         })?;
+
                     if count == 0 {
                         break;
                     }
@@ -662,21 +667,17 @@ mod tests {
                 "ghostty_config_hash".to_owned(),
                 serde_json::json!("a".repeat(64)),
             );
-
         assert!(serde_json::from_value::<VisualManifest>(obsolete).is_err());
 
         manifest.version = VISUAL_MANIFEST_VERSION - 1;
-
         assert!(validate_visual_manifest(&manifest).is_err());
 
         manifest.version = VISUAL_MANIFEST_VERSION;
         manifest.effective_config_hash = "A".repeat(64);
-
         assert!(validate_visual_manifest(&manifest).is_err());
 
         manifest.effective_config_hash = "a".repeat(64);
         manifest.members[0].blake3 = "b".repeat(64);
-
         assert!(validate_visual_manifest(&manifest).is_err());
     }
 

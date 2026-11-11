@@ -124,7 +124,6 @@ impl ActionDraft {
     pub fn edit(&mut self, change: impl FnOnce(&mut ActRequest)) -> Result<()> {
         self.unsealed("change")?;
         change(&mut self.request);
-
         return Ok(());
     }
 
@@ -136,7 +135,6 @@ impl ActionDraft {
     pub fn set_request_id(&mut self, request_id: Uuid) -> Result<()> {
         self.unsealed("change the request identity of")?;
         self.request.guard.request_id = Some(request_id);
-
         return Ok(());
     }
 
@@ -559,7 +557,6 @@ impl LaunchOptions {
         spec.idle_timeout = self.idle_timeout_ms.map(Duration::from_millis);
         spec.visual_profile.clone_from(&self.visual_profile);
         spec.validate()?;
-
         return Ok(spec);
     }
 }
@@ -660,7 +657,6 @@ impl OriginalLaunchOptions {
         spec.visual_profile.clone_from(&self.visual_profile);
         spec.alias.clone_from(&self.alias);
         spec.state_root = self.state_root.as_ref().map(PathBuf::from);
-
         return Ok(spec);
     }
 }

@@ -61,7 +61,6 @@ impl ProbeOutput {
 
 fn drain_pipe(pipe: &mut impl Read, bytes: &mut Vec<u8>, limit: usize, name: &str) -> Result<()> {
     let mut buffer = [0_u8; 8192];
-
     loop {
         match pipe.read(&mut buffer) {
             Ok(0) => return Ok(()),
@@ -117,7 +116,6 @@ pub(super) fn probe_output_with_check(
         .output
         .take()
         .ok_or_else(|| return external_error(name, "probe output pipes are unavailable"))?;
-
     return Ok(output.stdout_bytes);
 }
 
@@ -482,7 +480,6 @@ impl ManagedChild {
             stderr_bytes: Vec::new(),
             log: None,
         });
-
         return Ok(managed);
     }
 
@@ -631,7 +628,6 @@ pub(super) fn wait_while_running<T>(
         }
         return Ok(None);
     })?;
-
     return value.ok_or_else(|| return external_error(process.name, timed_out));
 }
 
@@ -734,7 +730,6 @@ mod ownership_tests {
         assert!(result.is_err());
 
         child.terminate();
-
         assert!(child.child.is_none());
         assert!(started.elapsed() < Duration::from_secs(2));
     }

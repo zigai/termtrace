@@ -576,7 +576,6 @@ impl Session {
         else {
             return Err(client_error("actor returned the wrong action payload"));
         };
-
         if input.sequence_id != request_id {
             return Err(client_error(
                 "actor returned an action input identifier that does not match the request",
@@ -713,7 +712,6 @@ impl Session {
             let exchange_deadline = Instant::now()
                 .checked_add(client_timeout)
                 .map_or(deadline, |bound| return bound.min(deadline));
-
             return ExchangeTiming::Deadline(exchange_deadline);
         });
 
@@ -838,7 +836,6 @@ impl Session {
                 let ControlPayload::ScreenFrame { frame } = *data else {
                     return Err(client_error("actor returned the wrong rich-screen payload"));
                 };
-
                 return Ok(frame);
             }
         }
@@ -920,7 +917,6 @@ impl Session {
         let deadline = lifecycle_deadline(timeout)?;
         let wire = request.guard.request(ControlCommand::Stop);
         let reached = self.reach_within(&wire, ExchangeTiming::Deadline(deadline))?;
-
         return self
             .complete_after_stop(reached, deadline.saturating_duration_since(Instant::now()));
     }
@@ -1415,6 +1411,7 @@ mod tests {
         }
 
         let status = child.wait().expect("reap group stand-in");
+
         forced.expect("original group capability remains available after recorder reaping");
 
         assert!(!status.success());

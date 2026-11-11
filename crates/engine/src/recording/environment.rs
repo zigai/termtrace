@@ -42,7 +42,6 @@ impl EffectiveEnvironment {
             canonical.into_os_string(),
         );
         self.policy.effective_digest = digest_variables(&self.variables);
-
         return Ok(());
     }
 
@@ -306,7 +305,6 @@ mod tests {
             .policy()
             .effective_digest
             .clone();
-
         let expected_b = EffectiveEnvironment::resolve(&spec_b, "xterm-test")
             .expect("resolve b")
             .policy()

@@ -118,7 +118,6 @@ pub fn archive(
     sync_parent_directory(destination)?;
 
     cleanup.disarm();
-
     return Ok(());
 }
 
@@ -258,12 +257,12 @@ impl TarReadTracker {
         }
 
         let mut state = self.0.borrow_mut();
+
         if state.padding.is_some() || state.position > padding_start {
             return Err(Error::invalid("tar archive member positions are invalid"));
         }
 
         state.padding = Some(padding_start..padding_end);
-
         return Ok(());
     }
 }
@@ -351,6 +350,7 @@ pub(super) fn extract_archive(archive: &Path, destination: &Path) -> Result<()> 
             let mut entry = entry.map_err(|source| {
                 return Error::invalid(format!("tar archive is invalid: {source}"));
             })?;
+
             if !entry.header().entry_type().is_file() {
                 return Err(Error::invalid(
                     "bundle archive contains a non-regular member",
@@ -370,6 +370,7 @@ pub(super) fn extract_archive(archive: &Path, destination: &Path) -> Result<()> 
             }
 
             let size = entry.size();
+
             if path == Path::new("manifest.json") && size > MAX_BUNDLE_MANIFEST_BYTES {
                 return Err(Error::invalid("bundle manifest exceeds its byte limit"));
             }
@@ -386,6 +387,7 @@ pub(super) fn extract_archive(archive: &Path, destination: &Path) -> Result<()> 
             let mut writer = secure_file(&target)?;
             let copied = io::copy(&mut entry, &mut writer)
                 .map_err(|source| return Error::filesystem(&target, source))?;
+
             if copied != size {
                 return Err(Error::invalid("bundle archive member is truncated"));
             }

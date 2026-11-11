@@ -265,7 +265,6 @@ pub(in crate::cli) fn run_record(
         },
         &resize_authority,
     )?;
-
     return report_record_outcome(outcome);
 }
 
@@ -345,7 +344,6 @@ pub(super) fn read_environment_stdin() -> Result<Vec<u8>> {
         .take(4 * 1024 * 1024 + 1)
         .read_to_end(&mut bytes)
         .into_diagnostic()?;
-
     return Ok(bytes);
 }
 

@@ -68,7 +68,6 @@ fn hashes(source: &Path) -> BTreeMap<String, String> {
 
 fn normalized(mut observation: Observation) -> Observation {
     observation.resolution = super::super::ObservationResolution::CanonicalReplay;
-
     return observation;
 }
 
@@ -94,6 +93,7 @@ fn cold_warm_late_and_pruned_cache_preserve_exact_observation_facts() {
     cached.event_seq = None;
     cached.event_byte_offset = None;
     cached.monotonic_ns = None;
+
     prune_replay_cache(&source).expect("simulate cold query before late publisher wins");
     let validated = ValidatedSession::open(&source).expect("source authority");
     publish_cached_checkpoint(&validated, &StatePoint::LatestPresented, &cached)
@@ -128,6 +128,7 @@ fn either_missing_position_rejects_authenticated_older_style_endpoints() {
 
     for missing_event in [true, false] {
         let mut unbound = cached.clone();
+
         if missing_event {
             unbound.event_seq = None;
         } else {
@@ -159,6 +160,7 @@ fn older_version_and_tampered_authentication_still_require_canonical_replay() {
     checkpoint.version = REPLAY_CHECKPOINT_VERSION - 1;
     let validated = ValidatedSession::open(&source).expect("authority");
     let older = trust::encode(&validated, checkpoint).expect("authenticated older version");
+
     prune_replay_cache(&source).expect("replace disposable fixture only");
 
     write_secure(
@@ -172,6 +174,7 @@ fn older_version_and_tampered_authentication_still_require_canonical_replay() {
     let mut tampered: serde_json::Value = serde_json::from_slice(&bytes).expect("fixture envelope");
     tampered["mac"] = serde_json::Value::String("0".repeat(64));
     let tampered = serde_json::to_vec(&tampered).expect("tampered envelope");
+
     prune_replay_cache(&source).expect("replace disposable fixture only");
 
     write_secure(
@@ -226,6 +229,7 @@ fn recorded_validation_never_vouches_for_changed_event_bytes() {
         .expect("final record hash")
         + 8;
     bytes[hash] = if bytes[hash] == b'0' { b'1' } else { b'0' };
+
     fs_err::set_permissions(&event_log, fs::Permissions::from_mode(0o600)).expect("writable log");
     fs_err::write(&event_log, &bytes).expect("rewrite event log");
 

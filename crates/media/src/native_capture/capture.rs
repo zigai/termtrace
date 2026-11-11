@@ -97,6 +97,7 @@ pub fn capture(helper: &Path, options: &CaptureOptions) -> Result<CaptureOutcome
         })?;
 
     require_native_tools(&options.kind)?;
+
     let staging = parent.join(format!(".visual.{}.tmp", uuid::Uuid::now_v7()));
     create_private_directory(&staging)?;
 
@@ -505,6 +506,7 @@ fn capture_staged(
                 })?;
             capture_started =
                 validate_acquisition_frames(&staging.join("ffmpeg-video.log"), packets)?;
+
             write_video_map(
                 &staging.join("video-map.jsonl"),
                 states.ok_or_else(|| {
@@ -656,6 +658,7 @@ pub(super) fn require_native_tools(kind: &CaptureKind) -> Result<()> {
     }
 
     which("ffmpeg")?;
+
     let output = Command::new("ffmpeg")
         .args(["-hide_banner", "-encoders"])
         .output()
@@ -803,7 +806,6 @@ impl DisplayScaling {
     /// Returns an error when `dpi` is zero.
     pub fn from_dpi(dpi: u32) -> Result<Self> {
         let scale = f64::from(dpi) / 96.0;
-
         return Self::new(scale, Some(dpi));
     }
 
@@ -834,7 +836,6 @@ fn display_units(value: f64) -> Result<u32> {
                   first, so the cast is exact; std has no checked float-to-integer conversion"
     )]
     let units = value as u32;
-
     return Ok(units);
 }
 
@@ -902,7 +903,6 @@ pub fn resolve_display_scaling(
             .unwrap_or(1.0);
 
         let total_scale = f64::from(gdk_scale) * dpi_scale;
-
         return DisplayScaling::new(total_scale, None);
     }
 
@@ -927,7 +927,6 @@ pub fn resolve_display_scaling(
                 .unwrap_or(1.0);
 
             let total_scale = f64::from(gdk_scale) * dpi_scale;
-
             return DisplayScaling::new(total_scale, None);
         }
 
@@ -1033,26 +1032,31 @@ mod tests {
     #[test]
     fn display_scaling_computes_dpi_and_gdk_factors() {
         let s1 = DisplayScaling::from_scale(1.0).expect("valid display scaling");
+
         assert_eq!(s1.dpi, 96);
         assert_eq!(s1.gdk_scale, 1);
         assert!((s1.gdk_dpi_scale - 1.0).abs() < f64::EPSILON);
 
         let s1_5 = DisplayScaling::from_scale(1.5).expect("valid display scaling");
+
         assert_eq!(s1_5.dpi, 144);
         assert_eq!(s1_5.gdk_scale, 1);
         assert!((s1_5.gdk_dpi_scale - 1.5).abs() < f64::EPSILON);
 
         let s2 = DisplayScaling::from_scale(2.0).expect("valid display scaling");
+
         assert_eq!(s2.dpi, 192);
         assert_eq!(s2.gdk_scale, 2);
         assert!((s2.gdk_dpi_scale - 1.0).abs() < f64::EPSILON);
 
         let s2_5 = DisplayScaling::from_scale(2.5).expect("valid display scaling");
+
         assert_eq!(s2_5.dpi, 240);
         assert_eq!(s2_5.gdk_scale, 2);
         assert!((s2_5.gdk_dpi_scale - 1.25).abs() < f64::EPSILON);
 
         let from_dpi = DisplayScaling::from_dpi(192).expect("valid display scaling");
+
         assert_eq!(from_dpi.scale, 2.0);
         assert_eq!(from_dpi.gdk_scale, 2);
         assert!((from_dpi.gdk_dpi_scale - 1.0).abs() < f64::EPSILON);
@@ -1081,7 +1085,6 @@ mod tests {
         let mut opt_2k = options(24);
         opt_2k.width = 2560;
         opt_2k.height = 1440;
-
         assert_eq!(
             resolve_display_scaling(&opt_2k, None).expect("resolve scaling"),
             DisplayScaling::from_scale(1.5).expect("valid display scaling")
@@ -1090,7 +1093,6 @@ mod tests {
         let mut opt_4k = options(24);
         opt_4k.width = 3840;
         opt_4k.height = 2160;
-
         assert_eq!(
             resolve_display_scaling(&opt_4k, None).expect("resolve scaling"),
             DisplayScaling::from_scale(2.0).expect("valid display scaling")
@@ -1149,7 +1151,6 @@ mod tests {
         let mut large = options(24);
         large.width = 3840;
         large.height = 2160;
-
         assert_eq!(
             resolve_display_scaling(&large, Some(&manifest)).expect("resolve scaling"),
             DisplayScaling::profile(144)

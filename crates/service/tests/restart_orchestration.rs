@@ -1,4 +1,5 @@
 //! Shared restart admission failures preserve evidence/alias authority and retain orphan diagnostics.
+
 mod support;
 
 #[cfg(test)]
@@ -74,7 +75,6 @@ mod tests {
         }
 
         args.extend(["--".into(), "/bin/true".into()]);
-
         return args;
     }
 
@@ -167,8 +167,10 @@ mod tests {
         let root = TempDir::new().expect("private root");
         let source = root.path().join("predecessor");
         let other = root.path().join("other");
+
         record_session(&source, "printf PREDECESSOR");
         record_session(&other, "printf OTHER");
+
         let before = bytes(&source);
         let registry = RegistryService::open(root.path().join("state")).expect("registry");
         registry

@@ -30,6 +30,7 @@ pub enum DerivativeFormat {
     /// VP9 CRF 32, zero bitrate, single thread, limited-range YUV420 BT.709 matrix.
     Webm {},
 }
+
 impl DerivativeFormat {
     /// Stable format name.
     pub const fn name(self) -> &'static str {
@@ -55,6 +56,7 @@ pub struct DerivativeExportOptions {
     /// Must match verified source pixels; never a fallback preference.
     pub source_kind: ArtifactSourceKind,
 }
+
 impl DerivativeExportOptions {
     /// Validate without launching tools.
     ///
@@ -81,7 +83,6 @@ pub fn gif_boundary_centiseconds(frame: u64, fps: u16) -> Result<u64, String> {
     }
 
     let boundary = (u128::from(frame) * 200 + u128::from(fps)) / (2 * u128::from(fps));
-
     return u64::try_from(boundary).map_err(|_error| return "GIF timing schedule overflow".into());
 }
 

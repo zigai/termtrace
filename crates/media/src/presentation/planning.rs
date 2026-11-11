@@ -78,7 +78,6 @@ pub fn video_clip_ranges_session(
 ) -> Result<Vec<SourceRange>> {
     let mut ranges = IdleRanges::new(selected, idle);
     let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
-
     while let Some(record) = cursor.next_record()? {
         if matches!(record.event, Event::Output { .. }) {
             ranges.observe(record.monotonic_ns);
@@ -246,7 +245,6 @@ fn marker_records(session: &Path, fps: u16, capture_start_ns: i128) -> Result<Ve
     let mut occurrence_counts = HashMap::<String, u64>::new();
     let mut records = Vec::new();
     let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
-
     while let Some(record) = cursor.next_record()? {
         if let Event::Marker { label, .. } = record.event {
             let occurrence = occurrence_counts.entry(label.clone()).or_default();
@@ -408,7 +406,6 @@ pub fn plan_with_capture_directory(
     };
     let change_frames =
         normalize_semantic_changes(&semantic_mapping, edit.change_visualization.as_ref())?;
-
     let cursor_masks = normalize_cursor_masks(&semantic_mapping, &edit.transforms)?;
 
     let (output_width, output_height) = validate_transform_geometry(
@@ -419,6 +416,7 @@ pub fn plan_with_capture_directory(
     )?;
 
     let verified = validate_completed_session(session)?;
+
     if verified.session_id != completion.session_id
         || verified.final_event_hash != completion.final_event_hash
     {
@@ -541,6 +539,7 @@ fn resolve_source(
             }
 
             let completion = validate_completed_session(session)?;
+
             if manifest.source_event_hash.as_deref() != Some(completion.final_event_hash.as_str()) {
                 return Err(plan_error(
                     "capture canonical boundary does not match completed source",
@@ -568,7 +567,6 @@ fn resolve_source(
 
             let capture_start_ns =
                 native_capture_clock_origin(&manifest, session_manifest, &visual)?;
-
             let native_frame_count = native_cfr_frame_count(&manifest)?;
 
             Ok(ResolvedSource {
@@ -604,8 +602,8 @@ fn resolve_source(
             }
 
             let mut semantic_start = u64::MAX;
-
             let mut semantic_end = 0_u64;
+
             for (index, clip) in edit.clips.iter().enumerate() {
                 let range = resolve_clip(session, clip, index, 0, fps)?;
                 semantic_start = semantic_start.min(range.start_monotonic_ns);
@@ -758,7 +756,6 @@ fn source_elapsed_ns(monotonic_ns: u64, capture_start_ns: i128) -> u128 {
 pub(super) fn hash_edit_identity(edit: &EditPlan) -> Result<String> {
     let mut hashed_edit = edit.clone();
     let mut subtitle_hashes = Vec::new();
-
     for (index, subtitle) in hashed_edit.subtitles.iter_mut().enumerate() {
         subtitle_hashes.push(hash_file(&subtitle.ass)?);
         subtitle.ass = PathBuf::from(format!("resource-{index}.ass"));
@@ -912,6 +909,7 @@ pub(super) fn validate_planned_source(source: &PresentationSource) -> Result<()>
         }
         PresentationSource::Semantic { plan } => {
             let completion = validate_completed_session(&plan.session)?;
+
             if completion.session_id != plan.session_id
                 || completion.final_event_hash != plan.source_event_hash
             {
@@ -1014,6 +1012,7 @@ fn normalize_annotations(
                     .collect()
             }
         };
+
         if spans.is_empty() {
             return Err(invalid(format!(
                 "annotation {annotation_index} does not intersect an output clip"
@@ -1041,7 +1040,6 @@ fn normalize_annotations(
             annotation.output_start_frame,
         );
     });
-
     return Ok(normalized);
 }
 
@@ -1082,7 +1080,6 @@ fn normalize_semantic_changes(
     let geometry = mapping.geometry;
     let (x_origin, y_origin) = mapping.text_origin();
     let mut output_frames_by_source = BTreeMap::<u64, Vec<u64>>::new();
-
     for clip in mapping.clips {
         for output_frame in clip.output_start_frame..clip.output_end_frame {
             let (source_frame, _) = mapped_source_frame(clip, output_frame);
@@ -1202,7 +1199,6 @@ fn normalize_cursor_masks(
     let geometry = mapping.geometry;
     let (x_origin, y_origin) = mapping.text_origin();
     let mut masks = Vec::new();
-
     for clip in mapping.clips {
         for output_frame in clip.output_start_frame..clip.output_end_frame {
             let (source_frame, _) = mapped_source_frame(clip, output_frame);
@@ -1278,6 +1274,7 @@ pub(super) fn validate_transform_geometry(
     );
 
     let mut spatial_transform_seen = false;
+
     for (index, transform) in edit.transforms.iter().enumerate() {
         let invalid = |reason: &str| {
             return edit_error(
@@ -1364,7 +1361,6 @@ fn scaled_even_dimension(
 ) -> Result<u16, &'static str> {
     let scaled = u32::from(value).saturating_mul(u32::from(numerator)) / u32::from(denominator);
     let even = scaled / 2 * 2;
-
     if even == 0 || even > 8192 {
         return Err("zoomed presentation dimension must be an even value from 2 through 8192");
     }
@@ -1443,7 +1439,6 @@ fn resolve_clip(
 
 fn session_final_ns(session: &Path) -> Result<u64> {
     let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
-
     let mut final_ns = 0;
     while let Some(record) = cursor.next_record()? {
         final_ns = record.monotonic_ns;
@@ -1539,7 +1534,6 @@ fn resolve_edit_selector(
 
     let mut found = None;
     let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
-
     while let Some(record) = cursor.next_record()? {
         if matches!(&record.event, Event::Marker { label, .. } if label == marker)
             && found.replace(record.monotonic_ns).is_some()
@@ -1621,7 +1615,6 @@ mod capture_clock_tests {
             native_frame: Some(0),
             ..Default::default()
         };
-
         assert!(
             resolve_edit_selector(Path::new("unused"), &selector, "clips[0].from", origin, 30)
                 .is_err()
@@ -1631,7 +1624,6 @@ mod capture_clock_tests {
             native_frame: Some(30),
             ..Default::default()
         };
-
         assert_eq!(
             resolve_edit_selector(Path::new("unused"), &selector, "clips[0].from", origin, 30)
                 .unwrap(),
@@ -1697,7 +1689,6 @@ mod capture_clock_tests {
             native_frame: Some(28),
             ..Default::default()
         };
-
         assert!(resolve_edit_selector(
             Path::new("unused"),
             &before_zero,
@@ -1711,7 +1702,6 @@ mod capture_clock_tests {
             native_frame: Some(29),
             ..Default::default()
         };
-
         assert_eq!(
             resolve_edit_selector(
                 Path::new("unused"),
@@ -1731,7 +1721,6 @@ mod capture_clock_tests {
             native_frame: Some(0),
             ..Default::default()
         };
-
         assert_eq!(
             resolve_edit_selector(Path::new("unused"), &zero, "clips[0].from", 0, 60).unwrap(),
             0
@@ -1741,7 +1730,6 @@ mod capture_clock_tests {
             native_frame: Some(1),
             ..Default::default()
         };
-
         assert_eq!(
             resolve_edit_selector(Path::new("unused"), &selector, "clips[0].from", 0, 60).unwrap(),
             16_666_667

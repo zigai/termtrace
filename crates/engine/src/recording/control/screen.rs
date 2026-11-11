@@ -88,8 +88,8 @@ impl SessionActor<'_> {
         let now = Instant::now();
         // A delayed actor must not mistake output still queued from the PTY for quiet.
         let output_pending = self.progress.output_pending();
-
         let mut index = 0;
+
         while index < self.screen_waiters.len() {
             let Some(waiter) = self.screen_waiters.get_mut(index) else {
                 break;
@@ -141,11 +141,9 @@ impl SessionActor<'_> {
                     .matching_state
                     .as_ref()
                     .is_some_and(|(_, since, _)| return since.elapsed() >= waiter.stable_for);
-
             let child_completed = child_exited && output_closed;
             let deadline = now >= waiter.deadline;
             let finished = stable || unchanged || child_completed || output_closed || deadline;
-
             if !finished {
                 index += 1;
                 continue;
@@ -186,7 +184,6 @@ impl SessionActor<'_> {
                     );
 
                     deliver_response(&waiter.response, response);
-
                     continue;
                 }
             };

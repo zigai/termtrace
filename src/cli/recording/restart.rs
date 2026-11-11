@@ -108,7 +108,6 @@ pub(super) fn record_arguments(
 
     arguments.push(OsString::from("--"));
     arguments.push(OsString::from("/bin/true"));
-
     return arguments;
 }
 
@@ -121,7 +120,6 @@ pub(super) fn restarted_record_options(
 ) -> Result<RecordOptions> {
     let manifest_bytes =
         fs_err::read(SessionLayout::new(predecessor).manifest()).into_diagnostic()?;
-
     let manifest = read_manifest(predecessor).into_diagnostic()?;
     let completion = wait_for_completion(predecessor, Duration::ZERO).into_diagnostic()?;
     let event_log =
@@ -237,7 +235,6 @@ pub(super) fn restarted_record_options(
         },
     };
     apply_restart_overrides(&mut options, overrides)?;
-
     return Ok(options);
 }
 

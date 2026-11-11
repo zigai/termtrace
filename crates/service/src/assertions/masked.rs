@@ -89,6 +89,7 @@ pub fn masked_snapshot(
     };
 
     let region = frame.returned_region;
+
     if region.width() == 0
         || region.height() == 0
         || region.bottom > frame.geometry.rows
@@ -102,6 +103,7 @@ pub fn masked_snapshot(
     }
 
     let mut masked = BTreeSet::new();
+
     for mask in &options.mask_regions {
         if mask.width() == 0
             || mask.height() == 0
@@ -177,6 +179,7 @@ pub fn masked_snapshot(
     }
 
     let mut canonical: Vec<ScreenRegion> = Vec::new();
+
     for row in region.top..region.bottom {
         let mut column = region.left;
 

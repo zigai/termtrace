@@ -75,6 +75,7 @@ fn visit_source_tracks(
     let catalog = TmuxCatalog::read_verified(directory, aggregate)?;
 
     let mut next = 0;
+
     loop {
         let page = catalog.tracks(next, 128, false)?;
         if page.is_empty() {
@@ -178,6 +179,7 @@ fn validate_destination(
             .session
             .canonicalize()
             .map_err(|source| return Error::filesystem(&track.session, source))?;
+
         if candidate.starts_with(&canonical) {
             return Err(Error::invalid(
                 "tmux evidence export destination must be outside every canonical track",

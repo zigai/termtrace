@@ -46,6 +46,7 @@ fn session_recovery_preserves_context_and_never_claims_completion() {
     let report: serde_json::Value =
         serde_json::from_slice(&fs_err::read(recovered.join("recovery.json")).expect("report"))
             .expect("report JSON");
+
     assert_eq!(report["complete_evidence"], false);
     assert!(report["recovery"]["discarded_tail"].is_object());
 
@@ -78,7 +79,6 @@ fn session_recovery_preserves_context_and_never_claims_completion() {
         .arg(&invalid)
         .assert()
         .failure();
-
     assert!(!invalid.exists());
 }
 
@@ -121,7 +121,6 @@ fn top_level_video_never_falls_back_from_native_to_semantic() {
         .stderr(predicate::str::contains(
             "required capability `native-video` is blocked",
         ));
-
     assert!(!output.exists(), "native failure must not publish a video");
     assert!(
         !temporary.path().join("native.mp4.termtrace").exists(),
@@ -142,7 +141,6 @@ fn top_level_video_auto_captures_native_and_overwrites_output() {
         .args(["--", "/bin/sh", "-c", "printf native"])
         .assert()
         .success();
-
     assert!(
         !session.join("visual/manifest.json").exists(),
         "session must not have visual capture initially"
@@ -187,7 +185,6 @@ fn top_level_video_auto_captures_native_and_overwrites_output() {
         .args(["--renderer", "native"])
         .assert()
         .success();
-
     assert!(
         output.is_file(),
         "output video should still exist after clean overwrite"
@@ -245,6 +242,7 @@ fn doctor_require_passes_ready_capabilities_and_fails_blocked_ones() {
         .get_output()
         .stdout
         .clone();
+
     assert_eq!(
         check(&doctor_json(&ready), "capabilities.semantic")["status"],
         "ok"
@@ -263,6 +261,7 @@ fn doctor_require_passes_ready_capabilities_and_fails_blocked_ones() {
 
         let report = doctor_json(&output);
         let capability = check(&report, &format!("capabilities.{required}"));
+
         assert_eq!(capability["status"], "skip");
 
         let needs = capability["needs"]
@@ -272,6 +271,7 @@ fn doctor_require_passes_ready_capabilities_and_fails_blocked_ones() {
 
         for cause in needs {
             let cause = check(&report, cause.as_str().expect("check id"));
+
             assert_eq!(cause["status"], "fail", "{cause:?}");
             assert!(
                 cause["fix"]["manual"].is_string(),
@@ -329,12 +329,14 @@ fi
         let home = temporary.path().join("home");
         let tools = temporary.path().join("bin");
         let state = temporary.path().join("state");
+
         fs::create_dir_all(&home).expect("private home");
 
         fs::create_dir_all(&tools).expect("private tools");
 
         fs::create_dir_all(&state).expect("private state");
         fs::set_permissions(&state, Permissions::from_mode(0o700)).expect("private permissions");
+
         let tmux = tools.join("tmux");
         fs::write(&tmux, script).expect("fake tmux script");
         fs::set_permissions(&tmux, Permissions::from_mode(0o755)).expect("fake executable");
@@ -515,6 +517,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
 
     let plan: serde_json::Value =
         serde_json::from_slice(&plan_output).expect("semantic video plan JSON");
+
     assert_eq!(plan["source"]["kind"], "semantic");
     assert_eq!(plan["source"]["plan"]["fps"], 60);
 
@@ -540,6 +543,7 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
 
     let supersampled_plan: serde_json::Value =
         serde_json::from_slice(&supersampled_output).expect("supersampled video plan JSON");
+
     assert_eq!(
         supersampled_plan["source"]["plan"]["raster_profile"],
         "supersampled-2x"
@@ -603,7 +607,6 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .stderr(predicate::str::contains(
             "termtrace doctor --require native-screenshot",
         ));
-
     assert!(
         !screenshot.exists(),
         "blocked screenshot created its destination"
@@ -627,7 +630,6 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .stderr(predicate::str::contains(
             "termtrace doctor --require native-video",
         ));
-
     assert!(
         !session.join("visual").exists(),
         "blocked capture published visual evidence"
@@ -657,7 +659,6 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .stderr(predicate::str::contains(
             "termtrace doctor --require semantic-video",
         ));
-
     assert!(!preview.exists(), "blocked preview created its destination");
 
     assert_no_entry_with_prefix(temporary.path(), ".preview-");
@@ -684,7 +685,6 @@ fn semantic_video_is_explicit_and_native_remains_the_default() {
         .stderr(predicate::str::contains(
             "termtrace doctor --require semantic-video",
         ));
-
     assert!(!export.exists(), "blocked export created its destination");
 
     assert_no_entry_with_prefix(temporary.path(), ".presentation-");
@@ -777,6 +777,7 @@ fn retained_native_video_exports_without_native_capture_tools() {
         .clone();
 
     let report: serde_json::Value = serde_json::from_slice(&output).expect("video result JSON");
+
     assert_eq!(report["renderer"], "native");
     assert!(
         destination.is_file(),
@@ -827,6 +828,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         .clone();
 
     let result = compact_json_line(&output);
+
     assert_eq!(result["kind"], "asciicast");
     assert!(result["output"].is_string());
     assert_eq!(result["output"], cast.display().to_string());
@@ -872,6 +874,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         .clone();
 
     let first = compact_json_line(&first);
+
     assert_eq!(first["kind"], "schema_generation");
     assert!(first["directory"].is_string());
     assert_eq!(first["directory"], schema_directory.display().to_string());
@@ -888,6 +891,7 @@ fn publishing_and_generation_commands_emit_compact_result_envelopes() {
         .clone();
 
     let second = compact_json_line(&second);
+
     assert_eq!(second["kind"], "schema_generation");
     assert_eq!(second["file_count"], first["file_count"]);
     assert_eq!(second["replaced_existing_files"], true);
@@ -925,7 +929,6 @@ fn readme_command_references_name_real_commands() {
             .expect("help should run");
 
         let help = String::from_utf8(output.stdout).expect("help is UTF-8");
-
         return help
             .lines()
             .skip_while(|line| return *line != "Commands:")
@@ -1032,7 +1035,6 @@ fn top_level_video_derivatives_use_explicit_sources_and_never_replace() {
             .stderr(predicate::str::contains(
                 "original_execution_source_unavailable",
             ));
-
         assert!(!unavailable.exists());
 
         let blocked = temp.path().join(format!("blocked.{extension}"));
@@ -1046,7 +1048,6 @@ fn top_level_video_derivatives_use_explicit_sources_and_never_replace() {
             .assert()
             .failure()
             .stderr(predicate::str::contains("native-video"));
-
         assert!(!blocked.exists());
     }
 
@@ -1161,7 +1162,6 @@ fn top_level_video_derivatives_use_explicit_sources_and_never_replace() {
             .assert()
             .failure()
             .stderr(predicate::str::contains("derivative_encoder_unavailable"));
-
         assert!(!out.exists());
     }
 
@@ -1178,7 +1178,6 @@ fn top_level_video_derivatives_use_explicit_sources_and_never_replace() {
             .arg(&out)
             .assert()
             .failure();
-
         assert!(!out.exists());
     }
 }
@@ -1202,6 +1201,7 @@ fn record_marked_edit_session(session: &Path) {
         .expect("spawn recorder");
 
     wait_for_control(session);
+
     let ready = Instant::now();
 
     // The edit below selects from the third marker (event 6) to 6.7 s. Timing from the spawn
@@ -1249,7 +1249,6 @@ fn edit_plan_json(session: &Path, edit: &Path, renderer: &str) -> serde_json::Va
         .get_output()
         .stdout
         .clone();
-
     return serde_json::from_slice(&output).expect("plan JSON");
 }
 

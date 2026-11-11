@@ -103,6 +103,7 @@ pub(in crate::cli) fn run_index(
     arguments: IndexArgs,
 ) -> Result<ExitCode> {
     let session = resolve_session(arguments.session)?.path;
+
     if !arguments.live_snapshot
         && attach_session(&session)?
             .completion()

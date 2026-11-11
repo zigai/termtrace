@@ -127,9 +127,11 @@ fn cancelling_during_a_stalled_capture_reports_cancelled_with_the_last_frame() {
         thread::sleep(CAPTURE_QUANTUM + Duration::from_millis(100));
 
         let cancelled_at = Instant::now();
+
         token.cancel();
 
         let outcome = waiter.join().expect("waiter thread");
+
         kill(recorder.pid(), Signal::SIGCONT).expect("resume recorder");
 
         let resumed = session

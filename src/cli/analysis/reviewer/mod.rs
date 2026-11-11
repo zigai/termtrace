@@ -152,7 +152,6 @@ impl ReviewWorker {
         });
 
         changed.notify_one();
-
         return Ok(());
     }
 
@@ -165,7 +164,6 @@ impl ReviewWorker {
         let Some((generation, result)) = work.completed.take() else {
             return Ok(None);
         };
-
         if generation != self.generation {
             return Ok(None);
         }
@@ -176,6 +174,7 @@ impl ReviewWorker {
 impl Drop for ReviewWorker {
     fn drop(&mut self) {
         self.cancelled.store(true, Ordering::Relaxed);
+
         let (lock, changed) = &*self.shared;
 
         if let Ok(mut work) = lock.lock() {
@@ -368,7 +367,6 @@ impl ReviewModel {
     fn jump_search(&mut self, forward: bool) -> Result<()> {
         let Some(query) = self.search_query.clone() else {
             self.status = "supply --search TEXT to navigate semantic matches";
-
             return Ok(());
         };
         let from = self.selected_entry().map(|entry| return entry.state_id);
@@ -415,6 +413,7 @@ pub(in crate::cli) fn run(
 ) -> Result<ExitCode> {
     let sigint = Arc::new(AtomicBool::new(false));
     let sigterm = Arc::new(AtomicBool::new(false));
+
     register_signal(SIGINT, Arc::clone(&sigint)).map_err(terminal_error)?;
 
     register_signal(SIGTERM, Arc::clone(&sigterm)).map_err(terminal_error)?;

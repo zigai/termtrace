@@ -104,6 +104,7 @@ fn application_events_are_deduplicated_bounded_and_separate_from_terminal_bytes(
         .flatten()
         .copied()
         .collect::<Vec<_>>();
+
     assert_eq!(output, b"READYDONE");
 
     let metadata =

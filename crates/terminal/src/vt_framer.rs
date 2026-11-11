@@ -104,7 +104,6 @@ impl VtFramer {
             byte_offset: 0,
         };
         self.consume(position, bytes, &mut emitted)?;
-
         return Ok(emitted);
     }
 
@@ -127,7 +126,6 @@ impl VtFramer {
             byte_offset,
         };
         self.consume(position, &[value], &mut emitted)?;
-
         return Ok(emitted);
     }
 
@@ -236,7 +234,6 @@ impl VtFramer {
             if !escape && bytes.first() == Some(&b'\\') {
                 self.push(position, bytes)?;
                 emitted.push(self.emit(string_token_kind(kind), Some(kind)));
-
                 return Ok(());
             }
 
@@ -400,7 +397,6 @@ impl VtFramer {
 pub fn frame_event_records(records: &[EventRecord]) -> Result<Vec<VtToken>> {
     let mut framer = VtFramer::with_default_bound()?;
     let mut tokens = Vec::new();
-
     for record in records {
         if let Event::Output { data } = &record.event {
             tokens.extend(framer.feed(record.seq, record.monotonic_ns, data.as_bytes())?);
@@ -408,7 +404,6 @@ pub fn frame_event_records(records: &[EventRecord]) -> Result<Vec<VtToken>> {
     }
 
     tokens.extend(framer.finish()?);
-
     return Ok(tokens);
 }
 
@@ -493,7 +488,6 @@ mod tests {
         );
         tokens.extend(framer.feed(8, 30, b"\\\xe7\x95\x8c").expect("third read"));
         tokens.extend(framer.finish().expect("finish"));
-
         assert_eq!(
             tokens
                 .iter()
@@ -514,6 +508,7 @@ mod tests {
             .iter()
             .flat_map(|token| return token.raw.as_bytes().iter().copied())
             .collect::<Vec<_>>();
+
         assert_eq!(recombined, b"A\x1b[2J\x1b]0;title\x1b\\\xe7\x95\x8c");
     }
 
@@ -576,7 +571,6 @@ mod tests {
         let mut tokens = framer.feed(1, 0, b"\x1b]0;\xc4").expect("first read");
         tokens.extend(framer.feed(2, 1, b"\x9crest\x07").expect("second read"));
         tokens.extend(framer.finish().expect("finish"));
-
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].kind, VtTokenKind::Osc);
         assert_eq!(tokens[0].raw.as_bytes(), b"\x1b]0;\xc4\x9crest\x07");
@@ -608,7 +602,6 @@ mod tests {
         let mut framer = VtFramer::with_default_bound().expect("framer");
         let mut tokens = framer.feed(1, 0, bytes).expect("feed");
         tokens.extend(framer.finish().expect("finish"));
-
         return tokens;
     }
 

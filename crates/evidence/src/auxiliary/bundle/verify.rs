@@ -51,12 +51,12 @@ pub fn verify(directory: &Path, expected: Option<&BundleIdentity>) -> Result<Bun
     }
 
     verify_members(directory, &manifest.members)?;
-
     return Ok(manifest);
 }
 
 fn verify_members(directory: &Path, expected: &[ArtifactMember]) -> Result<()> {
     let mut by_path: BTreeMap<&str, &ArtifactMember> = BTreeMap::new();
+
     for member in expected {
         validate_relative_path(Path::new(&member.path))?;
 

@@ -92,7 +92,6 @@ impl SessionActor<'_> {
         let is_applying = matches!(&pending.phase, InputSequencePhase::Applying { .. });
         if is_applying && !output_closed && Instant::now() < pending.next_deadline() {
             self.pending_input_sequence = Some(pending);
-
             return Ok(());
         }
 
@@ -110,7 +109,6 @@ impl SessionActor<'_> {
                         Ok(None) => {
                             pending.phase = InputSequencePhase::Applying { execution, action };
                             self.pending_input_sequence = Some(pending);
-
                             return Ok(());
                         }
                         Ok(Some(input)) => {
@@ -163,7 +161,6 @@ impl SessionActor<'_> {
                         Ok(None) => {
                             pending.phase = InputSequencePhase::Waiting(waiting);
                             self.pending_input_sequence = Some(pending);
-
                             return Ok(());
                         }
                         Err(error) => break Err((error, MutationEffect::Applied)),
@@ -171,7 +168,6 @@ impl SessionActor<'_> {
                 }
             }
         };
-
         return self.finish_input_sequence(
             pending.request,
             pending.response_sender,

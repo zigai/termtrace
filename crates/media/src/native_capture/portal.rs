@@ -41,6 +41,7 @@ pub(super) fn spawn(
 ) -> Result<ManagedChild> {
     let script = staging.join("portal.py");
     write_secure(&script, include_bytes!("portal.py"))?;
+
     let log = secure_file(&staging.join("portal.log"))?;
 
     return ManagedChild::spawn_logged(

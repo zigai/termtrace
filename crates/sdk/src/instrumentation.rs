@@ -72,7 +72,6 @@ impl Instrumentation {
             parent_span_id,
             attributes,
         )?;
-
         return Ok(span_id);
     }
 

@@ -118,15 +118,16 @@ pub(crate) fn collect_regular_files(
         let file_type = entry
             .file_type()
             .map_err(|source| return Error::filesystem(entry.path(), source))?;
+
         if file_type.is_dir() {
             collect_regular_files(root, &entry.path(), files)?;
-
             continue;
         }
 
         let entry_metadata = entry
             .metadata()
             .map_err(|source| return Error::filesystem(entry.path(), source))?;
+
         if !entry_metadata.is_file() {
             return Err(Error::invalid("bundle contains a symlink or special file"));
         }

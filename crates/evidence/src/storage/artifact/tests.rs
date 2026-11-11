@@ -23,6 +23,7 @@ fn failed_publication_preserves_existing_presentation() {
     fs_err::create_dir(&destination).expect("existing presentation");
     let previous = destination.join("presentation.mp4");
     fs_err::write(&previous, b"previous complete video").expect("previous output");
+
     let staging = temporary.path().join("missing-staging");
     let error = commit_directory(temporary.path(), &staging, &destination, true)
         .expect_err("missing staged output must fail publication");
@@ -40,6 +41,7 @@ fn publication_replaces_an_existing_presentation_with_complete_output() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let destination = temporary.path().join("presentation");
     let staging = temporary.path().join("staging");
+
     fs_err::create_dir(&destination).expect("previous directory");
 
     fs_err::create_dir(&staging).expect("staged directory");
@@ -49,7 +51,6 @@ fn publication_replaces_an_existing_presentation_with_complete_output() {
     fs_err::write(staging.join("presentation.mp4"), b"new complete video").expect("staged output");
 
     commit_directory(temporary.path(), &staging, &destination, true).expect("replace presentation");
-
     assert_eq!(
         fs_err::read(destination.join("presentation.mp4")).expect("published video"),
         b"new complete video"
@@ -154,12 +155,10 @@ fn member_verification_rejects_extra_and_changed_payloads() {
     verify_artifact_members(&artifact, &members).expect("members should verify");
 
     fs_err::write(artifact.join("extra.log"), b"unmanifested").expect("extra member");
-
     assert!(verify_artifact_members(&artifact, &members).is_err());
 
     fs_err::remove_file(artifact.join("extra.log")).expect("remove extra member");
     fs_err::write(artifact.join("final.txt"), b"changed").expect("change member");
-
     assert!(verify_artifact_members(&artifact, &members).is_err());
 }
 
@@ -223,7 +222,6 @@ fn member_collection_rejects_symlinks() {
 
     fs_err::write(temporary.path().join("outside"), b"secret").expect("outside file");
     symlink(temporary.path().join("outside"), artifact.join("linked")).expect("payload symlink");
-
     assert!(collect_artifact_members(&artifact).is_err());
 }
 
@@ -257,7 +255,6 @@ fn secure_outputs_do_not_follow_a_missing_parent_symlink() {
 
     let link = temporary.path().join("linked-parent");
     symlink(&outside, &link).expect("parent symlink");
-
     assert!(write_secure(&link.join("nested/report.json"), b"{}\n").is_err());
     assert!(!outside.join("nested").exists());
 }
@@ -271,7 +268,6 @@ fn secure_outputs_reject_symlinks_before_existing_parent_components() {
 
     let link = temporary.path().join("linked-parent");
     symlink(&outside, &link).expect("parent symlink");
-
     assert!(write_secure(&link.join("existing/nested/report.json"), b"{}\n").is_err());
     assert!(!outside.join("existing/nested").exists());
 }
@@ -323,7 +319,6 @@ fn secure_write_is_never_partially_published_at_injected_failure_boundaries() {
         let destination = directory.join(format!("before-rename-{stage:?}.json"));
         write_secure_with_failure(&destination, payload, stage)
             .expect_err("injected pre-rename failure");
-
         assert!(
             !destination.exists(),
             "pre-rename failure exposed a destination at {stage:?}"
@@ -395,6 +390,7 @@ fn unsynced_secure_write_does_not_follow_symlinks() {
 
     let directory = temporary.path().join("handoff");
     create_private_directory(&directory).expect("private handoff directory");
+
     let target = outside.join("target");
     symlink(&target, directory.join("ready")).expect("destination symlink");
 
@@ -433,7 +429,6 @@ fn artifact_catalog_rejects_session_lock_and_catalog_symlinks() {
     let outside_lock = outside.join("lock");
     fs_err::write(&outside_lock, b"sentinel").expect("outside lock");
     symlink(&outside_lock, lock_session.join(ARTIFACT_ROOT_LOCK)).expect("lock symlink");
-
     assert!(append_artifact_root(
         &lock_session,
         &lock_session.join("derived"),
@@ -455,7 +450,6 @@ fn artifact_catalog_rejects_session_lock_and_catalog_symlinks() {
     let outside_catalog = outside.join("catalog");
     fs_err::write(&outside_catalog, b"sentinel").expect("outside catalog");
     symlink(&outside_catalog, catalog_session.join(ARTIFACT_ROOT_LOG)).expect("catalog symlink");
-
     assert!(append_artifact_root(
         &catalog_session,
         &catalog_session.join("derived"),

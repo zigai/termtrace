@@ -45,7 +45,6 @@ struct Seal {
 fn directory(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(".segments");
-
     return PathBuf::from(name);
 }
 
@@ -177,6 +176,7 @@ impl SegmentWriter {
 
     fn rotate(&mut self) -> io::Result<()> {
         self.active.sync_all()?;
+
         let parent = directory(&self.path);
 
         if self.index == 0 {
@@ -230,7 +230,6 @@ impl SegmentWriter {
         self.index = next;
         self.bytes = 0;
         self.hash = Hasher::new();
-
         return Ok(());
     }
 }
@@ -259,7 +258,6 @@ impl Write for SegmentWriter {
         );
 
         self.bytes += u64::try_from(written).map_err(io::Error::other)?;
-
         return Ok(written);
     }
 
@@ -402,7 +400,6 @@ impl CanonicalLogFile {
         }
 
         file.seek(SeekFrom::Start(0))?;
-
         return Ok(file);
     }
 }
@@ -420,7 +417,6 @@ impl Read for CanonicalLogFile {
                     .position
                     .checked_add(u64::try_from(count).map_err(io::Error::other)?)
                     .ok_or_else(|| return invalid("canonical position overflow"))?;
-
                 return Ok(count);
             }
 
@@ -433,6 +429,7 @@ impl Read for CanonicalLogFile {
                 .index
                 .checked_add(1)
                 .ok_or_else(|| return invalid("segment index overflow"))?;
+
             if self.position
                 != next
                     .checked_mul(layout.segment_bytes)
@@ -504,7 +501,6 @@ impl Seek for CanonicalLogFile {
 
         self.active.seek(SeekFrom::Start(offset))?;
         self.position = target;
-
         return Ok(target);
     }
 }
@@ -621,14 +617,12 @@ mod tests {
 
         let mut actual = Vec::new();
         reader.read_to_end(&mut actual).expect("complete read");
-
         assert_eq!(actual, bytes);
 
         for offset in [0, 1023, 1024, 2049, 6144, 6499, 6500] {
             reader.seek(SeekFrom::Start(offset)).expect("seek");
             actual.clear();
             reader.read_to_end(&mut actual).expect("suffix read");
-
             assert_eq!(
                 actual.as_slice(),
                 bytes
@@ -648,7 +642,6 @@ mod tests {
         let mut reader = CanonicalLogFile::open(&path).expect("reader");
         let mut actual = Vec::new();
         reader.read_to_end(&mut actual).expect("initial read");
-
         assert_eq!(actual.len(), 1024);
 
         reader
@@ -663,7 +656,6 @@ mod tests {
         reader
             .read_to_end(&mut actual)
             .expect("follow later chunks");
-
         assert_eq!(actual, [b'b'; 2048]);
 
         reader
@@ -673,7 +665,6 @@ mod tests {
         writer.write_all(b"tail").expect("new active chunk");
         actual.clear();
         reader.read_to_end(&mut actual).expect("follow tail");
-
         assert_eq!(actual, b"tail");
     }
 

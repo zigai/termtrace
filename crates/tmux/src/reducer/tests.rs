@@ -300,7 +300,6 @@ fn published_recordings_link_once_and_follow_their_pane() {
     let live = state(TmuxRecordingLifecycle::Live);
     let mut covered = pane("%1", "@1", "a");
     covered.recording_session = Some(ByteString::from(b"/state/pane".as_slice()));
-
     assert_eq!(
         unlinked_recordings(&live, slice::from_ref(&covered)),
         [("%1".to_owned(), ByteString::from(b"/state/pane".as_slice()))]

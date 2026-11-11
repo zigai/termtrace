@@ -33,9 +33,11 @@ pub fn inspect_session(
     selector: StateSelector,
 ) -> Result<StateInspection> {
     let session = session_directory.as_ref();
+
     if completion::published(session)?.is_some() {
         let validated = ValidatedSession::open(session)?;
         let inspection = inspect_session_stream(session, selector, None)?;
+
         validated.check()?;
 
         return Ok(inspection);
@@ -65,6 +67,7 @@ pub fn wait_for_output(
     let event_path = SessionLayout::new(session).event_log();
     let completion_path = SessionLayout::new(session).completion();
     let deadline = Instant::now() + timeout;
+
     let mut cursor = EventLogCursor::open(&event_path)?;
     let mut matcher = OutputMatcher::new(needle);
 
@@ -98,6 +101,7 @@ pub fn wait_for_output(
         }
 
         let now = Instant::now();
+
         if now >= deadline {
             return Err(wait_error("timed out before output matched"));
         }
@@ -126,6 +130,7 @@ pub fn wait_for_completion(
         }
 
         let now = Instant::now();
+
         if now >= deadline {
             return Err(wait_error("timed out before session completion"));
         }

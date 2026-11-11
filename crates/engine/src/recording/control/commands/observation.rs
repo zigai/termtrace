@@ -14,7 +14,6 @@ use termtrace_model::terminal::screen::FrameDetail;
 fn system_monotonic_ns() -> Result<u64> {
     let time = clock_gettime(ClockId::CLOCK_MONOTONIC)
         .map_err(|error| return terminal_error("sample monotonic clock", error.to_string()))?;
-
     return u64::try_from(i128::from(time.tv_sec()) * 1_000_000_000 + i128::from(time.tv_nsec()))
         .map_err(|error| return terminal_error("represent monotonic clock", error.to_string()));
 }
@@ -157,8 +156,8 @@ pub(super) fn evaluate_action_postcondition(
 
             let unchanged = !reacted
                 && now >= started_at + reaction_window(*stable_for_ns, reaction.timeout_ns);
-
             let deadline = now >= started_at + Duration::from_nanos(*timeout_ns);
+
             if !stable && !unchanged && !child_completed && !output_closed && !deadline {
                 return Ok(None);
             }
@@ -229,8 +228,8 @@ pub(super) fn evaluate_action_postcondition(
                 && waiting.matching_state.as_ref().is_some_and(|(_, since)| {
                     return since.elapsed() >= Duration::from_nanos(*stable_for_ns);
                 });
-
             let deadline = now >= started_at + Duration::from_nanos(*timeout_ns);
+
             if !settled && !child_completed && !output_closed && !deadline {
                 return Ok(None);
             }
@@ -407,7 +406,6 @@ impl SessionActor<'_> {
             }
             _ => return None,
         };
-
         return Some(outcome);
     }
 }

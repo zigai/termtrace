@@ -54,12 +54,12 @@ pub(super) async fn execute(
 
     let group = child.id().and_then(ProcessGroup::from_leader);
     let output = child.wait_with_output();
+
     tokio::pin!(output);
 
     let progress_token = context.meta.get_progress_token();
     let started = Instant::now();
     let mut ticks = time::interval_at(started + PROGRESS_INTERVAL, PROGRESS_INTERVAL);
-
     loop {
         tokio::select! {
             output = &mut output => {

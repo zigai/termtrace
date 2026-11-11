@@ -256,7 +256,6 @@ fn record_to(
             return finish_with_cleanup(Err(error), closure_result);
         }
     };
-
     let startup_error = event_log
         .append(Event::Lifecycle {
             lifecycle_kind: LifecycleKind::Spawned,

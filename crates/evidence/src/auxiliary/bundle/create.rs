@@ -151,7 +151,6 @@ impl BundleDraft {
         let mut member = self.start_member(relative, metadata)?;
         io::copy(reader, &mut member)
             .map_err(|source| return Error::filesystem(&member.destination, source))?;
-
         return member.finish();
     }
 
@@ -330,7 +329,6 @@ impl Write for BundleMemberWriter<'_> {
             .byte_length
             .checked_add(u64::try_from(count).unwrap_or(u64::MAX))
             .ok_or_else(|| return io::Error::other("bundle member size overflow"))?;
-
         return Ok(count);
     }
 
@@ -351,6 +349,7 @@ impl Drop for BundleMemberWriter<'_> {
 
         self.writer.take();
         self.draft.remaining_bytes = self.draft.remaining_bytes.saturating_add(self.byte_length);
+
         // Drop has no error channel; the unfinished member is already excluded from the draft.
         drop(fs_err::remove_file(&self.destination));
 

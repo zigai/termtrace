@@ -96,6 +96,7 @@ pub fn plan_session(
     })?;
 
     let verified = validate_completed_session(session)?;
+
     if verified.session_id != completion.session_id
         || verified.final_event_hash != completion.final_event_hash
     {
@@ -254,6 +255,7 @@ pub fn materialize(
     }
 
     let completion_after = validate_completed_session(&source.session)?;
+
     if completion_after.session_id != completion.session_id
         || completion_after.final_event_hash != completion.final_event_hash
     {
@@ -343,7 +345,6 @@ fn render_semantic_frames(
         ));
     };
     scheduler.emit(&final_record, &final_state, source.frame_count)?;
-
     return scheduler.finish();
 }
 
@@ -390,7 +391,6 @@ impl<'scheduler, W: Write> SemanticFrameScheduler<'scheduler, W> {
 
         if end_frame <= self.next_frame {
             self.suppressed_state_count = self.suppressed_state_count.saturating_add(1);
-
             return Ok(());
         }
 
@@ -438,6 +438,7 @@ impl<'scheduler, W: Write> SemanticFrameScheduler<'scheduler, W> {
 
         self.next_frame = end_frame;
         self.rendered_state_count = self.rendered_state_count.saturating_add(1);
+
         (self.span_sink)(&span)?;
 
         return Ok(());
@@ -468,7 +469,6 @@ struct FrameSummary {
 fn maximum_applied_geometry(log: &EventLog) -> (u16, u16) {
     let mut maximum = (log.header.cols, log.header.rows);
     let mut intents = HashMap::new();
-
     for record in &log.events {
         match &record.event {
             Event::ResizeIntent {
@@ -547,7 +547,6 @@ fn frame_ceil(monotonic_ns: u64, fps: u16) -> u64 {
     let scaled = u128::from(monotonic_ns).saturating_mul(u128::from(fps));
     let frames =
         scaled.saturating_add(u128::from(NANOS_PER_SECOND - 1)) / u128::from(NANOS_PER_SECOND);
-
     return u64::try_from(frames).unwrap_or(u64::MAX);
 }
 
@@ -779,7 +778,6 @@ mod tests {
         let mut spans = Vec::new();
         let mut collect_span = |span: &SemanticFrameSpan| {
             spans.push(span.clone());
-
             return Ok(());
         };
         let mut scheduler =

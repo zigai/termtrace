@@ -29,7 +29,6 @@ fn semantic_fixture() -> SemanticState {
     let mut terminal = GhosttyVt::new(6, 2, 0).expect("create terminal");
     terminal.write(b"\x1b[38;2;1;2;3mA");
     terminal.write("界".as_bytes());
-
     return terminal.snapshot().expect("semantic snapshot");
 }
 
@@ -110,27 +109,22 @@ fn semantic_identity_excludes_only_transient_dirtiness() {
     assert_eq!(checked_state_hash(&changed), hash);
 
     changed.metadata.title = ByteString::from(b"window".as_slice());
-
     assert_ne!(checked_state_hash(&changed), hash);
 
     changed = state.clone();
     changed.metadata.working_directory = ByteString::from(b"file:///work".as_slice());
-
     assert_ne!(checked_state_hash(&changed), hash);
 
     changed = state.clone();
     changed.cursor.visible = !changed.cursor.visible;
-
     assert_ne!(checked_state_hash(&changed), hash);
 
     changed = state.clone();
     changed.modes.bracketed_paste = !changed.modes.bracketed_paste;
-
     assert_ne!(checked_state_hash(&changed), hash);
 
     changed = state;
     changed.colors.background.r ^= 1;
-
     assert_ne!(checked_state_hash(&changed), hash);
 }
 
@@ -292,6 +286,7 @@ fn spans_expand_losslessly_and_keep_trailing_blank_cells() {
     assert_eq!(rows.len(), 2);
 
     let first = rows.first().expect("first row");
+
     assert_eq!(first.text, "A界   ");
     assert_eq!(
         first
@@ -375,7 +370,6 @@ fn projection_hash_binds_detail_region_and_source_occurrence() {
 
     let mut reidentified = spans.clone();
     reidentified.frame_hash.clear();
-
     assert_eq!(
         screen_frame_hash(&reidentified).expect("identity excludes itself"),
         spans.frame_hash
@@ -393,7 +387,6 @@ fn snapshot_normalization_omits_volatile_source_identity() {
         CaptureQuality::Live,
     )
     .expect("first");
-
     let second = project_screen_frame(
         &state,
         &ScreenProjectionRequest::default(),
@@ -714,7 +707,6 @@ fn snapshot_normalizers_preserve_payload_and_only_requested_optional_fields() {
                     .expect("optional fields")
                     .clone(),
             );
-
             assert_eq!(
                 normalize(&frame, options).expect("normalized snapshot"),
                 expected,
@@ -881,7 +873,6 @@ fn large_regions_scale_the_byte_budget_but_a_small_crop_does_not() {
         detail: FrameDetail::Text,
         region: Some(region),
     };
-
     assert_eq!(
         project_screen_frame(&state, &crop, source(1), true, CaptureQuality::Live),
         Err(ScreenFrameError::ResourceLimit {
@@ -960,5 +951,6 @@ fn semantic_viewport_text_preserves_wide_characters_without_spacer_tail_spaces()
     terminal.write("世界".as_bytes());
     let state = terminal.snapshot().expect("snapshot");
     let text = semantic_viewport_text(&state);
+
     assert_eq!(text, "世界");
 }

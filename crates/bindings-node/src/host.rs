@@ -90,7 +90,6 @@ unsafe fn reject_cycles(
         }
 
         parents.pop();
-
         return Ok(());
     }
 }
@@ -266,7 +265,6 @@ impl From<BTreeMap<String, NativeValue>> for NativeValue {
 
 pub(crate) fn encode<T: Serialize + ?Sized>(value: &T) -> napi::Result<String> {
     let value = value.serialize(Host { json: false }).map_err(|e| e.0)?;
-
     return serde_json::to_string(&value).map_err(|e| napi::Error::from_reason(e.to_string()));
 }
 
@@ -629,7 +627,6 @@ impl Mapping {
     fn field<T: Serialize + ?Sized>(&mut self, key: &str, value: &T) -> Result<()> {
         let value = value.serialize(self.host)?;
         self.object.insert(key.to_owned(), value);
-
         return Ok(());
     }
 }
@@ -644,7 +641,6 @@ impl ser::SerializeMap for Mapping {
             other => other.to_string(),
         };
         self.key = Some(key);
-
         return Ok(());
     }
 
@@ -710,7 +706,6 @@ fn argument_error(class: &str, message: String) -> napi::Error {
         napi::Status::InvalidArg,
         format!("termtrace-argument:{class}"),
     )));
-
     return error;
 }
 

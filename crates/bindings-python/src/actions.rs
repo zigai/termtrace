@@ -54,7 +54,6 @@ pub fn request_id_arg(value: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Uuid>
             "request_id must be a str or uuid.UUID",
         ));
     };
-
     return parse_request_id(&text).map(Some).map_err(to_py_err);
 }
 
@@ -204,7 +203,6 @@ impl PyActionBuilder {
         change: impl FnOnce(&mut ActRequest),
     ) -> PyResult<PyRef<'builder, Self>> {
         slf.draft().edit(change).map_err(to_py_err)?;
-
         return Ok(slf);
     }
 

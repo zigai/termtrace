@@ -44,6 +44,7 @@ pyo3_stub_gen::create_exception!(
 
 /// Mutation facts present on every error; `None` unless the failed request reported them.
 const MUTATION_FACTS: [&str; 5] = ["request_id", "details", "result", "step", "send_request_id"];
+
 /// Detail attributes present on every locator failure; absent facts are `None`.
 const LOCATOR_DETAILS: [&str; 10] = [
     "query",

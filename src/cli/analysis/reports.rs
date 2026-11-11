@@ -293,7 +293,6 @@ pub(in crate::cli) fn run_explain(
     let (states, states_page, states_partial) = paginate(take(&mut report.states), &arguments.page);
     let (findings, findings_page, findings_partial) =
         paginate(take(&mut report.findings), &arguments.page);
-
     report.tokens = tokens;
     report.states = states;
     report.findings = findings;
@@ -678,7 +677,6 @@ fn timeline_text(entry: &TimelineEntry) -> Result<String> {
 
 fn effect_label(effect: &TerminalEffect) -> Result<String> {
     let value = serde_json::to_value(effect).into_diagnostic()?;
-
     return value
         .get("type")
         .and_then(serde_json::Value::as_str)
@@ -751,7 +749,6 @@ fn effect_text(effect: &TerminalEffect) -> Result<String> {
             lossy(identifier.as_bytes())?
         ),
     };
-
     return Ok(text);
 }
 
@@ -815,6 +812,5 @@ fn canonical_event_text(event: &Event) -> Result<String> {
         }
         _ => "canonical operation result".to_owned(),
     };
-
     return Ok(text);
 }

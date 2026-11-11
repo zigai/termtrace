@@ -121,7 +121,6 @@ impl IndexOptions {
     #[must_use]
     pub fn with_sampling_stride(mut self, stride_ns: u64) -> Self {
         self.sampling_stride_ns = (stride_ns > 0).then_some(stride_ns);
-
         return self;
     }
 }

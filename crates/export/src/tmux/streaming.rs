@@ -35,8 +35,8 @@ pub fn create(
     destination: impl AsRef<Path>,
 ) -> Result<TmuxStreamingBundleManifest> {
     let aggregate_manifest = aggregate_manifest.as_ref();
-    let destination = destination.as_ref();
 
+    let destination = destination.as_ref();
     if destination.exists() {
         return Err(Error::invalid("tmux export destination already exists"));
     }
@@ -257,6 +257,7 @@ fn verify_contents(
             serde_json::from_slice(&row).map_err(|error| return Error::json(&inventory, error))?;
 
         let expected = track_directory(count, source.pane_id.as_deref());
+
         if track.role != source.role
             || track.pane_id != source.pane_id
             || track.directory != expected
@@ -309,7 +310,6 @@ fn verify_contents(
     }
 
     verify_directory_entries(directory, manifest.track_count)?;
-
     return Ok(manifest);
 }
 
@@ -327,6 +327,7 @@ fn verify_directory_entries(directory: &Path, track_count: u64) -> Result<()> {
         let kind = entry
             .file_type()
             .map_err(|error| return Error::filesystem(entry.path(), error))?;
+
         #[expect(
             clippy::filetype_is_file,
             reason = "aggregate exports require regular files; symlinks, sockets, FIFOs, and devices are invalid"
@@ -337,8 +338,8 @@ fn verify_directory_entries(directory: &Path, track_count: u64) -> Result<()> {
     }
 
     let tracks = directory.join("tracks");
-
     let mut count = 0_u64;
+
     for entry in
         fs_err::read_dir(&tracks).map_err(|error| return Error::filesystem(&tracks, error))?
     {

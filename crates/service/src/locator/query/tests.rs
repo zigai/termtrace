@@ -10,7 +10,6 @@ fn fixture_frame() -> ScreenFrame {
         "../../../../../fixtures/conformance/locators/locator.json"
     ))
     .expect("locator fixture");
-
     return serde_json::from_value(value.get("frame").cloned().expect("frame"))
         .expect("screen frame");
 }
@@ -123,6 +122,7 @@ fn spacer_heads_remain_queryable_at_wrap_edges() {
         .single()
         .expect("single spacer match")
         .clone();
+
     assert_eq!(region_match.ranges[0].start_column, 11);
     assert_eq!(region_match.ranges[0].end_column, 12);
 }
@@ -227,7 +227,6 @@ fn composed_regions_intersect_and_partial_graphemes_are_rejected() {
     );
 
     let boundaries = [(0, 3, 0), (3, 6, 1)];
-
     assert!(matches!(
         matched_boundary_range(&boundaries, 1, 3),
         Err(QueryError::InvalidQuery { .. })
@@ -360,7 +359,6 @@ fn conformance_spec(value: &serde_json::Value) -> Result<LocatorSpec, QueryError
             reason: e.to_string(),
         };
     })?;
-
     return LocatorSpec::try_from(query);
 }
 
@@ -370,6 +368,7 @@ fn shared_locator_conformance_corpus_matches_public_contract() {
         "../../../../../fixtures/conformance/locators/locator.json"
     ))
     .expect("locator conformance fixture");
+
     assert_eq!(corpus.version, 1);
     assert!(!corpus.frame.presented);
     assert_eq!(corpus.frame.capture_quality, CaptureQuality::Incomplete);
@@ -407,7 +406,6 @@ fn shared_locator_conformance_corpus_matches_public_contract() {
                 "{}",
                 test_case.name
             );
-
             continue;
         }
 

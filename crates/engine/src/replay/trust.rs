@@ -123,7 +123,6 @@ impl ValidatedSession {
             })
             .and_then(|validated| {
                 validated.check()?;
-
                 return Ok(validated);
             });
 
@@ -201,7 +200,6 @@ impl SourceIdentity {
         source
             .0
             .push(file_identity(&SessionLayout::new(session).completion())?);
-
         return Ok(source);
     }
 

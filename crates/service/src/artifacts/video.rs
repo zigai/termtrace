@@ -525,6 +525,7 @@ impl ArtifactService {
         }
 
         let outcome = export_presentation(&plan, &sidecar, source_kind)?;
+
         if request.overwrite {
             publish(&outcome.video, out)?;
         } else {
@@ -641,7 +642,6 @@ fn ensure_native_capture(
             dpi: None,
         },
     )?;
-
     return Ok(destination);
 }
 
@@ -1053,6 +1053,7 @@ mod tests {
         let temporary = tempfile::tempdir().expect("temporary directory");
         let video = temporary.path().join("source.mp4");
         let out = temporary.path().join("output.mp4");
+
         fs_err::write(&video, b"new video").expect("source video");
 
         fs_err::create_dir(&out).expect("existing directory");
@@ -1073,12 +1074,12 @@ mod tests {
         let temporary = tempfile::tempdir().expect("temporary directory");
         let video = temporary.path().join("source.mp4");
         let out = temporary.path().join("output.mp4");
+
         fs_err::write(&video, b"new complete video").expect("source video");
 
         fs_err::write(&out, b"previous video").expect("previous output");
 
         publish(&video, &out).expect("publish video");
-
         assert_eq!(
             fs_err::read(out).expect("published video"),
             b"new complete video"
@@ -1128,6 +1129,7 @@ mod derivative_publication_tests {
         fs_err::write(&video, b"new").unwrap();
         for name in ["file.gif", "link.webm", "directory.gif"] {
             let out = temp.path().join(name);
+
             if name.starts_with("file") {
                 fs_err::write(&out, b"old").unwrap();
             } else if name.starts_with("link") {
@@ -1177,6 +1179,7 @@ mod derivative_publication_tests {
             .map(|i| {
                 let source = temp.path().join(format!("source-{i}"));
                 fs_err::write(&source, [i]).unwrap();
+
                 let out = out.clone();
                 let barrier = Arc::clone(&barrier);
 

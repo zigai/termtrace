@@ -7,14 +7,20 @@ use std::{ffi::c_void, ptr};
 const ESC: u8 = 0x1b;
 const SCROLLBACK_BYTES: usize = 1024;
 const GROUND: u32 = sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_GROUND.cast_unsigned();
+
 const APC_START: u32 =
     sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_APC_START.cast_unsigned();
+
 const APC_END: u32 = sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_APC_END.cast_unsigned();
+
 const DCS_START: u32 =
     sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_DCS_START.cast_unsigned();
+
 const DCS_END: u32 = sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_DCS_END.cast_unsigned();
+
 const OSC_START: u32 =
     sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_OSC_START.cast_unsigned();
+
 const OSC_END: u32 = sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_OSC_END.cast_unsigned();
 const STARTS: u32 = APC_START | DCS_START | OSC_START;
 const ENDS: u32 = APC_END | DCS_END | OSC_END;
@@ -134,7 +140,6 @@ impl SequenceScanner {
                 (&raw const kitty_storage_bytes).cast::<c_void>(),
             )
         })?;
-
         return Ok(scanner);
     }
 
@@ -184,7 +189,6 @@ impl SequenceScanner {
         }
 
         let mut step = self.write_until(bytes.get(..limit).unwrap_or_default());
-
         if let ScanKind::Sequence { escape, end, .. } = &mut step.kind {
             *escape = first == ESC && *end != Some(StringEnd::Escape);
         }

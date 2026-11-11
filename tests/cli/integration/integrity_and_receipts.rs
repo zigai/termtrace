@@ -26,6 +26,7 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
         .clone();
 
     let report: serde_json::Value = serde_json::from_slice(&output).expect("verify JSON");
+
     assert_eq!(report["valid"], true);
     assert_eq!(report["level"], "content");
 
@@ -42,6 +43,7 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&output).expect("verify durability JSON");
+
     assert_eq!(report["valid"], true);
     assert_eq!(report["level"], "durability_record");
 
@@ -64,6 +66,7 @@ fn verify_reports_manifest_binding_and_detects_tampering() {
         .clone();
 
     let report: serde_json::Value = serde_json::from_slice(&output).expect("tampered verify JSON");
+
     assert_eq!(report["valid"], false);
     assert!(
         report["findings"]
@@ -111,6 +114,7 @@ fn verify_resolves_session_names() {
         .clone();
 
     let report: serde_json::Value = serde_json::from_slice(&output).expect("verify JSON");
+
     assert_eq!(report["valid"], true);
 }
 
@@ -167,6 +171,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
         .clone();
 
     let verified: serde_json::Value = serde_json::from_slice(&output).expect("verify JSON");
+
     assert_eq!(verified["signature_cryptographic_valid"], true);
     assert_eq!(verified["signature_signer_trusted"], false);
     assert!(
@@ -193,6 +198,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
 
     let trusted_json: serde_json::Value =
         serde_json::from_slice(&trusted_output).expect("trusted JSON");
+
     assert_eq!(trusted_json["session_authenticity_established"], true);
     assert_eq!(trusted_json["signature_signer_trusted"], true);
 
@@ -224,6 +230,7 @@ fn detached_receipt_separates_cryptography_from_signer_trust() {
         .clone();
 
     let report: serde_json::Value = serde_json::from_slice(&output).expect("tampered verify JSON");
+
     assert_eq!(report["valid"], false);
     assert!(
         report["findings"]

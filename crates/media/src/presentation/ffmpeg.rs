@@ -237,6 +237,7 @@ fn bounding_region(regions: &[ChangeRegion]) -> Option<ChangeRegion> {
     let first = regions.first()?;
     let mut left = first.x;
     let mut top = first.y;
+
     let mut right = first.x.saturating_add(first.width);
     let mut bottom = first.y.saturating_add(first.height);
 
@@ -405,8 +406,10 @@ pub(super) fn append_pixel_transforms(
 
                 if let Some(label) = label {
                     ensure_presentation_font(staging)?;
+
                     let name = format!("callout-{sequence}.txt");
                     write_secure(&staging.join(&name), label.as_bytes())?;
+
                     let next = format!("transform{sequence}");
                     filters.push(format!(
                         "[{prior}]drawtext=fontfile='fonts/JetBrainsMono-Regular.ttf':textfile='{}':fontcolor=cyan:fontsize=18:box=1:boxcolor=black@0.7:x={}:y={}[{next}]",
@@ -528,6 +531,7 @@ pub(super) fn prepare_subtitle_resources(
 
     for (index, subtitle) in plan.subtitles.iter().enumerate() {
         validate_ass_resource(&subtitle.source_path)?;
+
         let destination = staging.join(format!("subtitle-{index}.ass"));
         let bytes = fs_err::read(&subtitle.source_path).map_err(|source| {
             return Error::Filesystem {
@@ -535,6 +539,7 @@ pub(super) fn prepare_subtitle_resources(
                 source,
             };
         })?;
+
         if blake3::hash(&bytes).to_hex().as_str() != subtitle.resource_hash {
             return Err(plan_error(format!(
                 "ASS subtitle resource {} changed after planning",
@@ -845,7 +850,6 @@ pub(super) fn probe_delivery_video(staging: &Path) -> Result<serde_json::Value> 
             source,
         };
     })?;
-
     return Ok(value);
 }
 
@@ -958,6 +962,7 @@ pub(super) fn probe_video_file(
     gif: bool,
 ) -> Result<serde_json::Value> {
     let mut args: Vec<String> = ["-v", "error"].map(str::to_owned).to_vec();
+
     if gif {
         args.extend(["-min_delay", "0"].map(str::to_owned));
     }

@@ -71,11 +71,13 @@ const SMOKE: &str = "Smoke";
 const STATE_ROOT_ID: &str = "state.root";
 const ALIASES_ID: &str = "state.aliases";
 const DOCTOR_FIX: &str = "termtrace doctor --fix";
+
 const DEFAULT_PATH_CAPABILITIES: &[&str] = &[
     NATIVE_SCREENSHOT_CAPABILITY,
     NATIVE_VIDEO_CAPABILITY,
     PRESENTATION_CAPABILITY,
 ];
+
 const ENVIRONMENT: &[&str] = &[
     STATE_DIR_ENV,
     "TERMTRACE_LOG",
@@ -138,6 +140,7 @@ pub(in crate::cli) fn run_doctor(
     }
 
     let mut fixes = Vec::new();
+
     if arguments.fix && !state.repairs.is_empty() {
         for path in &state.repairs {
             let action = format!("chmod 700 {}", shell_path(path, home.as_deref()));
@@ -249,6 +252,7 @@ fn report(
         .collect();
 
     let mut summary = DoctorSummary::default();
+
     for check in &checks {
         let count = match check.status {
             DoctorStatus::Ok => &mut summary.ok,
@@ -366,6 +370,7 @@ fn dependency_checks(
         .iter()
         .map(|tool| {
             let name = tool.program.to_lowercase();
+
             if let Some(path) = &tool.found {
                 return check(
                     DEPENDENCIES,
@@ -497,8 +502,8 @@ fn diagnose_state(home: Option<&Path>) -> StateDiagnosis {
 
     let mut problems = Vec::new();
     let mut repairs = Vec::new();
-
     let mut repairable = true;
+
     for directory in SessionRegistry::owner_directories(&root) {
         let metadata = match fs::symlink_metadata(&directory) {
             Ok(metadata) => metadata,
@@ -597,7 +602,6 @@ fn aliases_check(state_root: &DoctorCheck) -> DoctorCheck {
         return skipped(STATE, NAME, vec![STATE_ROOT_ID.to_owned()]);
     };
     let [_, registry, ..] = SessionRegistry::owner_directories(&root);
-
     if !registry.exists() {
         return check(STATE, NAME, DoctorStatus::Ok, "No aliases are registered");
     }
@@ -880,6 +884,7 @@ fn capability_check(
     semantic_ready: bool,
 ) -> DoctorCheck {
     let id = capability.id.as_str();
+
     if capability.status == CapabilityStatus::Ready {
         return check(
             CAPABILITIES,
@@ -1029,6 +1034,7 @@ impl TextStyle {
             return text.to_owned();
         };
         let available = width - indent;
+
         let mut lines: Vec<String> = Vec::new();
         let mut line = String::new();
 
@@ -1093,6 +1099,7 @@ fn render(report: &DoctorReport, style: &TextStyle) -> Result<String> {
 
     let message_column = 2 + 4 + 2 + name_width + 2;
     let fix_column = 2 + 4 + 2;
+
     let mut group: Option<&str> = None;
 
     for check in &report.checks {
@@ -1142,7 +1149,6 @@ fn render(report: &DoctorReport, style: &TextStyle) -> Result<String> {
         summary.ok, summary.info, summary.warn, summary.fail, summary.skip
     )
     .into_diagnostic()?;
-
     return Ok(output);
 }
 

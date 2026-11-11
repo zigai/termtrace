@@ -17,6 +17,7 @@ const MAX_QUERY_MATCHES: usize = 10_000;
 const MAX_DIAGNOSTIC_CHARS: usize = 256;
 const MAX_COVERED_CELLS: usize = 128;
 const MAX_QUERY_MATCHED_CELLS: usize = MAX_SCREEN_FRAME_CELLS as usize;
+
 #[expect(
     clippy::cast_possible_truncation,
     reason = "`TryFrom` is unavailable in const context; the assertion bounds the limit to 32 \
@@ -30,6 +31,7 @@ const MAX_QUERY_TEXT_BYTES: usize = {
 
     MAX_SCREEN_FRAME_JSON_BYTES as usize
 };
+
 const MAX_QUERY_CELL_WORK: usize = MAX_QUERY_MATCHED_CELLS * 4;
 
 /// Whether a text query searches or compares the complete selected text.
@@ -245,7 +247,6 @@ impl LocatorSpec {
                 reason: bounded_text(&error.to_string()).0,
             };
         })?;
-
         return Self::regex(regex);
     }
 
@@ -275,7 +276,6 @@ impl LocatorSpec {
     #[must_use]
     pub fn in_row(mut self, row: u16) -> Self {
         self.row = Some(row);
-
         return self;
     }
 
@@ -291,7 +291,6 @@ impl LocatorSpec {
         }
 
         self.region = Some(region);
-
         return Ok(self);
     }
 
@@ -299,7 +298,6 @@ impl LocatorSpec {
     #[must_use]
     pub fn with_style(mut self, style: StyleFilter) -> Self {
         self.style = Some(style);
-
         return self;
     }
 
@@ -307,7 +305,6 @@ impl LocatorSpec {
     #[must_use]
     pub fn across_soft_wraps(mut self, enabled: bool) -> Self {
         self.cross_soft_wraps = enabled;
-
         return self;
     }
 
@@ -359,6 +356,7 @@ impl LocatorSpec {
         }
 
         let row = self.row.or(other.row);
+
         if let (Some(row), Some(region)) = (row, region)
             && (row < region.top || row >= region.bottom)
         {
@@ -878,6 +876,7 @@ fn evaluate_rows(
             })
             .map(|(index, _)| return index)
             .collect();
+
         if selected.is_empty() {
             continue;
         }
@@ -928,7 +927,6 @@ fn soft_wrap_groups(rows: Vec<LogicalRow>) -> Vec<LogicalRow> {
 fn selected_text(row: &LogicalRow, selected: &[usize]) -> (String, Vec<(usize, usize, usize)>) {
     let mut text = String::new();
     let mut boundaries: Vec<(usize, usize, usize)> = Vec::with_capacity(selected.len());
-
     for index in selected {
         if let Some(cell) = row.cells.get(*index) {
             let start = text.len();
@@ -1149,7 +1147,6 @@ fn push_match(output: &mut Vec<ScreenMatch>, screen_match: ScreenMatch) -> Resul
     }
 
     output.push(screen_match);
-
     return Ok(());
 }
 
@@ -1168,6 +1165,7 @@ fn cell_in_region(cell: &LogicalCell, region: Option<ScreenRegion>) -> bool {
 
 fn make_match(frame: &Arc<ScreenFrame>, spec: &LocatorSpec, cells: &[&LogicalCell]) -> ScreenMatch {
     let mut ranges: Vec<MatchRange> = Vec::new();
+
     for cell in cells {
         if let Some(range) = ranges.last_mut()
             && range.row == cell.row

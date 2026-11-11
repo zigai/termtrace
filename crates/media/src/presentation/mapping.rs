@@ -17,7 +17,6 @@ pub(super) fn write_presentation_map(
     let mut writer = secure_writer(path)?;
     let mut span_cursor = 0usize;
     let mut mask_cursor = 0usize;
-
     for (clip_index, clip) in plan.clips.iter().enumerate() {
         for output_frame in clip.output_start_frame..clip.output_end_frame {
             let (source_frame, operation) = mapped_source_frame(clip, output_frame);
@@ -181,6 +180,7 @@ pub(super) fn output_spans_for_source_frames(
     let mut spans = Vec::new();
     for clip in clips {
         let mut open = None;
+
         for output_frame in clip.output_start_frame..clip.output_end_frame {
             let (source_frame, _) = mapped_source_frame(clip, output_frame);
             let selected = source_start_frame <= source_frame && source_frame < source_end_frame;
@@ -205,6 +205,7 @@ pub(super) fn output_spans_for_source_frames(
 
 pub(super) fn mapped_source_frame(clip: &NormalizedClip, output_frame: u64) -> (u64, &'static str) {
     let offset = output_frame - clip.output_start_frame;
+
     if offset < clip.retimed_frame_count {
         let source_offset = offset.saturating_mul(u64::from(clip.speed.numerator))
             / u64::from(clip.speed.denominator);

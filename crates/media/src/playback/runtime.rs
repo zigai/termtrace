@@ -206,7 +206,6 @@ fn playback_events(options: &PlaybackOptions, terminal: &mut ReplayTerminal) -> 
 
     write_secure_unsynced(&options.ready_file, b"ready\n")?;
     thread::sleep(options.final_hold);
-
     return Ok(());
 }
 
@@ -252,6 +251,7 @@ fn timed_playback(
     validate_playback_header(&cursor, log)?;
 
     let mut endpoint_seen = false;
+
     while let Some(record) = cursor.next_record()? {
         if record.seq >= log.event_count {
             return Err(changed_source());

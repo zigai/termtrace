@@ -297,7 +297,6 @@ impl Error {
         let Self::Control(ControlError::Rejected { details, .. }) = self else {
             return None;
         };
-
         return details.as_deref();
     }
 

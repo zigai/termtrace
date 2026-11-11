@@ -51,6 +51,7 @@ pub fn diagnose_session(
 ) -> Result<DiagnoseReport> {
     let validated = ValidatedSession::open(session)?;
     let report = diagnose_recording(session, true, checks, broad_change_percent, visual_evidence)?;
+
     validated.check()?;
 
     return Ok(report);
@@ -514,7 +515,6 @@ impl DiagnosticStore {
             .map_err(sql_error)?;
         let mut rows = scrollback.query([]).map_err(sql_error)?;
         let mut ids = IdSample::default();
-
         while let Some(row) = rows.next().map_err(sql_error)? {
             ids.push(row.get(0).map_err(sql_error)?);
         }

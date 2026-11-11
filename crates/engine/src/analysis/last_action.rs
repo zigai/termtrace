@@ -316,7 +316,6 @@ fn finish_analysis(inputs: ActionAnalysisInputs) -> LastActionAnalysis {
 fn last_input_action(session: &Path, log: &EventLog) -> Result<LastActionBoundary> {
     let mut journal = MutationJournalCursor::open(&SessionLayout::new(session).mutation_journal())?;
     let mut last_action = None;
-
     while let Some(request) = journal.next_record()? {
         if let Some(action) = journaled_input_action(log, &request)? {
             last_action = Some(action);
@@ -362,7 +361,6 @@ fn unjournaled_input_action(log: &EventLog) -> Result<LastActionBoundary> {
         .rev()
         .find(|record| return matches!(record.event, Event::InputIntent { .. }))
         .ok_or_else(|| return task_error("session contains no canonical input action"))?;
-
     return action_boundary(
         log,
         None,

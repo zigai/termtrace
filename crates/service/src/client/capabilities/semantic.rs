@@ -45,7 +45,6 @@ impl Semantic<'_> {
     pub fn diff(&self, from: StatePoint, to: StatePoint) -> Result<SemanticDiff> {
         let (difference, _, _) =
             diff_session_states_with_semantic_states(self.session.path(), from, to)?;
-
         return Ok(difference);
     }
 

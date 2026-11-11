@@ -393,6 +393,7 @@ fn full_ranged_and_point_captures_of_a_timed_recording_are_consistent() {
         .success();
 
     let range_started = Instant::now();
+
     termtrace()
         .args(["artifact", "capture"])
         .arg(&output)
@@ -551,6 +552,7 @@ fn full_ranged_and_point_captures_of_a_timed_recording_are_consistent() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&integrity).expect("integrity report JSON");
+
     assert_eq!(report["valid"], true, "{report}");
     assert_eq!(report["findings"], serde_json::json!([]), "{report}");
     assert!(

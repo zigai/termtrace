@@ -58,6 +58,7 @@ fn hash_cell(hasher: &mut Vec<u8>, cell: &CellState) {
     };
 
     let mut bits = 0_u16;
+
     if cell.style.bold {
         bits |= 1;
     }
@@ -214,6 +215,7 @@ fn semantic_state_metadata_hasher(state: &SemanticState) -> blake3::Hasher {
 
     // Active style
     let mut active_bits = 0_u16;
+
     if state.active_style.bold {
         active_bits |= 1;
     }
@@ -265,7 +267,6 @@ fn semantic_state_metadata_hasher(state: &SemanticState) -> blake3::Hasher {
 
     let mut hasher = blake3::Hasher::new();
     hasher.update(&hash);
-
     return hasher;
 }
 
@@ -617,7 +618,6 @@ fn project_data(
 )]
 fn selected_rows(state: &SemanticState, region: ScreenRegion) -> impl Iterator<Item = &RowState> {
     let rows = &state.grid[usize::from(region.top)..usize::from(region.bottom)];
-
     return rows.iter();
 }
 

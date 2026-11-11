@@ -127,7 +127,6 @@ pub fn prepare(request: PaneRunRequest) -> Result<PaneLaunch> {
 
     let explicitly_selected = !request.pane_launch
         && (request.force || request.shell_command.is_some() || !request.command.is_empty());
-
     let (command, launch_kind) = child_command(&client, request, &current)?;
     client.unset_pane_option(&pane, options::PANE_SESSION)?;
     let row = client.pane_row(&pane)?;
@@ -136,6 +135,7 @@ pub fn prepare(request: PaneRunRequest) -> Result<PaneLaunch> {
         .ok_or_else(|| return Error::Tmux(format!("tmux pane {pane} has no process")))?;
 
     let scope = TmuxScopePolicy::from_options(&client)?;
+
     if !explicitly_selected && !scope.matches(&row) {
         mark_decision(&client, &pane, pid, false)?;
 
@@ -390,7 +390,6 @@ impl Publication {
                             options::PANE_SESSION,
                             session.as_os_str(),
                         )?;
-
                         return client.signal_observer();
                     }
 

@@ -87,7 +87,6 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
         .arg(&junit)
         .assert()
         .success();
-
     assert!(artifacts
         .join("snapshots/ready-workflow-final.frame.json")
         .is_file());
@@ -108,6 +107,7 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("scenario report");
+
     assert_eq!(report["status"], "passed");
     assert_eq!(report["cases"].as_array().expect("cases").len(), 2);
 
@@ -147,7 +147,6 @@ fn scenario_runner_executes_typed_steps_in_fresh_evidence() {
         .args(["--limit", "1", "--jsonl"])
         .assert()
         .success();
-
     assert!(
         !replay_checkpoints(&canonical).is_empty(),
         "closure must checkpoint an asserted endpoint"
@@ -215,6 +214,7 @@ fn scenario_failure_publishes_atomic_diagnostic_directory() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("failure report");
+
     assert_eq!(report["status"], "failed");
     assert_eq!(
         report["cases"][0]["attempts"]
@@ -371,6 +371,7 @@ fn scenario_retry_stops_after_success_and_preserves_real_attempt_outcomes() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("suite report");
+
     assert_eq!(report["status"], "flaky");
     assert_eq!(report["fail_on_flaky"], false);
     assert_eq!(
@@ -421,6 +422,7 @@ fn scenario_retry_stops_after_success_and_preserves_real_attempt_outcomes() {
     }
 
     fs_err::remove_file(&counter).unwrap();
+
     let strict_junit = temporary.path().join("strict.xml");
     let strict = Command::cargo_bin("termtrace")
         .unwrap()
@@ -436,6 +438,7 @@ fn scenario_retry_stops_after_success_and_preserves_real_attempt_outcomes() {
 
     let strict_report: serde_json::Value =
         serde_json::from_slice(&strict.get_output().stdout).unwrap();
+
     assert_eq!(strict_report["status"], "flaky");
     assert_eq!(strict_report["fail_on_flaky"], true);
     assert_eq!(
@@ -464,6 +467,7 @@ fn scenario_retry_stops_after_success_and_preserves_real_attempt_outcomes() {
     fs_err::write(&scenario, serde_json::to_vec(&third_scenario).unwrap()).unwrap();
 
     fs_err::remove_file(&counter).unwrap();
+
     let third_junit = temporary.path().join("third-attempt.xml");
     let third = Command::cargo_bin("termtrace")
         .unwrap()
@@ -479,6 +483,7 @@ fn scenario_retry_stops_after_success_and_preserves_real_attempt_outcomes() {
 
     let third_report: serde_json::Value =
         serde_json::from_slice(&third.get_output().stdout).unwrap();
+
     assert_eq!(third_report["status"], "flaky");
 
     let third_attempts = third_report["cases"][0]["attempts"].as_array().unwrap();
@@ -554,6 +559,7 @@ fn scenario_wait_requires_the_requested_stability_interval() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("scenario report");
+
     assert_eq!(report["status"], "failed");
 
     let attempt = &report["cases"][0]["attempts"][0]["report"];
@@ -593,6 +599,7 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
 
     let summary: serde_json::Value =
         serde_json::from_slice(&assertion.get_output().stdout).expect("review summary");
+
     assert_eq!(
         summary["rendering_policy"],
         "semantic_cells_only_no_raw_replay"
@@ -614,6 +621,7 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
 
     let result: serde_json::Value =
         serde_json::from_slice(&searched.get_output().stdout).expect("review search");
+
     assert_eq!(result["query"], "SAFE");
     assert!(!result["matches"].as_array().expect("matches").is_empty());
     assert!(result["matches"][0]["selector"]
@@ -635,7 +643,6 @@ fn reviewer_summary_is_read_only_and_never_replays_recorded_controls() {
         .arg(state_id.to_string())
         .assert()
         .success();
-
     assert!(exported.join("manifest.json").is_file());
     assert!(exported.join("state.json").is_file());
     assert!(exported.join("screen.txt").is_file());
@@ -672,7 +679,6 @@ fn recorded_reviewer_session(temporary: &TempDir, name: &str) -> PathBuf {
         .args(["--", "/bin/sh", "-c", "printf REVIEWER"])
         .assert()
         .success();
-
     return session;
 }
 
@@ -723,9 +729,9 @@ fn reviewer_pty_output(session: &Path, signal: Option<&str>) -> Vec<u8> {
 
     let mut writer = pty.master.take_writer().expect("take PTY writer");
     let deadline = Instant::now() + Duration::from_secs(5);
+
     let mut entered_alternate_screen = false;
     let mut observed = Vec::new();
-
     while Instant::now() < deadline {
         let remaining = deadline.saturating_duration_since(Instant::now());
 
@@ -854,7 +860,6 @@ printf '\n__TERMTRACE_REVIEWER_ROLLBACK__=%s reviewer_status=%s\n' "$restored" "
     let reader_thread = thread::spawn(move || {
         let mut output = Vec::new();
         let _read_result = reader.read_to_end(&mut output);
-
         return output;
     });
 
@@ -935,7 +940,6 @@ fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
         .iter()
         .map(|entry| return entry.state_id)
         .collect::<Vec<_>>();
-
     let first = states
         .iter()
         .position(|state| return Some(&state.state_id) == page_ids.first())
@@ -953,7 +957,6 @@ fn reviewer_pages_preserve_exact_hidden_states_and_reject_tampered_sources() {
         .iter()
         .find(|state| return state.state_id > hidden.state_id && state.presented)
         .expect("next presented state");
-
     let next = load_review_page(
         &session,
         &ReviewQuery::Move {
@@ -1106,7 +1109,6 @@ fn reviewer_pages_resolve_marker_and_input_source_boundaries() {
             .find(|state| return state.monotonic_ns >= time)
             .or_else(|| return states.last())
             .expect("state at source boundary");
-
         let page = load_review_page(&session, &query, &cancelled)
             .expect("source boundary page")
             .expect("selected boundary");
@@ -1378,6 +1380,7 @@ fn scenario_infrastructure_siblings_matrix_shards_and_report_write_errors() {
     assert_scenario_json_xml(&report, &fs_err::read_to_string(&junit).unwrap());
 
     let mut selected = Vec::new();
+
     for shard in [0, 1] {
         let path = temp.path().join(format!("shard-{shard}.xml"));
         let output = Command::cargo_bin("termtrace")
@@ -1435,6 +1438,7 @@ fn scenario_infrastructure_siblings_matrix_shards_and_report_write_errors() {
             .failure();
 
         let r: serde_json::Value = serde_json::from_slice(&output.get_output().stdout).unwrap();
+
         assert_eq!(r["status"], "failed");
         assert_eq!(r["cases"][0]["status"], "passed");
         assert_eq!(r["infrastructure_errors"][0]["phase"], "report_write");
@@ -1451,8 +1455,10 @@ fn scenario_publication_failure_preserves_primary_and_successful_sibling() {
     let artifacts = temp.path().join("artifacts");
     fs_err::create_dir(&artifacts).unwrap();
     fs_err::write(artifacts.join("failures"), "not a directory").unwrap();
+
     let fail = temp.path().join("a-fail.json");
     let pass = temp.path().join("b-pass.json");
+
     for (path, expected) in [(&fail, "NEVER"), (&pass, "READY")] {
         fs_err::write(path, serde_json::to_vec(&serde_json::json!({"version":2, "name":expected, "launch":{"command":["/bin/sh","-c","printf READY; read line"], "timeoutMs":5000, "geometry":{"cols":40,"rows":4}}, "steps":[{"waitScreen":{"contains":expected,"timeoutMs":300}}, {"stop":{}}]})).unwrap()).unwrap();
     }
@@ -1503,6 +1509,7 @@ fn scenario_transport_failure_force_closes_recorder_and_drains_siblings() {
     let pids = temp.path().join("pids");
     fs_err::write(&stopped, serde_json::to_vec(&serde_json::json!({"version":2,"name":"stopped recorder", "launch":{"command":["/bin/sh","-c","printf READY; IFS= read -r line; printf '%s %s\\n' \"$$\" \"$PPID\" > \"$PIDS\"; kill -STOP \"$PPID\"; while :; do sleep 1; done"], "environment":{"base":"clear","set":{"PIDS":pids},"copy":["PATH"]}, "geometry":{"cols":40,"rows":4},"timeoutMs":5000},"steps":[{"waitScreen":{"contains":"READY"}},{"send":[{"text":"go\n"}]},{"waitScreen":{"contains":"NEVER","timeoutMs":100}}]})).unwrap()).unwrap();
     fs_err::write(&good, serde_json::to_vec(&serde_json::json!({"version":2,"name":"good sibling", "launch":{"command":["/bin/sh","-c","printf READY; read line"],"timeoutMs":5000},"steps":[{"waitScreen":{"contains":"READY"}},{"stop":{}}]})).unwrap()).unwrap();
+
     let junit = temp.path().join("transport.xml");
     let output = Command::cargo_bin("termtrace")
         .unwrap()
@@ -1518,6 +1525,7 @@ fn scenario_transport_failure_force_closes_recorder_and_drains_siblings() {
         .failure();
 
     let r: serde_json::Value = serde_json::from_slice(&output.get_output().stdout).unwrap();
+
     assert_eq!(r["cases"][1]["status"], "passed");
 
     let attempts = r["cases"][0]["attempts"].as_array().unwrap();
@@ -1535,6 +1543,7 @@ fn scenario_transport_failure_force_closes_recorder_and_drains_siblings() {
     assert!(errors.iter().any(|e| return e["phase"] == "replay"));
 
     assert_scenario_json_xml(&r, &fs_err::read_to_string(junit).unwrap());
+
     let pids = fs_err::read_to_string(pids).unwrap();
     let pids: Vec<u32> = pids
         .split_whitespace()
@@ -1618,5 +1627,6 @@ fn scenario_json_write_failure_including_broken_pipe_is_nonzero_after_junit() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("stderr failure must not suppress JSON");
+
     assert_eq!(report["infrastructure_errors"][0]["phase"], "report_write");
 }

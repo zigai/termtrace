@@ -132,7 +132,6 @@ impl ObserverRole {
             .ok()?
             .read_to_string(&mut text)
             .ok()?;
-
         return text.trim().parse().ok();
     }
 }
@@ -174,12 +173,12 @@ pub fn audit(
     suspects.retain(|pane, _| return present.contains(pane));
 
     let mut enforcement = Vec::new();
+
     for pane in panes {
         let pane_id = &pane.row.snapshot.pane_id;
         let Some(pid) = pane.row.pid else {
             continue;
         };
-
         if pane.row.marks.grandfathered == Some(pid) {
             suspects.remove(pane_id);
             continue;
@@ -203,6 +202,7 @@ pub fn audit(
         }
 
         let first_seen = *suspects.entry(pane_id.clone()).or_insert(now);
+
         if now.saturating_duration_since(first_seen) < UNRECORDED_GRACE {
             continue;
         }
@@ -283,7 +283,6 @@ pub fn guard(client: &TmuxClient, pane: &str) -> Result<()> {
         integration.coverage,
         "",
     );
-
     return Ok(());
 }
 

@@ -148,6 +148,7 @@ pub(super) fn wait_for_grid(
 
     loop {
         let size = read_winsize(tty)?;
+
         if size.grid() == expected {
             return Ok(Ok(size));
         }
@@ -358,6 +359,7 @@ fn answer(stream: UnixStream, shared: &Shared) -> io::Result<()> {
     )?;
 
     let deadline = Instant::now() + OBSERVATION_TIMEOUT;
+
     let mut observed = None;
 
     while Instant::now() < deadline {
@@ -388,7 +390,6 @@ fn answer(stream: UnixStream, shared: &Shared) -> io::Result<()> {
             event_seq: None,
         },
     );
-
     return Ok(());
 }
 

@@ -97,7 +97,6 @@ impl RecordingStore {
         }
 
         set_private(&store.directory)?;
-
         return Ok(store);
     }
 
@@ -127,7 +126,6 @@ impl RecordingStore {
     pub fn write_private(&self, name: &str, bytes: &[u8]) -> Result<PathBuf> {
         let path = self.directory.join(name);
         write_private_file(&path, bytes)?;
-
         return Ok(path);
     }
 
@@ -235,6 +233,7 @@ impl RecordingStore {
 
         if page.next_sequence.is_none() && page.events.len() == usize::from(limit) {
             let following = from_sequence.max(1).saturating_add(u64::from(limit));
+
             if following <= manifest.lifecycle_journal.sequence {
                 page.next_sequence = Some(following);
             }
@@ -267,6 +266,7 @@ impl RecordingStore {
 
         if let Some(existing) = self.catalog(manifest)?.track(canonical.session_id)? {
             let existing = existing.track;
+
             if existing.pane_id != track.pane_id || existing.session != track.session {
                 return Err(Error::invalid(
                     "tmux recording identity was rebound to another pane or path",
@@ -285,7 +285,6 @@ impl RecordingStore {
         }
 
         let path = self.directory.join(LOCK_NAME);
-
         return ExclusiveLock::acquire(&path)
             .map_err(|error| return Error::filesystem(&path, error));
     }
@@ -322,7 +321,6 @@ impl LockedRecording<'_> {
     /// Returns reducer rejections or commit failures; nothing is committed on error.
     pub fn apply(&mut self, input: Input, now: u64) -> Result<()> {
         let step = reducer::reduce(&self.manifest.name, &self.manifest.state, input, now)?;
-
         return self.commit(step.state, step.events, now);
     }
 
@@ -375,7 +373,6 @@ impl LockedRecording<'_> {
         sync_directory(directory)?;
 
         self.manifest = next;
-
         return Ok(());
     }
 }

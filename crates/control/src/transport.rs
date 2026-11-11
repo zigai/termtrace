@@ -523,7 +523,6 @@ fn remaining_until(deadline: Option<Instant>) -> Option<Duration> {
     let Some(deadline) = deadline else {
         return Some(POLL_SLICE);
     };
-
     return deadline
         .checked_duration_since(Instant::now())
         .filter(|remaining| return !remaining.is_zero());
@@ -615,7 +614,6 @@ mod tests {
     fn line(response: &ControlResponse) -> Vec<u8> {
         let mut encoded = serde_json::to_vec(response).expect("encode response");
         encoded.push(b'\n');
-
         return encoded;
     }
 
@@ -669,7 +667,6 @@ mod tests {
     #[test]
     fn response_with_another_protocol_version_is_rejected() {
         let request = ControlRequest::new(ControlCommand::Stop);
-
         let (result, _) = exchange_with_peer(
             &request,
             line(&rejection(
@@ -797,7 +794,6 @@ mod tests {
         let request = ControlRequest::new(ControlCommand::Mark {
             label: "l".repeat(limit),
         });
-
         let (result, received) = exchange_with_peer(&request, Vec::new());
         let error = result.expect_err("oversized request");
         assert!(matches!(error, Error::InvalidRequest { .. }), "{error:?}");
@@ -813,6 +809,7 @@ mod tests {
     fn peer_closed_before_reading_fails_the_request_write() {
         let (client, server) = UnixStream::pair().expect("socket pair");
         drop(server);
+
         let request = ControlRequest::new(ControlCommand::Ping);
 
         let error = exchange_stream(

@@ -95,7 +95,6 @@ fn live_control_drives_and_audits_a_detached_session() {
             label: "different".to_owned(),
         },
     };
-
     assert!(matches!(
         send_request(&session, &collision),
         Err(termtrace_service::ControlError::Rejected { code, .. })
@@ -175,6 +174,7 @@ fn live_control_drives_and_audits_a_detached_session() {
     ];
 
     let mut selected_hashes = Vec::new();
+
     for selector in selectors {
         let mut show = Command::cargo_bin("termtrace").expect("binary should build");
         let shown = show
@@ -256,6 +256,7 @@ fn live_control_uses_a_bounded_endpoint_for_long_evidence_paths() {
     while Instant::now() < ready_deadline {
         let events =
             fs_err::read_to_string(SessionLayout::new(&session).event_log()).unwrap_or_default();
+
         if events.contains("READY") {
             break;
         }

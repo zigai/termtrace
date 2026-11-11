@@ -30,7 +30,6 @@ fn quality_corpus() -> SemanticState {
     state.cursor.column = Some(7);
     state.cursor.row = Some(5);
     state.cursor.wide_tail = Some(false);
-
     return state;
 }
 
@@ -44,7 +43,6 @@ fn assert_decoration_geometry(svg: &str, pixmap: &Pixmap) {
         let pixel = pixmap
             .pixel(style * 24 + x, 2 * 24 + y)
             .expect("decoration cell is inside the rendered viewport");
-
         return f64::from(pixel.red().min(pixel.blue()).saturating_sub(pixel.green()));
     };
 
@@ -113,7 +111,6 @@ fn assert_decoration_geometry(svg: &str, pixmap: &Pixmap) {
             .iter()
             .map(|value| return *value > threshold)
             .collect();
-
         return painted
             .windows(2)
             .filter(|pair| return pair[0] != pair[1])
@@ -280,7 +277,6 @@ fn quality_corpus_is_deterministic_under_each_raster_profile() {
     ] {
         let first_png =
             render_png_with_profile(&state, profile).expect("render first profiled PNG");
-
         let second_png =
             render_png_with_profile(&state, profile).expect("render second profiled PNG");
         assert_eq!(first_png, second_png);
@@ -291,7 +287,6 @@ fn quality_corpus_is_deterministic_under_each_raster_profile() {
 
         let first_rgba = render_video_rgba(&state, state.cols, state.rows, profile)
             .expect("render first profiled RGBA frame");
-
         let second_rgba = render_video_rgba(&state, state.cols, state.rows, profile)
             .expect("render second profiled RGBA frame");
         assert_eq!(first_rgba, second_rgba);

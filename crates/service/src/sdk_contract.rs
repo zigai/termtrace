@@ -1,4 +1,5 @@
 //! Schema-owned SDK codecs, separate from canonical evidence serialization.
+
 use std::time::Duration;
 use termtrace_model::{artifact::sdk::MediaArtifactResult, terminal::screen::ScreenRegion};
 
@@ -13,7 +14,6 @@ pub fn decode_media_artifact(json: &str) -> Result<MediaArtifactResult, String> 
     let result: MediaArtifactResult =
         serde_json::from_str(json).map_err(|e| return e.to_string())?;
     result.validate()?;
-
     return Ok(result);
 }
 
@@ -22,7 +22,6 @@ pub fn decode_media_artifact(json: &str) -> Result<MediaArtifactResult, String> 
 /// Rejects invalid envelope invariants.
 pub fn encode_media_artifact(result: &MediaArtifactResult) -> Result<String, String> {
     result.validate()?;
-
     return serde_json::to_string(result).map_err(|e| return e.to_string());
 }
 
@@ -112,9 +111,9 @@ mod tests {
 
         for case in fixture["cases"].as_array().unwrap() {
             let mut value = original.clone();
+
             let pointer = case["path"].as_str().unwrap();
             let (parent, key) = pointer.rsplit_once('/').unwrap();
-
             let object = value.pointer_mut(parent).unwrap().as_object_mut().unwrap();
             if case["absent"] == true {
                 object.remove(key);

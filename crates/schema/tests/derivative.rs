@@ -1,4 +1,5 @@
 //! Task08-only schemas; no generated binding declarations.
+
 use jsonschema::{meta::is_valid, Validator};
 use termtrace_schema::catalog;
 

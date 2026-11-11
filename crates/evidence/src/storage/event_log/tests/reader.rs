@@ -18,6 +18,7 @@ fn rejects_second_json_value_after_an_authenticated_event() {
     let temporary = TempDir::new().expect("temporary directory");
     let source = temporary.path().join("session/events.jsonl");
     secure_directory(source.parent().expect("parent"));
+
     let clock = SessionClock::now().expect("clock");
     let mut writer = EventLogWriter::create(&source, &header(&clock), clock).expect("writer");
     writer
@@ -26,6 +27,7 @@ fn rejects_second_json_value_after_an_authenticated_event() {
         })
         .expect("output");
     drop(writer);
+
     let original = fs_err::read(&source).expect("valid log");
     let header_end = original
         .iter()
@@ -38,7 +40,6 @@ fn rejects_second_json_value_after_an_authenticated_event() {
 
     corrupted.extend_from_slice(b"{}\n");
     fs_err::write(&source, &corrupted).expect("corrupt record");
-
     assert!(matches!(
         EventLog::read(&source),
         Err(Error::InvalidEventLog { line: 2, .. })
@@ -46,6 +47,7 @@ fn rejects_second_json_value_after_an_authenticated_event() {
 
     let recovered = source.with_file_name("recovered.jsonl");
     let report = EventLog::recover_prefix(&source, &recovered).expect("recover prefix");
+
     assert_eq!(report.valid_events, 0);
     assert_eq!(
         report
@@ -221,7 +223,6 @@ fn live_suffix_crosses_pending_operation_without_claiming_full_verification() {
     cursor
         .validate_live_boundary(&durable)
         .expect("actor endpoint");
-
     assert!(cursor.next_record().expect("eof").is_none());
     assert!(matches!(
         cursor.finish(),

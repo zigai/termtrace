@@ -100,7 +100,7 @@ jobs:
           uv tool install rumdl==0.3.0
           npm install --global oxfmt@0.76.0
           cargo install cargo-dylint@6.3.1 dylint-link@6.3.1 --locked
-          cargo install --git https://github.com/zigai/rust-statement-spacing.git cargo-statement-spacing --tag v0.4.0 --locked
+          cargo install --git https://github.com/zigai/rust-statement-spacing.git cargo-statement-spacing --tag v0.5.0 --locked
       # The Rust cache keeps only Cargo's own profile directories, so the Dylint output of
       # `cargo statement-spacing` and its compiler driver need their own.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

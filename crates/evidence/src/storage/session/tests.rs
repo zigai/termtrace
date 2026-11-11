@@ -105,7 +105,6 @@ fn completed_fixture(events: Vec<Event>) -> (TempDir, EventLog) {
 
     let mut writer =
         EventLogWriter::create(session.join("events.jsonl"), &header, clock).expect("event log");
-
     for event in events {
         writer.append(event).expect("append event");
     }
@@ -166,7 +165,6 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
 
     let mut missing_target = fitted.clone();
     missing_target.geometry_provenance.capture_target = None;
-
     assert!(matches!(
         validate_manifest(&missing_target),
         Err(Error::InvalidEvidence { .. })
@@ -174,7 +172,6 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
 
     let mut missing_profile = fitted;
     missing_profile.ghostty_visual = None;
-
     assert!(matches!(
         validate_manifest(&missing_profile),
         Err(Error::InvalidEvidence { .. })
@@ -186,7 +183,6 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
         .as_mut()
         .expect("Ghostty provenance")
         .replay_profile = "nested/ghostty-profile.ghostty".to_owned();
-
     assert!(matches!(
         validate_manifest(&invalid_path),
         Err(Error::InvalidEvidence { .. })
@@ -198,7 +194,6 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
         .as_mut()
         .expect("Ghostty provenance")
         .replay_profile_hash = "A".repeat(64);
-
     assert!(matches!(
         validate_manifest(&invalid_replay_hash),
         Err(Error::InvalidEvidence { .. })
@@ -209,7 +204,6 @@ fn manifest_validation_rejects_noncanonical_ghostty_profile_contracts() {
         .as_mut()
         .expect("Ghostty provenance")
         .effective_config_hash = "f".repeat(63);
-
     assert!(matches!(
         validate_manifest(&manifest),
         Err(Error::InvalidEvidence { .. })
@@ -230,7 +224,6 @@ fn manifest_version_dispatch_keeps_profileless_sessions_in_the_earlier_format() 
 
     let mut semantic = legacy.clone();
     semantic.visual_profile = Some(VisualProfile::semantic_bundled().record().expect("valid"));
-
     assert!(matches!(
         validate_manifest(&semantic),
         Err(Error::InvalidEvidence { .. })
@@ -241,7 +234,6 @@ fn manifest_version_dispatch_keeps_profileless_sessions_in_the_earlier_format() 
 
     let mut versioned_without_profile = legacy;
     versioned_without_profile.version = SESSION_MANIFEST_VISUAL_PROFILE_VERSION;
-
     assert!(matches!(
         validate_manifest(&versioned_without_profile),
         Err(Error::InvalidEvidence { .. })
@@ -288,7 +280,6 @@ fn manifest_validation_binds_the_visual_profile_to_its_hash_and_ghostty_provenan
 
     let mut missing_provenance = manifest;
     missing_provenance.ghostty_visual = None;
-
     assert!(matches!(
         validate_manifest(&missing_provenance),
         Err(Error::InvalidEvidence { .. })
@@ -526,7 +517,6 @@ fn recovery_utf8_preserves_historical_report_and_diagnostic_bytes_and_hashes() {
         "session_manifest_hash": manifest_hash(&fs_err::read(source.join("session.json")).expect("source manifest")),
         "recovery": legacy_report,
     })).expect("legacy diagnostic bytes");
-
     let actual =
         fs_err::read(SessionLayout::new(&destination).recovery_diagnostic()).expect("diagnostic");
     assert_eq!(blake3::hash(&actual), blake3::hash(&expected));
@@ -579,7 +569,6 @@ fn recovery_non_utf8_binds_exact_bytes_for_both_paths_without_rewriting_source()
     assert_eq!(before, recovery_source_hashes(&source));
 
     EventLog::read(destination.join("events.jsonl")).expect("validated recovered prefix");
-
     assert!(!destination.join("completion.json").exists());
 
     let published = recovery_source_hashes(&destination);
@@ -593,7 +582,6 @@ fn recovery_non_utf8_binds_exact_bytes_for_both_paths_without_rewriting_source()
 
     let alias = temporary.path().join("source-link");
     symlink(&source, &alias).expect("private source alias");
-
     assert!(recover_session(&source, &alias.join("nested-recovery")).is_err());
     assert_eq!(before, recovery_source_hashes(&source));
 }

@@ -155,8 +155,8 @@ pub fn recover_session(source: &Path, destination: &Path) -> Result<RecoveryRepo
     let staged = SessionLayout::new(staging.path());
     let mut report =
         EventLog::recover_prefix(SessionLayout::new(source).event_log(), staged.event_log())?;
-
     let summary = EventLogSummary::read(staged.event_log())?;
+
     if summary.header.session_id != manifest.session_id
         || summary.header.session_manifest_hash != manifest_hash
     {

@@ -97,7 +97,6 @@ impl TmuxClient {
         let mut command = Command::new(&self.executable);
         // Without a UTF-8 locale, tmux replaces control and non-ASCII bytes in output with `_`.
         command.arg("-u").args(self.socket_arguments());
-
         return command;
     }
 
@@ -421,7 +420,6 @@ impl TmuxClient {
     pub fn observer_wait_command(&self) -> Command {
         let mut command = self.command();
         command.args(["wait-for", options::OBSERVER_CHANNEL]);
-
         return command;
     }
 
@@ -512,7 +510,6 @@ fn option_argument(value: &OsStr) -> Cow<'_, OsStr> {
     };
     let mut escaped = prefix.to_vec();
     escaped.extend_from_slice(b"\\;");
-
     return Cow::Owned(OsString::from_vec(escaped));
 }
 
@@ -549,7 +546,6 @@ fn row_format() -> String {
 fn parse_rows(output: &[u8]) -> Result<Vec<PaneRow>> {
     let mut rows = Vec::new();
     let mut rest = output;
-
     while !rest.is_empty() {
         let end = rest
             .windows(ROW_END.len())
@@ -570,7 +566,6 @@ fn parse_row(row: &[u8]) -> Result<PaneRow> {
         .split(|byte| return *byte == FIELD)
         .map(|field| return percent_decode(field).collect::<Vec<_>>())
         .collect::<Vec<_>>();
-
     let [dead, pane_id, pid, grandfathered, selected, excluded, session_id, session_name, window_id, window_index, window_name, layout, window_active, zoomed, pane_active, in_mode, pane_mode, current_command, recording_session] =
         fields.as_slice()
     else {
@@ -675,7 +670,6 @@ pub fn shell_quote(bytes: &[u8]) -> Vec<u8> {
     }
 
     quoted.push(b'\'');
-
     return quoted;
 }
 
@@ -691,7 +685,6 @@ pub fn config_quote(bytes: &[u8]) -> String {
     }
 
     quoted.push('"');
-
     return quoted;
 }
 
@@ -708,7 +701,6 @@ mod tests {
             .into_bytes();
             bytes.extend_from_slice(session);
             bytes.extend_from_slice(ROW_END);
-
             return bytes;
         };
         let mut output = row("%1", b"/state/a\nb");

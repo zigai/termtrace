@@ -47,7 +47,6 @@ impl<'source> TimelineRanks<'source> {
         };
         ranks.advance_canonical()?;
         ranks.advance_control()?;
-
         return Ok(ranks);
     }
 

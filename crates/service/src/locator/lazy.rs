@@ -105,7 +105,6 @@ impl<'session> Locator<'session> {
                 region: self.spec.region(),
             })
             .map_err(LocatorError::Capture)?;
-
         return evaluate(Arc::new(frame), self.spec.clone()).map_err(LocatorError::Query);
     }
 
@@ -456,6 +455,7 @@ impl WaitCancellation {
             });
 
             let result = operation(&cancelled);
+
             done.store(true, Ordering::Release);
 
             return result;
@@ -633,6 +633,7 @@ mod tests {
         assert!(!idle.sleep(Duration::from_millis(10)));
 
         idle.cancel();
+
         let started = Instant::now();
 
         assert!(idle.sleep(Duration::from_secs(30)));

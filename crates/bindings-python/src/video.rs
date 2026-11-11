@@ -40,7 +40,6 @@ impl PyStubType for EditArg {
         info.import.insert("os".into());
         info.import.insert("termtrace.editing".into());
         info.import.insert("termtrace.types".into());
-
         return info;
     }
 }

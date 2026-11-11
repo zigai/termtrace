@@ -28,6 +28,7 @@ use termtrace_schema::catalog;
 const GIF: DerivativeFormat = DerivativeFormat::Gif {
     loop_policy: GifLoop::Infinite,
 };
+
 const WEBM: DerivativeFormat = DerivativeFormat::Webm {};
 
 fn delivery_capability(format: DerivativeFormat) -> Capability {
@@ -85,7 +86,6 @@ impl SystemService {
                 id,
             )?);
         };
-
         if capability.status == CapabilityStatus::Ready {
             return Ok(());
         }

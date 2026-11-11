@@ -44,7 +44,6 @@ pub fn binary() -> PathBuf {
     let bundled = containing_object()
         .map(|object| return object.with_file_name("termtrace"))
         .filter(|candidate| return candidate.is_file());
-
     return bundled.unwrap_or_else(|| return PathBuf::from("termtrace"));
 }
 

@@ -153,7 +153,6 @@ fn actor_rejection_codes_classify_without_losing_the_code() {
         reason: "caller contract".to_owned(),
         source: None,
     };
-
     assert_eq!(local.code(), "invalid_operation");
     assert!(local.details().is_none());
 }

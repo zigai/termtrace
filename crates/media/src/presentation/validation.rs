@@ -55,6 +55,7 @@ pub fn read_edit_plan(path: impl AsRef<Path>) -> Result<NormalizedEdit> {
 /// violation, and filesystem errors when a subtitle resource cannot be read.
 pub fn normalize_edit(edit: &EditPlan, resource_base: Option<&Path>) -> Result<NormalizedEdit> {
     let mut edit = edit.clone();
+
     for (index, subtitle) in edit.subtitles.iter_mut().enumerate() {
         if subtitle.ass.is_absolute() {
             continue;

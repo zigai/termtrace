@@ -1,4 +1,5 @@
 //! Shared immutable assertion and safe snapshot comparison vectors.
+
 #[cfg(test)]
 mod tests {
     use nix::{
@@ -58,7 +59,6 @@ mod tests {
         let AssertionError::Mismatch(error) = error else {
             panic!("unexpected operational error: {error}");
         };
-
         return error;
     }
 
@@ -107,6 +107,7 @@ mod tests {
             .expect("query");
 
         let selected = found.first().expect("first");
+
         assert_screen_text(&frame, "Save").expect("text");
 
         assert_exists(&found).expect("exists");
@@ -125,31 +126,26 @@ mod tests {
             "screen_text",
             only_mismatch(assert_screen_text(&frame, "ABSENT").expect_err("mismatch")),
         );
-
         mismatch(
             &corpus,
             "exists",
             assert_exists(&none).expect_err("mismatch"),
         );
-
         mismatch(
             &corpus,
             "not_exists",
             assert_not_exists(&found).expect_err("mismatch"),
         );
-
         mismatch(
             &corpus,
             "count",
             assert_count(&found, 1).expect_err("mismatch"),
         );
-
         mismatch(
             &corpus,
             "match_text",
             assert_match_text(selected, "OTHER").expect_err("mismatch"),
         );
-
         mismatch(
             &corpus,
             "match_style",
@@ -172,13 +168,11 @@ mod tests {
             "cursor",
             assert_cursor(&frame, &cursor).expect_err("mismatch"),
         );
-
         mismatch(
             &corpus,
             "no_wrapped_rows",
             only_mismatch(assert_no_wrapped_rows(&frame).expect_err("mismatch")),
         );
-
         mismatch(
             &corpus,
             "neutral_region",
@@ -194,11 +188,9 @@ mod tests {
 
         frame.presented = true;
         frame.modes.synchronized_output = true;
-
         assert!(assert_no_presented_transient(&frame).is_err());
 
         frame.data = ScreenFrameContent::None;
-
         assert!(matches!(
             assert_screen_text(&frame, "Save"),
             Err(AssertionError::Query(_))
@@ -220,10 +212,8 @@ mod tests {
         let mut options: MaskedSnapshotOptions =
             serde_json::from_value(corpus.get("mask_options").cloned().expect("mask"))
                 .expect("options");
-
         let expected = masked_snapshot(&frame, &options).expect("masked");
         options.mask_regions = vec![region(1, 2, 6, 2), region(1, 0, 4, 2), region(1, 0, 6, 2)];
-
         assert_eq!(masked_snapshot(&frame, &options).expect("union"), expected);
 
         let mut changed = frame.clone();
@@ -269,7 +259,6 @@ mod tests {
             region(0, 0, 17, 1),
         ] {
             options.mask_regions = vec![invalid];
-
             assert!(matches!(
                 masked_snapshot(&frame, &options),
                 Err(AssertionError::Query(_))
@@ -279,7 +268,6 @@ mod tests {
         options.mask_regions = vec![region(3, 15, 16, 4), region(4, 0, 2, 5)];
         masked_snapshot(&frame, &options).expect("whole wrapped wide grapheme");
         options.profile = SnapshotProfile::Text;
-
         assert!(masked_snapshot(&frame, &options).is_err());
         assert_eq!(serde_json::to_string(&frame).expect("frame"), original);
     }
@@ -332,13 +320,11 @@ mod tests {
 
         let root_link = temp.path().join("linked-root");
         symlink(path.parent().expect("parent"), &root_link).expect("symlink parent");
-
         assert!(compare(&root_link.join("new.json"), true).is_err());
         assert!(compare(temp.path(), true).is_err());
 
         let notdir = temp.path().join("file-root");
         fs::write(&notdir, "x").expect("file");
-
         assert!(compare(&notdir.join("x"), true).is_err());
         assert!(compare(&temp.path().join("nested/../escape"), true).is_err());
 
@@ -373,19 +359,16 @@ mod tests {
         assert_masked_snapshot_file(&frame, &masked, &options, false).expect("masked compare");
         let mut bad = options;
         bad.mask_regions = vec![region(1, 0, 1, 2)];
-
         assert!(assert_masked_snapshot_file(&frame, &path, &bad, true).is_err());
         assert_eq!(fs::read_to_string(&path).expect("unchanged"), expected);
 
         fs::write(&path, vec![b'x'; 4 * 1024 * 1024 + 1]).expect("large");
-
         assert!(matches!(
             compare(&path, false),
             Err(TerminalAssertionError::Operation(_))
         ));
 
         fs::write(&path, "stale").expect("stale");
-
         assert!(matches!(
             compare(&path, false),
             Err(TerminalAssertionError::Assertion(AssertionError::Mismatch(

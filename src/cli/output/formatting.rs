@@ -69,6 +69,7 @@ pub(in crate::cli) fn write_projection_warning(
 
 pub(in crate::cli) fn row_range(first: u16, count: u16) -> String {
     let last = first.saturating_add(count.saturating_sub(1));
+
     if first == last {
         return first.to_string();
     }

@@ -265,7 +265,6 @@ unsafe extern "C" fn semantic_prompt(
 
     let optional = |string| {
         let bytes = unsafe { borrowed(string) };
-
         return (!bytes.is_empty()).then(|| return ByteString::from(bytes));
     };
     let effect = match event.kind {
@@ -375,6 +374,5 @@ fn sequence_identifier(content: &[u8]) -> &[u8] {
             return byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.');
         })
         .count();
-
     return content.get(..length).unwrap_or_default();
 }

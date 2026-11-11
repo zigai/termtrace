@@ -43,7 +43,6 @@ pub(in crate::cli) fn run_mcp() -> Result<ExitCode> {
         .enable_all()
         .build()
         .into_diagnostic()?;
-
     return runtime.block_on(serve());
 }
 
@@ -305,7 +304,6 @@ async fn call(
         CallToolResult::error(content)
     };
     result.structured_content = Some(structured);
-
     return Ok(result);
 }
 
@@ -317,6 +315,5 @@ fn screenshot_png(output: &Value) -> StdResult<Vec<u8>, String> {
     let path: PathValue =
         serde_json::from_value(path.clone()).map_err(|error| return error.to_string())?;
     let path = PathBuf::from(OsString::from_vec(path.into_bytes().into_bytes()));
-
     return fs_err::read(path).map_err(|error| return error.to_string());
 }

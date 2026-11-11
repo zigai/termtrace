@@ -133,6 +133,7 @@ fn validate_sdk_json_inner(
     *remaining = remaining
         .checked_sub(cost)
         .ok_or("SDK JSON exceeds attribute budget")?;
+
     match value {
         Value::Number(number) => {
             if number
@@ -158,6 +159,7 @@ fn validate_sdk_json_inner(
                 *remaining = remaining
                     .checked_sub(key.len())
                     .ok_or("SDK JSON exceeds attribute budget")?;
+
                 validate_sdk_json_inner(item, depth + 1, remaining)?;
             }
         }

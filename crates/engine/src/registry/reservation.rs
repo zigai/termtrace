@@ -111,7 +111,6 @@ impl SessionRegistry {
                 "alias is no longer reserved",
             ));
         };
-
         if !is_valid(&reservation.alias, &current)
             || current.owner_token != reservation.owner_token
             || current.created_unix_ns != reservation.created_unix_ns
@@ -164,7 +163,6 @@ impl SessionRegistry {
                 "alias is no longer reserved",
             ));
         };
-
         if !is_valid(&reservation.alias, &current) || current.owner_token != reservation.owner_token
         {
             return Err(registry_error(

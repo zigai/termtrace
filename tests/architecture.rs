@@ -110,13 +110,13 @@ fn violations(metadata: &Metadata) -> Result<Vec<String>, Box<dyn Error>> {
     }
 
     let mut violations = Vec::new();
+
     for package in packages {
         let Some(allowed) = allowed_dependencies(package.name.as_str()) else {
             violations.push(format!(
                 "workspace package without dependency policy: {}",
                 package.name
             ));
-
             continue;
         };
 
@@ -140,7 +140,6 @@ fn violations(metadata: &Metadata) -> Result<Vec<String>, Box<dyn Error>> {
 
     violations.sort();
     violations.dedup();
-
     return Ok(violations);
 }
 
@@ -153,6 +152,7 @@ fn ignored_test_violations(root: &Path) -> Result<Vec<String>, Box<dyn Error>> {
     ];
 
     let mut violations = Vec::new();
+
     while let Some(path) = pending.pop() {
         if path.is_dir() {
             if path
@@ -203,7 +203,6 @@ fn ignored_test_violations(root: &Path) -> Result<Vec<String>, Box<dyn Error>> {
     }
 
     violations.sort();
-
     return Ok(violations);
 }
 

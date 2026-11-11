@@ -248,7 +248,6 @@ pub fn read_artifact_roots(path: &Path) -> Result<Vec<ArtifactRootRecord>> {
     };
 
     validate_private_regular_file_fd(&fd, path)?;
-
     return read_artifact_roots_from(&mut File::from(fd), path);
 }
 
@@ -268,6 +267,7 @@ fn read_artifact_roots_from(file: &mut File, path: &Path) -> Result<Vec<Artifact
             .map_err(|source| return json_error(path.to_path_buf(), source))?;
 
         let seq = u64::try_from(index).unwrap_or(u64::MAX);
+
         if record.format != ARTIFACT_ROOT_FORMAT
             || record.version != ARTIFACT_ROOT_VERSION
             || record.seq != seq
@@ -292,6 +292,7 @@ fn read_artifact_roots_from(file: &mut File, path: &Path) -> Result<Vec<Artifact
             source_range: record.source_range,
             source_prefix: record.source_prefix.as_ref(),
         };
+
         if record.hash != hash_artifact_root(&body, path)? {
             return Err(Error::invalid(
                 "artifact-root catalog record hash does not match",

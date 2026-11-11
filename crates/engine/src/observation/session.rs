@@ -59,6 +59,7 @@ pub fn replay_endpoint_for_prefix(
     )?;
 
     let manifest = read_manifest(session)?;
+
     if header.session_id != manifest.session_id
         || header.session_manifest_hash != manifest_hash(&canonical_manifest_bytes(&manifest)?)
     {
@@ -409,6 +410,7 @@ pub fn resolved_screen_state_for_session(
     })?;
 
     let (state, resolution, completion) = resolve_completed_state(&canonical, &point, None)?;
+
     if !state.presented && !include_hidden {
         return Err(observation_error(
             "selected semantic state is hidden; pass explicit hidden-state permission",
@@ -507,6 +509,7 @@ fn resolve_completed_state(
 
     let selector = state_selector_for_session(session, point, cancelled)?;
     let inspection = inspect_session_stream(session, selector, cancelled)?;
+
     validated.check()?;
 
     if let Err(error) = publish_checkpoint(&validated, point, &inspection) {
@@ -604,7 +607,6 @@ fn unique_marker_event_seq(
 ) -> Result<u64> {
     let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     let mut found = None;
-
     while let Some(record) = cursor.next_record()? {
         check_cancelled(cancelled)?;
 
@@ -632,7 +634,6 @@ pub fn semantic_state_for_session(
     include_hidden: bool,
 ) -> Result<SemanticState> {
     let (state, _) = semantic_state_with_hash_for_session(session, point, include_hidden)?;
-
     return Ok(state);
 }
 
@@ -689,6 +690,7 @@ fn semantic_state_with_hash_for_session_inner(
     }
 
     let (state, _, _) = resolve_completed_state(&canonical, point, cancelled)?;
+
     if !state.presented && !include_hidden {
         return Err(observation_error(
             "selected semantic state is hidden; pass explicit hidden-state permission",

@@ -27,7 +27,6 @@ impl SessionActor<'_> {
             );
 
             deliver_response(&response_sender, response);
-
             return Ok(());
         }
 
@@ -42,7 +41,6 @@ impl SessionActor<'_> {
                 );
 
                 deliver_response(&response_sender, response);
-
                 return Ok(());
             }
         };
@@ -57,13 +55,11 @@ impl SessionActor<'_> {
             )?;
             if let Some(response) = prior {
                 deliver_response(&response_sender, response);
-
                 return Ok(());
             }
 
             if let Some(response) = self.pending_outer_resize_retry(&request, &hash) {
                 deliver_response(&response_sender, response);
-
                 return Ok(());
             }
 
@@ -76,7 +72,6 @@ impl SessionActor<'_> {
                 );
 
                 deliver_response(&response_sender, response);
-
                 return Ok(());
             }
 
@@ -99,7 +94,6 @@ impl SessionActor<'_> {
             );
 
             deliver_response(&response_sender, response);
-
             return Ok(());
         }
 
@@ -125,7 +119,6 @@ impl SessionActor<'_> {
                 );
 
                 deliver_response(&response_sender, response);
-
                 return Ok(());
             }
 
@@ -138,7 +131,6 @@ impl SessionActor<'_> {
                 );
 
                 deliver_response(&response_sender, response);
-
                 return Ok(());
             }
 
@@ -152,7 +144,6 @@ impl SessionActor<'_> {
                 projection: *projection,
                 response: response_sender,
             });
-
             return Ok(());
         }
 
@@ -178,7 +169,6 @@ impl SessionActor<'_> {
                 );
 
                 deliver_response(&response_sender, response);
-
                 return Ok(());
             }
 
@@ -191,7 +181,6 @@ impl SessionActor<'_> {
                 );
 
                 deliver_response(&response_sender, response);
-
                 return Ok(());
             }
 
@@ -217,7 +206,6 @@ impl SessionActor<'_> {
                 projection: *projection,
                 response: response_sender,
             });
-
             return Ok(());
         }
 
@@ -230,7 +218,6 @@ impl SessionActor<'_> {
             );
 
             deliver_response(&response_sender, response);
-
             return Ok(());
         }
 
@@ -282,7 +269,6 @@ impl SessionActor<'_> {
                             {
                                 let (before, _) = screen_match_text(&self.live.presented);
                                 let mut typed = String::new();
-
                                 let mut atom_matches = 0;
                                 for atom in atoms {
                                     match atom {

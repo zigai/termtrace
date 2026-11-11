@@ -20,6 +20,7 @@ const MAX_PREDICATE_DEPTH: usize = 4;
 const MAX_PREDICATE_NODES: usize = 32;
 const MAX_PREDICATE_CHILDREN: usize = 16;
 const PREDICATE_REGEX_SIZE_LIMIT: usize = 1024 * 1024;
+
 const REACTION_RULE: &str =
     "reaction requires a lowercase BLAKE3 starting state and 0 < timeout <= 1h";
 
@@ -594,8 +595,8 @@ fn evaluate(
 
 fn screen_row_text(state: &SemanticState, row: u16) -> Option<String> {
     let row = state.grid.get(usize::from(row))?;
-    let mut text = String::new();
 
+    let mut text = String::new();
     for cell in row.cells.iter() {
         text.push_str(if cell.grapheme.is_empty() { " " } else { &cell.grapheme });
     }
@@ -843,13 +844,11 @@ mod tests {
                 })
                 .collect(),
         };
-
         assert_eq!(wide.compile().map(|_| ()), Err(PredicateError::TooLarge));
 
         let siblings = ScreenPredicate::Any {
             predicates: (0..17).map(|_| return contains("a")).collect(),
         };
-
         assert_eq!(
             siblings.compile().map(|_| ()),
             Err(PredicateError::ChildCount)

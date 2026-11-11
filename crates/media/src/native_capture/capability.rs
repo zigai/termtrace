@@ -143,7 +143,6 @@ fn operational_probe(screenshot: bool, video: bool, cancelled: &AtomicBool) -> [
 
     let deadline = Instant::now() + PROBE_TIMEOUT;
     let result = probe_staged(&staging, deadline, screenshot, video, cancelled);
-
     let cleanup = fs::remove_dir_all(&staging);
     if let Err(error) = cleanup {
         return failed_probes(external_error("native probe cleanup", error));
@@ -313,6 +312,7 @@ fn wait_for_painted_frame(display: &str, probe: &Probe<'_>, video: bool) -> Resu
                     .env("DISPLAY", display),
             )?
         };
+
         if sample == [0x10, 0x20, 0x30] {
             return Ok(());
         }

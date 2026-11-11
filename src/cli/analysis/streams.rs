@@ -474,8 +474,8 @@ fn follow_records(
         }
 
         staged.seek(SeekFrom::Start(0)).into_diagnostic()?;
-
         let mut staged_reader = BufReader::new(&mut staged);
+
         loop {
             line.clear();
             if staged_reader
@@ -487,6 +487,7 @@ fn follow_records(
             }
 
             let record: EventRecord = serde_json::from_slice(&line).into_diagnostic()?;
+
             if !emit(response, record)? {
                 return Ok(ExitCode::SUCCESS);
             }

@@ -99,7 +99,6 @@ fn explicit_missing_binary_never_falls_back_to_the_host() {
 
     let mut invalid = request();
     invalid.cell_width = 0;
-
     assert!(PreparedTmuxSetup::prepare_with_executable(
         invalid,
         PathBuf::from("/usr/bin/tmux"),

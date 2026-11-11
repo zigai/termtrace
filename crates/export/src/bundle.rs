@@ -94,6 +94,7 @@ pub fn create(
     max_bytes: Option<u64>,
 ) -> Result<BundleManifest> {
     let trusted = TrustedSource::resolve(session)?;
+
     if destination.starts_with(trusted.canonical()) {
         return Err(Error::invalid(
             "evidence export destination must be outside the canonical session",
@@ -197,6 +198,7 @@ pub fn verify_profile(
 
     if policy.profile == BundleProfile::Forensic {
         let report = verify_session(directory.join("canonical"), VerificationLevel::Content);
+
         if !report.valid
             || report.session_id != Some(manifest.session_id)
             || report.final_event_hash.as_deref() != Some(manifest.source_final_event_hash.as_str())
@@ -296,6 +298,7 @@ fn verify_bound_payloads(
     }
 
     let screen = read_bounded(&directory.join("screen.txt"), MAX_STRUCTURED_MEMBER_BYTES)?;
+
     if screen != observation.frame.viewport_text.as_bytes() {
         return Err(Error::invalid(
             "bundle screen text does not match its source-bound observation",
@@ -312,6 +315,7 @@ fn verify_bound_payloads(
         )?;
 
         let expected_verification = verify_session(trusted.canonical(), VerificationLevel::Content);
+
         if !expected_verification.valid || verification != expected_verification {
             return Err(Error::invalid(
                 "bundle verification report does not bind the expected canonical source",
@@ -409,6 +413,7 @@ pub(super) fn verify_archived_manifest(
     verify_member_bytes(manifest, "screen.txt", screen)?;
 
     let mut observation_matches = false;
+
     for resolution in [
         ObservationResolution::CanonicalReplay,
         ObservationResolution::ValidatedCheckpoint,
@@ -448,6 +453,7 @@ pub(super) fn verify_archived_manifest(
         trusted.write_event_projection(&mut expected)?;
 
         let member = manifest_member(manifest, "events-metadata.jsonl")?;
+
         if member.byte_length != expected.bytes
             || member.blake3 != expected.hasher.finalize().to_hex().as_str()
         {
@@ -496,7 +502,6 @@ fn encoded_json_member(value: &impl Serialize, path: &str) -> Result<Vec<u8>> {
     let mut bytes =
         serde_json::to_vec_pretty(value).map_err(|source| return Error::json(path, source))?;
     bytes.push(b'\n');
-
     return Ok(bytes);
 }
 
@@ -591,6 +596,7 @@ fn canonical_file_names(directory: &Path) -> Result<Vec<String>> {
         let file_type = entry
             .file_type()
             .map_err(|source| return Error::filesystem(entry.path(), source))?;
+
         if file_type.is_symlink()
             || file_type.is_dir()
             || file_type.is_block_device()
@@ -607,7 +613,6 @@ fn canonical_file_names(directory: &Path) -> Result<Vec<String>> {
     }
 
     names.sort();
-
     return Ok(names);
 }
 
@@ -663,7 +668,6 @@ fn planned(path: &str, sensitivity: ArtifactSensitivity, relationship: &str) -> 
 
 fn canonical_member_name(path: &str) -> Option<&str> {
     let name = path.strip_prefix("canonical/")?;
-
     return (!name.is_empty() && !name.contains('/')).then_some(name);
 }
 
@@ -686,7 +690,6 @@ fn add_json_member(
 
 fn read_json_bounded<T: DeserializeOwned>(path: &Path, maximum: u64) -> Result<T> {
     let bytes = read_bounded(path, maximum)?;
-
     return serde_json::from_slice(&bytes).map_err(|source| return Error::json(path, source));
 }
 
@@ -911,7 +914,6 @@ mod tests {
                     historical.session = source.clone();
                     let old_path =
                         serde_json::to_string(&source).expect("historical PathBuf string");
-
                     let current =
                         encoded_json_member(&historical, "verification.json").expect("UTF8 report");
                     assert!(String::from_utf8(current)
@@ -947,6 +949,7 @@ mod tests {
                         .expect("member");
                     member.byte_length = u64::try_from(tampered.len()).expect("length");
                     member.blake3 = blake3::hash(&tampered).to_hex().to_string();
+
                     fs_err::write(
                         directory.join("manifest.json"),
                         serde_json::to_vec_pretty(&manifest).expect("rehashed manifest"),

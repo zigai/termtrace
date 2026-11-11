@@ -123,7 +123,6 @@ pub fn send_step_request_id(send_request_id: Uuid, index: usize) -> Uuid {
     }
 
     let name = format!("termtrace/send-step/v1/{send_request_id}/{index}");
-
     return Uuid::new_v5(&Uuid::NAMESPACE_URL, name.as_bytes());
 }
 
@@ -224,7 +223,6 @@ impl Session {
                 })?;
 
                 let mut typed = String::new();
-
                 let mut atom_matches = 0;
                 for step in &request.steps {
                     if let SendStep::Input(atoms) = step {
@@ -366,7 +364,6 @@ impl Session {
                 None => return self.frame(projection).ok(),
             },
         };
-
         return frame.cloned();
     }
 
@@ -432,7 +429,6 @@ impl Session {
                 CommandPostcondition::Screen(self.wait_screen(predicate.clone(), *settle, *timeout))
             }
         };
-
         return Some(Box::new(postcondition));
     }
 }

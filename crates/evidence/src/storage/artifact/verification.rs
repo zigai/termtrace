@@ -45,8 +45,8 @@ pub fn collect_artifact_members(directory: &Path) -> Result<Vec<ArtifactMember>>
     let mut paths: Vec<PathBuf> = Vec::new();
     collect_member_paths(directory, directory, &mut paths)?;
     paths.sort();
-
     let mut payloads: Vec<(PathBuf, String)> = Vec::with_capacity(paths.len());
+
     for relative in paths {
         let normalized = normalized_relative_path(&relative)?;
         if normalized != ARTIFACT_MANIFEST {
@@ -57,11 +57,13 @@ pub fn collect_artifact_members(directory: &Path) -> Result<Vec<ArtifactMember>>
     let worker_count = available_workers(payloads.len());
     let mut indexed = thread::scope(|scope| -> Result<Vec<(usize, ArtifactMember)>> {
         let mut handles = Vec::with_capacity(worker_count);
+
         for worker in 0..worker_count {
             let payloads = &payloads;
             handles.push(
                 scope.spawn(move || -> Result<Vec<(usize, ArtifactMember)>> {
                     let mut members: Vec<(usize, ArtifactMember)> = Vec::new();
+
                     for index in (worker..payloads.len()).step_by(worker_count) {
                         let (path, normalized) = payloads.get(index).ok_or_else(|| {
                             return Error::invalid("artifact hashing index is outside payloads");
@@ -255,7 +257,6 @@ fn verify_artifact_root(
     }
 
     verify_artifact_members(&directory, &manifest.members)?;
-
     return Ok(directory);
 }
 
@@ -265,6 +266,7 @@ fn validate_source_prefix(
     prefix: &CanonicalBoundary,
 ) -> Result<()> {
     let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
+
     if cursor.header().session_manifest_hash != manifest_hash {
         return Err(Error::invalid(
             "artifact prefix has a different source manifest",
@@ -272,6 +274,7 @@ fn validate_source_prefix(
     }
 
     let mut output_bytes = 0_u64;
+
     while cursor.next_event_seq() < prefix.next_event_seq {
         let record = cursor
             .next_record()?
@@ -295,6 +298,7 @@ fn validate_source_prefix(
 
 fn collect_member_paths(root: &Path, directory: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
     let mut entries: Vec<fs::DirEntry> = Vec::new();
+
     for entry in fs::read_dir(directory).map_err(|source| {
         return Error::Filesystem {
             path: directory.to_path_buf(),
@@ -320,6 +324,7 @@ fn collect_member_paths(root: &Path, directory: &Path, paths: &mut Vec<PathBuf>)
                 source,
             };
         })?;
+
         if metadata.file_type().is_symlink() {
             return Err(Error::invalid("artifact payload contains a symlink"));
         }

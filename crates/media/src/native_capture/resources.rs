@@ -124,7 +124,6 @@ pub(super) fn snapshot_mapped(
 fn terminal_pid(root: Option<u32>) -> StdResult<Option<(u32, PathBuf)>, String> {
     let mut queue: VecDeque<u32> = root.into_iter().collect();
     let mut seen = BTreeSet::new();
-
     while let Some(pid) = queue.pop_front() {
         if !seen.insert(pid) {
             continue;
@@ -164,6 +163,7 @@ fn mapped_fonts(pid: u32) -> StdResult<BTreeSet<(PathBuf, u64, Option<u64>)>, St
     }))?;
 
     let mut paths = BTreeSet::new();
+
     for line in text.lines() {
         let Some(start) = line.find('/') else {
             continue;
@@ -243,6 +243,7 @@ fn resource_identity(
     let mut buffer = vec![0_u8; 65536].into_boxed_slice();
 
     let mut total = 0_u64;
+
     loop {
         if cancelled.load(Ordering::Relaxed) {
             return Err("native_resource_hash_cancelled".to_owned());
@@ -251,6 +252,7 @@ fn resource_identity(
         let count = file
             .read(&mut buffer)
             .map_err(limitation(|| format!("{kind}_hash_unavailable")))?;
+
         if count == 0 {
             break;
         }
@@ -335,7 +337,6 @@ mod tests {
                 &AtomicBool::new(false),
             )
             .expect("resource identity");
-
             let length = u64::try_from(length).expect("length fits u64");
             assert_eq!(identity.byte_length, length);
             assert_eq!(identity.blake3, blake3::hash(&bytes).to_hex().to_string());
@@ -352,6 +353,7 @@ mod tests {
         )
         .err()
         .expect("cancelled hashing");
+
         assert_eq!(error, "native_resource_hash_cancelled");
     }
 }

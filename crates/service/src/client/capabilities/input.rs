@@ -161,7 +161,6 @@ impl Pointer<'_> {
     fn typed(&self, guard: &MutationGuard, command: ControlCommand) -> Result<PointerOutcome> {
         let request = guard.request(command);
         let payload = self.session.control(&request)?;
-
         return PointerOutcome::from_payload(request.request_id, payload);
     }
 }

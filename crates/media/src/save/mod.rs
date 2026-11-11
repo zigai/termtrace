@@ -90,6 +90,7 @@ pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Resul
     }
 
     let mut expected_members: BTreeSet<String> = BTreeSet::new();
+
     for member in &manifest.files {
         let path = Path::new(&member.path);
         if path.components().count() != 1
@@ -109,6 +110,7 @@ pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Resul
     }
 
     let mut observed_members: BTreeSet<String> = BTreeSet::new();
+
     for entry in
         fs::read_dir(directory).map_err(|source| return filesystem_error(directory, source))?
     {
@@ -116,6 +118,7 @@ pub fn verify_saved_artifact(directory: &Path, expected: &SaveManifest) -> Resul
         let file_type = entry
             .file_type()
             .map_err(|source| return filesystem_error(entry.path(), source))?;
+
         if file_type.is_dir()
             || file_type.is_symlink()
             || file_type.is_block_device()
@@ -204,7 +207,6 @@ pub fn save(
     let publish = (|| -> Result<SaveManifest> {
         let mut files: Vec<SavedFile> = Vec::with_capacity(formats.len());
         let mut remaining_bytes = max_bytes.unwrap_or(u64::MAX);
-
         for format in formats {
             files.push(save_rendered_file(
                 *format,
@@ -333,6 +335,7 @@ pub fn save_screenshot_batch(
         };
 
         let mut entries: Vec<ScreenshotBatchEntry> = Vec::with_capacity(points.len());
+
         for (index, (point, inspection)) in points.iter().zip(inspections).enumerate() {
             let directory = format!("state-{index:04}");
             let entry_directory = staging.join(&directory);
@@ -497,6 +500,7 @@ fn save_rendered_file(
     let mut output = secure_file(&target)?;
     {
         let mut writer = BudgetWriter::new(&mut output, *remaining_bytes);
+
         match format {
             SaveFormat::Txt => writer
                 .write_all(observation.frame.viewport_text.as_bytes())
@@ -609,7 +613,6 @@ fn pretty_json(value: &impl serde::Serialize, path: &Path) -> Result<Vec<u8>> {
         };
     })?;
     bytes.push(b'\n');
-
     return Ok(bytes);
 }
 

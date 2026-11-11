@@ -282,7 +282,6 @@ impl ScreenInput {
 
         push_millis(&mut arguments, "--stable-for", self.stable_for_ms);
         push_millis(&mut arguments, "--timeout", self.timeout_ms);
-
         return Invocation::new(arguments, Structure::Object);
     }
 }
@@ -338,7 +337,6 @@ impl WaitInput {
         }
 
         push_millis(&mut arguments, "--timeout", self.timeout_ms);
-
         return Invocation::new(arguments, Structure::Object);
     }
 }
@@ -382,7 +380,6 @@ impl StopInput {
         }
 
         push_optional(&mut arguments, "--timeout-ms", self.timeout_ms);
-
         return Invocation::new(arguments, Structure::Object);
     }
 }
@@ -470,7 +467,6 @@ impl AnalyzeInput {
             AnalyzeKind::Verify => ["verify", "--json"],
             AnalyzeKind::Output => ["output", "--strip-controls"],
         };
-
         let [subcommand, format] = format;
         arguments.extend([subcommand.to_owned(), self.session, format.to_owned()]);
         push_optional(&mut arguments, "--from-state-hash", self.from_state_hash);

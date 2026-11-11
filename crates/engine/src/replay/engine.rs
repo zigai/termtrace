@@ -67,6 +67,7 @@ pub(super) const DEFAULT_REPLAY_LIMITS: ReplayLimits = ReplayLimits {
     cell_work: MAX_REPLAY_CELL_WORK,
     elapsed: MAX_REPLAY_ELAPSED,
 };
+
 const INDEX_REPLAY_LIMITS: ReplayLimits = ReplayLimits {
     output_bytes: u64::MAX,
     capture_attempts: u64::MAX,
@@ -196,7 +197,6 @@ pub fn replay(log: &EventLog) -> Result<CollectedReplay> {
     let mut states = Vec::new();
     let artifacts = replay_with(log, None, |record, _, _| {
         states.push(record);
-
         return Ok(());
     })?;
 
@@ -289,7 +289,6 @@ pub(crate) fn visit_replay_seeded_while(
 /// Returns an error when the source cannot replay or no state matches.
 pub fn inspect(log: &EventLog, selector: StateSelector) -> Result<StateInspection> {
     let (inspection, _) = inspect_with_formats(log, selector, &[])?;
-
     return Ok(inspection);
 }
 
@@ -306,7 +305,6 @@ pub fn inspect_many(log: &EventLog, selectors: &[StateSelector]) -> Result<Vec<S
         .iter()
         .map(|selector| {
             let (inspection, _) = select(&recording, index.as_ref(), selector.clone(), &[])?;
-
             return Ok(inspection);
         })
         .collect();
@@ -363,6 +361,7 @@ pub(crate) fn inspect_latest_presented_prefix(
         }
 
         let record = cursor.next_record().transpose();
+
         if let Some(Ok(record)) = &record
             && let Event::Output { data } = &record.event
         {
@@ -417,8 +416,8 @@ fn inspect_latest_presented_records<'record>(
             Event::Output { data } => {
                 budget.charge_output(data.as_bytes().len())?;
                 let data_bytes = data.as_bytes();
-                let mut offset = 0;
 
+                let mut offset = 0;
                 while let Some(rest) = data_bytes.get(offset..)
                     && !rest.is_empty()
                 {
@@ -519,7 +518,6 @@ fn inspect_latest_presented_records<'record>(
 /// Returns an error when replay, selection, or formatter output fails.
 pub fn format_state(log: &EventLog, selector: StateSelector, format: Format) -> Result<Vec<u8>> {
     let (_, rendered) = inspect_with_formats(log, selector, &[format])?;
-
     return rendered
         .into_iter()
         .next()
@@ -557,7 +555,6 @@ pub fn inspect_completed_many(
         .iter()
         .map(|selector| {
             let (inspection, _) = select(&recording, index.as_ref(), selector.clone(), &[])?;
-
             return Ok(inspection);
         })
         .collect::<Result<Vec<_>>>()?;
@@ -576,7 +573,6 @@ pub fn inspect_completed_session(
     selector: StateSelector,
 ) -> Result<StateInspection> {
     let (inspection, _) = inspect_completed_session_with_formats(session, selector, &[])?;
-
     return Ok(inspection);
 }
 
@@ -591,6 +587,7 @@ pub fn inspect_completed_session_with_formats(
 ) -> Result<StateInspectionWithFormats> {
     let validated = super::trust::ValidatedSession::open(session)?;
     let inspection = inspect_session_stream_with_formats(session, selector, formats)?;
+
     validated.check()?;
 
     return Ok(inspection);
@@ -615,7 +612,6 @@ fn completed_index(session: &Path) -> Result<Option<DerivedIndex>> {
     let Some(completion) = completion::published(session)? else {
         return Ok(None);
     };
-
     return DerivedIndex::open_completed(session, &completion);
 }
 
@@ -707,6 +703,7 @@ fn select(
     recording.check_cancelled()?;
 
     let (record, state) = end.last.ok_or_else(no_match)?;
+
     if let Some(ReplayStop::Position(state_id)) = stop
         && record.state_id != state_id
     {
@@ -854,7 +851,6 @@ fn inspect_recording_stream(
         cancelled,
     };
     let (inspection, _) = select(&recording, index.as_ref(), selector, &[])?;
-
     return Ok(inspection);
 }
 
@@ -901,7 +897,6 @@ pub(super) fn replay_for_index<'record>(
             return Ok(true);
         },
     )?;
-
     return Ok(end.artifacts);
 }
 
@@ -925,7 +920,6 @@ pub(super) fn replay_with_limits(
             return Ok(true);
         }),
     )?;
-
     return Ok(end.artifacts);
 }
 
@@ -951,7 +945,6 @@ pub(super) fn replay_with_seed_and_limits(
             return Ok(true);
         }),
     )?;
-
     return Ok(end.artifacts);
 }
 
@@ -1098,6 +1091,7 @@ fn replay_session(
     let resumed = match seed.and_then(|seed| return seed.source_position.as_ref()) {
         Some(position) if completed => {
             let validated = super::trust::ValidatedSession::open(session)?;
+
             cursor.resume_at(position)?;
 
             Some(validated)
@@ -1112,7 +1106,6 @@ fn replay_session(
 
     let seed_source = seed.and_then(|seed| {
         let record = &seed.record;
-
         return record
             .event_seq
             .map(|seq| return (seq, record.monotonic_ns));
@@ -1123,11 +1116,11 @@ fn replay_session(
     let records = from_fn(|| {
         let next = cursor.next_record().transpose();
         exhausted = next.is_none();
-
         return next;
     })
     .map(|record| {
         let record = record.map_err(Error::from)?;
+
         if let Some((seq, monotonic_ns)) = seed_source
             && record.seq == seq
         {
@@ -1274,7 +1267,6 @@ fn replay_records<'record>(
             // the [start, end) contract: the baseline is the boundary state, and the
             // event at the inclusive boundary remains an observable transition.
             running = builder.capture_baseline(range.start_monotonic_ns, &mut sink)?;
-
             emitted_range_baseline = true;
 
             if !running {
@@ -1403,7 +1395,6 @@ fn source_byte_start(
     let Some(seed_event_seq) = seed.event_seq else {
         return Ok(Some(0));
     };
-
     if record.seq > seed_event_seq {
         return Ok(Some(0));
     }
@@ -1595,7 +1586,6 @@ impl ReplayBuilder {
 
         builder.previous = Some(restored);
         builder.previous_hash = Some(restored_hash);
-
         return Ok(builder);
     }
 
@@ -1631,6 +1621,7 @@ impl ReplayBuilder {
         plan: &ReplayPlan<'_>,
     ) -> Result<bool> {
         let mut consumed = 0;
+
         for chunk in bytes.chunks(4_096) {
             if plan.cancelled() {
                 return Ok(false);
@@ -1639,6 +1630,7 @@ impl ReplayBuilder {
             self.budget.check_elapsed()?;
 
             let mut rest = chunk;
+
             while !rest.is_empty() {
                 let step = self.engine.write_step(rest);
                 rest = rest.get(step.consumed..).unwrap_or_default();
@@ -1671,7 +1663,6 @@ impl ReplayBuilder {
     ) -> Result<bool> {
         let mut consumed = 0;
         let mut next_check = 0;
-
         while let Some(rest) = bytes.get(consumed..)
             && !rest.is_empty()
         {
@@ -1705,6 +1696,7 @@ impl ReplayBuilder {
 
                         if self.emitted != Some(edge) {
                             let unit = edge_unit(source, end, step.consumed, before_step);
+
                             if !self.emit_state(*frame, edge, unit, sink)? {
                                 return Ok(false);
                             }
@@ -1724,6 +1716,7 @@ impl ReplayBuilder {
                     monotonic_ns: source.monotonic_ns,
                     effect,
                 };
+
                 if !sink(ReplayVisit::Effect(record), &self.engine)? {
                     return Ok(false);
                 }
@@ -1899,6 +1892,7 @@ impl ReplayBudget {
         self.output_bytes = self
             .output_bytes
             .saturating_add(u64::try_from(bytes).unwrap_or(u64::MAX));
+
         #[cfg(test)]
         TEST_REPLAY_OUTPUT_BYTES.set(
             TEST_REPLAY_OUTPUT_BYTES
@@ -1920,7 +1914,6 @@ impl ReplayBudget {
             supported_geometry_cell_count(cols, rows)
                 .ok_or_else(|| return invalid_replay("resize geometry exceeds replay limits"))?,
         );
-
         return self.check_elapsed();
     }
 

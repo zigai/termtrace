@@ -50,7 +50,6 @@ fn spec(script: &str) -> OriginalLaunchSpec {
     });
 
     spec.startup_timeout = Duration::from_secs(60);
-
     return spec;
 }
 
@@ -64,6 +63,7 @@ fn wait_for_output(session: &OriginalSession, text: &str) {
         let output = OutputService::page(session.session().path(), None, 1 << 20)
             .map(|page| return page.bytes.as_bytes().to_vec())
             .unwrap_or_default();
+
         if String::from_utf8_lossy(&output).contains(text) {
             return;
         }
@@ -126,6 +126,7 @@ fn assert_all_exited(processes: &[ProcessIdentity]) {
                     .is_ok_and(|current| return current.start_ticks == process.start_ticks);
             })
             .collect();
+
         if alive.is_empty() {
             return;
         }
@@ -182,7 +183,6 @@ fn capture_failure(error: &Error) -> &OriginalCaptureFacts {
     let Error::OriginalCaptureFailed { facts } = error else {
         panic!("unexpected error {error:?}");
     };
-
     return facts;
 }
 
@@ -327,6 +327,7 @@ fn visual_profile_is_resolved_before_startup_and_committed_into_the_session() {
         &fs::read(original.session().path().join("session.json")).expect("session manifest"),
     )
     .expect("manifest JSON");
+
     assert_eq!(manifest["version"], 13);
     assert_eq!(
         manifest["visual_profile"]["profile_hash"],
@@ -491,6 +492,7 @@ fn cancelled_startup_tears_down_and_reports_cancellation() {
                             .to_string_lossy()
                             .ends_with(".original-capture.json");
                     });
+
                 if let Some(entry) = found
                     && let Ok(bytes) = fs::read(entry.path())
                     && let Ok(status) = serde_json::from_slice::<serde_json::Value>(&bytes)
@@ -507,6 +509,7 @@ fn cancelled_startup_tears_down_and_reports_cancellation() {
 
             let supervisor = status["supervisor_pid"].as_str().unwrap().parse().unwrap();
             let tree = descendants(supervisor);
+
             cancelled.store(true, Ordering::Release);
 
             return tree;
@@ -550,6 +553,7 @@ fn cancellation_during_profile_resolution_stops_the_query_and_reports_cancellati
     // Ghostty blocks opening a FIFO config that has no writer, so the query never finishes.
     let config = temporary.path().join("config.ghostty");
     mkfifo(&config, Mode::S_IRUSR | Mode::S_IWUSR).expect("config FIFO");
+
     let mut blocked = spec("echo never");
     blocked.visual_profile = Some(VisualProfile {
         version: 1,
@@ -670,6 +674,7 @@ fn walkdir(root: &Path) -> Vec<PathBuf> {
     while let Some(directory) = pending.pop() {
         for entry in fs::read_dir(&directory).expect("directory").flatten() {
             let path = entry.path();
+
             if entry.file_type().expect("type").is_dir() {
                 pending.push(path);
             } else {
@@ -1079,6 +1084,7 @@ fn a_supervisor_killed_during_startup_leaves_no_secret_behind() {
                             .to_string_lossy()
                             .ends_with(".original-capture.json");
                     });
+
                 if let Some(entry) = found
                     && let Ok(bytes) = fs::read(entry.path())
                     && let Ok(status) = serde_json::from_slice::<serde_json::Value>(&bytes)

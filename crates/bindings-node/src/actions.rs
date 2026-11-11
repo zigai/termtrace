@@ -202,7 +202,6 @@ impl JsActionBuilder {
 
     fn edit(&self, change: impl FnOnce(&mut ActRequest)) -> napi::Result<&Self> {
         self.draft().edit(change).map_err(crate::to_napi_err)?;
-
         return Ok(self);
     }
 

@@ -165,7 +165,6 @@ fn typed_error_context<T: serde::Serialize>(
         napi::Status::GenericFailure,
         format!("termtrace:{typed}"),
     )));
-
     return error;
 }
 

@@ -31,6 +31,7 @@ fn native_live_prefix_excludes_hidden_bytes_and_remains_verifiable_after_complet
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let status = termtrace_sdk::request(&session, ControlCommand::Status).expect("status");
+
         if let ControlPayload::Status { boundaries, .. } = status
             && boundaries.durable.output_bytes >= 17
         {
@@ -246,6 +247,7 @@ fn original_native_acquires_before_execution_and_preserves_exit_status() {
     let completion = validate_completed_session(&session).expect("valid completed recording");
     assert_eq!(completion.exit_code, Some(7));
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
+
     assert_eq!(
         canonical_output_bytes(&log),
         b"\x1b[31mORIGINAL\x1b[0m\r\nDONE\r\n"
@@ -381,7 +383,6 @@ fn original_native_cancellation_stops_the_managed_command() {
 )]
 fn original_status(session: &Path) -> serde_json::Value {
     let path = PathBuf::from(format!("{}.original-capture.json", session.display()));
-
     return serde_json::from_slice(&fs::read(path).expect("status sidecar")).expect("status JSON");
 }
 
@@ -414,7 +415,6 @@ fn await_original_state(session: &Path, states: &[&str]) -> serde_json::Value {
 fn termtrace(state: &Path) -> Command {
     let mut command = Command::cargo_bin("termtrace").expect("binary");
     command.env("TERMTRACE_STATE_DIR", state);
-
     return command;
 }
 
@@ -441,6 +441,7 @@ fn detached_original_resizes_its_window_inside_a_constant_canvas() {
     start_detached(&state, &session, "resized", WINCH_SCRIPT);
 
     let live = original_status(&session);
+
     assert_eq!(live["state"], "live");
     assert_eq!(live["grid"], serde_json::json!({"cols": 100, "rows": 30}));
 
@@ -472,6 +473,7 @@ fn detached_original_resizes_its_window_inside_a_constant_canvas() {
         .success();
 
     let published = await_original_state(&session, &["published", "failed"]);
+
     assert_eq!(published["state"], "published", "{published}");
 
     validate_json_value("original-capture-status.schema.json", &published);
@@ -604,6 +606,7 @@ fn original_restart_waits_for_the_predecessor_capture_and_keeps_its_grid() {
     );
 
     let live = original_status(&successor);
+
     assert_eq!(live["state"], "live");
     assert_eq!(live["grid"], serde_json::json!({"cols": 100, "rows": 30}));
     assert_eq!(
@@ -711,9 +714,11 @@ fn original_native_names_a_missing_tool_before_creating_a_session() {
 
         let output = temporary.path().join("output");
         let scratch = temporary.path().join("scratch");
+
         fs::create_dir_all(&output).expect("output directory");
 
         fs::create_dir_all(&scratch).expect("scratch directory");
+
         let session = output.join("missing-tool.termtrace");
 
         Command::cargo_bin("termtrace")
@@ -788,7 +793,6 @@ fn visual_profile_native_failures_stop_before_launch_without_fallback() {
             .assert()
             .failure()
             .stderr(predicate::str::contains(code));
-
         assert!(!marker.exists(), "{code}: the application started");
         assert!(!session.exists(), "{code}: a session was created");
     }
@@ -883,6 +887,7 @@ fn visual_profile_native_standard_base_ignores_ambient_user_config() {
         let home = temporary.path().join(format!("{name}-config"));
         fs::create_dir_all(home.join("ghostty")).expect("user config directory");
         fs::write(home.join("ghostty/config"), user_config).expect("user config");
+
         let session = temporary.path().join(name);
         let marker = temporary.path().join(format!("{name}-started"));
 
@@ -902,7 +907,6 @@ fn visual_profile_native_standard_base_ignores_ambient_user_config() {
             .timeout(Duration::from_secs(60))
             .assert()
             .success();
-
         assert!(marker.exists());
 
         let manifest = read_manifest(&session).expect("profiled manifest");
@@ -925,7 +929,6 @@ fn visual_profile_native_standard_base_ignores_ambient_user_config() {
 fn visual_profile_native_original_and_replay_share_profile_grid_and_dpi() {
     let temporary = TempDir::new().expect("temporary directory");
     let mut cell_heights = Vec::new();
-
     for dpi in [96, 144] {
         let session = temporary.path().join(format!("original-{dpi}"));
         let profile = native_profile(&format!(

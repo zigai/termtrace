@@ -66,7 +66,6 @@ pub fn validate_completed_session_with_check(
     let completion = read_completion(session_directory)?;
     let summary = EventLogSummary::read_with_check(layout.event_log(), check)?;
     validate_completion_summary_candidate(session_directory, &summary, &completion)?;
-
     return Ok(completion);
 }
 

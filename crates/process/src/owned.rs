@@ -45,7 +45,6 @@ pub fn command(helper: &Path, program: impl AsRef<OsStr>) -> io::Result<Command>
         .arg(owner.start_ticks.to_string())
         .arg("--")
         .arg(program);
-
     return Ok(command);
 }
 

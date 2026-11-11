@@ -228,6 +228,7 @@ fn write_row_content(
 
     // 1. Coalesced Background Rectangles
     let mut current_bg: Option<BgRun> = None;
+
     for resolved in &resolved_cells {
         let need_bg = resolved.background != state.colors.background || resolved.cell.style.inverse;
         if need_bg {
@@ -260,6 +261,7 @@ fn write_row_content(
 
     // 2. Coalesced Text Glyphs
     let mut current_text: Option<TextRun> = None;
+
     for resolved in &resolved_cells {
         let has_text = !resolved.cell.style.invisible && !resolved.cell.grapheme.is_empty();
         if has_text {
@@ -323,6 +325,7 @@ fn write_row_content(
 fn write_row_decorations(svg: &mut String, resolved_cells: &[ResolvedCell<'_>]) -> Result<()> {
     // Underlines
     let mut current_underline: Option<UnderlineRun> = None;
+
     for resolved in resolved_cells {
         let underline = resolved.cell.style.underline;
         if underline != 0 {
@@ -640,6 +643,7 @@ fn write_cursor(
             let cursor_y = resolved
                 .y
                 .saturating_add(u32::from(SEMANTIC_CELL_HEIGHT.saturating_sub(2)));
+
             writeln!(
                 svg,
                 "<rect x=\"{}\" y=\"{cursor_y}\" width=\"{}\" height=\"2\" fill=\"{}\"/>",
@@ -654,6 +658,7 @@ fn write_cursor(
             } else {
                 u32::from(SEMANTIC_CELL_WIDTH)
             };
+
             writeln!(
                 svg,
                 "<rect x=\"{}\" y=\"{}\" width=\"{span}\" height=\"{}\" fill=\"{}\"/>",

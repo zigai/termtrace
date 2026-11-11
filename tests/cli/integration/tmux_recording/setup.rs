@@ -50,7 +50,6 @@ fn watchdog_keeps_tmux_format_expressions_in_executable_paths() {
 
     let mut expected = setup.tmux.as_os_str().as_bytes().to_vec();
     expected.extend_from_slice(b"\0tmux\0watchdog\0-q\0");
-
     assert_eq!(
         fs_err::read(root.join("literal-#{pid}-.result")).expect("literal executable ran"),
         expected

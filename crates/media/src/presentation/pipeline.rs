@@ -142,6 +142,7 @@ pub fn preview(
         .ok_or_else(|| return plan_error("preview destination must have a parent"))?;
 
     let parent = if parent.as_os_str().is_empty() { Path::new(".") } else { parent };
+
     require_presentation_tools()?;
     fs_err::create_dir_all(parent).map_err(|source| {
         return Error::Filesystem {
@@ -302,8 +303,8 @@ pub(super) fn select_preview_frames(
     }
 
     let candidates: u64 = merged.iter().map(|(start, end)| return end - start).sum();
-    let count = u64::from(options.max_frames).min(candidates);
 
+    let count = u64::from(options.max_frames).min(candidates);
     if count == 0 {
         return Err(plan_error("preview selection contains no frames"));
     }
@@ -311,7 +312,6 @@ pub(super) fn select_preview_frames(
     let mut selected = Vec::with_capacity(usize::from(options.max_frames));
     let mut intervals = merged.into_iter();
     let mut interval = intervals.next();
-
     let mut preceding = 0;
     for index in 0..count {
         let candidate_index = if count == 1 {
@@ -323,6 +323,7 @@ pub(super) fn select_preview_frames(
 
         while let Some((start, end)) = interval {
             let length = end - start;
+
             if candidate_index - preceding < length {
                 selected.push(start + candidate_index - preceding);
                 break;
@@ -547,6 +548,7 @@ pub(super) fn validate_normalized_frames(plan: &PresentationPlan) -> Result<()> 
     }
 
     let mut next = 0u64;
+
     for clip in &plan.clips {
         let frames = clip
             .source_end_frame
@@ -569,6 +571,7 @@ pub(super) fn validate_normalized_frames(plan: &PresentationPlan) -> Result<()> 
             .checked_add(clip.retimed_frame_count)
             .and_then(|n| return n.checked_add(clip.hold_frame_count))
             .ok_or_else(|| return plan_error("normalized output frame overflow"))?;
+
         if clip.output_end_frame != next {
             return Err(plan_error("normalized clip end differs"));
         }
@@ -600,7 +603,6 @@ fn export_staged(
                         };
                     })?,
                 )?;
-
                 return Ok(output_probe);
             });
             let frame_map = scope.spawn(|| -> Result<()> {
@@ -609,7 +611,6 @@ fn export_staged(
                 } else {
                     Vec::new()
                 };
-
                 return write_presentation_map(
                     &staging.join("presentation-map.jsonl"),
                     plan,
@@ -679,6 +680,5 @@ fn export_staged(
 
     write_secure(&staging.join("manifest.json"), &manifest_bytes)?;
     verify_artifact_members(staging, &manifest.members)?;
-
     return Ok(manifest);
 }

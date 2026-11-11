@@ -55,6 +55,7 @@ pub(crate) fn open(session: &Path) -> Result<(EventLogCursor, PageSource)> {
     let header_hash = manifest_hash(&header);
     let reader = EventLogCursor::open_snapshot(&path)?;
     reader.validate_live_source(metadata.dev(), metadata.ino(), &header_hash)?;
+
     let manifest_path = session.join("session.json");
     let manifest_bytes =
         fs_err::read(&manifest_path).map_err(|source| return filesystem(&manifest_path, source))?;
@@ -91,6 +92,7 @@ pub(crate) fn start(source: &PageSource) -> EventPageCursor {
 
 pub(crate) fn check_source(source: &PageSource, cursor: &EventPageCursor) -> Result<()> {
     let expected = &cursor.source;
+
     if expected.session_path != source.session_path
         || expected.session_id != source.session_id
         || expected.device != source.device
@@ -121,6 +123,5 @@ pub(crate) fn next(position: &mut EventPageCursor, seq: u64, hash: String) -> Re
         .ok_or_else(|| return invalid("event sequence overflow"))?;
 
     position.event_hash = hash;
-
     return Ok(());
 }

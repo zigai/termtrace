@@ -25,7 +25,6 @@ impl SessionRegistry {
     /// is not an owner-only real directory.
     pub fn open_default() -> Result<Self> {
         let root = Self::default_state_root()?;
-
         return Self::open(root);
     }
 
@@ -82,6 +81,7 @@ impl SessionRegistry {
         })?;
 
         let mode = metadata.mode() & 0o777;
+
         if metadata.file_type().is_symlink()
             || !metadata.file_type().is_dir()
             || metadata.uid() != getuid().as_raw()
@@ -173,7 +173,6 @@ impl SessionRegistry {
 
         let _lock = self.lock()?;
         let path = self.entry_path(alias);
-
         if path.exists() {
             return Err(registry_error(
                 "reserve session alias",
@@ -230,6 +229,7 @@ impl SessionRegistry {
         }
 
         let manifest = read_manifest(&canonical)?;
+
         if manifest.session_id != entry.session_id {
             return Err(registry_error(
                 "resolve registry entry",
@@ -322,7 +322,6 @@ impl SessionRegistry {
         }
 
         rows.sort_by(|left, right| return left.alias.cmp(&right.alias));
-
         return Ok(rows);
     }
 
@@ -374,7 +373,6 @@ impl SessionRegistry {
         SessionRegistry::validate_owner_directory(&canonical)?;
 
         let manifest = read_manifest(&canonical)?;
-
         if manifest.format != SESSION_MANIFEST_FORMAT
             || manifest.version != manifest.expected_version()
         {
@@ -453,14 +451,12 @@ pub(super) fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         row.lifecycle = SessionPhase::Incompatible;
         row.diagnostic =
             Some("registry format, protocol, or process identity is incompatible".to_owned());
-
         return row;
     }
 
     let session = entry.session_path();
     if let Err(error) = SessionRegistry::validate_owner_directory(&session) {
         row.diagnostic = Some(error.to_string());
-
         return row;
     }
 
@@ -468,12 +464,10 @@ pub(super) fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         Ok(path) if path.as_os_str().as_bytes() == entry.canonical_session.as_bytes() => path,
         Ok(_) => {
             row.diagnostic = Some("canonical session path changed after registration".to_owned());
-
             return row;
         }
         Err(error) => {
             row.diagnostic = Some(error.to_string());
-
             return row;
         }
     };
@@ -482,7 +476,6 @@ pub(super) fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
         Ok(manifest) => manifest,
         Err(error) => {
             row.diagnostic = Some(error.to_string());
-
             return row;
         }
     };
@@ -497,7 +490,6 @@ pub(super) fn inspect_entry(entry: &RegistryEntry) -> RegistryListEntry {
     if manifest.session_id != entry.session_id {
         row.lifecycle = SessionPhase::IdentityMismatch;
         row.diagnostic = Some("manifest session ID differs from registry binding".to_owned());
-
         return row;
     }
 
@@ -557,7 +549,6 @@ pub(super) fn ensure_owner_directory(path: &Path) -> Result<()> {
     })?;
 
     sync_parent_directory(path)?;
-
     return SessionRegistry::validate_owner_directory(path);
 }
 
@@ -634,7 +625,6 @@ pub(super) fn sync_parent_directory(path: &Path) -> Result<()> {
     let parent = path.parent().ok_or_else(|| {
         return registry_error("sync registry parent", "path has no parent directory");
     })?;
-
     return sync_directory(parent);
 }
 

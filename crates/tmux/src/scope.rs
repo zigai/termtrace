@@ -136,6 +136,7 @@ impl TmuxScopePolicy {
             let pane = str::from_utf8(pane.as_bytes()).map_err(|error| {
                 return Error::invalid(format!("tmux pane IDs must be UTF-8: {error}"));
             })?;
+
             if !valid_identifier(pane, b'%') {
                 return Err(Error::invalid(format!(
                     "tmux pane selector `{pane}` is not a stable pane ID such as %3"
@@ -146,7 +147,6 @@ impl TmuxScopePolicy {
         }
 
         policy.validate()?;
-
         return Ok(policy);
     }
 
@@ -260,7 +260,6 @@ impl TmuxScopePolicy {
         }
 
         resolved.validate()?;
-
         return Ok(resolved);
     }
 
@@ -329,7 +328,6 @@ impl TmuxScopePolicy {
     /// Returns malformed policies.
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         self.validate()?;
-
         return serde_json::to_vec(self).map_err(|error| return Error::json(options::SCOPE, error));
     }
 
@@ -350,7 +348,6 @@ impl TmuxScopePolicy {
         })?;
 
         policy.validate()?;
-
         return Ok(policy);
     }
 
@@ -360,7 +357,6 @@ impl TmuxScopePolicy {
     /// Returns malformed policies or tmux failures.
     pub fn store(&self, client: &TmuxClient) -> Result<()> {
         client.set_option(options::SCOPE, OsStr::from_bytes(&self.to_bytes()?))?;
-
         return client.signal_observer();
     }
 

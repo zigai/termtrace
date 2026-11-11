@@ -143,7 +143,6 @@ pub fn permanent_gaps(now: u64) -> Vec<TmuxCoverageGap> {
 pub fn reduce(name: &str, state: &TmuxRecordingState, input: Input, now: u64) -> Result<Step> {
     let mut next = state.clone();
     let mut events = Vec::new();
-
     match input {
         Input::Observe(observation) => {
             if next.lifecycle.is_open() {
@@ -260,6 +259,7 @@ fn observe(
         .collect::<BTreeSet<_>>();
 
     let mut linked = Vec::new();
+
     for pane in &panes {
         match previous.get(pane.pane_id.as_str()) {
             Some(before) => pane_transitions(events, before, pane),
@@ -304,7 +304,6 @@ fn observe(
 
     state.panes = panes;
     state.updated_unix_ns = now;
-
     return Ok(());
 }
 

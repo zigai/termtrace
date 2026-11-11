@@ -77,7 +77,6 @@ impl TerminalWindow {
                 &ConfigureWindowAux::new().width(width).height(height),
             )
             .map_err(|error| return window_error("resize the terminal window", error))?;
-
         return self
             .connection
             .flush()

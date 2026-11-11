@@ -65,6 +65,7 @@ fn send_steps(arguments: &SendArgs) -> Result<Vec<(SendStep, &'static str)>> {
     let stdin_requested = arguments.stdin || arguments.atoms.iter().any(|atom| return atom == "-");
 
     let mut stdin_bytes = Vec::new();
+
     if stdin_requested {
         io::stdin()
             .read_to_end(&mut stdin_bytes)
@@ -231,8 +232,8 @@ pub(in crate::cli) fn run_send(
     };
 
     let report_changes = arguments.screen == SendScreen::Diff;
-
     let mut output = applied_response(&outcome, arguments.verbose)?;
+
     if arguments.screen == SendScreen::Text || !outcome.is_matched() {
         insert_screen(&mut output, outcome.frame());
     }
@@ -245,6 +246,7 @@ pub(in crate::cli) fn run_send(
         write_json_pretty(response, &output)?;
     } else {
         let mut summary = human_action_summary(&output);
+
         if arguments.screen == SendScreen::State
             && let Some(state) = outcome.state_hash()
         {
@@ -290,7 +292,6 @@ fn frame_text(frame: &ScreenFrame) -> String {
         .map(|row| return row.trim_end_matches(' '))
         .collect::<Vec<_>>()
         .join("\n");
-
     return viewport.trim_end_matches('\n').to_owned();
 }
 
@@ -717,7 +718,6 @@ pub(super) fn applied_response(
         boundaries: include_details.then_some(&outcome.boundaries),
         code: (!matched).then_some("postcondition_failed"),
     };
-
     return serde_json::to_value(&output).into_diagnostic();
 }
 
@@ -814,7 +814,6 @@ pub(super) fn error_response(
             .filter(|_| return verbose)
             .map(|details| return &details.boundaries),
     };
-
     #[expect(
         clippy::expect_used,
         reason = "ActionErrorOutput contains only primitive serializable types and cannot fail JSON serialization"
@@ -907,6 +906,7 @@ mod action_response_tests {
             boundaries: boundaries(),
         };
         let response = applied_response(&outcome, true).expect("action response");
+
         assert_eq!(response["ok"], false);
         assert_eq!(response["code"], "postcondition_failed");
         assert_eq!(response["request_id"], request_id.to_string());
@@ -958,6 +958,7 @@ mod action_response_tests {
         });
 
         let response = error_response(request_id, &error, false, true);
+
         assert_eq!(response["code"], "input_sequence_incomplete");
         assert_eq!(response["request_id"], request_id.to_string());
         assert_eq!(response["input"]["effect"]["kind"], "unknown");

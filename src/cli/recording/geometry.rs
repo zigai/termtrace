@@ -43,6 +43,7 @@ pub(super) fn query_terminal() -> Result<TerminalGeometryReport> {
 
     let stdin = io::stdin();
     let deadline = Instant::now() + GEOMETRY_QUERY_TIMEOUT;
+
     let mut bytes: Vec<u8> = Vec::with_capacity(128);
     let mut buffer = [0_u8; 128];
 

@@ -140,7 +140,6 @@ fn spawn_reader(
             }
         })
         .map_err(|error| return terminal_error("spawn PTY reader", error.to_string()))?;
-
     return Ok(thread);
 }
 
@@ -176,7 +175,6 @@ fn spawn_resize(
         .spawn(move || {
             let stdin = io::stdin();
             let mut previous = initial;
-
             for _ in signals.forever() {
                 match tcgetwinsize(&stdin) {
                     Ok(size) => {
@@ -228,6 +226,7 @@ fn spawn_host_signals(
                     SIGCHLD => RuntimeMessage::ChildStateChanged,
                     _ => continue,
                 };
+
                 if sender.send(message).is_err() {
                     return;
                 }
@@ -289,7 +288,6 @@ fn input_loop(cancel: &OwnedFd, sender: &mpsc::SyncSender<RuntimeMessage>) {
     };
 
     let mut buffer = [0_u8; READ_BUFFER_BYTES];
-
     loop {
         let mut descriptors = [
             PollFd::new(stdin.as_fd(), PollFlags::POLLIN),
@@ -908,7 +906,6 @@ mod tests {
 
         loop {
             let mut descriptors = [PollFd::new(write_pipe.as_fd(), PollFlags::POLLOUT)];
-
             if let Ok(1) = poll(&mut descriptors, PollTimeout::from(0_u16)) {
                 fd_write(&write_pipe, &fill_data).expect("fill pipe");
             } else {
@@ -941,6 +938,7 @@ mod tests {
         .expect("spawn reader");
 
         fd_write(&cancel_write, b"x").expect("signal reader cancellation");
+
         let join_result = thread.join();
         assert!(join_result.is_ok());
 

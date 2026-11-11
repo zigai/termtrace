@@ -278,7 +278,6 @@ pub(super) fn validate_acquisition_frames(path: &Path, expected_count: u64) -> R
 
     let mut frames = AcquisitionFrames::new(log_lines(file));
     let mut first = None;
-
     let mut count = 0;
     while let Some((_, acquired)) = frames.next_frame()? {
         first.get_or_insert(acquired);
@@ -377,6 +376,7 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
                     source: None,
                 };
             })?;
+
             if !line.contains("Parsed_showinfo_") {
                 continue;
             }
@@ -431,7 +431,6 @@ impl<I: Iterator<Item = io::Result<String>>> AcquisitionFrames<I> {
             }
 
             self.previous = Some((number, acquired));
-
             return Ok(self.previous);
         }
 

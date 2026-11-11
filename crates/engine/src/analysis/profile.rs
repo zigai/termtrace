@@ -120,7 +120,6 @@ pub fn restore(
     };
 
     profile.validate()?;
-
     return Ok(profile);
 }
 
@@ -132,7 +131,6 @@ pub fn restore(
 /// be read, or the effective configuration contains invalid color settings.
 pub fn terminal_colors(profile: &ResolvedGhosttyProfile) -> Result<TerminalColors> {
     profile.validate()?;
-
     return terminal_colors_from_config(&profile.effective_config);
 }
 
@@ -140,7 +138,6 @@ pub(crate) fn terminal_colors_from_config(config: &[u8]) -> Result<TerminalColor
     let mut colors = builtin_terminal_colors()?;
     apply_config(&mut colors, config)?;
     colors.source = format!("ghostty_show_config_blake3:{}", hash(config));
-
     return Ok(colors);
 }
 
@@ -326,7 +323,6 @@ mod tests {
             b"background = #000000\nforeground = #f2f2f2\ncursor-color = #cccccc\npalette = 1=#ff0080\n",
         )
         .expect("valid profile");
-
         assert_eq!(colors.background, [0, 0, 0]);
         assert_eq!(colors.foreground, [0xf2, 0xf2, 0xf2]);
         assert_eq!(colors.cursor, Some([0xcc, 0xcc, 0xcc]));
@@ -348,14 +344,12 @@ mod tests {
     fn disables_ligatures_unless_the_config_sets_font_features() {
         let mut plain = b"font-size = 13\n".to_vec();
         disable_default_ligatures(&mut plain);
-
         assert!(
             plain.ends_with(b"font-feature = -calt\nfont-feature = -liga\nfont-feature = -dlig\n")
         );
 
         let mut chosen = b"font-feature = +ss01\n".to_vec();
         disable_default_ligatures(&mut chosen);
-
         assert_eq!(chosen, b"font-feature = +ss01\n".to_vec());
     }
 
@@ -385,7 +379,6 @@ mod tests {
             let mut output = Vec::with_capacity(config.len().saturating_mul(2));
             for byte in config {
                 output.push(*byte);
-
                 if *byte == b'\\' {
                     output.push(*byte);
                 }
@@ -435,7 +428,6 @@ mod tests {
         let effective_config =
             b"config-file = /isolated/config\nconfig-default-files = false\nbackground = #000000"
                 .to_vec();
-
         let profile = resolve(
             &replay_config,
             None,
@@ -459,7 +451,6 @@ mod tests {
             |config| {
                 let mut effective = config.to_vec();
                 effective.extend_from_slice(b"foreground = #ffffff\n");
-
                 return Ok(effective);
             },
         )
@@ -468,17 +459,14 @@ mod tests {
         profile.validate().expect("valid byte commitments");
         let mut tampered_replay = profile.clone();
         tampered_replay.replay_config.push(b' ');
-
         assert!(tampered_replay.validate().is_err());
 
         let mut tampered_effective = profile.clone();
         tampered_effective.effective_config.push(b' ');
-
         assert!(tampered_effective.validate().is_err());
 
         let mut relocated = profile;
         relocated.provenance.replay_profile = "nested/profile.ghostty".to_owned();
-
         assert!(relocated.validate().is_err());
     }
 

@@ -45,6 +45,7 @@ fn output_raw_reproduces_exact_canonical_child_bytes() {
 
     let log = EventLog::read(session.join("events.jsonl")).expect("canonical log");
     let expected = canonical_output_bytes(&log);
+
     assert_eq!(expected, b"A\x1b[?1049h\x1b[31mB\x1b[0m\xffC");
 
     let mut output = Command::cargo_bin("termtrace").expect("binary should build");
@@ -141,6 +142,7 @@ fn output_follow_emits_each_durable_prefix_once_until_completion() {
 
     let log = EventLog::read(session.join("events.jsonl")).expect("completed event log");
     let expected = canonical_output_bytes(&log);
+
     assert_eq!(expected, b"A\x1b[31mB\xff");
     assert_eq!(followed.stdout, expected);
 
@@ -182,11 +184,13 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
         .any(|w| return w == b"secret-bytes"));
 
     let mut byte_count = 0;
+
     for line in output
         .split(|byte| return *byte == b'\n')
         .filter(|line| return !line.is_empty())
     {
         let record: serde_json::Value = serde_json::from_slice(line).expect("metadata event JSON");
+
         assert_eq!(record["event_type"], "output");
         assert_eq!(record["metadata_only"], true);
         assert!(record["event"].is_null());
@@ -222,6 +226,7 @@ fn events_filters_typed_records_and_summarizes_sensitive_bytes() {
 
     let exact_record: serde_json::Value =
         serde_json::from_slice(exact_line).expect("exact event JSON");
+
     assert_eq!(exact_record["metadata_only"], false);
     assert_eq!(exact_record["event_type"], "output");
     assert_eq!(exact_record["event"]["type"], "output");
@@ -282,7 +287,6 @@ fn events_follow_resumes_filtered_durable_records_without_duplicates() {
         .filter(|record| return matches!(record.event, Event::Output { .. }))
         .map(|record| return record.seq)
         .collect::<Vec<_>>();
-
     let projected_sequences = projected
         .iter()
         .map(|value| return value["seq"].as_u64().expect("sequence"))
@@ -333,7 +337,6 @@ fn follow_test_marker(session: &Path, label: &str) -> u64 {
     let ControlPayload::Marked { event_seq, .. } = data else {
         panic!("unexpected marker response");
     };
-
     return event_seq;
 }
 
@@ -406,6 +409,7 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
     assert!(historical.status.success(), "{historical:?}");
 
     let first: serde_json::Value = serde_json::from_slice(&historical.stdout).expect("first event");
+
     assert_eq!(first["seq"], 0);
 
     let mut follower = StdCommand::new(env!("CARGO_BIN_EXE_termtrace"))
@@ -429,6 +433,7 @@ fn events_follow_recent_actor_cursor_delivers_markers_and_completed_transition()
         for line in BufReader::new(stdout).lines() {
             let value: serde_json::Value =
                 serde_json::from_str(&line.expect("follow line")).expect("projection");
+
             if sender.send(value).is_err() {
                 break;
             }
@@ -519,7 +524,6 @@ fn events_follow_rejects_self_hashed_suffix_before_publishing() {
     record.hash = hasher.finalize().to_hex().to_string();
     let mut changed = serde_json::to_vec(&record).expect("forged record");
     changed.push(b'\n');
-
     assert_eq!(changed.len(), line.len(), "overwrite without truncation");
 
     let mut writer = fs::OpenOptions::new()
@@ -650,7 +654,6 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("is incomplete"));
-
     assert!(matches!(
         index_session_with_options(&session, IndexOptions::default()),
         Err(termtrace_engine::Error::SessionIncomplete { .. })
@@ -768,7 +771,6 @@ fn marker_listing_distinguishes_each_repeated_label_occurrence() {
     let first_time = markers[0]["monotonic_ns"]
         .as_u64()
         .expect("first marker time");
-
     let selected = resolve_session_prefix_source_selection(
         &session,
         Some(first_seq + 1),

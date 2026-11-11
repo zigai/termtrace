@@ -157,6 +157,7 @@ impl SessionRegistry {
         }
 
         let mut completed_sessions = Vec::new();
+
         for item in fs::read_dir(&sessions).map_err(|source| {
             return Error::Filesystem {
                 path: sessions.clone(),
@@ -219,6 +220,7 @@ impl SessionRegistry {
             let linked = tmux_linked.is_some_and(|linked| {
                 return linked.contains(&canonical) || linked.contains(&session);
             });
+
             if protected || linked {
                 continue;
             }
@@ -248,6 +250,7 @@ impl SessionRegistry {
         {
             let over_quota = max_completed_bytes
                 .is_some_and(|limit| return report.completed_bytes_after_plan > limit);
+
             if u64::try_from(index).unwrap_or(u64::MAX) < keep_latest
                 || (completed > cutoff && !over_quota)
             {
@@ -326,7 +329,6 @@ impl SessionRegistry {
     pub fn reap_stale_aliases(&self, apply: bool) -> Result<Vec<String>> {
         let _lock = apply.then(|| return self.lock()).transpose()?;
         let (_, _, stale_aliases) = self.reap_and_resolve_protected_paths(apply)?;
-
         return Ok(stale_aliases);
     }
 

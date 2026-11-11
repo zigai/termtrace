@@ -113,7 +113,6 @@ pub(crate) fn run_validated(
 
     let mut stopped = false;
     let mut final_snapshot = None;
-
     for (index, step) in scenario.steps.iter().enumerate() {
         if !report.infrastructure_errors.is_empty() {
             break;
@@ -360,6 +359,7 @@ fn validate_replay_closure(session: &Path, steps: &[ScenarioStepResult]) -> Resu
             true,
         )
         .map_err(|error| return operation("observe asserted replay state", error))?;
+
         if observation.state_hash != *state_hash {
             return Err(invalid(format!(
                 "replay closure resolved asserted state hash `{state_hash}` as `{}`",
@@ -665,7 +665,6 @@ fn assert_timeline(session: &Path, assertion: &ScenarioTimelineAssertion) -> Res
 
         let mut count = 0_u64;
         let mut time = 0;
-
         while let Some(record) = cursor
             .next_record()
             .map_err(|error| return operation("read timeline assertion", error))?
@@ -777,7 +776,6 @@ mod tests {
 
         fn complete(&mut self, timeout: Duration) -> termtrace_service::Result<()> {
             self.complete_timeout = Some(timeout);
-
             return self.call(1, "completion");
         }
 
@@ -902,7 +900,6 @@ mod tests {
         // Exercise the same publication/merge path as run_validated. The missing
         // canonical fixture produces a new, optional publication warning.
         publish_report_failure(destination.clone(), &scenario, &mut report, None);
-
         assert_eq!(
             report.artifact_warnings,
             vec!["final screen unavailable", "event log unavailable"]

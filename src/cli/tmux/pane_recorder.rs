@@ -26,7 +26,6 @@ pub(super) fn run(request: PaneRunRequest) -> Result<ExitCode> {
         PaneLaunch::Unrecorded(command) => return Err(exec_unrecorded(command)).into_diagnostic(),
         PaneLaunch::Record(recording) => *recording,
     };
-
     return record_pane(recording);
 }
 
@@ -35,7 +34,6 @@ fn record_pane(mut recording: PaneRecording) -> Result<ExitCode> {
         inherited_geometry(recording.cell_width, recording.cell_height).into_diagnostic()?;
     recording.provenance.pane_width = geometry.cols;
     recording.provenance.pane_height = geometry.rows;
-
     let ghostty_config = recording.ghostty_config.as_deref();
     let ghostty_profile = match recording.profile_mode {
         GhosttyProfileMode::Off => None,

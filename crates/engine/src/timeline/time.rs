@@ -100,7 +100,6 @@ pub fn parse_time_offset_ns(value: &str) -> StdResult<u64, TimeOffsetError> {
             "time offset `{value}` requires a unit (ns, us, ms, s, m, or h)"
         ));
     })?;
-
     return parse_scaled_decimal(number, scale).map_err(|error| return error.in_value(value));
 }
 
@@ -189,6 +188,7 @@ fn parse_scaled_decimal(number: &str, scale: u64) -> StdResult<u64, TimeOffsetEr
         .ok_or_else(|| return TimeOffsetError::new("fraction is too precise"))?;
 
     let scaled = u128::from(numerator) * u128::from(scale);
+
     if scaled % u128::from(denominator) != 0 {
         return Err(TimeOffsetError::new(
             "fraction is more precise than one nanosecond",

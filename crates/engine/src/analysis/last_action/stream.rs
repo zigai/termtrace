@@ -106,7 +106,6 @@ pub fn analyze_session(session: &Path, broad_change_percent: u8) -> Result<LastA
 
     let mut tokens = TokenCursor::new(session, None)?;
     let mut first_action_token_id = None;
-
     while let Some(entry) = tokens.next()? {
         if let TimelineItem::VtToken { token } = entry.item
             && token
@@ -277,6 +276,7 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
         bytes_written: 0,
         error_code: None,
     };
+
     while let Some(row) = rows.next().map_err(index_error)? {
         let seq = u64::from_be_bytes(row.get::<_, [u8; 8]>(0).map_err(index_error)?);
         let operation: String = row.get(1).map_err(index_error)?;
@@ -313,6 +313,5 @@ fn last_input_action(session: &Path) -> Result<LastActionBoundary> {
     }
 
     action.atom_count = u32::try_from(action.operation_ids.len()).unwrap_or(u32::MAX);
-
     return Ok(action);
 }

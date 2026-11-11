@@ -321,7 +321,6 @@ impl SessionActor<'_> {
                         for step in 1..=step_count {
                             let drag_column =
                                 interpolate_cell(*column, *to_column, step, step_count);
-
                             let drag_row = interpolate_cell(*row, *to_row, step, step_count);
                             encoded.extend_from_slice(
                                 self.live
@@ -483,7 +482,6 @@ impl SessionActor<'_> {
                     } else {
                         "activation_text_concealed"
                     };
-
                     return Err(control_rejected(
                         code,
                         "activation requires a visible row-contained text match",

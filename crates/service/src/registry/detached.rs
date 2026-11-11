@@ -247,7 +247,6 @@ fn log_tail(log: &Path) -> Option<String> {
     file.take(LOG_TAIL_BYTES).read_to_end(&mut tail).ok()?;
     let tail = String::from_utf8_lossy(&tail);
     let tail = tail.trim();
-
     return (!tail.is_empty()).then(|| return tail.to_owned());
 }
 

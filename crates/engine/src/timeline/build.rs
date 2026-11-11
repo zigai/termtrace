@@ -312,6 +312,7 @@ impl IndexedTokenTimelineCursor {
                     source,
                 };
             })?;
+
             if read == 0 {
                 return Ok(None);
             }
@@ -528,6 +529,7 @@ fn locate_range_control_offset(
     };
 
     let mut offset = None;
+
     for line in open_seekable(&source_index_path, 0)?.lines() {
         let line = line.map_err(|source| {
             return Error::Filesystem {
@@ -543,6 +545,7 @@ fn locate_range_control_offset(
                 source,
             };
         })?;
+
         if entry.event_seq > last_event {
             break;
         }
@@ -568,6 +571,7 @@ fn locate_offset_checkpoint(
     };
 
     let mut candidate = None;
+
     for checkpoint in index.checkpoints()? {
         let mut rank = checkpoint.timeline_rank;
 
@@ -609,7 +613,6 @@ impl TimelinePageCollector {
     fn push(&mut self, entry: TimelineEntry) -> bool {
         if self.seen < self.offset {
             self.seen = self.seen.saturating_add(1);
-
             return true;
         }
 
@@ -618,12 +621,10 @@ impl TimelinePageCollector {
             #[cfg(test)]
             TEST_MAX_PAGE_ENTRIES.set(TEST_MAX_PAGE_ENTRIES.get().max(self.entries.len()));
             self.seen = self.seen.saturating_add(1);
-
             return true;
         }
 
         self.has_next = true;
-
         return false;
     }
 }
@@ -687,7 +688,6 @@ pub fn build_timeline(
                 Some(control_index_offset),
                 false,
             );
-
             while let Some(entry) = auxiliary.next()? {
                 if matches!(entry.item, TimelineItem::VtToken { .. }) {
                     entries.push(entry);
@@ -719,7 +719,6 @@ pub fn build_timeline(
 
     // Stable, so an effect stays ahead of the state with the same key.
     entries.sort_by_key(timeline_key);
-
     return Ok(entries);
 }
 
@@ -842,7 +841,6 @@ pub fn build_timeline_page(
         let Some(entry) = entry else {
             break;
         };
-
         if !collector.push(entry) {
             break;
         }

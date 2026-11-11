@@ -216,7 +216,6 @@ pub(super) fn format(terminal: sys::GhosttyTerminal, format: Format) -> Result<V
         selection: ptr::null(),
     };
     let formatter = Formatter::new(terminal, options)?;
-
     return formatter.output();
 }
 
@@ -230,7 +229,6 @@ impl Snapshot<'_> {
         check(operation, unsafe {
             sys::ghostty_render_state_get(*self.render, key, (&raw mut value).cast::<c_void>())
         })?;
-
         return Ok(value);
     }
 
@@ -246,7 +244,6 @@ impl Snapshot<'_> {
                 (&raw mut style).cast::<c_void>(),
             )
         })?;
-
         return decode_style(style);
     }
 
@@ -317,6 +314,7 @@ impl Snapshot<'_> {
 
     fn mode_state(&self) -> Result<ModeState> {
         const ANSI_MODES: &[u16] = &[2, 4, 12, 20];
+
         const DEC_MODES: &[u16] = &[
             1, 3, 4, 5, 6, 7, 8, 9, 12, 25, 40, 45, 47, 66, 67, 69, 1000, 1002, 1003, 1004, 1005,
             1006, 1007, 1015, 1016, 1035, 1036, 1039, 1045, 1047, 1048, 1049, 2004, 2026, 2027,
@@ -493,6 +491,7 @@ impl Snapshot<'_> {
 
                 // Partial dirtiness lets Ghostty skip clean rows, which keep their previous value.
                 let mut y = 0_u16;
+
                 while unsafe {
                     sys::ghostty_render_state_row_iterator_next_dirty(handles.row, &raw mut y)
                 } {
@@ -634,7 +633,6 @@ impl RenderIterators {
                 (&raw mut handles.row).cast::<c_void>(),
             )
         })?;
-
         return Ok(handles);
     }
 
@@ -694,6 +692,7 @@ impl RenderIterators {
         };
 
         let mut cells = Vec::with_capacity(usize::from(cols));
+
         for column in 0..cols {
             if !unsafe { sys::ghostty_render_state_row_cells_next(self.cells) } {
                 return Err(Error::GhosttyVt {
@@ -769,7 +768,6 @@ impl Formatter {
             )
         })?;
         output.truncate(length);
-
         return Ok(output);
     }
 }
@@ -789,7 +787,6 @@ fn row_get<T: Default>(
     check(operation, unsafe {
         sys::ghostty_render_state_row_get(row, key, (&raw mut value).cast::<c_void>())
     })?;
-
     return Ok(value);
 }
 
@@ -802,7 +799,6 @@ fn cell_get<T: Default>(
     check(operation, unsafe {
         sys::ghostty_render_state_row_cells_get(cells, key, (&raw mut value).cast::<c_void>())
     })?;
-
     return Ok(value);
 }
 
@@ -815,7 +811,6 @@ fn raw_row_get<T: Default>(
     check(operation, unsafe {
         sys::ghostty_row_get(row, key, (&raw mut value).cast::<c_void>())
     })?;
-
     return Ok(value);
 }
 
@@ -828,7 +823,6 @@ fn raw_cell_get<T: Default>(
     check(operation, unsafe {
         sys::ghostty_cell_get(cell, key, (&raw mut value).cast::<c_void>())
     })?;
-
     return Ok(value);
 }
 
@@ -878,7 +872,6 @@ fn read_wide_kind(cells: sys::GhosttyRenderStateRowCells) -> Result<WideKind> {
         "get cell wide kind",
         sys::GhosttyCellData_GHOSTTY_CELL_DATA_WIDE,
     )?;
-
     return decode_wide_kind(wide);
 }
 
@@ -1086,7 +1079,6 @@ pub(super) fn terminal_mode(
             (&raw mut mode).cast::<c_void>(),
         )
     })?;
-
     return Ok(mode.value);
 }
 
@@ -1103,6 +1095,7 @@ mod tests {
         terminal.write("界e\u{301}".as_bytes());
         terminal.write(b"\x1b[0m\x1b[2;3H\x1b[?2004h");
         let primary = terminal.snapshot().expect("primary snapshot");
+
         assert_eq!(primary.cols, 12);
         assert_eq!(primary.rows, 4);
         assert!(primary.modes.bracketed_paste);
@@ -1219,7 +1212,6 @@ mod tests {
     fn tracks_synchronized_output_and_resize() {
         let mut terminal = GhosttyVt::new(8, 2, 0).expect("create terminal");
         terminal.write(b"\x1b[?2026hhidden");
-
         assert!(
             terminal
                 .snapshot()
@@ -1229,7 +1221,6 @@ mod tests {
         );
 
         terminal.write(b"\x1b[?2026l");
-
         assert!(
             !terminal
                 .snapshot()
@@ -1251,11 +1242,13 @@ mod tests {
         Arc::make_mut(&mut edited.grid[0].cells)[0].grapheme = "x".into();
 
         let original = terminal.snapshot().expect("unchanged terminal snapshot");
+
         assert_eq!(original.grid[0].cells[0].grapheme, "a");
         assert_eq!(original.grid[0].cells[1].grapheme, "b");
 
         terminal.write(b"\x1b[Hc\x1b[?2004h");
         let updated = terminal.snapshot().expect("updated snapshot");
+
         assert_eq!(updated.grid[0].cells[0].grapheme, "c");
         assert!(updated.modes.bracketed_paste);
         assert_eq!(original.grid[0].cells[0].grapheme, "a");

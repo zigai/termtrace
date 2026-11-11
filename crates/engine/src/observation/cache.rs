@@ -220,7 +220,6 @@ fn publish_cached_checkpoint(
     let session = validated.root();
     let completion = validated.completion();
     let path = checkpoint_path(session, point, completion)?;
-
     if path.exists() {
         return Ok(());
     }
@@ -443,6 +442,7 @@ fn replay_cache_entries(directory: &Path) -> Result<Vec<ReplayCacheEntry>> {
                 source,
             };
         })?;
+
         if !metadata.is_file() {
             return Err(observation_error(
                 "replay checkpoint cache contains a non-regular member",

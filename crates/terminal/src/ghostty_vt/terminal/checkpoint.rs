@@ -114,7 +114,6 @@ fn encode_host_header(sequence: Sequence, flags: u8) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(HOST_HEADER_BYTES);
     bytes.extend_from_slice(&[state, flags]);
     bytes.extend_from_slice(&value.to_le_bytes());
-
     return bytes;
 }
 
@@ -187,7 +186,6 @@ fn continuation(terminal: sys::GhosttyTerminal) -> Result<Vec<u8>> {
         )
     })?;
     bytes.truncate(written);
-
     return Ok(bytes);
 }
 
@@ -282,7 +280,6 @@ unsafe extern "C" fn append_snapshot_bytes(
 
     let bytes = unsafe { &mut *userdata.cast::<Vec<u8>>() };
     bytes.extend_from_slice(unsafe { slice::from_raw_parts(data, len) });
-
     return true;
 }
 
@@ -313,7 +310,6 @@ mod tests {
             .encode_checkpoint()
             .expect("encode checkpoint")
             .expect("checkpoint available");
-
         return GhosttyVt::restore_checkpoint(&bytes, SCROLLBACK).expect("restore checkpoint");
     }
 
@@ -453,14 +449,12 @@ mod tests {
         let mut restored = restore(&original);
         original.write(b"\x9b\x81");
         restored.write(b"\x9b\x81");
-
         assert_eq!(content(&mut restored), content(&mut original));
 
         let mut plain = engine(10, 2);
         plain.write(b"\x07");
         let mut restored = restore(&plain);
         restored.write(b"\x07");
-
         assert!(restored.take_effects().is_empty());
     }
 
@@ -510,7 +504,6 @@ mod tests {
         }
 
         let (state, _) = content(&mut restored);
-
         assert_eq!(content(&mut restored), content(&mut original));
         assert_eq!(state.colors.foreground, Rgb { r: 1, g: 2, b: 3 });
         assert_eq!(state.colors.background, Rgb { r: 4, g: 5, b: 6 });
@@ -548,13 +541,11 @@ mod tests {
 
         let mut padded = bytes.clone();
         padded.push(0);
-
         assert!(GhosttyVt::restore_checkpoint(&padded, SCROLLBACK).is_err());
         assert!(GhosttyVt::restore_checkpoint(&bytes[..3], SCROLLBACK).is_err());
 
         let mut bad_state = bytes.clone();
         bad_state[0] = 9;
-
         assert!(GhosttyVt::restore_checkpoint(&bad_state, SCROLLBACK).is_err());
     }
 }

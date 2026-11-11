@@ -75,7 +75,6 @@ fn shared_fixture_matches_through_every_public_sdk_facade() {
 
     let temporary = TempDir::new().expect("temporary directory");
     let rust = rust_summary(&fixture, temporary.path());
-
     let expected = SdkSummary {
         state_hash_valid: true,
         atom_count: fixture.expected_atom_count,
@@ -85,7 +84,6 @@ fn shared_fixture_matches_through_every_public_sdk_facade() {
         stable_quality: true,
         actor_boundaries: true,
     };
-
     assert_eq!(rust, expected, "Rust conformance outcomes");
 }
 
@@ -186,7 +184,6 @@ fn marker_labels(session: &termtrace_sdk::Session) -> termtrace_sdk::Result<Vec<
             let Some(EventMetadata::Marker { label, .. }) = event.metadata else {
                 return None;
             };
-
             return Some(label);
         })
         .collect());
@@ -307,6 +304,7 @@ fn send_reports_the_failed_step_after_applying_earlier_ones() {
             ..SendRequest::default()
         })
         .expect_err("a blank marker label is rejected");
+
     assert_eq!(failure.step, 1);
     assert_eq!(failure.error.code(), "invalid_marker");
     assert_eq!(failure.error.effect(), MutationEffect::NotApplied);
@@ -332,7 +330,6 @@ fn start_delayed_reaction(
         ]))?;
 
     wait_for_output(session.path(), b"READY", Duration::from_secs(5))?;
-
     return Ok(session);
 }
 
@@ -823,7 +820,6 @@ impl ErrorFacts {
 fn interaction_fixture() -> InteractionFixture {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("fixtures/conformance/actions/interaction-control.json");
-
     return serde_json::from_slice(&fs_err::read(&path).expect("interaction fixture"))
         .expect("interaction fixture JSON");
 }
@@ -837,7 +833,6 @@ fn hex_bytes(hex: &str) -> Vec<u8> {
         .step_by(2)
         .map(|index| {
             let pair = hex.get(index..index + 2).expect("hex pair");
-
             return u8::from_str_radix(pair, 16).expect("hex byte");
         })
         .collect();
@@ -857,7 +852,6 @@ fn start_fixture(
     let session = terminal.start(spec).expect("launch interaction fixture");
     wait_for_output(session.path(), ready.as_bytes(), Duration::from_secs(5))
         .expect("interaction fixture ready");
-
     return session;
 }
 
@@ -989,6 +983,7 @@ fn raw_bytes_reach_the_child_and_canonical_events_exactly() {
     let result = session
         .act(ActRequest::new().bytes(hex_bytes(&fixture.raw_bytes_hex)))
         .expect("raw byte action");
+
     assert_eq!(result.input.bytes_written, 4);
     wait_for_frame_text(&session, &fixture.raw_bytes_echo);
 
@@ -1139,6 +1134,7 @@ fn session_controls_resize_signal_and_mark_the_live_session() {
     let marked = session
         .mark("checkpoint", &MutationGuard::default())
         .expect("mark");
+
     assert_eq!(marked.label, "checkpoint");
     assert_eq!(
         marker_labels(&session).expect("read markers"),

@@ -57,12 +57,14 @@ fn detailed<T: serde::Serialize>(message: String, details: T, frame: LastFrame) 
             .to_owned(),
         Err(error) => return napi::Error::from_reason(error.to_string()),
     };
+
     #[derive(serde::Serialize)]
     #[serde(untagged)]
     enum ErrorFrame {
         NotCarried {},
         Carried { frame_json: Option<String> },
     }
+
     let frame = match frame {
         LastFrame::NotCarried => ErrorFrame::NotCarried {},
         LastFrame::Carried(frame) => ErrorFrame::Carried {
@@ -82,7 +84,6 @@ fn detailed<T: serde::Serialize>(message: String, details: T, frame: LastFrame) 
 /// Build a regex specification from a Rust regex syntax string.
 pub(crate) fn regex_spec(pattern: Arg<String>) -> napi::Result<LocatorSpec> {
     let source = pattern.0;
-
     return LocatorSpec::native_regex(source).map_err(|error| return query_error(&error));
 }
 

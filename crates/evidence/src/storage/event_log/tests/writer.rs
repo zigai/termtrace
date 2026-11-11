@@ -126,7 +126,6 @@ fn observation_time_survives_delayed_append_and_is_integrity_bound() {
         ),
     )
     .expect("tamper");
-
     assert!(
         EventLog::read(&path).is_err(),
         "observation time is covered by the event hash"
@@ -158,7 +157,6 @@ fn distinguishes_observed_and_durable_boundaries() {
             data: ByteString::from(&b"x"[..]),
         })
         .expect("buffer output");
-
     assert_eq!(writer.observed_boundary().next_event_seq, 1);
     assert_eq!(writer.observed_boundary().output_bytes, 1);
     assert_eq!(writer.durable_boundary().next_event_seq, 0);
@@ -170,7 +168,6 @@ fn distinguishes_observed_and_durable_boundaries() {
             label: "flush".to_owned(),
         })
         .expect("durable marker");
-
     assert_eq!(writer.observed_boundary(), writer.durable_boundary());
     assert_eq!(writer.durable_boundary().next_event_seq, 2);
     assert_eq!(writer.durable_boundary().output_bytes, 1);
@@ -255,7 +252,6 @@ fn bounded_policy_flushes_an_idle_pending_prefix() {
     writer
         .await_durable()
         .expect("requested synchronization completes");
-
     assert_eq!(writer.durable_boundary(), writer.observed_boundary());
 
     let record = writer.durability_record();
@@ -295,14 +291,12 @@ fn deferred_events_become_durable_with_the_next_synchronized_append() {
     writer
         .append_deferred(marker("deferred"))
         .expect("deferred marker");
-
     assert_eq!(writer.observed_boundary().next_event_seq, 1);
     assert_eq!(writer.durable_boundary().next_event_seq, 0);
 
     writer
         .append(marker("synchronized"))
         .expect("synchronized marker");
-
     assert_eq!(writer.durable_boundary(), writer.observed_boundary());
     assert_eq!(writer.durable_boundary().next_event_seq, 2);
 }
@@ -322,7 +316,6 @@ fn deferred_events_follow_strict_and_bounded_policies() {
     strict
         .append_deferred(marker("strict"))
         .expect("strict deferred marker");
-
     assert_eq!(strict.durable_boundary().next_event_seq, 1);
 
     let mut bounded = policy_writer(
@@ -337,7 +330,6 @@ fn deferred_events_follow_strict_and_bounded_policies() {
     bounded
         .append_deferred(marker("bounded"))
         .expect("bounded deferred marker");
-
     assert_eq!(bounded.durable_boundary().next_event_seq, 0);
 
     thread::sleep(Duration::from_millis(5));
@@ -347,7 +339,6 @@ fn deferred_events_follow_strict_and_bounded_policies() {
     bounded
         .await_durable()
         .expect("requested synchronization completes");
-
     assert_eq!(bounded.durable_boundary(), bounded.observed_boundary());
 }
 
@@ -356,6 +347,7 @@ fn slow_synchronization_delays_neither_output_timestamps_nor_durable_waits() {
     const DELAY: Duration = Duration::from_millis(400);
 
     let temporary = TempDir::new().expect("temporary directory");
+
     SYNC_DELAY.set(DELAY);
 
     let mut writer = policy_writer(
@@ -397,6 +389,7 @@ fn slow_synchronization_delays_neither_output_timestamps_nor_durable_waits() {
     reader.join().expect("reader thread");
 
     let started = Instant::now();
+
     writer.append(marker("durable")).expect("durable marker");
 
     assert!(
@@ -430,6 +423,7 @@ fn idle_bounded_flush_keeps_polling_in_flight_and_reports_storage_failure() {
     const DELAY: Duration = Duration::from_millis(400);
 
     let temporary = TempDir::new().expect("temporary directory");
+
     SYNC_DELAY.set(DELAY);
 
     let mut writer = policy_writer(
@@ -467,7 +461,6 @@ fn idle_bounded_flush_keeps_polling_in_flight_and_reports_storage_failure() {
     thread::sleep(in_flight_deadline.saturating_duration_since(Instant::now()));
 
     writer.observe_durable();
-
     assert_eq!(writer.durable_boundary(), durable);
     assert!(!writer
         .flush_due()
@@ -529,6 +522,7 @@ fn flush_due_reports_storage_failure_even_without_a_deadline() {
     ] {
         let throughput = policy.mode == DurabilityMode::Throughput;
         let mut writer = policy_writer(&temporary, name, policy);
+
         if throughput {
             // This exceeds the encoded buffer threshold and queues Write without Sync.
             writer
@@ -598,7 +592,6 @@ fn durable_boundary_moves_only_when_the_owner_adopts_completed_synchronization()
     assert!(writer.flush_deadline().is_some());
 
     writer.observe_durable();
-
     assert_eq!(writer.durable_boundary(), writer.observed_boundary());
     assert_eq!(writer.flush_deadline(), None);
 }

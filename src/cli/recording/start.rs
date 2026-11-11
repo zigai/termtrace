@@ -499,7 +499,6 @@ pub(super) fn record_arguments(
 
     arguments.push(OsString::from("--"));
     arguments.extend(recording.command.iter().cloned());
-
     return arguments;
 }
 

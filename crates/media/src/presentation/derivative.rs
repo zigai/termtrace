@@ -79,6 +79,7 @@ pub fn verify_source_selection(
     kind: ArtifactSourceKind,
 ) -> Result<ArtifactSourceRef> {
     let completion = validate_completed_session(session)?;
+
     validate_planned_source(&plan.source)?;
     match (&plan.source, kind) {
         (
@@ -134,8 +135,8 @@ pub fn verify_source_selection(
 
             let origin =
                 super::planning::native_capture_clock_origin(&manifest, &canonical, directory)?;
-
             let frames = super::planning::native_cfr_frame_count(&manifest)?;
+
             for clip in &plan.clips {
                 let elapsed_start = u128::try_from(
                     (i128::from(clip.source_range.start_monotonic_ns) - origin).max(0),
@@ -157,6 +158,7 @@ pub fn verify_source_selection(
                 let exact_native_boundary = (elapsed_end * u128::from(plan.fps))
                     .abs_diff(u128::from(clip.source_end_frame) * 1_000_000_000)
                     <= u128::from(plan.fps);
+
                 if clip.source_start_frame != start
                     || (clip.source_end_frame != end && !exact_native_boundary)
                     || clip.source_end_frame > frames
@@ -296,6 +298,7 @@ pub fn export_derivatives_with_cancel(
                 || plan.clips.iter().any(|c| return c.caption.is_some())
                 || plan.layout.branding.is_some(),
         );
+
         if capability.status != CapabilityStatus::Ready {
             return Err(Error::CapabilityBlocked {
                 id: capability.id,
@@ -395,6 +398,7 @@ fn export_staged(
     json(&staging.join("composition-probe.json"), &composed_probe)?;
 
     let mut outputs = Vec::new();
+
     for delivery in &options.formats {
         let filename = delivery.filename();
         match delivery {
@@ -536,7 +540,6 @@ fn export_staged(
 
     let members = collect_artifact_members(staging)?;
     let mut sdk_members: Vec<SdkArtifactMember> = members.iter().cloned().map(Into::into).collect();
-
     for member in &mut sdk_members {
         match member.path.as_str() {
             "presentation.gif" => {
@@ -616,7 +619,6 @@ fn export_staged(
     };
 
     result.validate().map_err(plan_error)?;
-
     return Ok(result);
 }
 
@@ -653,14 +655,12 @@ fn encode(
     )?;
 
     commands.push(args);
-
     return Ok(());
 }
 
 fn write_schedule(staging: &Path, plan: &PresentationPlan) -> Result<()> {
     let path = staging.join("gif-timing.jsonl");
     let mut writer = secure_writer(&path)?;
-
     for i in 0..plan.output_frame_count {
         let start = gif_boundary_centiseconds(i, plan.fps).map_err(plan_error)?;
         let end = gif_boundary_centiseconds(i + 1, plan.fps).map_err(plan_error)?;
@@ -747,6 +747,7 @@ fn verify_webm_timestamps(
         .map_err(|_error| return plan_error("malformed WebM time base denominator"))?;
 
     let tick = num / den;
+
     if !tick.is_finite() || tick <= 0.0 || tick > 1.0 / f64::from(plan.fps) {
         return Err(plan_error("WebM time base cannot represent requested FPS"));
     }
@@ -779,6 +780,7 @@ fn verify_webm_timestamps(
         BufReader::new(fs_err::File::open(&path).map_err(|e| return filesystem(&path, e))?);
 
     let mut count = 0u64;
+
     for line in reader.lines() {
         let line = line.map_err(|e| return filesystem(&path, e))?;
         if line.trim().is_empty() {
@@ -789,6 +791,7 @@ fn verify_webm_timestamps(
             .trim()
             .parse()
             .map_err(|_error| return plan_error("malformed WebM frame timestamp"))?;
+
         if !pts.is_finite() || (pts - count as f64 / f64::from(plan.fps)).abs() > tick + 0.000_001 {
             return Err(plan_error("WebM frame timestamp exceeds muxer tick error"));
         }
@@ -826,20 +829,19 @@ fn verify_gif(path: &Path, plan: &PresentationPlan, looping: GifLoop) -> Result<
         reader
             .read_exact(&mut b)
             .map_err(|e| return filesystem(path, e))?;
-
         return Ok(b);
     };
-    let header = read(13)?;
 
+    let header = read(13)?;
     if &header[..6] != b"GIF89a" || header[10] & 0x80 == 0 || header[10] & 7 != 7 {
         return Err(plan_error("GIF missing global palette"));
     }
 
     let palette = read(3 * (1usize << ((header[10] & 7) + 1)))?;
+
     let mut count = 0u64;
     let mut delay = None;
     let mut loop_found = false;
-
     loop {
         match read(1)?[0] {
             0x3b => break,
@@ -859,7 +861,6 @@ fn verify_gif(path: &Path, plan: &PresentationPlan, looping: GifLoop) -> Result<
                 } else {
                     let mut first = true;
                     let mut netscape = false;
-
                     loop {
                         let n = usize::from(read(1)?[0]);
                         if n == 0 {
@@ -1065,7 +1066,6 @@ mod encoder_tests {
             let outcome = export_derivatives(&plan, &session, &dest, &options).unwrap();
             outcome.validate().unwrap();
             verify_derivative_artifact(&dest, &outcome).unwrap();
-
             assert_eq!(
                 outcome.provenance,
                 ArtifactProvenance::PresentationOutput {
@@ -1088,7 +1088,6 @@ mod encoder_tests {
 
             let mp4 = temp.path().join(format!("mp4-{fps}"));
             super::super::export(&plan, &mp4, ArtifactSourceKind::SemanticRendering).unwrap();
-
             assert_eq!(
                 fs_err::read(dest.join("presentation-map.jsonl")).unwrap(),
                 fs_err::read(mp4.join("presentation-map.jsonl")).unwrap()
@@ -1293,7 +1292,9 @@ mod failure_tests {
         fs_err::write(staging.join("payload"), b"payload").unwrap();
 
         fs_err::set_permissions(&parent, Permissions::from_mode(0o500)).unwrap();
+
         let cleanup = cleanup_staging(&staging);
+
         fs_err::set_permissions(&parent, Permissions::from_mode(0o700)).unwrap();
 
         assert!(
@@ -1351,7 +1352,6 @@ mod mapping_pixel_tests {
                 .spawn()
                 .unwrap();
             let mut input = child.stdin.take().unwrap();
-
             for i in 0u8..12 {
                 input.write_all(&vec![i * 10; 16 * 16 * 3]).unwrap();
             }
@@ -1493,6 +1493,7 @@ pub fn verify_derivative_artifact(
     }
 
     let manifest_path = directory.join(&result.manifest.path);
+
     if result.manifest.path != "manifest.json"
         || hash_file(&manifest_path)? != result.manifest.blake3
     {
@@ -1619,6 +1620,7 @@ mod native_encoder_tests {
             .into();
 
         index_session_for_video(&session, 30).unwrap();
+
         let capture_directory = temp.path().join("replay-pixels");
         let (target, geometry_solver) = native_capture_target(&helper, &session, None).unwrap();
         capture(
@@ -1681,7 +1683,6 @@ mod native_encoder_tests {
         let expected_authored_hash = blake3::hash(&serde_json::to_vec(&authored_identity).unwrap())
             .to_hex()
             .to_string();
-
         let native_ordinal_plan = plan_with_capture_directory(
             &session,
             &authored_native,
@@ -1806,7 +1807,6 @@ mod native_encoder_tests {
         json(&temp.path().join("result.json"), &result).unwrap();
         let mp4 = temp.path().join("mp4");
         export(&plan, &mp4, ArtifactSourceKind::NativeReplay).unwrap();
-
         assert_eq!(
             fs_err::read(directory.join("presentation-map.jsonl")).unwrap(),
             fs_err::read(mp4.join("presentation-map.jsonl")).unwrap()
@@ -1861,13 +1861,13 @@ mod native_encoder_tests {
         }
 
         json(&temp.path().join("decoded-color-errors.json"), &metrics).unwrap();
+
         // One-frame encodes and explicit final holds retain every opaque frame.
         let mut single = plan.clone();
         single.clips.truncate(1);
         single.clips[0].source_end_frame = single.clips[0].source_start_frame + 1;
         single.clips[0].source_range.end_monotonic_ns =
             single.clips[0].source_range.start_monotonic_ns + 1;
-
         single.clips[0].speed = RationalSpeed::default();
         single.clips[0].retimed_frame_count = 1;
 
@@ -1909,7 +1909,6 @@ mod native_encoder_tests {
         verify_derivative_artifact(&race, &winner).unwrap();
 
         verify_artifact_members(&capture_directory, &capture_members).unwrap();
-
         assert_eq!(
             hash_file(&capture_directory.join("manifest.json")).unwrap(),
             manifest_hash

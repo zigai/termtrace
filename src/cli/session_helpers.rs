@@ -82,7 +82,6 @@ pub(super) fn resolve_cli_range(
             None
         }
     };
-
     return selection_bounds(resolve_session_prefix_source_selection(
         session,
         live_event_count,

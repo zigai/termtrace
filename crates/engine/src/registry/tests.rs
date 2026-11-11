@@ -26,7 +26,6 @@ fn registry_rejects_symlink_entries_without_following_them() {
     let target = temporary.path().join("target");
     fs_err::write(&target, b"{}").expect("target");
     symlink(&target, registry.entry_path("demo")).expect("symlink");
-
     assert!(registry.resolve("demo").is_err());
 }
 
@@ -44,8 +43,8 @@ fn reservation_excludes_concurrent_owners_and_promotes_only_the_winner() {
     fs_err::create_dir(&sessions).expect("sessions directory");
 
     let barrier = Arc::new(Barrier::new(3));
-
     let mut contenders = Vec::new();
+
     for name in ["first", "second"] {
         let registry = Arc::clone(&registry);
         let barrier = Arc::clone(&barrier);
@@ -83,7 +82,6 @@ fn reservation_excludes_concurrent_owners_and_promotes_only_the_winner() {
         .into_iter()
         .find_map(Result::ok)
         .expect("winning reservation");
-
     let reservation_record: AliasReservation = serde_json::from_slice(
         &fs_err::read(registry.entry_path("demo")).expect("reservation record"),
     )
@@ -98,7 +96,6 @@ fn reservation_excludes_concurrent_owners_and_promotes_only_the_winner() {
 
     let mut wrong_owner = reservation.clone();
     wrong_owner.owner_token = Uuid::now_v7();
-
     assert!(registry.release(&wrong_owner).is_err());
 
     record_fixture(reservation.session_path());
@@ -189,6 +186,5 @@ fn record_fixture(output_directory: PathBuf) -> PathBuf {
         resource_limits: ResourceLimits::default(),
     })
     .expect("record fixture");
-
     return output_directory;
 }

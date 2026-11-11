@@ -42,7 +42,6 @@ fn draining_since(start: Instant) -> Termination {
         status: exited(),
         at: start,
     });
-
     return termination;
 }
 
@@ -110,7 +109,6 @@ fn output_close_during_drain_settles_without_killing() {
     let start = Instant::now();
     let mut termination = draining_since(start);
     termination.observe(Fact::OutputClosed);
-
     assert!(termination.output_closed());
     assert_eq!(
         termination.step(tick(start + 5 * MS)),
@@ -123,7 +121,6 @@ fn exit_after_output_closed_skips_draining() {
     let start = Instant::now();
     let mut termination = Termination::new();
     termination.observe(Fact::OutputClosed);
-
     assert!(termination.output_closed());
     assert!(!termination.child_exited());
     assert!(termination.step(tick(start)).is_empty());
@@ -132,7 +129,6 @@ fn exit_after_output_closed_skips_draining() {
         status: exited(),
         at: start,
     });
-
     assert!(termination.exit_status().is_some());
     assert_eq!(
         termination.step(tick(start + MS)),
@@ -149,7 +145,6 @@ fn closing_waits_for_the_input_sequence_to_drain() {
         input_sequence_pending: true,
         ..tick(start + MS)
     };
-
     assert!(termination.step(pending).is_empty());
     assert!(termination.step(pending).is_empty());
     assert_eq!(
@@ -213,7 +208,6 @@ fn runaway_output_force_kills_before_the_grace_expires() {
         limit: 100,
         at: start,
     });
-
     assert!(termination
         .step(Tick {
             output_bytes: 8291,
@@ -237,7 +231,6 @@ fn runaway_output_force_kills_before_the_grace_expires() {
         limit: 100_000,
         at: start,
     });
-
     assert!(large
         .step(Tick {
             output_bytes: 199_999,
@@ -280,7 +273,6 @@ fn forwarded_signal_force_kills_after_its_grace() {
     termination.observe(Fact::SignalForwarded {
         at: start + 1000 * MS,
     });
-
     assert_eq!(
         termination.signal_kill_deadline(),
         Some(start + HOST_SIGNAL_GRACE_PERIOD)
@@ -306,7 +298,6 @@ fn child_exit_cancels_the_signal_escalation_but_later_signals_rearm_it() {
         status: exited(),
         at: start + MS,
     });
-
     assert_eq!(termination.signal_kill_deadline(), None);
 
     termination.observe(Fact::SignalForwarded { at: start + 2 * MS });
@@ -314,7 +305,6 @@ fn child_exit_cancels_the_signal_escalation_but_later_signals_rearm_it() {
         input_sequence_pending: true,
         ..tick(start + 2002 * MS)
     };
-
     assert_eq!(
         termination.step(pending),
         force_kill(
@@ -334,7 +324,6 @@ fn resource_escalation_wins_over_a_due_signal_and_the_group_is_killed_once() {
         limit: 10,
         at: start + 1900 * MS,
     });
-
     assert_eq!(
         termination.step(tick(start + 3000 * MS)),
         force_kill(
@@ -352,7 +341,6 @@ fn resource_escalation_wins_over_a_due_signal_and_the_group_is_killed_once() {
         limit: 10,
         at: start + 9000 * MS,
     });
-
     assert!(termination.step(tick(start + 20_000 * MS)).is_empty());
 }
 
@@ -365,14 +353,12 @@ fn escalation_kill_before_exit_makes_drain_expiry_fatal() {
         limit: 10,
         at: start,
     });
-
     assert_eq!(termination.step(tick(start + 250 * MS)).len(), 2);
 
     termination.observe(Fact::ChildExited {
         status: exited(),
         at: start + 260 * MS,
     });
-
     assert!(termination.step(tick(start + 509 * MS)).is_empty());
     assert_eq!(termination.step(tick(start + 510 * MS)), drain_failure());
 }
@@ -391,12 +377,10 @@ fn escalation_and_drain_expiry_in_one_tick_fail_after_the_single_kill() {
         status: exited(),
         at: start,
     });
-
     let mut expected = force_kill(
         "output_budget_force_kill",
         "child did not exit after output-budget termination; process group was killed",
     );
     expected.extend(drain_failure());
-
     assert_eq!(termination.step(tick(start + 250 * MS)), expected);
 }

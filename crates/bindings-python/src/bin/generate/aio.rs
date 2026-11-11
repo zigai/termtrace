@@ -28,8 +28,10 @@ const WRAPPED: [&str; 17] = [
     "Termtrace",
     "Tmux",
 ];
+
 // Hand-written base class providing special behavior, per wrapped class.
 const BASES: [(&str, &str); 2] = [("Locator", "LocatorBase"), ("Recording", "RecordingBase")];
+
 // Methods that run on the calling thread because they never block.
 const IMMEDIATE: [(&str, &[&str]); 9] = [
     ("ActionBuilder", &["*"]),
@@ -98,6 +100,7 @@ const IMMEDIATE: [(&str, &[&str]); 9] = [
         ],
     ),
 ];
+
 // Mutations keep running after a cancelled await and are tracked until they return.
 const MUTATIONS: [(&str, &[&str]); 5] = [
     ("ActionBuilder", &["run", "execute"]),
@@ -123,11 +126,13 @@ const MUTATIONS: [(&str, &[&str]); 5] = [
     ),
     ("Session", &["mark", "resize", "send", "signal"]),
 ];
+
 // Launches force-close a recording that starts after its await was cancelled.
 const LAUNCHES: [(&str, &[&str]); 1] = [("Termtrace", &["launch", "record"])];
 // Wrappers whose mutations belong to the recording or session that created them.
 const CHILDREN: [&str; 2] = ["ActionBuilder", "Pointer"];
 const SKIPPED: [&str; 5] = ["__enter__", "__exit__", "__repr__", "__new__", "__init__"];
+
 const HEADER: [&str; 29] = [
     r#""""Asynchronous Termtrace wrappers. Generated from the native stub; run `just generate`.""""#,
     "",
@@ -242,6 +247,7 @@ impl Source<'_> {
 
     fn parameter(&self, argument: &ast::ArgWithDefault) -> Result<String, Failure> {
         let mut text = argument.def.arg.to_string();
+
         if let Some(annotation) = &argument.def.annotation {
             text = format!("{text}: {}", self.annotation(Some(annotation))?);
         }
@@ -291,7 +297,6 @@ fn returned(expr: Option<&Expr>) -> Option<String> {
     let Some(Expr::Name(name)) = expr else {
         return None;
     };
-
     return WRAPPED
         .contains(&name.id.as_str())
         .then(|| return name.id.to_string());
@@ -314,7 +319,6 @@ fn docstring_text(body: &[Stmt]) -> Option<String> {
     let Constant::Str(text) = &constant.value else {
         return None;
     };
-
     return Some(clean_docstring(text));
 }
 
@@ -372,7 +376,6 @@ fn docstring(function: &StmtFunctionDef, indent: &str) -> Vec<String> {
             .map(|line| return format!("{indent}{line}").trim_end().to_owned()),
     );
     out.push(format!("{indent}\"\"\""));
-
     return out;
 }
 
@@ -399,6 +402,7 @@ fn method(
     let target = target.as_deref();
 
     let call = format!("self._sync.{name}({})", forwarded.join(", "));
+
     let mut lines = Vec::new();
 
     if decorated(function, "property") {
@@ -409,7 +413,6 @@ fn method(
             "        return {}",
             wrap(&format!("self._sync.{name}"), target)
         ));
-
         return Ok(lines);
     }
 
@@ -430,7 +433,6 @@ fn method(
         lines.push(format!(
             "        return offload_mutation(self._pending, lambda: {call})"
         ));
-
         return Ok(lines);
     }
 
@@ -571,8 +573,8 @@ fn collect_functions(body: &[Stmt], names: &mut BTreeSet<String>) {
 
 fn base_methods(runtime: &str) -> Result<BTreeMap<String, BTreeSet<String>>, Failure> {
     let module = ast::Suite::parse(runtime, "_async.py")?;
-    let mut methods = BTreeMap::new();
 
+    let mut methods = BTreeMap::new();
     for statement in &module {
         if let Stmt::ClassDef(class) = statement {
             let mut names = BTreeSet::new();
@@ -593,7 +595,6 @@ fn generate(stub: &str, runtime: &str) -> Result<String, Failure> {
             let Stmt::ClassDef(class) = statement else {
                 return None;
             };
-
             return Some((class.name.to_string(), class));
         })
         .collect::<BTreeMap<String, &StmtClassDef>>();
@@ -623,7 +624,6 @@ fn generate(stub: &str, runtime: &str) -> Result<String, Failure> {
                 let Stmt::FunctionDef(function) = statement else {
                     return None;
                 };
-
                 return Some(function);
             })
             .collect::<Vec<_>>();
@@ -659,6 +659,7 @@ fn generate(stub: &str, runtime: &str) -> Result<String, Failure> {
         };
         for function in functions {
             let name = function.name.as_str();
+
             if excluded.contains(name)
                 || SKIPPED.contains(&name)
                 || decorated(function, "staticmethod")

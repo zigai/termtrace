@@ -103,7 +103,6 @@ mod tests {
         let shared = directory.path().join("shared.lock");
         fs::write(&shared, b"").expect("create");
         fs::set_permissions(&shared, fs::Permissions::from_mode(0o644)).expect("chmod");
-
         assert_eq!(
             ExclusiveLock::acquire(&shared).expect_err("shared").kind(),
             ErrorKind::PermissionDenied
@@ -111,7 +110,6 @@ mod tests {
 
         let linked = directory.path().join("linked.lock");
         symlink(&shared, &linked).expect("symlink");
-
         assert!(ExclusiveLock::try_acquire(&linked).is_err());
     }
 }

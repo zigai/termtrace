@@ -60,6 +60,7 @@ pub fn export_to_writer(
     let path = display_path.as_ref();
     let log = EventLogSummary::read(SessionLayout::new(session).event_log())?;
     let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
+
     write_line(
         &mut writer,
         &CastHeader {
@@ -81,6 +82,7 @@ pub fn export_to_writer(
     let mut input_bytes = Vec::new();
 
     let mut seconds = 0.0;
+
     while let Some(record) = cursor.next_record()? {
         seconds = Duration::from_nanos(record.monotonic_ns).as_secs_f64();
 

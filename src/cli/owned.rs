@@ -34,7 +34,6 @@ impl Drop for Signals {
 pub(super) fn run(arguments: OwnedProcessArgs) -> Result<ExitCode> {
     let cancelled = Arc::new(AtomicBool::new(false));
     let mut signals = Signals(Vec::new());
-
     for signal in [SIGHUP, SIGINT, SIGTERM] {
         signals
             .0

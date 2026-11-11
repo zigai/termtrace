@@ -60,7 +60,6 @@ impl PrivateTmux {
         fs::create_dir_all(&tmux_tmpdir).expect("create isolated tmux socket root");
         fs::set_permissions(&tmux_tmpdir, Permissions::from_mode(0o700))
             .expect("secure isolated tmux socket root");
-
         return tmux_tmpdir;
     }
 
@@ -207,7 +206,6 @@ impl PrivateTmux {
         command.args(["-L", self.socket.as_str()]);
         command.env_remove("TMUX");
         command.env("TMUX_TMPDIR", &self.tmux_tmpdir);
-
         return command;
     }
 
@@ -238,6 +236,7 @@ impl PrivateTmux {
                 .expect("query pane recording");
 
             let value = trim_newline(output.stdout);
+
             if output.status.success() && !value.is_empty() {
                 return PathBuf::from(OsString::from_vec(value));
             }
@@ -273,6 +272,7 @@ impl PrivateTmux {
             );
 
             let status = compact_json_line(&output.stdout);
+
             if predicate(&status) {
                 return status;
             }
@@ -312,6 +312,7 @@ impl PrivateTmux {
                     .expect("query pane PID")
                     .stdout,
             );
+
             if self.pane_option(pane, option) == pid {
                 return;
             }
@@ -432,6 +433,7 @@ fn wait_for_tmux_server_exit(server_pid: u64) {
             .args(["-0", server_pid.as_str()])
             .output()
             .expect("probe original tmux server PID");
+
         if !output.status.success() {
             return;
         }
@@ -464,7 +466,6 @@ impl Drop for PrivateTmux {
 fn termtrace_in(tmux_tmpdir: &Path) -> Command {
     let mut command = Command::cargo_bin("termtrace").expect("binary should build");
     command.env("TMUX_TMPDIR", tmux_tmpdir);
-
     return command;
 }
 

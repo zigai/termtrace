@@ -62,7 +62,6 @@ async fn connect_with(binary: &Path, state: &Path) -> Connection {
     let mut command = TokioCommand::new(binary);
     command.arg("mcp").env("TERMTRACE_STATE_DIR", state);
     let transport = TokioChildProcess::new(command).expect("spawn MCP server");
-
     return Client::default()
         .serve(transport)
         .await
@@ -77,7 +76,6 @@ fn arguments(value: Value) -> Map<String, Value> {
     let Value::Object(arguments) = value else {
         panic!("tool arguments must be an object");
     };
-
     return arguments;
 }
 
@@ -193,7 +191,6 @@ fn cli_screen(state: &Path, name: &str) -> Value {
         .get_output()
         .stdout
         .clone();
-
     return serde_json::from_slice(&output).expect("screen JSON");
 }
 
@@ -574,7 +571,6 @@ fn handshake_clients_are_served_until_standard_input_closes() {
         .spawn()
         .expect("spawn MCP server");
     let mut input = server.stdin.take().expect("server stdin");
-
     for message in [
         json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "protocolVersion": "2025-11-25",
@@ -603,6 +599,7 @@ fn handshake_clients_are_served_until_standard_input_closes() {
     assert_eq!(tools, Some(9));
 
     drop(input);
+
     let deadline = Instant::now() + Duration::from_secs(10);
     let status = loop {
         if let Some(status) = server.try_wait().expect("poll server") {

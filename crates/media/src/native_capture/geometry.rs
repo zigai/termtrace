@@ -253,7 +253,6 @@ pub(super) fn session_canvas(session: &Path, target: CaptureTarget) -> Result<Ca
     let mut largest = initial;
     let mut intents = HashMap::new();
     let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
-
     while let Some(record) = cursor.next_record()? {
         match record.event {
             Event::ResizeIntent {
@@ -599,7 +598,6 @@ fn probe_staged(
     xvfb.terminate();
 
     validate_report(report)?;
-
     return Ok(report);
 }
 
@@ -667,6 +665,7 @@ fn next_axis(
     search: PaddingSearch,
 ) -> StdResult<(u16, Option<u16>), &'static str> {
     let current = *samples.last().ok_or(OVERFLOWED)?;
+
     if current.cells == required {
         return Ok((current.size, current.padding));
     }
@@ -746,7 +745,6 @@ fn solver_error(cols: u16, rows: u16, attempts: &[GeometryProbeAttempt], reason:
         })
         .collect::<Vec<_>>()
         .join(", ");
-
     return Error::InvalidReplay {
         reason: format!(
             "could not fit native viewport to {cols}x{rows} grid ({reason}); probes: {probes}"

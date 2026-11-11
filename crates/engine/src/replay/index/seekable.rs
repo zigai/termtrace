@@ -67,7 +67,6 @@ impl SeekableWriter {
             .ok_or_else(|| return io::Error::other("seekable member offset overflow"))?;
 
         self.pending.clear();
-
         return Ok(());
     }
 
@@ -81,9 +80,9 @@ impl SeekableWriter {
             }
 
             let count = u64::try_from(self.frames.len()).map_err(io::Error::other)?;
+
             self.writer.write_all(&self.uncompressed.to_le_bytes())?;
             self.writer.write_all(&count.to_le_bytes())?;
-
             return self.writer.write_all(MAGIC);
         })();
 
@@ -140,7 +139,6 @@ fn read_table(file: &mut File, path: &Path) -> Result<Table> {
 
     let (uncompressed, rest) = footer.split_first_chunk::<8>().ok_or_else(malformed)?;
     let (count, magic) = rest.split_first_chunk::<8>().ok_or_else(malformed)?;
-
     if magic != MAGIC {
         return Err(malformed());
     }

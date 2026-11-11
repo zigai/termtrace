@@ -846,7 +846,6 @@ impl EditFailure {
     #[must_use]
     pub const fn clip(mut self, clip_index: usize) -> Self {
         self.clip_index = Some(clip_index);
-
         return self;
     }
 
@@ -854,7 +853,6 @@ impl EditFailure {
     #[must_use]
     pub fn marker(mut self, label: impl Into<String>) -> Self {
         self.marker = Some(label.into());
-
         return self;
     }
 }

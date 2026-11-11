@@ -319,7 +319,6 @@ impl<'py, T: Serialize> IntoPyObject<'py> for Framed<T> {
     fn into_pyobject(self, py: Python<'py>) -> PyResult<Self::Output> {
         let object = crate::host::to_python(py, &self.value)?;
         object.set_item("frame", PyFrame::new(Arc::new(self.frame)))?;
-
         return Ok(object);
     }
 }

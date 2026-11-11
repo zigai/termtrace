@@ -68,7 +68,6 @@ impl LaunchSpec {
     pub const fn geometry(mut self, cols: u16, rows: u16) -> Self {
         self.cols = cols;
         self.rows = rows;
-
         return self;
     }
 
@@ -76,7 +75,6 @@ impl LaunchSpec {
     #[must_use]
     pub fn working_directory(mut self, path: impl Into<PathBuf>) -> Self {
         self.working_directory = Some(path.into());
-
         return self;
     }
 
@@ -84,7 +82,6 @@ impl LaunchSpec {
     #[must_use]
     pub const fn startup_timeout(mut self, timeout: Duration) -> Self {
         self.startup_timeout = timeout;
-
         return self;
     }
 
@@ -92,7 +89,6 @@ impl LaunchSpec {
     #[must_use]
     pub fn environment(mut self, environment: EnvironmentSpec) -> Self {
         self.environment = environment;
-
         return self;
     }
 
@@ -100,7 +96,6 @@ impl LaunchSpec {
     #[must_use]
     pub fn clear_environment(mut self) -> Self {
         self.environment.base = EnvironmentBase::Clear;
-
         return self;
     }
 
@@ -114,7 +109,6 @@ impl LaunchSpec {
         self.environment
             .set
             .insert(name.into(), ByteString::new(value.into()));
-
         return self;
     }
 
@@ -122,7 +116,6 @@ impl LaunchSpec {
     #[must_use]
     pub fn unset_environment(mut self, name: impl Into<String>) -> Self {
         self.environment.unset.insert(name.into());
-
         return self;
     }
 
@@ -130,7 +123,6 @@ impl LaunchSpec {
     #[must_use]
     pub fn copy_environment(mut self, name: impl Into<String>) -> Self {
         self.environment.copy.insert(name.into());
-
         return self;
     }
 
@@ -138,7 +130,6 @@ impl LaunchSpec {
     #[must_use]
     pub const fn color_policy(mut self, policy: ColorPolicy) -> Self {
         self.environment.color = policy;
-
         return self;
     }
 
@@ -146,7 +137,6 @@ impl LaunchSpec {
     #[must_use]
     pub const fn output_byte_budget(mut self, bytes: u64) -> Self {
         self.output_byte_budget = Some(bytes);
-
         return self;
     }
 
@@ -155,7 +145,6 @@ impl LaunchSpec {
     #[must_use]
     pub const fn max_duration(mut self, duration: Duration) -> Self {
         self.max_duration = Some(duration);
-
         return self;
     }
 
@@ -164,7 +153,6 @@ impl LaunchSpec {
     #[must_use]
     pub const fn idle_timeout(mut self, duration: Duration) -> Self {
         self.idle_timeout = Some(duration);
-
         return self;
     }
 
@@ -173,7 +161,6 @@ impl LaunchSpec {
     #[must_use]
     pub fn visual_profile(mut self, profile: VisualProfile) -> Self {
         self.visual_profile = Some(profile);
-
         return self;
     }
 

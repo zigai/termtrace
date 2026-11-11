@@ -155,7 +155,6 @@ pub fn normalized_snapshot(
     options: ScreenSnapshotOptions,
 ) -> Result<String, AssertionError> {
     let value = normalize_frame(frame, profile, options).map_err(AssertionError::Snapshot)?;
-
     return serde_json::to_string_pretty(&value)
         .map_err(ScreenFrameError::serialization)
         .map_err(AssertionError::Snapshot);
@@ -370,6 +369,7 @@ pub fn assert_screen_text(frame: &ScreenFrame, expected: &str) -> Result<(), Ass
     }
 
     let text = frame_text(frame);
+
     if !expected.is_empty() && text.contains(expected) {
         return Ok(());
     }
@@ -610,6 +610,7 @@ pub fn assert_neutral_region(
     });
 
     let expected_cells = usize::from(region.width()) * usize::from(region.height());
+
     if checked == expected_cells && non_neutral == 0 {
         return Ok(());
     }
@@ -731,7 +732,6 @@ mod tests {
             "../../../fixtures/conformance/locators/locator.json"
         ))
         .expect("locator fixture");
-
         return serde_json::from_value(value.get("frame").cloned().expect("fixture frame"))
             .expect("screen frame");
     }

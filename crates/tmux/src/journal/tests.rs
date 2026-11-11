@@ -19,7 +19,6 @@ fn append_events(
     events: Vec<TmuxEvent>,
 ) -> TmuxJournalBoundary {
     let (_, next) = append(path, boundary, events, 7).expect("journal append");
-
     return next;
 }
 
@@ -27,7 +26,6 @@ fn committed(path: &Path, boundary: &TmuxJournalBoundary) -> Result<Vec<TmuxEven
     let mut records = Vec::new();
     visit(path, boundary, |record| {
         records.push(record.clone());
-
         return Ok(());
     })?;
 
@@ -88,7 +86,6 @@ fn len(path: &Path) -> u64 {
 fn appends_continue_the_sequence_and_visit_returns_every_committed_event() {
     let directory = TempDir::new().expect("temporary directory");
     let path = journal(&directory);
-
     let (first_written, first) =
         append(&path, &TmuxJournalBoundary::empty(), vec![session("$1")], 7).expect("append");
 
@@ -188,6 +185,7 @@ fn visit_rejects_sequences_that_skip_repeat_or_do_not_start_at_one() {
         }
 
         fs::write(&path, &contents).expect("journal");
+
         let last = *sequences.last().expect("sequence");
         assert_eq!(
             invalid_reason(committed(&path, &boundary_of(&contents, last, &hash))),
@@ -378,6 +376,7 @@ fn copy_committed_copies_exactly_the_committed_prefix() {
     let path = journal(&directory);
     let first = append_events(&path, &TmuxJournalBoundary::empty(), vec![session("$1")]);
     append_events(&path, &first, vec![session("$2")]);
+
     let copy = directory.path().join("copy.jsonl");
     copy_committed(&path, &copy, &first).expect("copy");
 
@@ -412,7 +411,9 @@ fn copy_committed_refuses_a_tampered_source_without_creating_the_copy() {
     let boundary = append_events(&path, &TmuxJournalBoundary::empty(), vec![session("$1")]);
     let contents = String::from_utf8(fs::read(&path).expect("journal")).expect("utf-8 journal");
     fs::write(&path, contents.replacen("\"$1\"", "\"$9\"", 1)).expect("tampered journal");
+
     let copy = directory.path().join("copy.jsonl");
+
     assert_eq!(
         invalid_reason(copy_committed(&path, &copy, &boundary)),
         "tmux lifecycle journal chain differs"

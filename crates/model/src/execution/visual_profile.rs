@@ -447,7 +447,6 @@ mod tests {
         let profile: VisualProfile =
             serde_json::from_value(json!({"version": 1, "native": fields}))
                 .map_err(|error| return error.to_string())?;
-
         return profile
             .normalized()
             .map_err(|error| return error.to_string());
@@ -639,7 +638,6 @@ mod tests {
 
         let mut changed_hash = recorded.clone();
         changed_hash.profile_hash = "0".repeat(64);
-
         assert!(changed_hash.validate().is_err());
 
         let mut denormalized = recorded;

@@ -67,7 +67,6 @@ pub fn is_control_frame(encoded: &[u8]) -> bool {
 /// Derive an input atom's operation identity from its request and zero-based index.
 pub fn derive_input_operation_id(request_id: Uuid, index: usize) -> Uuid {
     let name = format!("termtrace/input-atom/v1/{request_id}/{index}");
-
     return Uuid::new_v5(&Uuid::NAMESPACE_URL, name.as_bytes());
 }
 
@@ -616,7 +615,6 @@ impl ControlRequest {
     #[must_use]
     pub fn with_expected_presented_state_hash(mut self, hash: impl Into<String>) -> Self {
         self.expected_presented_state_hash = Some(hash.into());
-
         return self;
     }
 }
@@ -1131,7 +1129,6 @@ mod tests {
             .as_object_mut()
             .expect("control request serializes as an object")
             .insert("extra".to_owned(), serde_json::Value::Bool(true));
-
         assert!(serde_json::from_value::<ControlRequest>(encoded).is_err());
     }
 
@@ -1143,7 +1140,6 @@ mod tests {
 
         let mut oversized = vec![b'x'; usize::try_from(MAX_CONTROL_MESSAGE_BYTES).unwrap()];
         oversized.push(b'\n');
-
         assert!(!is_control_frame(&oversized));
     }
 

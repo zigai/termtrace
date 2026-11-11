@@ -149,7 +149,6 @@ fn start_recorder(temporary: &TempDir) -> (PathBuf, OuterTerminal, Box<dyn porta
     let mut reader = pty.master.try_clone_reader().expect("PTY reader");
     thread::spawn(move || {
         let mut buffer = [0_u8; 4096];
-
         while reader.read(&mut buffer).is_ok_and(|read| return read > 0) {}
     });
 
@@ -242,6 +241,7 @@ fn observed_outer_grid_acknowledges_once_and_retries_replay_the_answer() {
     let temporary = TempDir::new().expect("temporary directory");
     let (session, outer, child) = start_recorder(&temporary);
     outer.behave(Outer::Apply(100, 30));
+
     let request_id = Uuid::now_v7();
     let applied = resize(&session, request_id, 100, 30);
     assert!(
@@ -260,6 +260,7 @@ fn observed_outer_grid_acknowledges_once_and_retries_replay_the_answer() {
     assert_eq!(resize_events(&session, request_id).len(), 2);
 
     outer.behave(Outer::Apply(90, 28));
+
     let different = Uuid::now_v7();
     assert_eq!(
         failure(&resize(&session, different, 120, 34)),
@@ -267,6 +268,7 @@ fn observed_outer_grid_acknowledges_once_and_retries_replay_the_answer() {
     );
 
     let events = resize_events(&session, different);
+
     assert_eq!(events[0]["event"]["cols"], 90);
     stop(&session, child);
 }
@@ -276,6 +278,7 @@ fn rejected_outer_resize_has_no_effect() {
     let temporary = TempDir::new().expect("temporary directory");
     let (session, outer, child) = start_recorder(&temporary);
     outer.behave(Outer::Reject);
+
     let request_id = Uuid::now_v7();
     let rejected = resize(&session, request_id, 400, 200);
     assert_eq!(
@@ -316,6 +319,7 @@ fn unobserved_outer_resizes_are_unknown_and_late_grids_evolve_the_answer() {
     );
 
     outer.behave(Outer::ApplyLater(110, 32, Duration::from_secs(7)));
+
     let late = Uuid::now_v7();
     let pending = thread::scope(|scope| {
         let first = scope.spawn(|| return resize(&session, late, 110, 32));

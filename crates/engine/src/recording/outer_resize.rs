@@ -251,6 +251,7 @@ impl SessionActor<'_> {
         command_hash: &str,
     ) -> Option<ControlResponse> {
         let pending = self.outer_resize.as_ref()?.pending.as_ref()?;
+
         if pending.request_id != request.request_id || pending.response.is_none() {
             return None;
         }
@@ -381,7 +382,6 @@ impl SessionActor<'_> {
             deadline: Instant::now() + OUTER_RESIZE_DEADLINE,
             dispatch: None,
         });
-
         return Ok(());
     }
 
@@ -406,7 +406,6 @@ impl SessionActor<'_> {
         )?;
 
         deliver_response(response, answer);
-
         return Ok(());
     }
 
@@ -428,7 +427,6 @@ impl SessionActor<'_> {
             Dispatch::Rejected { code, message } => (code, message),
             dispatch @ (Dispatch::Configured | Dispatch::NoReply(_)) => {
                 pending.dispatch = Some(dispatch);
-
                 return Ok(());
             }
         };

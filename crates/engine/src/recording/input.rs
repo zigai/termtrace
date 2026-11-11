@@ -82,7 +82,6 @@ pub(super) fn semantic_key(key: NamedKey, modifiers: KeyModifiers) -> String {
 
     let key = semantic_key_name(key);
     parts.push(&key);
-
     return parts.join("+");
 }
 
@@ -129,7 +128,6 @@ pub(super) fn encode_paste(data: &[u8], bracketed: bool) -> Result<Vec<u8>> {
         encoded.extend_from_slice(b"\x1b[200~");
         encoded.extend_from_slice(data);
         encoded.extend_from_slice(b"\x1b[201~");
-
         return Ok(encoded);
     }
 
@@ -470,6 +468,7 @@ fn validate_input_sequence(atoms: &[InputSequenceAtom], pace_ns: u64) -> Result<
     }
 
     let mut operation_ids = HashSet::with_capacity(atoms.len());
+
     for atom in atoms {
         if !operation_ids.insert(sequence_operation_id(atom)) {
             return Err(control_rejected(
@@ -667,7 +666,6 @@ pub(super) fn apply_resize(
     let Some(error) = resize_result.err() else {
         return result_write;
     };
-
     return finish_with_cleanup(
         Err(terminal_error("resize child PTY", error.to_string())),
         result_write,
@@ -815,6 +813,7 @@ mod tests {
         for step in 0..=10 {
             let col = interpolate_cell(0, 10, step, 10);
             let row = interpolate_cell(10, 0, step, 10);
+
             assert_eq!(col + row, 10);
         }
 

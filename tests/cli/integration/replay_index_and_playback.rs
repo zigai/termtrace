@@ -83,7 +83,6 @@ fn asciicast_preserves_utf8_split_between_output_and_input_events() {
             .map(|line| {
                 let event: serde_json::Value = serde_json::from_str(line).expect("cast event");
                 assert_eq!(event[1], code);
-
                 return event[2].as_str().expect("output text").to_owned();
             })
             .collect::<String>();
@@ -135,6 +134,7 @@ fn index_replays_every_distinct_state_deterministically() {
     let mut cast_lines = cast_text.lines();
     let cast_header: serde_json::Value =
         serde_json::from_str(cast_lines.next().expect("cast header")).expect("cast header JSON");
+
     assert_eq!(cast_header["version"], 2);
     assert!(cast_lines.next().is_some(), "cast should contain output");
 
@@ -401,7 +401,6 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
         .arg(&session)
         .assert()
         .success();
-
     assert!(session.join("derived").is_dir());
     assert!(derived.is_dir(), "range index must coexist with full index");
 
@@ -517,7 +516,6 @@ fn indexed_inspection_returns_the_same_states_as_canonical_replay() {
                     .args(["--format", "json-compact"])
                     .assert()
                     .success();
-
                 return output.get_output().stdout.clone();
             })
             .collect::<Vec<_>>();
@@ -555,7 +553,6 @@ fn inspect_exits_cleanly_when_downstream_closes_the_pipe() {
     let mut reader = BufReader::new(stdout);
     let mut first_line = String::new();
     reader.read_line(&mut first_line).expect("first JSON line");
-
     assert_eq!(first_line, "{\n");
 
     drop(reader);
@@ -870,7 +867,6 @@ fn playback_does_not_echo_terminal_query_responses() {
     let reader_thread = thread::spawn(move || {
         let mut output = Vec::new();
         let mut buffer = [0_u8; 128];
-
         let mut observed_query = false;
         loop {
             match reader.read(&mut buffer) {

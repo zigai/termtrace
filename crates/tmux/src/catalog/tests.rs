@@ -66,6 +66,7 @@ fn thousands_of_incarnations_have_bounded_snapshots_and_rebuildable_pages() {
         .initialize(manifest(), events, 2)
         .expect("durable inventory");
     let snapshot = store.read().expect("snapshot");
+
     assert_eq!(snapshot.catalog.tracks, 2500);
     assert!(
         fs::metadata(store.manifest_path())
@@ -109,6 +110,7 @@ fn thousands_of_incarnations_have_bounded_snapshots_and_rebuildable_pages() {
     }
 
     let snapshot = store.read().expect("snapshot");
+
     assert_eq!(snapshot.catalog.unfinished_tracks, 2499);
     let older = TmuxCatalog::read(store.directory(), &old).expect("private older snapshot");
     assert!(

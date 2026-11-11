@@ -149,6 +149,7 @@ impl<'de> de::Deserializer<'de> for Input<'_, '_> {
         }
 
         let os = object.py().import("os")?;
+
         if object.is_instance(&os.getattr("PathLike")?)? {
             let path = os.call_method1("fspath", (object,))?;
 

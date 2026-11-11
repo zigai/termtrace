@@ -75,6 +75,7 @@ impl TmuxCatalog {
             connection
                 .execute_batch("PRAGMA cache_size=-1024; BEGIN DEFERRED;")
                 .map_err(|error| return sql_error(&path, error))?;
+
             if let Some(head) = load_head(&connection, &path)?
                 && matches_manifest(&head, manifest)
             {
@@ -102,7 +103,6 @@ impl TmuxCatalog {
         let connection = Connection::open("").map_err(|error| return sql_error(&path, error))?;
         let mut catalog = Self::initialize(connection, directory)?;
         catalog.rebuild(manifest)?;
-
         return Ok(catalog);
     }
 
@@ -111,8 +111,8 @@ impl TmuxCatalog {
         let path = directory.join(CATALOG_NAME);
         checked_index_file(&path, true)?;
         let connection = Connection::open(&path).map_err(|error| return sql_error(&path, error))?;
-
         let mut catalog = Self::initialize(connection, directory)?;
+
         if !matches_manifest(&catalog.head, manifest) {
             catalog.rebuild(manifest)?;
         }
@@ -177,7 +177,6 @@ impl TmuxCatalog {
             .map_err(|error| return sql_error(&self.path, error))?;
 
         self.head = head;
-
         return Ok(());
     }
 
@@ -270,8 +269,8 @@ impl TmuxCatalog {
             .map_err(|error| return sql_error(&self.path, error))?;
 
         let mut entries = Vec::new();
-
         let mut bytes = 0_usize;
+
         for row in rows {
             let (sequence, value, completed) =
                 row.map_err(|error| return sql_error(&self.path, error))?;
@@ -313,8 +312,8 @@ impl TmuxCatalog {
             .map_err(|error| return sql_error(&self.path, error))?;
 
         let mut entries = Vec::new();
-
         let mut bytes = 0_usize;
+
         for row in rows {
             let (sequence, value, latest) =
                 row.map_err(|error| return sql_error(&self.path, error))?;
@@ -334,7 +333,6 @@ impl TmuxCatalog {
                     "tmux gap index points at a non-gap journal record",
                 ));
             };
-
             if canonical != gap {
                 return Err(Error::invalid(
                     "tmux gap index differs from its journal record",
@@ -384,6 +382,7 @@ impl TmuxCatalog {
         mut visit: impl FnMut(TmuxEventRecord) -> Result<ControlFlow<()>>,
     ) -> Result<()> {
         let first = from_sequence.max(1);
+
         if limit == 0 || first > self.head.sequence {
             return Ok(());
         }
@@ -415,11 +414,13 @@ impl TmuxCatalog {
         for row in rows {
             let (sequence, offset, length, hash) =
                 row.map_err(|error| return sql_error(&self.path, error))?;
+
             if sequence != expected {
                 return Err(missing_event());
             }
 
             let event = self.read_event(&mut journal, sequence, offset, length, &hash)?;
+
             if visit(event)?.is_break() {
                 return Ok(());
             }
@@ -545,6 +546,7 @@ fn apply_record(
 
             if let Some(existing) = existing {
                 let previous: TmuxPaneTrack = decode(path, &existing)?;
+
                 if previous.pane_id != track.pane_id || previous.session != track.session {
                     return Err(Error::invalid("tmux recording identity was rebound"));
                 }

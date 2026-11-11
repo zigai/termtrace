@@ -84,7 +84,6 @@ fn ranged_timeline_pages_from_a_replay_baseline() {
 fn indexed_control_log(temporary: &tempfile::TempDir) -> EventLog {
     let session_id = Uuid::now_v7();
     let mut events: Vec<EventRecord> = Vec::new();
-
     for seq in 0..400_u64 {
         events.push(EventRecord {
             observed_monotonic_ns: None,
@@ -115,7 +114,6 @@ fn indexed_control_log(temporary: &tempfile::TempDir) -> EventLog {
     };
 
     write_cataloged(temporary.path(), &log).expect("control-rich checkpoint index");
-
     return log;
 }
 
@@ -196,7 +194,6 @@ fn late_control_pages_and_ranges_seek_auxiliary_output() {
 fn indexed_range_preserves_control_spanning_output_events() {
     let template = tempfile::TempDir::new().expect("template directory");
     let mut log = indexed_control_log(&template);
-
     for (seq, data) in [
         (348_usize, b"\x1b]2;".as_slice()),
         (349_usize, b"spanning-title".as_slice()),
@@ -505,7 +502,6 @@ fn checkpointed_pages_report_the_same_effects_as_full_replay() {
             }
 
             bytes.extend_from_slice(tail);
-
             return bytes;
         })
         .collect::<Vec<_>>();

@@ -17,7 +17,6 @@ pub const MAX_TERMINAL_CELLS: u32 = 250_000;
 #[must_use]
 pub fn supported_geometry_cell_count(cols: u16, rows: u16) -> Option<u32> {
     let cells = u32::from(cols).checked_mul(u32::from(rows))?;
-
     return (cols > 0
         && rows > 0
         && cols <= MAX_TERMINAL_COLUMNS
@@ -133,8 +132,8 @@ impl KeyChord {
         let normalized = text.to_ascii_lowercase().replace(['+', '_'], "-");
         let mut remaining = normalized.as_str();
         let mut modifiers = KeyModifiers::default();
-
         let mut modified = false;
+
         loop {
             let (next, held) = if let Some(next) = remaining
                 .strip_prefix("ctrl-")
@@ -150,6 +149,7 @@ impl KeyChord {
             } else {
                 break;
             };
+
             if *held {
                 return Err(invalid("a modifier was supplied more than once"));
             }

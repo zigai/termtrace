@@ -17,20 +17,27 @@ use zstd::stream::decode_all;
 pub const SEMANTIC_TEXT_FONT_FAMILY: &str = "Termtrace JetBrains Mono";
 /// Termtrace-scoped family for the Symbols Nerd Font fallback.
 pub const SEMANTIC_SYMBOLS_FONT_FAMILY: &str = "Termtrace Symbols Nerd Font";
+
 /// Embedded font-family stack prioritizing JetBrains Mono with Symbols Nerd Font fallback.
 pub const SEMANTIC_TEXT_FONT_STACK: &str =
     "'Termtrace JetBrains Mono', 'Termtrace Symbols Nerd Font', monospace";
+
 /// Embedded font-family stack prioritizing Symbols Nerd Font with JetBrains Mono fallback.
 pub const SEMANTIC_SYMBOLS_FONT_STACK: &str =
     "'Termtrace Symbols Nerd Font', 'Termtrace JetBrains Mono', monospace";
+
 pub(crate) const SEMANTIC_RASTER_TEXT_FONT_FAMILY: &str = "JetBrains Mono";
+
 pub(crate) const SEMANTIC_RASTER_TEXT_FONT_STACK: &str =
     "'JetBrains Mono', 'Symbols Nerd Font', monospace";
+
 pub(crate) const SEMANTIC_RASTER_SYMBOLS_FONT_STACK: &str =
     "'Symbols Nerd Font', 'JetBrains Mono', monospace";
+
 const FONT_SET_HASH_DOMAIN: &[u8] = b"termtrace-semantic-font-set-v1\0";
 const FONT_BUNDLE_MAGIC: &[u8; 8] = b"TTFONT01";
 const FONT_COUNT: u16 = 5;
+
 const FONT_BUNDLE_COMPRESSED: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/semantic-font-set.bundle.zst"));
 
@@ -125,7 +132,6 @@ impl SemanticFontSet {
     #[must_use]
     pub fn regular_face_bytes(&self) -> &[u8] {
         let [regular, ..] = &self.faces;
-
         return regular.bytes.bytes();
     }
 
@@ -179,7 +185,6 @@ fn load_font_set() -> Result<SemanticFontSet> {
         bytes: bundle,
         ranges,
     } = decompress_font_bundle()?;
-
     let [regular_range, bold_range, italic_range, bold_italic_range, symbols_range] =
         ranges.as_slice()
     else {
@@ -247,6 +252,7 @@ fn load_font_set() -> Result<SemanticFontSet> {
     hasher.update(FONT_SET_HASH_DOMAIN);
 
     let mut database = Database::new();
+
     for face in &faces {
         let role = face.resource.role.as_str().as_bytes();
         let role_length = u16::try_from(role.len())
@@ -277,6 +283,7 @@ fn load_font_set() -> Result<SemanticFontSet> {
 
 fn precompute_font_faces_css(faces: &[SemanticFontFace; 5]) -> Result<Arc<str>> {
     let mut total_capacity: usize = 32;
+
     for face in faces {
         let bytes_len = face.bytes.bytes().len();
         let base64_len = bytes_len
@@ -402,6 +409,7 @@ fn decompress_font_bundle() -> Result<DecompressedFontBundle> {
     })?;
 
     let mut cursor = 0;
+
     if take_bundle_bytes(&bundle, &mut cursor, FONT_BUNDLE_MAGIC.len())
         != Some(FONT_BUNDLE_MAGIC.as_slice())
         || read_bundle_u16(&bundle, &mut cursor) != Some(FONT_COUNT)
@@ -410,6 +418,7 @@ fn decompress_font_bundle() -> Result<DecompressedFontBundle> {
     }
 
     let mut lengths: Vec<usize> = Vec::with_capacity(usize::from(FONT_COUNT));
+
     for _ in 0..FONT_COUNT {
         let length = read_bundle_u64(&bundle, &mut cursor)
             .and_then(|length| return usize::try_from(length).ok())
@@ -422,6 +431,7 @@ fn decompress_font_bundle() -> Result<DecompressedFontBundle> {
 
     for length in lengths {
         let end = offset.checked_add(length).ok_or_else(invalid_font_bundle)?;
+
         if end > bundle.len() {
             return Err(invalid_font_bundle());
         }
@@ -453,13 +463,11 @@ fn take_bundle_bytes<'bundle>(
 
 fn read_bundle_u16(bundle: &[u8], cursor: &mut usize) -> Option<u16> {
     let bytes: [u8; 2] = take_bundle_bytes(bundle, cursor, 2)?.try_into().ok()?;
-
     return Some(u16::from_le_bytes(bytes));
 }
 
 fn read_bundle_u64(bundle: &[u8], cursor: &mut usize) -> Option<u64> {
     let bytes: [u8; 8] = take_bundle_bytes(bundle, cursor, 8)?.try_into().ok()?;
-
     return Some(u64::from_le_bytes(bytes));
 }
 

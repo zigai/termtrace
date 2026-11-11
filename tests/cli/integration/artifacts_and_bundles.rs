@@ -30,7 +30,6 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         .assert()
         .success()
         .stdout(predicate::str::contains("save-manifest.json"));
-
     assert_eq!(
         fs_err::metadata(&destination)
             .expect("saved directory metadata")
@@ -44,6 +43,7 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         &fs_err::read(destination.join("save-manifest.json")).expect("save manifest"),
     )
     .expect("manifest JSON");
+
     assert_eq!(manifest["format"], "termtrace-save");
     assert_eq!(
         manifest["sensitivity"],
@@ -136,7 +136,6 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
                         let pixel = image
                             .pixel(style * 24 + x, 24 + y)
                             .expect("underline pixel inside exported image");
-
                         return pixel.red().min(pixel.blue()).saturating_sub(pixel.green());
                     });
                 })
@@ -188,7 +187,6 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         .stdout(predicate::str::contains(
             r#""truth_layer":"semantic_rendering""#,
         ));
-
     assert!(screenshot.join("screen.png").is_file());
 
     let final_state = inspect_session(&session, StateSelector::Final)
@@ -229,7 +227,6 @@ fn save_atomically_publishes_one_state_with_manifested_files() {
         .args(["--format", "txt"])
         .assert()
         .failure();
-
     assert!(destination.join("semantic-state.json").is_file());
 }
 
@@ -262,6 +259,7 @@ fn screenshots_serialize_non_utf8_output_paths_without_panicking() {
 
     let response: serde_json::Value =
         serde_json::from_slice(&output).expect("non-UTF-8 screenshot response JSON");
+
     assert_eq!(response["kind"], "semantic_screenshot");
 
     let directory: ByteString = serde_json::from_value(response["directory"]["base64"].clone())
@@ -338,7 +336,6 @@ fn state_hash_selectors_reach_every_exact_state_workflow() {
         .args(["--format", "txt"])
         .assert()
         .success();
-
     assert!(save.join("screen.txt").is_file());
 
     let screenshot = temporary.path().join("other/nested/hash-screenshot");
@@ -352,7 +349,6 @@ fn state_hash_selectors_reach_every_exact_state_workflow() {
         .arg(&screenshot)
         .assert()
         .success();
-
     assert!(screenshot.join("screen.png").is_file());
 
     let mut invalid = Command::cargo_bin("termtrace").expect("binary should build");
@@ -401,7 +397,6 @@ fn bundles_publish_sensitivity_profiles_and_verify_offline() {
         .arg(&bundle)
         .assert()
         .success();
-
     assert_eq!(
         fs_err::metadata(&bundle)
             .expect("bundle metadata")

@@ -43,6 +43,7 @@ pub(super) const DEFAULT_EVENT_LOG_LIMITS: EventLogLimits = EventLogLimits {
     encoded_bytes: MAX_EVENT_LOG_ENCODED_BYTES,
     decoded_payload_bytes: MAX_EVENT_LOG_DECODED_PAYLOAD_BYTES,
 };
+
 // Streaming validation retains one bounded record and a disk-backed identifier index.
 // The materializing reader keeps its allocation limits; lifetime streaming has none.
 const STREAM_EVENT_LOG_LIMITS: EventLogLimits = EventLogLimits {
@@ -363,7 +364,6 @@ impl EventLogCursor {
                 source,
             };
         })?);
-
         return Ok(cursor);
     }
 
@@ -449,7 +449,6 @@ impl EventLogCursor {
         self.encoded_bytes = position.file_offset;
         self.buffer.clear();
         self.buffer_start = 0;
-
         return Ok(());
     }
 
@@ -695,7 +694,6 @@ impl EventLogCursor {
         self.validate_source_identity()?;
         let mut pending: Vec<_> = self.validation.pending_operations.into_values().collect();
         pending.sort_by_key(|operation| return operation.intent_seq);
-
         return Ok(pending);
     }
 
@@ -765,7 +763,6 @@ impl EventLogCursor {
 
         let mut pending: Vec<_> = self.validation.pending_operations.into_values().collect();
         pending.sort_by_key(|operation| return operation.intent_seq);
-
         return Ok(pending);
     }
 
@@ -849,7 +846,6 @@ impl EventLogSummary {
 
         summary.pending_operations =
             if snapshot { cursor.finish_snapshot()? } else { cursor.finish()? };
-
         return Ok(summary);
     }
 }
@@ -955,7 +951,6 @@ pub(super) fn parse_event_log_with_limits(
                     limits.encoded_bytes
                 ),
             );
-
             return Err(error);
         }
 
@@ -965,7 +960,6 @@ pub(super) fn parse_event_log_with_limits(
                 line_number,
                 format!("event log exceeds {} event limit", limits.event_count),
             );
-
             return Err(error);
         }
 
@@ -983,7 +977,6 @@ pub(super) fn parse_event_log_with_limits(
                         limits.decoded_payload_bytes
                     ),
                 );
-
                 return Err(error);
             }
 

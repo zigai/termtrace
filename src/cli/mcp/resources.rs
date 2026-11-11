@@ -77,7 +77,6 @@ impl View {
 
         return Self::ALL.into_iter().find_map(|view| {
             let session = path.strip_suffix(view.suffix())?;
-
             return (!session.is_empty() && !session.contains('/')).then_some((view, session));
         });
     }

@@ -96,6 +96,7 @@ pub(super) fn open_directory_path(path: &Path, create_missing: bool) -> Result<O
     .map_err(|error| return nix_filesystem(Path::new(starting_path), error))?;
 
     let mut traversed = PathBuf::from(starting_path);
+
     for component in path.components() {
         let name = match component {
             Component::RootDir | Component::CurDir => continue,
@@ -255,7 +256,6 @@ pub fn finish_writer(mut writer: BufWriter<File>, path: &Path) -> Result<()> {
 /// Returns an error when the directory path is unsafe, missing, or cannot be synced.
 pub fn sync_directory(path: &Path) -> Result<()> {
     let directory = open_directory_path(path, false)?;
-
     return sync_fd(&directory, path);
 }
 
@@ -376,6 +376,7 @@ fn write_secure_with_hook(
 
     let parent = open_parent_directory(path, true)?;
     let destination_name = safe_file_name(path)?;
+
     let staging_name = format!(".termtrace-write-{}.tmp", Uuid::now_v7());
     let staging_path = parent_path.join(&staging_name);
     let staging = open_file_at(
@@ -480,7 +481,6 @@ pub(crate) fn sync_parent_directory(path: &Path) -> Result<()> {
         Mode::empty(),
     )
     .map_err(|error| return nix_filesystem(parent, error))?;
-
     return sync_fd(&directory, parent);
 }
 
@@ -503,6 +503,7 @@ pub fn write_secure_unsynced(path: &Path, bytes: &[u8]) -> Result<()> {
 
     let parent = open_parent_directory(path, true)?;
     let destination_name = safe_file_name(path)?;
+
     let staging_name = format!(".termtrace-write-{}.tmp", Uuid::now_v7());
     let staging_path = parent_path.join(&staging_name);
     let staging = open_file_at(

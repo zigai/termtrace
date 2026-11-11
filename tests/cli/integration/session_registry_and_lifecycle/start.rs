@@ -55,6 +55,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         .success();
 
     let status = compact_json_line(&status.get_output().stdout);
+
     assert_eq!(status["lifecycle"], "live");
     assert_eq!(status["session"], "demo");
     assert_eq!(status["lifecycle"], "live");
@@ -123,6 +124,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         .clone();
 
     let failed = compact_json_line(&failed);
+
     assert_eq!(failed["startup_state"], "completed_failure");
 
     let failed_session = PathBuf::from(
@@ -162,6 +164,7 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
         .clone();
 
     let successful = compact_json_line(&successful);
+
     assert_eq!(successful["startup_state"], "completed_success");
     assert_eq!(successful["completion"]["exit_code"], 0);
 
@@ -217,6 +220,7 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
         .clone();
 
     let unsuccessful = compact_json_line(&unsuccessful);
+
     assert_eq!(unsuccessful["startup_state"], "completed_failure");
     assert_eq!(unsuccessful["completion"]["exit_code"], 7);
 
@@ -249,7 +253,6 @@ fn concurrent_start_reservation_launches_only_one_recorder() {
             ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-
         return command;
     };
     let first = command().spawn().expect("first concurrent start");
@@ -261,6 +264,7 @@ fn concurrent_start_reservation_launches_only_one_recorder() {
     let winner = if first.status.success() { &first } else { &second };
     let loser = if first.status.success() { &second } else { &first };
     let started = compact_json_line(&winner.stdout);
+
     assert_eq!(started["alias"], "contended");
     assert!(
         String::from_utf8_lossy(&loser.stderr).contains("reserved or registered"),
@@ -297,6 +301,5 @@ fn start_rejects_a_grid_over_the_cell_limit_before_launching_a_recorder() {
         .stderr(predicate::str::contains(
             "terminal size 600x500 exceeds the supported limits of 1000 columns, 1000 rows, and 250000 cells",
         ));
-
     assert!(!state.join("sessions").exists());
 }

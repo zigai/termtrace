@@ -40,6 +40,7 @@ impl ControlStripper {
         self.source_byte_count = self
             .source_byte_count
             .saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+
         let mut output = Vec::with_capacity(bytes.len());
 
         while !bytes.is_empty() {
@@ -64,7 +65,6 @@ impl ControlStripper {
         self.output_byte_count = self
             .output_byte_count
             .saturating_add(u64::try_from(output.len()).unwrap_or(u64::MAX));
-
         return output;
     }
 
@@ -97,7 +97,6 @@ mod tests {
         let mut stripper = ControlStripper::new().expect("stripper");
         let mut output = stripper.feed(b"before\n\x1b[?104");
         output.extend(stripper.feed(b"9h\x1b[31mred\x1b[0m\n"));
-
         assert_eq!(output, b"before\nred\n");
         assert!(stripper.has_observed_alternate_screen());
         assert_eq!(stripper.source_byte_count(), 28);

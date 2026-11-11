@@ -78,6 +78,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
 
     let frame: serde_json::Value =
         serde_json::from_slice(&stable.get_output().stdout).expect("stable frame JSON");
+
     assert_eq!(frame["capture_quality"], "stable");
     assert!(frame["frame"]["viewport_text"]
         .as_str()
@@ -139,6 +140,7 @@ fn show_uses_actor_fast_path_and_validated_completed_replay() {
 
     let status: serde_json::Value =
         serde_json::from_slice(&status.get_output().stdout).expect("cache status");
+
     assert_eq!(status["entries"], 1);
     assert!(status["compressed_bytes"]
         .as_u64()
@@ -533,6 +535,7 @@ fn synchronization_commands_reject_incomplete_stability() {
 
     let idle: serde_json::Value =
         serde_json::from_slice(&idle_output).expect("idle start response");
+
     assert_eq!(idle["postcondition"]["matched"], true);
 
     let mut stop_idle = Command::cargo_bin("termtrace").expect("binary should build");

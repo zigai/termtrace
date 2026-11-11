@@ -84,6 +84,7 @@ impl EventsService {
         }
 
         let (mut reader, source) = paging::open(session)?;
+
         if let Some(cursor) = &cursor {
             paging::check_source(&source, cursor)?;
         }

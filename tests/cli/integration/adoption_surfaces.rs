@@ -206,6 +206,7 @@ fn blocking_rust_facade_launches_drives_and_completes_evidence() {
     let frame = session
         .frame(ScreenProjectionRequest::default())
         .expect("screen frame");
+
     assert_eq!(frame.geometry.cols, 90);
     assert_eq!(frame.geometry.rows, 25);
     assert!(session
@@ -312,7 +313,6 @@ fn rust_facade_bridges_actor_shutdown_to_completion_publication() {
         connection
             .read_to_end(&mut request)
             .expect("read snapshot request");
-
         assert!(!request.is_empty(), "snapshot request was not dispatched");
 
         drop(connection);

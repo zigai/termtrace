@@ -1,4 +1,5 @@
 //! One restart orchestration used by CLI, bindings and successor extensions.
+
 use super::{spawn_detached, RegistryService};
 use crate::{
     client::{await_ready, original_capture_status, Readiness, Session, StopOutcome, StopRequest},
@@ -112,7 +113,6 @@ impl RegistryService {
                 }
 
                 args.extend([OsString::from("--"), "/bin/true".into()]);
-
                 return Ok(args);
             },
         );
@@ -170,7 +170,6 @@ impl RegistryService {
                 }
 
                 args.extend([OsString::from("--"), "/bin/true".into()]);
-
                 return Ok(args);
             },
         );
@@ -266,6 +265,7 @@ impl RegistryService {
                 Ok(Readiness::TimedOut) => SuccessorReadiness::TimedOut,
                 Err(_) => SuccessorReadiness::Failed,
             });
+
             match readiness? {
                 Readiness::Live | Readiness::Completed(_) => {}
                 Readiness::Exited(status) => {

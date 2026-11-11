@@ -119,6 +119,7 @@ fn send_writes_text_file_and_stdin_bytes_directly() {
         .clone();
 
     let response: serde_json::Value = serde_json::from_slice(&output).expect("stdin send response");
+
     assert_eq!(response["input"]["bytes"], 4_u64);
 
     let output = child.wait_with_output().expect("direct input completion");
@@ -1103,5 +1104,6 @@ fn raw_operation_collisions_reject_atomically_across_mutation_kinds() {
         .flatten()
         .copied()
         .collect();
+
     assert_eq!(input, b"AB!");
 }

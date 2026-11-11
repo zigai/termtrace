@@ -132,7 +132,6 @@ fn get_glyph_path(
             None
         };
         map.insert(key, path.clone());
-
         return path;
     });
 }
@@ -153,7 +152,6 @@ fn scaled_pixels(base: u16, scale: f32) -> Result<u16> {
                   whole, so the cast is exact; std has no checked float-to-integer conversion"
     )]
     let pixels = scaled as u16;
-
     return Ok(pixels);
 }
 
@@ -316,7 +314,6 @@ fn render_grid_direct(
 
             let underline_color =
                 resolve_color(cell.style.underline_color, fg_color, &state.colors.palette);
-
             let opacity = if cell.style.faint { 153 } else { 255 };
 
             let mut u_paint = Paint::default();
@@ -378,7 +375,6 @@ fn render_grid_direct(
                     let y = row_y + (23.0 * scale).round();
                     let h = (1.0 * scale).round().max(1.0);
                     let mut start = cell_x;
-
                     while start < cell_x + span {
                         if let Some(rect) = Rect::from_xywh(start, y, 1.0 * scale, h) {
                             pixmap.fill_rect(rect, &u_paint, Transform::identity(), None);
@@ -391,9 +387,9 @@ fn render_grid_direct(
                     let y = row_y + (23.0 * scale).round();
                     let h = (1.0 * scale).round().max(1.0);
                     let mut start = cell_x;
-
                     while start < cell_x + span {
                         let dash_w = (4.0 * scale).min(cell_x + span - start);
+
                         if let Some(rect) = Rect::from_xywh(start, y, dash_w, h) {
                             pixmap.fill_rect(rect, &u_paint, Transform::identity(), None);
                         }
@@ -469,6 +465,7 @@ fn render_grid_direct(
                 };
 
                 let h = f32::from(SEMANTIC_CELL_HEIGHT) * scale;
+
                 if let Some(rect) = Rect::from_xywh(x, y, w, h) {
                     pixmap.fill_rect(rect, &paint, Transform::identity(), None);
                 }
@@ -548,7 +545,6 @@ pub fn render_png_with_profile(
 ) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     write_png(state, profile, &mut bytes)?;
-
     return Ok(bytes);
 }
 
@@ -682,7 +678,6 @@ fn rasterize_svg_pixmap(
         }
 
         resvg::render(&tree, Transform::default(), &mut pixmap.as_mut());
-
         return Ok(pixmap);
     }
 
@@ -698,6 +693,7 @@ fn rasterize_svg_pixmap(
     let mut intermediate = INTERMEDIATE_SURFACE
         .with(|cell| {
             let mut slot = cell.borrow_mut();
+
             if let Some(surface) = slot.take()
                 && surface.width() == width
                 && surface.height() == height
@@ -786,7 +782,6 @@ mod tests {
     fn rasterize_state(state: &SemanticState) -> Pixmap {
         let svg =
             render_svg_scene(state, state.cols, state.rows, false).expect("render raster test SVG");
-
         return rasterize_svg_pixmap(
             &svg,
             SemanticRasterProfile::Direct,
@@ -806,7 +801,6 @@ mod tests {
         terminal.write(text.as_bytes());
         let mut state = terminal.snapshot().expect("snapshot text terminal");
         state.cursor.visible = false;
-
         return rasterize_state(&state);
     }
 
@@ -962,7 +956,6 @@ mod tests {
         state.cursor.wide_tail = Some(false);
         state.cursor.style = CursorStyle::HollowBlock;
         let hollow = rasterize_state(&state);
-
         state.cursor.visible = false;
         let hidden = rasterize_state(&state);
 

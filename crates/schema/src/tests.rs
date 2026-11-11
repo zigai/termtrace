@@ -12,6 +12,7 @@ fn checked_in_schemas_match_catalog() {
         .collect();
 
     let mut checked_in: BTreeSet<String> = BTreeSet::new();
+
     for entry in fs_err::read_dir(&directory).expect("read schema directory") {
         let entry = entry.expect("read schema directory entry");
         if entry.file_type().expect("read schema file type").is_dir() {
@@ -81,7 +82,6 @@ fn sdk_artifact_contract_vector_matches_schema() {
     assert!(validator.is_valid(&value));
 
     value["members"][0]["byte_length"] = serde_json::json!(9_007_199_254_740_993_u64);
-
     assert!(!validator.is_valid(&value));
 }
 
@@ -104,7 +104,6 @@ fn sdk_schema_rejects_overflow_and_requires_nullable_member_key() {
     for bad in ["18446744073709551616", "01", "-1", "1.5"] {
         let mut value = original.clone();
         value["members"][0]["byte_length"] = bad.into();
-
         assert!(!validator.is_valid(&value), "schema accepted {bad}");
     }
 
@@ -113,6 +112,5 @@ fn sdk_schema_rejects_overflow_and_requires_nullable_member_key() {
         .as_object_mut()
         .unwrap()
         .remove("schema_type");
-
     assert!(!validator.is_valid(&value));
 }

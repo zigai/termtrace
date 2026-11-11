@@ -124,7 +124,6 @@ impl TmuxConnectionArgs {
 
         let client = TmuxClient::new(self.tmux.clone(), socket);
         client.require_supported_version().into_diagnostic()?;
-
         return Ok(client);
     }
 }

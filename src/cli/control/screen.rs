@@ -363,7 +363,6 @@ pub(super) fn sparse(viewport_text: &str) -> serde_json::Value {
         .enumerate()
         .filter_map(|(row, text)| {
             let text = text.trim_end();
-
             return (!text.is_empty()).then(|| return (row, text));
         })
         .collect();
@@ -373,7 +372,6 @@ pub(super) fn sparse(viewport_text: &str) -> serde_json::Value {
         blank_rows_omitted: total_rows.saturating_sub(rows.len()),
         rows,
     };
-
     #[expect(
         clippy::expect_used,
         reason = "SparseScreenResponse contains only primitive usize and string slices which cannot fail JSON serialization"
@@ -404,7 +402,6 @@ pub(super) fn difference(before: &str, after: &str, since: String) -> serde_json
         moves,
         rows,
     };
-
     #[expect(
         clippy::expect_used,
         reason = "DiffScreenResponse contains only String and string slices which cannot fail JSON serialization"

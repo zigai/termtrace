@@ -727,7 +727,6 @@ impl EventLogWriter {
         }
 
         self.durable_cursor = durable;
-
         return Ok(());
     }
 

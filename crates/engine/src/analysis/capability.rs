@@ -91,6 +91,7 @@ pub fn probe_capabilities(
     };
 
     let mut capabilities: Vec<Capability> = Vec::with_capacity(CAPABILITY_IDS.len());
+
     for id in CAPABILITY_IDS {
         let capability = match *id {
             CORE_CAPABILITY => core.clone(),

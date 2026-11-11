@@ -345,9 +345,9 @@ impl PreparedTmuxSetup {
         command.extend_from_slice(b" tmux watchdog -q");
 
         let mut escaped = Vec::new();
+
         for byte in command {
             escaped.push(byte);
-
             if byte == b'#' {
                 escaped.push(byte);
             }
@@ -363,7 +363,6 @@ impl PreparedTmuxSetup {
         command.extend_from_slice(&shell_quote(self.tmux.as_os_str().as_bytes()));
         command.push(b' ');
         command.extend_from_slice(&shell_quote(self.termtrace.as_os_str().as_bytes()));
-
         return command;
     }
 
@@ -622,6 +621,7 @@ pub fn disable(client: &TmuxClient) -> Result<Disabled> {
     }
 
     let expected = PreparedTmuxSetup::from_options(client)?;
+
     if client.option(expected.launch_option())? != expected.wrapper_command().as_bytes() {
         return Err(Error::invalid(
             "tmux launch command changed after Termtrace was enabled; refusing to overwrite it",

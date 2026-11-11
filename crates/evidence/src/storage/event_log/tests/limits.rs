@@ -99,7 +99,6 @@ fn enforces_aggregate_event_log_limits_before_retention() {
     let mut truncated = fs_err::read(&path).expect("canonical bytes");
     truncated.pop();
     fs_err::write(&path, truncated).expect("unterminated terminal line");
-
     assert!(matches!(
         EventLogSummary::read(&path),
         Err(Error::InvalidEventLog { .. })

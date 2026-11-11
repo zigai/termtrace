@@ -20,11 +20,13 @@ fn test_registry_lifecycle_and_gc() {
     let entry = registry
         .register("test-alias", &session_path)
         .expect("register");
+
     assert_eq!(entry.alias, "test-alias");
     assert_eq!(entry.session_path(), session_path);
 
     // Resolve alias
     let resolved = registry.resolve("test-alias").expect("resolve");
+
     assert_eq!(resolved.alias, "test-alias");
     assert_eq!(resolved.session_path(), session_path);
 
@@ -42,6 +44,7 @@ fn test_registry_lifecycle_and_gc() {
 
     // Remove alias
     let removed = registry.remove("test-alias").expect("remove");
+
     assert_eq!(removed.alias, "test-alias");
     assert!(registry.resolve("test-alias").is_err());
 
@@ -50,6 +53,7 @@ fn test_registry_lifecycle_and_gc() {
 
     // Run GC (dry run)
     let gc_report = registry.gc(30, 20, None, false).expect("gc dry run");
+
     assert_eq!(gc_report.removed_sessions, 0);
 }
 

@@ -59,6 +59,7 @@ fn tmux_session_scope_records_only_the_selected_session() {
         .clone();
 
     let changed = compact_json_line(&changed);
+
     assert_eq!(changed["changed"], true);
     assert_eq!(changed["future_processes_only"], true);
     assert_eq!(changed["scope"]["mode"], "selected");
@@ -105,6 +106,7 @@ fn tmux_pane_scope_records_that_pane_after_its_process_restarts() {
         .clone();
 
     let changed = compact_json_line(&changed);
+
     assert_eq!(changed["scope"]["mode"], "selected");
     assert_eq!(changed["scope"]["pane_ids"][0], "%0");
     assert!(
@@ -158,6 +160,7 @@ fn tmux_window_scope_records_new_panes_only_in_that_window() {
         .clone();
 
     let changed = compact_json_line(&changed);
+
     assert_eq!(changed["scope"]["mode"], "selected");
     assert_eq!(changed["scope"]["window_ids"][0], "@0");
 

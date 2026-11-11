@@ -130,7 +130,6 @@ impl AnalysisService {
     /// Returns an error if summary construction fails.
     pub fn review_summary(session: &Path) -> Result<ReviewSummary> {
         let visual = validated_visual_manifests(session).map_err(Error::from)?;
-
         return summarize_review(session, &visual).map_err(Error::from);
     }
 

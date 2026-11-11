@@ -37,7 +37,6 @@ pub(super) fn validate_operation_transition(
                 expected_bytes,
             },
         );
-
         return Ok(());
     }
 

@@ -35,7 +35,6 @@ impl Evidence<'_> {
         )?;
 
         verify_saved_artifact(&outcome.directory, &outcome.manifest)?;
-
         return Ok(outcome);
     }
 

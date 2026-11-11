@@ -105,7 +105,6 @@ impl StatusSidecar {
 
         let mut bytes = serde_json::to_vec_pretty(&self.status).into_diagnostic()?;
         bytes.push(b'\n');
-
         return Ok(bytes);
     }
 
@@ -142,7 +141,6 @@ impl StatusSidecar {
 
     fn published(&mut self, result: MediaArtifactResult) -> Result<()> {
         self.status.result = Some(result);
-
         return self.publish(OriginalCaptureState::Published);
     }
 
@@ -216,6 +214,7 @@ fn application_environment(supplied: Option<EnvironmentSpec>) -> EnvironmentSpec
     let mut spec = supplied.unwrap_or_default();
     for name in CAPTURE_ENVIRONMENT {
         let name = (*name).to_owned();
+
         if spec.set.contains_key(&name) || spec.unset.contains(&name) {
             continue;
         }
@@ -224,6 +223,7 @@ fn application_environment(supplied: Option<EnvironmentSpec>) -> EnvironmentSpec
             EnvironmentBase::Inherit => true,
             EnvironmentBase::Clear => spec.copy.remove(&name),
         };
+
         if !inherited {
             continue;
         }
@@ -479,7 +479,6 @@ pub(super) fn run(response: &mut ResponseWriter, mut arguments: RecordArgs) -> R
 
     let cancelled = Arc::new(AtomicBool::new(false));
     let mut signals = CancellationSignals(Vec::new());
-
     for signal in [SIGINT, SIGTERM] {
         signals
             .0
@@ -722,7 +721,6 @@ fn restart_recorder_arguments(
     }
 
     arguments.extend([OsString::from("--"), OsString::from("/bin/true")]);
-
     return arguments;
 }
 
@@ -736,7 +734,6 @@ fn failure_record(
     let mut failed_visual = None;
     let mut cleanup = None;
     let mut primary = error;
-
     loop {
         match primary {
             MediaError::CaptureFailed { evidence, source } => {
@@ -867,6 +864,7 @@ fn supervisor_arguments(alias: &str, session: &Path, arguments: &RecordArgs) -> 
 
     // The recording builder always names geometry; the supervisor would report it as ignored.
     let mut index = 0;
+
     while let Some(argument) = supervisor.get(index) {
         if argument == "--" {
             break;
@@ -911,6 +909,5 @@ fn supervisor_arguments(alias: &str, session: &Path, arguments: &RecordArgs) -> 
     }
 
     supervisor.splice(1..1, original);
-
     return supervisor;
 }

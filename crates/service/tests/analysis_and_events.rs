@@ -193,6 +193,7 @@ fn projected_pages_filter_without_losing_resume_or_metadata() {
 
     let second = EventsService::page(&session, Some(first.cursor), 1, true, &filter)
         .expect("filtered second");
+
     assert_eq!(second.events[0].seq, 3);
     assert!(!second.has_more);
     assert_eq!(second.cursor.next_event_seq, 4);
@@ -221,22 +222,18 @@ fn bound_pages_reject_forged_foreign_replaced_and_out_of_range_cursors() {
     let page = OutputService::page(&session, None, 2).expect("page");
     let mut forged = page.cursor.clone();
     forged.events.event_hash = "0".repeat(64);
-
     assert!(OutputService::page(&session, Some(forged), 2).is_err());
 
     let mut forged = page.cursor.clone();
     forged.byte_offset = 7;
-
     assert!(OutputService::page(&session, Some(forged), 2).is_err());
 
     let mut forged = page.cursor.clone();
     forged.events.source.session_path = b"/wrong".as_slice().into();
-
     assert!(OutputService::page(&session, Some(forged), 2).is_err());
 
     let mut forged = page.cursor.clone();
     forged.events.next_event_seq = 9;
-
     assert!(OutputService::page(&session, Some(forged), 2).is_err());
     for limit in [0, 4 * 1024 * 1024 + 1] {
         assert!(OutputService::page(&session, None, limit).is_err());
@@ -259,6 +256,7 @@ fn bound_pages_reject_forged_foreign_replaced_and_out_of_range_cursors() {
 
     let path = session.join("paging.jsonl");
     let original = fs::read(&path).expect("log bytes");
+
     drop(writer);
 
     fs::rename(&path, session.join("old.jsonl")).expect("replace old inode");
@@ -274,6 +272,7 @@ fn live_partial_tail_is_explicit_and_complete_corruption_never_hides_after_a_ful
     let (session, mut writer) = paging_fixture(temp.path()).expect("paging fixture");
     append_output(&mut writer, b"abc").expect("fixture append");
     drop(writer);
+
     let path = session.join("paging.jsonl");
     let bytes = fs::read(&path).expect("log");
     OpenOptions::new()
@@ -326,6 +325,7 @@ fn public_client_pages_resume_across_live_completion_without_omission() {
 
     let mut all = events.events;
     let mut cursor = events.cursor;
+
     owner
         .stop(StopRequest::default(), Some(Duration::from_secs(5)))
         .expect("owned stop");

@@ -64,6 +64,7 @@ pub(super) fn run(
             return finish_with_cleanup(Err(error), actor.spawned.reap_after_failure());
         }
     };
+
     let started = RuntimeWorkers::start(
         reader,
         master_fd,
@@ -91,8 +92,8 @@ pub(super) fn run(
 
         let started_at = Instant::now();
         let mut last_activity_at = Instant::now();
-
         let mut control_server_stopped = false;
+
         loop {
             let deadline = actor.next_deadline(started_at, last_activity_at);
             let received = deadline.map_or_else(
@@ -110,6 +111,7 @@ pub(super) fn run(
             actor.event_log.observe_durable();
 
             let mut received_output = false;
+
             match received {
                 Ok(RuntimeMessage::ControlServerStopped) => control_server_stopped = true,
                 Ok(message) => {
@@ -205,7 +207,6 @@ pub(super) fn run(
             "child completed before screen predicate matched",
         );
         actor.expire_outer_resize(true)?;
-
         return actor
             .termination
             .exit_status()
@@ -387,7 +388,6 @@ impl SessionActor<'_> {
         });
 
         self.progress.resource_limit = Some(outcome);
-
         return Ok(());
     }
 

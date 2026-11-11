@@ -63,6 +63,7 @@ fn tmux_default_pane_is_a_complete_termtrace_recording() {
     );
 
     let log = EventLog::read(session.join("events.jsonl")).expect("tmux event log");
+
     assert_eq!(log.header.term, "tmux-256color");
     validate_completed_session(&session).expect("valid completed tmux evidence");
 

@@ -163,7 +163,6 @@ fn ascii_json_string(text: &str) -> String {
             ' '..='~' => out.push(character),
             _ => {
                 let mut units = [0_u16; 2];
-
                 for unit in character.encode_utf16(&mut units) {
                     let _infallible = write!(out, "\\u{unit:04x}");
                 }
@@ -172,7 +171,6 @@ fn ascii_json_string(text: &str) -> String {
     }
 
     out.push('"');
-
     return out;
 }
 
@@ -217,7 +215,6 @@ impl Json {
         let Self::Object(entries) = self else {
             return None;
         };
-
         return entries
             .iter()
             .find(|(name, _)| return name == key)
@@ -276,7 +273,6 @@ impl Json {
     fn with(&self, key: &str, value: Self) -> Self {
         let mut entries = self.entries().to_vec();
         insert(&mut entries, key, value);
-
         return Self::Object(entries);
     }
 }
@@ -306,7 +302,6 @@ fn pascal(text: &str) -> String {
             let first = characters
                 .next()
                 .map(|first| return first.to_ascii_uppercase());
-
             return first.into_iter().chain(characters).collect::<String>();
         })
         .collect();
@@ -361,14 +356,12 @@ impl Resolver<'_> {
             body,
         };
         self.declared.insert(name.to_owned(), Some(declaration));
-
         return Ok(());
     }
 
     fn object(&mut self, name: &str, schema: &Json) -> Result<DeclarationBody, DeclarationError> {
         let required = schema.get("required").map_or(&[][..], Json::items);
         let mut fields = Vec::new();
-
         for (field, spec) in schema.get("properties").map_or(&[][..], Json::entries) {
             let value = self.expr(spec, &format!("{name}{}", pascal(field)))?;
             fields.push(Field {
@@ -497,7 +490,6 @@ impl Resolver<'_> {
             }
             _ => TypeExpr::Json,
         };
-
         return Ok(expr);
     }
 

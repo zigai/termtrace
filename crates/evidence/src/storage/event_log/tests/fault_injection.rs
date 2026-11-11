@@ -52,7 +52,6 @@ impl TestFixture {
         drop(writer);
 
         let content = fs_err::read_to_string(&self.source).expect("read valid log");
-
         return content.lines().map(ToOwned::to_owned).collect();
     }
 
@@ -76,7 +75,6 @@ impl TestFixture {
         drop(writer);
 
         let content = fs_err::read_to_string(&self.source).expect("read valid log");
-
         return content.lines().map(ToOwned::to_owned).collect();
     }
 }
@@ -142,9 +140,11 @@ fn mid_line_byte_truncation_on_first_event_at_various_offsets() {
 
         let report =
             EventLog::recover_prefix(&fixture.source, &fixture.recovered).expect("recover prefix");
+
         assert_eq!(report.valid_events, 0);
 
         let tail = report.discarded_tail.as_ref().expect("discarded tail");
+
         assert_eq!(tail.line, 2);
         assert_eq!(tail.reason, "truncated line without newline terminator");
 
@@ -194,9 +194,11 @@ fn mid_line_byte_truncation_on_later_event_recovers_prior_events() {
 
         let report =
             EventLog::recover_prefix(&fixture.source, &fixture.recovered).expect("recover prefix");
+
         assert_eq!(report.valid_events, 2);
 
         let tail = report.discarded_tail.as_ref().expect("discarded tail");
+
         assert_eq!(tail.line, 4);
         assert_eq!(tail.reason, "truncated line without newline terminator");
 
@@ -236,9 +238,11 @@ fn torn_write_with_trailing_newline_malformed_json() {
 
     let report =
         EventLog::recover_prefix(&fixture.source, &fixture.recovered).expect("recover prefix");
+
     assert_eq!(report.valid_events, 2);
 
     let tail = report.discarded_tail.as_ref().expect("discarded tail");
+
     assert_eq!(tail.line, 4);
     assert!(tail.reason.contains("JSON decoding failed"));
 
@@ -283,9 +287,11 @@ fn corrupted_blake3_hash_field_halts_recovery_and_discards_invalid_tail() {
 
     let report =
         EventLog::recover_prefix(&fixture.source, &fixture.recovered).expect("recover prefix");
+
     assert_eq!(report.valid_events, 1);
 
     let tail = report.discarded_tail.as_ref().expect("discarded tail");
+
     assert_eq!(tail.line, 3);
     assert_eq!(tail.reason, "event hash does not match");
 
@@ -331,9 +337,11 @@ fn corrupted_blake3_prev_hash_field_halts_recovery_and_discards_invalid_tail() {
 
     let report =
         EventLog::recover_prefix(&fixture.source, &fixture.recovered).expect("recover prefix");
+
     assert_eq!(report.valid_events, 1);
 
     let tail = report.discarded_tail.as_ref().expect("discarded tail");
+
     assert_eq!(tail.line, 3);
     assert_eq!(tail.reason, "previous hash does not match");
 
@@ -373,9 +381,11 @@ fn sequence_jump_halts_recovery_and_reports_diagnostic() {
 
     let report =
         EventLog::recover_prefix(&fixture.source, &fixture.recovered).expect("recover prefix");
+
     assert_eq!(report.valid_events, 1);
 
     let tail = report.discarded_tail.as_ref().expect("discarded tail");
+
     assert_eq!(tail.line, 3);
     assert_eq!(tail.reason, "expected sequence 1, found 5");
 
@@ -415,9 +425,11 @@ fn sequence_regression_halts_recovery_and_reports_diagnostic() {
 
     let report =
         EventLog::recover_prefix(&fixture.source, &fixture.recovered).expect("recover prefix");
+
     assert_eq!(report.valid_events, 1);
 
     let tail = report.discarded_tail.as_ref().expect("discarded tail");
+
     assert_eq!(tail.line, 3);
     assert_eq!(tail.reason, "expected sequence 1, found 0");
 
@@ -457,9 +469,11 @@ fn monotonic_timestamp_regression_halts_recovery() {
 
     let report =
         EventLog::recover_prefix(&fixture.source, &fixture.recovered).expect("recover prefix");
+
     assert_eq!(report.valid_events, 1);
 
     let tail = report.discarded_tail.as_ref().expect("discarded tail");
+
     assert_eq!(tail.line, 3);
     assert_eq!(tail.reason, "monotonic timestamp moved backwards");
 
@@ -496,9 +510,11 @@ fn zero_byte_tail_padding_unflushed_block_discarded() {
 
     let report =
         EventLog::recover_prefix(&fixture.source, &fixture.recovered).expect("recover prefix");
+
     assert_eq!(report.valid_events, 3);
 
     let tail = report.discarded_tail.as_ref().expect("discarded tail");
+
     assert_eq!(tail.line, 5);
     assert_eq!(tail.reason, "truncated line without newline terminator");
 
@@ -537,9 +553,11 @@ fn zero_byte_tail_padding_with_newline_discarded() {
 
     let report =
         EventLog::recover_prefix(&fixture.source, &fixture.recovered).expect("recover prefix");
+
     assert_eq!(report.valid_events, 3);
 
     let tail = report.discarded_tail.as_ref().expect("discarded tail");
+
     assert_eq!(tail.line, 5);
     assert!(tail.reason.contains("JSON decoding failed"));
 
@@ -763,9 +781,11 @@ fn recovery_reports_uncertain_input_intent_when_torn_before_result() {
 
     let report =
         EventLog::recover_prefix(&fixture.source, &fixture.recovered).expect("recover prefix");
+
     assert_eq!(report.valid_events, 2);
 
     let tail = report.discarded_tail.as_ref().expect("discarded tail");
+
     assert_eq!(tail.line, 4);
     assert_eq!(tail.reason, "truncated line without newline terminator");
     assert_eq!(report.pending_operations.len(), 1);
@@ -828,9 +848,11 @@ fn recovery_resolves_completed_operation_when_torn_after_result() {
 
     let report =
         EventLog::recover_prefix(&fixture.source, &fixture.recovered).expect("recover prefix");
+
     assert_eq!(report.valid_events, 2);
 
     let tail = report.discarded_tail.as_ref().expect("discarded tail");
+
     assert_eq!(tail.line, 4);
     assert_eq!(tail.reason, "truncated line without newline terminator");
     assert!(report.pending_operations.is_empty());

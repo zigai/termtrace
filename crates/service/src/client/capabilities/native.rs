@@ -77,7 +77,6 @@ impl Native<'_> {
     pub fn capture(&self, options: &CaptureOptions) -> Result<CaptureOutcome> {
         let mut options = options.clone();
         options.session_directory = self.session.path().to_path_buf();
-
         return capture_native(self.session.helper(), &options).map_err(Error::from);
     }
 
@@ -88,7 +87,6 @@ impl Native<'_> {
     pub fn playback(&self, options: &PlaybackOptions) -> Result<()> {
         let mut options = options.clone();
         options.session_directory = self.session.path().to_path_buf();
-
         return playback(&options).map_err(Error::from);
     }
 }

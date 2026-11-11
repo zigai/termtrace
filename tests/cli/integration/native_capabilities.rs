@@ -457,7 +457,9 @@ fn native_capture_and_exports_invoke_only_the_tools_they_need() {
         .assert()
         .success();
     video.assert_not_invoked(&["import"]);
+
     let manifest = read_json(&session.join("visual/manifest.json"));
+
     assert_eq!(manifest["capture_kind"], "video");
     assert_eq!(manifest["video_probe"]["streams"][0]["codec_name"], "h264");
 
@@ -473,7 +475,9 @@ fn native_capture_and_exports_invoke_only_the_tools_they_need() {
         .assert()
         .success();
     screenshot.assert_not_invoked(&["ffmpeg"]);
+
     let manifest = read_json(&native_screenshot.join("manifest.json"));
+
     assert_eq!(manifest["capture_kind"], "screenshot");
     assert_eq!(
         manifest["screenshot_probe"]["streams"][0]["codec_name"],
@@ -531,6 +535,7 @@ fn native_capture_and_exports_invoke_only_the_tools_they_need() {
 
         let streams: serde_json::Value =
             serde_json::from_slice(&probe.stdout).expect("ffprobe JSON");
+
         assert_eq!(streams["streams"][0]["codec_name"], "h264", "{renderer}");
 
         let duration: f64 = streams["streams"][0]["duration"]

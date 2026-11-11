@@ -33,7 +33,6 @@ pub(in crate::cli) fn write_clap_error(error: clap::Error, quiet: bool) -> ExitC
             && print_error.kind() != io::ErrorKind::BrokenPipe
         {
             direct_stderr(&format!("could not print help: {print_error}"));
-
             return ExitCode::FAILURE;
         }
     } else if !quiet {

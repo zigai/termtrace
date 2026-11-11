@@ -98,14 +98,12 @@ fn fixture_frame() -> ScreenFrame {
         "../../../fixtures/conformance/locators/locator.json"
     ))
     .expect("valid locator fixture JSON");
-
     return serde_json::from_value(value["frame"].clone()).expect("valid ScreenFrame");
 }
 
 #[test]
 fn test_frame_text_extraction_from_variants() {
     let mut frame = fixture_frame();
-
     for (name, data, expected) in [
         ("no detail", ScreenFrameContent::None, ""),
         (

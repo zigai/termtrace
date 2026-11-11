@@ -179,7 +179,6 @@ fn resolve_executable(
         } else {
             working_directory.join(requested_path)
         };
-
         return canonical_executable(candidate);
     }
 
@@ -246,7 +245,6 @@ fn hash_file(path: &Path) -> Option<String> {
     let mut file = File::open(path).ok()?;
     let mut hasher = blake3::Hasher::new();
     hasher.update_reader(&mut file).ok()?;
-
     return Some(hasher.finalize().to_hex().to_string());
 }
 
@@ -255,7 +253,6 @@ fn read_process_umask() -> Option<u32> {
     let value = status
         .lines()
         .find_map(|line| return line.strip_prefix("Umask:").map(str::trim))?;
-
     return u32::from_str_radix(value, 8).ok();
 }
 

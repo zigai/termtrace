@@ -60,7 +60,6 @@ pub(crate) fn human_screen_summary(value: &serde_json::Value) -> String {
     push_moved_rows(&mut output, &moves);
     if changed_rows == 0 && moves.is_empty() {
         output.push_str("  (no nonblank or changed rows)\n");
-
         return output;
     }
 
@@ -109,7 +108,6 @@ pub(crate) fn human_screen_changes(
 
     if changes.is_empty() {
         output.push_str("  (no changes)\n");
-
         return Ok(output);
     }
 

@@ -97,7 +97,6 @@ impl EventLogHeader {
     #[must_use]
     pub fn with_colors(mut self, colors: TerminalColors) -> Self {
         self.colors = colors;
-
         return self;
     }
 }
@@ -404,7 +403,6 @@ impl Event {
                 .saturating_add(response.as_bytes().len()),
             _ => 0,
         };
-
         return u64::try_from(length).unwrap_or(u64::MAX);
     }
 }

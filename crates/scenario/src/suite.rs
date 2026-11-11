@@ -60,6 +60,7 @@ pub fn run_suite(
     paths.dedup();
 
     let mut expanded: Vec<(PathBuf, Scenario)> = Vec::new();
+
     for path in paths {
         let scenario = read(&path)?;
 
@@ -104,6 +105,7 @@ pub fn run_suite(
     let mut cases: Vec<Option<ScenarioCaseReport>> = vec![None; task_count];
     thread::scope(|scope| {
         let mut workers = Vec::new();
+
         for _ in 0..options.jobs.min(task_count) {
             let queue = Arc::clone(&queue);
             let sender = sender.clone();
@@ -130,6 +132,7 @@ pub fn run_suite(
                         elapsed_ms(started),
                     ),
                 };
+
                 if sender.send((index, case)).is_err() {
                     break;
                 }
@@ -137,6 +140,7 @@ pub fn run_suite(
         }
 
         drop(sender);
+
         // Drain all deliveries before joining every worker. Never return early on a case error.
         for (index, case) in receiver {
             if let Some(slot) = cases.get_mut(index) {
@@ -171,7 +175,6 @@ pub fn run_suite(
         cases,
     };
     report.status = report.verdict();
-
     return Ok(report);
 }
 
@@ -265,7 +268,6 @@ fn run_case_with(
     }
 
     case.status = case.verdict().unwrap_or(ScenarioCaseStatus::Failed);
-
     return case;
 }
 
@@ -354,6 +356,7 @@ pub fn scenario_junit(report: &ScenarioSuiteReport) -> String {
             || return case.scenario.display().to_string(),
             |a| return a.report.name.clone(),
         );
+
         let _written = write!(
             body,
             "<testcase classname=\"{}\" name=\"{}\" time=\"{}\"><properties>",
@@ -382,6 +385,7 @@ pub fn scenario_junit(report: &ScenarioSuiteReport) -> String {
         body.push_str("</properties>");
 
         let mut detail = String::new();
+
         for a in &case.attempts {
             let _written = writeln!(
                 detail,
@@ -490,6 +494,7 @@ mod tests {
 
     fn attempt(status: ScenarioStatus) -> ScenarioReport {
         let mut r = error_report("example", "launch", "recorder_startup");
+
         if status != ScenarioStatus::Error {
             r.status = status;
             r.infrastructure_errors.clear();
@@ -526,7 +531,6 @@ mod tests {
                 .collect(),
         };
         c.status = c.verdict().unwrap_or(ScenarioCaseStatus::Failed);
-
         return c;
     }
 
@@ -543,7 +547,6 @@ mod tests {
             cases,
         };
         r.status = r.verdict();
-
         return r;
     }
 
@@ -659,18 +662,15 @@ mod tests {
         r.infrastructure_errors
             .push(infrastructure("report_write", "junit_write"));
         r.status = r.verdict();
-
         assert!(r.ci_failed());
         assert!(scenario_junit(&r).contains("errors=\"1\""));
 
         let mut value = serde_json::to_value(suite(vec![case(&[P])], false)).unwrap();
         value["version"] = 1.into();
-
         assert!(serde_json::from_value::<ScenarioSuiteReport>(value).is_err());
 
         let mut value = serde_json::to_value(attempt(P)).unwrap();
         value["version"] = 2.into();
-
         assert!(serde_json::from_value::<ScenarioReport>(value).is_err());
     }
 
@@ -680,7 +680,6 @@ mod tests {
             vec![case(&[ScenarioStatus::Failed, ScenarioStatus::Passed])],
             false,
         );
-
         let xml = scenario_junit(&r);
         assert_eq!(xml, scenario_junit(&r));
         for expected in [
@@ -717,28 +716,22 @@ mod tests {
             reruns: 0,
             fail_on_flaky: false,
         };
-
         assert_eq!(validate_suite_options(&options).unwrap(), None);
 
         options.jobs = 0;
-
         assert!(validate_suite_options(&options).is_err());
 
         options.jobs = 1;
         options.shard_index = Some(0);
-
         assert!(validate_suite_options(&options).is_err());
 
         options.shard_count = Some(0);
-
         assert!(validate_suite_options(&options).is_err());
 
         options.shard_count = Some(2);
-
         assert_eq!(validate_suite_options(&options).unwrap(), Some((0, 2)));
 
         options.shard_index = Some(2);
-
         assert!(validate_suite_options(&options).is_err());
     }
 }

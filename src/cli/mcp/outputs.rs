@@ -71,7 +71,6 @@ pub(super) fn start() -> Arc<JsonObject> {
             ),
         }),
     );
-
     return schemas.finish(vec![started]);
 }
 
@@ -391,7 +390,6 @@ pub(super) fn analyze() -> Arc<JsonObject> {
         text,
         lifecycle(&mut schemas),
     ];
-
     return schemas.finish(variants);
 }
 

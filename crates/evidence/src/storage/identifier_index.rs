@@ -98,6 +98,7 @@ impl RequestIndex {
                     [id.as_bytes().as_slice()],
                 )
                 .map_err(index_error)?;
+
             if count == 0 {
                 // Dropping this uncommitted transaction rolls back the entire batch.
                 return Ok(false);

@@ -42,7 +42,6 @@ fn streamed_diagnostic_detectors_match_materialized_reports() {
 
         let expected =
             diagnose(&prefix, DiagnosticCheck::all(), 1, &[]).expect("legacy prefix diagnosis");
-
         let actual =
             diagnose_snapshot(&snapshot, DiagnosticCheck::all(), 1).expect("snapshot diagnosis");
         assert_eq!(
@@ -147,7 +146,6 @@ fn terminal_effects_show_in_timeline_and_diagnose_without_payloads() {
             .get_output()
             .stdout
             .clone();
-
         return String::from_utf8(output).expect("UTF-8 output");
     };
     let timeline = run(&["analyze", "timeline", "--all"]);
@@ -315,8 +313,8 @@ fn timeline_streams_presented_states_and_canonical_operations() {
     for (hidden, controls) in [(false, false), (false, true), (true, true)] {
         let expected = build_timeline(&log, hidden, controls, None).expect("reference timeline");
         let mut entries = Vec::new();
-
         let mut offset = 0;
+
         loop {
             let page = build_session_timeline_page(&session, hidden, controls, None, offset, 3)
                 .expect("streamed page");
@@ -381,6 +379,7 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
     assert_eq!(timeline_lines.len(), 101);
 
     let timeline_page = timeline_lines.last().expect("timeline page marker");
+
     assert_eq!(timeline_page["kind"], "output_page");
     assert_eq!(timeline_page["page"]["returned"], 100);
     assert_eq!(timeline_page["page"]["next_offset"], 100);
@@ -397,6 +396,7 @@ fn agent_facing_event_and_timeline_defaults_are_bounded_and_resumable() {
     assert_eq!(event_lines.len(), 101);
 
     let event_page = event_lines.last().expect("event page marker");
+
     assert_eq!(event_page["kind"], "output_page");
     assert_eq!(event_page["page"]["total"], 205);
     assert_eq!(event_page["page"]["next_offset"], 100);

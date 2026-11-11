@@ -57,7 +57,6 @@ fn file_index_matches_memory_and_excludes_later_appends() {
     create_private_directory(&session).expect("private directory");
 
     let event_path = session.join("events.jsonl");
-
     let mut writer = writer(&event_path);
     for bytes in [
         b"hello\x1b[".as_slice(),
@@ -132,7 +131,6 @@ fn file_index_matches_memory_and_excludes_later_appends() {
 
     let mut wrong = summary;
     wrong.terminal.as_mut().expect("terminal").hash = "0".repeat(64);
-
     assert!(write_source_index(
         &invalid,
         &IndexSource::File(&event_path, &wrong),
@@ -153,7 +151,6 @@ fn streaming_index_exceeds_materializing_reader_event_limit() {
     create_private_directory(&session).expect("private directory");
 
     let event_path = session.join("events.jsonl");
-
     let mut writer = writer(&event_path);
     for _ in 0..1_000_001 {
         writer
@@ -186,6 +183,7 @@ fn streaming_index_exceeds_materializing_reader_event_limit() {
         TEST_CHECKPOINT_SPACING,
     )
     .expect("streamed million-event index");
+
     assert_eq!(retained, 1);
     assert_eq!(artifacts.final_state_id, 0);
 }
@@ -215,6 +213,7 @@ fn video_stride_samples_intermediate_flutter_into_compact_index() {
     let summary = EventLogSummary::snapshot(&event_path).expect("snapshot");
     let full_dir = session.join("full");
     let video_dir = session.join("video");
+
     create_private_directory(&full_dir).expect("full directory");
 
     create_private_directory(&video_dir).expect("video directory");
@@ -281,7 +280,6 @@ fn index_session_with_video_options_samples_cleanly() {
     create_private_directory(&session).expect("private directory");
 
     let event_path = session.join("events.jsonl");
-
     let mut writer = writer(&event_path);
     for i in 0..30 {
         writer
@@ -320,6 +318,7 @@ fn index_session_with_video_options_samples_cleanly() {
     // Also test write_index_with_stride
     let memory_dir = session.join("memory_stride");
     create_private_directory(&memory_dir).expect("memory directory");
+
     let log = EventLog::read(&event_path).expect("read log");
     let (_, memory_retained) = write_index_with_stride(
         &memory_dir,
@@ -330,6 +329,7 @@ fn index_session_with_video_options_samples_cleanly() {
         Some(1_000_000_000 / 60),
     )
     .expect("write_index_with_stride");
+
     assert_eq!(memory_retained, 2);
 }
 
@@ -423,7 +423,6 @@ fn seekable_members_read_like_plain_files_from_any_offset() {
             .expect("seekable reader")
             .read_to_end(&mut read)
             .expect("seekable read");
-
         assert_eq!(
             read,
             plain[usize::try_from(offset).expect("offset")..],
@@ -444,7 +443,6 @@ fn seekable_members_read_like_plain_files_from_any_offset() {
         .expect("empty reader")
         .read_to_end(&mut read)
         .expect("empty read");
-
     assert!(read.is_empty());
 }
 
@@ -452,14 +450,15 @@ fn recorded_fixture(events: Vec<Event>) -> (tempfile::TempDir, EventLog) {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let session = temporary.path().join("session");
     create_private_directory(&session).expect("private session");
-    let path = session.join("events.jsonl");
 
+    let path = session.join("events.jsonl");
     let mut writer = writer(&path);
     for event in events {
         writer.append(event).expect("canonical event");
     }
 
     drop(writer);
+
     let log = EventLog::read(&path).expect("canonical log");
 
     return (temporary, log);
@@ -503,14 +502,12 @@ fn old_v7_manifest_without_final_state_id_falls_back_before_current_decode() {
     let selectors = [StateSelector::Final, StateSelector::StateId(0)];
     let expected = inspect_many(&log, &selectors).expect("canonical batch");
     catalog_file_index(&session, &log, None);
-
     assert!(DerivedIndex::open(&log).expect("current index").is_some());
 
     let path = session.join(layout::DERIVED).join(INDEX_MANIFEST);
     let mut manifest: serde_json::Value =
         serde_json::from_slice(&fs_err::read(&path).expect("manifest")).expect("JSON");
     manifest["version"] = serde_json::json!(7);
-
     assert!(manifest
         .as_object_mut()
         .expect("object")
@@ -603,7 +600,6 @@ fn file_checkpoint_replays_pending_resize_intent() {
         super::super::DEFAULT_REPLAY_LIMITS,
         |record, _, _| {
             resumed.push(record);
-
             return Ok(());
         },
     )

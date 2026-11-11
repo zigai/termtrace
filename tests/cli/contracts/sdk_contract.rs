@@ -154,7 +154,6 @@ fn check_row(
     for (kind, case_id) in &row.cases {
         if !fixture_ids.contains(case_id) {
             errors.push(format!("{id}: unknown fixture case {case_id}"));
-
             continue;
         }
 
@@ -218,6 +217,7 @@ fn sdk_contract_inventory_is_complete_and_consistent() {
 fn sdk_contract_portable_vector_preserves_exact_values() {
     let wire = include_str!("../../../fixtures/conformance/sdk/cases/portable.json");
     let value = decode_media_artifact(wire).unwrap();
+
     assert_eq!(value.members[0].byte_length.0, 9_007_199_254_740_993);
     assert_eq!(value.source.boundary.next_event_seq.0, u64::MAX);
     assert_eq!(

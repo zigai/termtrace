@@ -5,6 +5,7 @@ fn numeric_environment_values_never_enter_rejection_diagnostics() {
     let temporary = TempDir::new().expect("temporary directory");
     let specification = temporary.path().join("environment.json");
     let session = temporary.path().join("rejected");
+
     fs_err::write(&specification, br#"{"set":{"TOKEN":100000000}}"#)
         .expect("write malformed environment");
 

@@ -289,7 +289,6 @@ fn composite_command(
     }
 
     command.extend(requested.iter().skip(1).cloned());
-
     return Ok(command);
 }
 
@@ -357,8 +356,8 @@ fn observe(
     let mut locked = store.lock()?;
     let now = unix_time_ns();
     settle(store, &mut locked, now)?;
-    let manifest = locked.manifest();
 
+    let manifest = locked.manifest();
     if !manifest.state.lifecycle.is_open() {
         return Ok(());
     }
@@ -407,8 +406,8 @@ fn settle(store: &RecordingStore, locked: &mut LockedRecording<'_>, now: u64) ->
 
     let catalog = store.catalog(manifest)?;
     let mut remaining = catalog.summary().unfinished_tracks;
-    let mut completed = Vec::new();
 
+    let mut completed = Vec::new();
     for entry in unfinished_tracks(&catalog)? {
         if let Some(completion) = read_completed(&path_from_bytes(&entry.track.session))? {
             if completion.session_id != entry.track.session_id {
@@ -445,7 +444,6 @@ fn catalog_tracks(
 ) -> Result<Vec<TmuxTrackCatalogEntry>> {
     let mut entries = Vec::new();
     let mut next = 0;
-
     loop {
         let page = catalog.tracks(next, TRACK_PAGE, unfinished_only)?;
         let Some(last) = page.last() else {
@@ -528,7 +526,6 @@ pub fn register_pane_track(manifest: &Path, pane: &str, session: &Path) -> Resul
         &ByteString::from(session.as_os_str().as_bytes()),
         now,
     )?;
-
     return locked.apply(Input::TrackLinked(track), now);
 }
 
@@ -614,6 +611,7 @@ pub fn stop(tracks: &impl Tracks, request: StopRequest<'_>) -> Result<TmuxRecord
 
             if request.wait {
                 facts.phase = TmuxFailurePhase::WaitingTracks;
+
                 tracks.wait_completed(&path_from_bytes(session), request.timeout)?;
                 facts.completed_track_waits.push(session.clone());
             }
@@ -624,6 +622,7 @@ pub fn stop(tracks: &impl Tracks, request: StopRequest<'_>) -> Result<TmuxRecord
 
             for entry in unfinished_tracks(&store.catalog(&manifest)?)? {
                 facts.phase = TmuxFailurePhase::WaitingTracks;
+
                 tracks.wait_completed(
                     &path_from_bytes(&entry.track.session),
                     deadline.saturating_duration_since(Instant::now()),

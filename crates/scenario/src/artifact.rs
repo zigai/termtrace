@@ -79,6 +79,7 @@ fn populate_failure(
     }
 
     write_json(temporary.join("scenario.json"), &redacted_scenario)?;
+
     // This copy only claims publication in the transaction that successfully publishes it.
     let mut published_report = report.clone();
     published_report.failure_artifacts = None;
@@ -111,6 +112,7 @@ fn populate_failure(
                 Ok(png) => {
                     if write_bytes(temporary.join("final-screen.png"), &png).is_err() {
                         let _remove = fs_err::remove_file(temporary.join("final-screen.png"));
+
                         derivation_errors.push("semantic image unavailable".to_owned());
                     }
                 }
@@ -136,6 +138,7 @@ fn populate_failure(
                 Ok(diagnosis) => {
                     if write_json(temporary.join("diagnose.json"), &diagnosis).is_err() {
                         let _remove = fs_err::remove_file(temporary.join("diagnose.json"));
+
                         derivation_errors.push("diagnose unavailable".to_owned());
                     }
                 }

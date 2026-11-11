@@ -146,6 +146,7 @@ fn control_server_loop(
                 }
             }
         };
+
         if !listener_ready && stop_accepting_ready {
             return Ok(());
         }
@@ -156,6 +157,7 @@ fn control_server_loop(
 
         const MAX_ACCEPT_BATCH: usize = 32;
         let mut accepted_count = 0;
+
         loop {
             if accepted_count >= MAX_ACCEPT_BATCH {
                 break;
@@ -338,7 +340,6 @@ fn handle_control_connection(
                     })
                 {
                     let _delivered = sender.send(RuntimeMessage::ControlDisconnected(request_id));
-
                     return Ok(());
                 }
 
@@ -446,6 +447,7 @@ fn read_control_request(
         }
 
         let now = Instant::now();
+
         if now >= deadline {
             return Err(terminal_error(
                 "read control request",
@@ -602,6 +604,7 @@ fn write_all_with_cancellation(
         }
 
         let now = Instant::now();
+
         if now >= deadline {
             return Err(terminal_error(
                 "write control response",
@@ -743,7 +746,6 @@ fn rich_response_context(
         }
         _ => return None,
     };
-
     return Some((frame, boundaries, scope));
 }
 
@@ -751,7 +753,6 @@ fn actor_frame_boundaries(frame: &ScreenFrame) -> Option<ActorBoundaries> {
     let ScreenFrameSource::Actor { boundaries, .. } = &frame.source else {
         return None;
     };
-
     return Some(boundaries.clone());
 }
 
@@ -842,6 +843,7 @@ mod tests {
         };
         let (code, _, details) =
             oversized_response_error(&response, MAX_CONTROL_MESSAGE_BYTES + 37);
+
         assert_eq!(code, "screen_frame_resource_limit");
 
         let details = details.expect("rich response details");
@@ -900,6 +902,7 @@ mod tests {
         };
         let (code, _, details) =
             oversized_response_error(&response, MAX_CONTROL_MESSAGE_BYTES + 42);
+
         assert_eq!(code, "screen_frame_resource_limit");
 
         let details = details.expect("action response details");
@@ -1054,7 +1057,9 @@ mod tests {
         client.flush().expect("flush partial write");
 
         let start = Instant::now();
+
         worker.stop().expect("stop control server");
+
         let elapsed = start.elapsed();
         assert!(
             elapsed < Duration::from_secs(1),

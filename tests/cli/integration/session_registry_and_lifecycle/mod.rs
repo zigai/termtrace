@@ -13,8 +13,8 @@ fn table_column_starts(line: &str) -> Vec<usize> {
     }
 
     let mut starts = vec![0];
-    let mut separator_start = None;
 
+    let mut separator_start = None;
     for (index, byte) in line.bytes().enumerate() {
         if byte == b' ' {
             if separator_start.is_none() {

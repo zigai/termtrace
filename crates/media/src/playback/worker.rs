@@ -154,6 +154,7 @@ fn run_worker(
             .take(64 * 1024 + 1)
             .read_until(b'\n', &mut line)
             .map_err(|source| return filesystem(socket, source))?;
+
         if count == 0 {
             return Ok(());
         }
@@ -214,7 +215,6 @@ fn run_worker(
                     },
                     socket,
                 )?;
-
                 return Err(error);
             }
         }
@@ -266,6 +266,7 @@ fn advance_events(
     terminal: &mut ReplayTerminal,
 ) -> Result<PlaybackPosition> {
     let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
+
     if cursor.header().session_id != endpoint.session_id
         || cursor.header().session_manifest_hash != endpoint.session_manifest_hash
     {
@@ -380,7 +381,6 @@ fn advance_events(
 fn write_response(stream: &mut UnixStream, response: &WorkerResponse, path: &Path) -> Result<()> {
     serde_json::to_writer(&mut *stream, response)
         .map_err(|source| return json_error(path, source))?;
-
     return stream
         .write_all(b"\n")
         .map_err(|source| return filesystem(path, source));

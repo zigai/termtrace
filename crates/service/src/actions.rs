@@ -148,6 +148,7 @@ impl MutationGuard {
     #[must_use]
     pub fn request(&self, command: ControlCommand) -> ControlRequest {
         let mut request = ControlRequest::new(command);
+
         if let Some(request_id) = self.request_id {
             request.request_id = request_id;
         }
@@ -155,7 +156,6 @@ impl MutationGuard {
         request
             .expected_presented_state_hash
             .clone_from(&self.if_state);
-
         return request;
     }
 }
@@ -192,7 +192,6 @@ impl ActRequest {
     #[must_use]
     pub fn text(mut self, text: impl Into<String>) -> Self {
         self.atoms.push(InputAtom::Text(text.into()));
-
         return self;
     }
 
@@ -200,7 +199,6 @@ impl ActRequest {
     #[must_use]
     pub fn bytes(mut self, bytes: impl Into<Vec<u8>>) -> Self {
         self.atoms.push(InputAtom::Bytes(bytes.into()));
-
         return self;
     }
 
@@ -208,7 +206,6 @@ impl ActRequest {
     #[must_use]
     pub fn key(mut self, chord: KeyChord) -> Self {
         self.atoms.push(InputAtom::Key(chord));
-
         return self;
     }
 
@@ -216,7 +213,6 @@ impl ActRequest {
     #[must_use]
     pub fn paste(mut self, text: impl Into<String>) -> Self {
         self.atoms.push(InputAtom::Paste(text.into()));
-
         return self;
     }
 
@@ -224,7 +220,6 @@ impl ActRequest {
     #[must_use]
     pub fn if_state(mut self, state_hash: impl Into<String>) -> Self {
         self.guard.if_state = Some(state_hash.into());
-
         return self;
     }
 
@@ -232,7 +227,6 @@ impl ActRequest {
     #[must_use]
     pub fn intent(mut self, intent: impl Into<String>) -> Self {
         self.intent = Some(intent.into());
-
         return self;
     }
 
@@ -240,7 +234,6 @@ impl ActRequest {
     #[must_use]
     pub const fn pace(mut self, delay: Duration) -> Self {
         self.pace = delay;
-
         return self;
     }
 
@@ -252,7 +245,6 @@ impl ActRequest {
             timeout,
             settle: Duration::ZERO,
         };
-
         return self;
     }
 
@@ -264,7 +256,6 @@ impl ActRequest {
             timeout,
             reaction: Reaction::new(),
         };
-
         return self;
     }
 
@@ -272,7 +263,6 @@ impl ActRequest {
     #[must_use]
     pub const fn projection(mut self, projection: ScreenProjectionRequest) -> Self {
         self.projection = projection;
-
         return self;
     }
 
@@ -383,7 +373,6 @@ impl ActOutcome {
         let (ActionPostconditionResult::None { state_hash, .. }
         | ActionPostconditionResult::Idle { state_hash, .. }
         | ActionPostconditionResult::Screen { state_hash, .. }) = &self.postcondition;
-
         return state_hash
             .as_deref()
             .or_else(|| return self.frame().map(|frame| return frame.state_hash.as_str()));

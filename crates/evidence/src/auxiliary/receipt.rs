@@ -78,7 +78,6 @@ pub fn create_ssh_receipt(session: &Path, key: &Path, signer_key_id: &str) -> Re
     let payload = build_payload(session, signer_key_id)?;
     let path = SessionLayout::new(session).evidence_receipt();
     sign_ssh_receipt(&path, payload, key)?;
-
     return Ok(path);
 }
 
@@ -117,6 +116,7 @@ pub(crate) fn payload(
     created_unix_ns: u128,
 ) -> Result<EvidenceReceiptPayload> {
     let available_count = u64::try_from(roots.len()).unwrap_or(u64::MAX);
+
     if artifact_root_count > available_count {
         return Err(Error::invalid(
             "artifact checkpoint exceeds the current root catalog",
@@ -275,7 +275,6 @@ pub fn read_receipt(receipt_path: &Path) -> Result<EvidenceReceipt> {
     })?;
 
     validate_envelope(&receipt)?;
-
     return Ok(receipt);
 }
 
@@ -293,6 +292,7 @@ pub fn verify_ssh_receipt(
     allowed_signers: Option<&Path>,
 ) -> Result<ReceiptVerification> {
     let receipt = read_receipt(receipt_path)?;
+
     if receipt.payload != *expected_payload {
         return Err(Error::invalid(
             "receipt payload does not match current canonical roots or artifact checkpoint",
@@ -379,7 +379,6 @@ fn signed_payload_bytes(payload: &EvidenceReceiptPayload) -> Result<Vec<u8>> {
             source,
         };
     })?);
-
     return Ok(bytes);
 }
 

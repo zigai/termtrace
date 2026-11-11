@@ -326,7 +326,6 @@ impl OriginalLaunchSpec {
 
         arguments.push("--".into());
         arguments.extend(self.command.iter().cloned());
-
         return arguments;
     }
 }
@@ -639,6 +638,7 @@ fn tear_down(session: &Path, helper: &Path, mut child: Child) -> Option<String> 
     }
 
     let _killed = child.kill();
+
     if reap_within(&mut child, KILL_REAP_TIMEOUT) {
         return None;
     }
@@ -801,7 +801,6 @@ impl super::Terminal {
         loop {
             if cancelled.load(Ordering::Acquire) {
                 let cleanup = tear_down(session, self.binary(), child);
-
                 return Err(capture_failed(
                     session,
                     Some(OriginalCaptureFailure::Cancelled),
@@ -1054,6 +1053,7 @@ impl OriginalSession {
                     return status.state.is_terminal()
                         || status.state == OriginalCaptureState::Abandoned;
                 });
+
                 if settled {
                     break finished_capture(&self.session, completion);
                 }
@@ -1139,7 +1139,6 @@ impl OriginalSession {
             .force_close()
             .err()
             .map(|error| return error.to_string());
-
         return session_capture_failed(
             &self.session,
             Some(OriginalCaptureFailure::Cancelled),

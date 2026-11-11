@@ -83,6 +83,7 @@ fn optimistic_state_guards_reject_stale_input_without_canonical_events() {
     ] {
         let output = command.assert().failure().get_output().stdout.clone();
         let rejection = compact_json_line(&output);
+
         assert_eq!(rejection["code"], "stale_observation");
 
         let effect = rejection

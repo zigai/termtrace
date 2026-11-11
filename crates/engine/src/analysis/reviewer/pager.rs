@@ -353,7 +353,6 @@ fn event_target(
 ) -> Result<Option<u64>> {
     let mut cursor = EventLogCursor::open(SessionLayout::new(session).event_log())?;
     let mut selected = None;
-
     let mut matches = 0_u64;
     while let Some(record) = cursor.next_record()? {
         if cancelled.load(Ordering::Relaxed) {

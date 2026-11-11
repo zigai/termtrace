@@ -1,4 +1,5 @@
 //! Non-actor management failures have no replay identifier or deduplication guarantee.
+
 use super::mutation::{MutationEffect, Retry};
 use crate::{
     artifact::original::OriginalCaptureFacts, execution::session::SessionCompletion,
@@ -28,6 +29,7 @@ pub enum RestartFailurePhase {
     /// Compare-and-retarget failed; do not assume the alias still has its old owner.
     AliasRetarget,
 }
+
 /// Result of observing a spawned successor.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -43,6 +45,7 @@ pub enum SuccessorReadiness {
     /// Readiness observation failed; inspect the source/logs.
     Failed,
 }
+
 /// Exact allocated paths and proven successor launch/readiness facts, not rollback claims.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RestartAttempt {
@@ -72,6 +75,7 @@ pub struct RestartFailureFacts {
     /// Allocated successor/orphan locations and proven admission facts.
     pub successor: Option<RestartAttempt>,
 }
+
 /// Last known tmux management phase; none of these are input-atom counts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -87,6 +91,7 @@ pub enum TmuxFailurePhase {
     /// Settling aggregate lifecycle after shutdown attempts.
     Settling,
 }
+
 /// Actual tmux progress receipts, independent of the actor mutation/retry protocol.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TmuxFailureFacts {
@@ -124,6 +129,7 @@ impl TmuxFailureFacts {
         };
     }
 }
+
 /// Discriminator for actual non-actor management progress.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "operation", content = "facts", rename_all = "snake_case")]
@@ -135,6 +141,7 @@ pub enum ManagementFailure {
     /// Original-execution capture lifecycle facts; the application may have run.
     OriginalCapture(OriginalCaptureFacts),
 }
+
 /// Management has no automatic replay policy, regardless of nested actor effects.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -142,6 +149,7 @@ pub enum ManagementGuidance {
     /// Inspect predecessor, successor/orphan, alias and aggregate before a deliberate new action.
     InspectNoAutomaticRetry,
 }
+
 /// Shared failure projection. Actor-only effect/retry never describe a multi-step workflow.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "scope", rename_all = "snake_case")]
@@ -161,6 +169,7 @@ pub enum FailureContext {
         management: Box<ManagementFailure>,
     },
 }
+
 impl FailureContext {
     /// Use the single admitted actor mapping, never rederive it in native adapters.
     #[must_use]

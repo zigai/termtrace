@@ -28,7 +28,6 @@ use termtrace_model::{
 /// Returns an error when either selector is missing/ambiguous or replay fails.
 pub fn diff_states(log: &EventLog, from: StatePoint, to: StatePoint) -> Result<SemanticDiff> {
     let (difference, _, _) = diff_states_with_semantic_states(log, from, to)?;
-
     return Ok(difference);
 }
 
@@ -214,7 +213,6 @@ pub fn diff_inspections_with_semantic_states(
 /// Returns an error when replay fails or a marker is missing/ambiguous.
 pub fn inspect_point(log: &EventLog, point: &StatePoint) -> Result<StateInspection> {
     let selector = state_selector(log, point)?;
-
     return inspect(log, selector);
 }
 
@@ -282,6 +280,7 @@ fn changed_rows(before: &SemanticState, after: &SemanticState) -> Vec<RowChange>
         );
 
         let mut cells = Vec::new();
+
         for column in 0..columns {
             let before_cell =
                 before_row.and_then(|value| return value.cells.get(usize::from(column)));
@@ -528,7 +527,6 @@ mod tests {
             observed_monotonic_ns: 0,
             state_id: 0,
         };
-
         let region = (detail == FrameDetail::Cells).then_some(ScreenRegion {
             top: 0,
             left: 0,

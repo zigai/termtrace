@@ -59,11 +59,13 @@ const CHECKPOINT_SPACING: CheckpointSpacing = CheckpointSpacing {
     minimum_units: 4 * POSITION_STRIDE,
     units_per_frame_byte: 16,
 };
+
 #[cfg(test)]
 pub(super) const TEST_CHECKPOINT_SPACING: CheckpointSpacing = CheckpointSpacing {
     minimum_units: 32,
     units_per_frame_byte: 0,
 };
+
 const INDEX_MANIFEST: &str = "manifest.json";
 const CHECKPOINTS: &str = "checkpoints.jsonl.zst";
 const CHECKPOINT_FRAMES: &str = "checkpoints.bin";
@@ -372,10 +374,8 @@ impl DerivedIndex {
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(true),
             Err(source) => return Err(Error::Filesystem { path, source }),
         };
-
         let format: Format =
             serde_json::from_slice(&bytes).map_err(|source| return json_error(path, source))?;
-
         return Ok(
             format.version == STATE_FORMAT_VERSION && format.ghostty_revision == GHOSTTY_REVISION
         );
@@ -451,6 +451,7 @@ impl DerivedIndex {
         };
         let file = fs_err::File::open(&path).map_err(filesystem_error)?;
         let decoder = zstd::stream::read::Decoder::new(file).map_err(filesystem_error)?;
+
         let mut checkpoints = Vec::new();
 
         for line in BufReader::new(decoder).lines() {
@@ -511,6 +512,7 @@ impl DerivedIndex {
         })?;
 
         let mut listed = Vec::new();
+
         for line in BufReader::new(file).lines() {
             let line = line.map_err(|source| {
                 return Error::Filesystem {
@@ -544,7 +546,6 @@ fn read_block(path: &Path, offset: u64, length: u64) -> Result<Vec<u8>> {
 
     let mut compressed = vec![0_u8; length];
     file.read_exact(&mut compressed).map_err(filesystem_error)?;
-
     return decode_all(compressed.as_slice()).map_err(filesystem_error);
 }
 
@@ -801,7 +802,6 @@ impl StateIndexWriter {
         }
 
         self.pending = Some(entry);
-
         return Ok(());
     }
 
@@ -862,7 +862,6 @@ pub(crate) fn write_cataloged(session: &Path, log: &EventLog) -> Result<PathBuf>
         log.events.last().map(|record| return record.hash.as_str()),
         None,
     )?;
-
     return Ok(directory);
 }
 
@@ -955,7 +954,6 @@ fn write_source_index(
                 ReplayVisit::State(record, _) => record,
                 ReplayVisit::Effect(_) => {
                     counts.effects_before = counts.effects_before.saturating_add(1);
-
                     return Ok(());
                 }
             };

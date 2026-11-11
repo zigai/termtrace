@@ -227,7 +227,6 @@ impl Termination {
                         operation: "drain PTY output",
                         reason: "PTY remained open after terminating retained process-group descendants",
                     });
-
                     return effects;
                 }
                 Kill::Pending { .. } => {

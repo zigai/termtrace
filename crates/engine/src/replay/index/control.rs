@@ -36,6 +36,7 @@ pub(super) fn write_control_index(
     };
 
     let mut framer = VtFramer::with_default_bound()?;
+
     for record in source.records()? {
         let record = record?;
 

@@ -59,6 +59,7 @@ impl IndexSource<'_> {
             }
             Self::File(path, summary) => {
                 let mut cursor = EventLogCursor::open(path)?;
+
                 if cursor.header() != &summary.header {
                     return Err(invalid_replay("index source header changed"));
                 }
@@ -80,7 +81,6 @@ impl IndexSource<'_> {
                                     .validate_boundary(summary.event_count, &terminal.hash);
                             },
                         );
-
                         return validation.err().map(|error| return Err(Error::from(error)));
                     }
 

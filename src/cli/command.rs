@@ -17,6 +17,7 @@ use clap::{error::ErrorKind as ClapErrorKind, CommandFactory as _, Parser, Subco
 use std::env;
 use termtrace_media::helper_protocol;
 use termtrace_process::owned;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "termtrace",
@@ -130,6 +131,7 @@ pub(super) fn should_disable_color() -> bool {
 
 pub(super) fn root() -> clap::Command {
     let mut command = bound_help_width(Cli::command());
+
     if should_disable_color() {
         command = command.color(clap::ColorChoice::Never);
     }
@@ -144,6 +146,7 @@ impl Cli {
 
     pub(super) fn validate(&self) -> Result<(), clap::Error> {
         let mut cmd = root();
+
         match &self.command {
             Command::Record(record_args) => {
                 validate_recording_args(&mut cmd, &record_args.recording)?;

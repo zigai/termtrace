@@ -56,12 +56,14 @@ pub const GRANDFATHERED_PID: &str = "@termtrace-grandfathered-pid";
 pub const SELECTED_PID: &str = "@termtrace-selected-pid";
 /// Pane: process excluded from recording.
 pub const EXCLUDED_PID: &str = "@termtrace-excluded-pid";
+
 /// Hooks that run the pane guard.
 pub const GUARDED_HOOKS: &[&str] = &[
     "after-new-session",
     "after-new-window",
     "after-split-window",
 ];
+
 /// Hooks that signal [`OBSERVER_CHANNEL`] after tmux changes panes, windows, or sessions.
 pub const OBSERVED_HOOKS: &[&str] = &[
     "client-session-changed",
@@ -78,6 +80,7 @@ pub const OBSERVED_HOOKS: &[&str] = &[
     "window-renamed",
     "window-unlinked",
 ];
+
 /// Global options owned by the integration and removed by disable.
 pub const RESERVED: &[&str] = &[
     VERSION,
@@ -99,5 +102,6 @@ pub const RESERVED: &[&str] = &[
     RETAIN_BYTES,
     SCOPE,
 ];
+
 /// Pane options owned by the integration and removed by disable.
 pub const PANE_MARKS: &[&str] = &[GRANDFATHERED_PID, SELECTED_PID, EXCLUDED_PID];

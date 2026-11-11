@@ -366,6 +366,7 @@ impl NativeReplayWorker {
 
         let result = (|| {
             let mut entries = Vec::new();
+
             for (index, endpoint) in endpoints {
                 let name = format!("capture-{index:04}");
                 let artifact = staging.join(&name);
@@ -387,7 +388,6 @@ impl NativeReplayWorker {
                     "members": collect_artifact_members(&staging)?,
                 }),
             )?;
-
             write_json(
                 &staging.join("manifest.json"),
                 &serde_json::json!({
@@ -469,6 +469,7 @@ impl NativeReplayWorker {
             self.xvfb.check_running()?;
 
             let mut buffer = [0_u8; 4096];
+
             match self.stream.read(&mut buffer) {
                 Ok(0) => return Err(failure("worker closed without acknowledging endpoint")),
                 Ok(count) => response.extend_from_slice(buffer.get(..count).ok_or_else(|| {
@@ -644,7 +645,6 @@ impl NativeReplayWorker {
         validate_visual_manifest(&visual)?;
         write_json(&staging.join("manifest.json"), &visual)?;
         verify_artifact_members(staging, &visual.members)?;
-
         return sync_directory(staging).map_err(Error::from);
     }
 }

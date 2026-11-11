@@ -67,6 +67,7 @@ impl OutputService {
         }
 
         let (mut reader, source) = paging::open(session)?;
+
         if let Some(cursor) = &cursor {
             paging::check_source(&source, &cursor.events)?;
         }
@@ -84,6 +85,7 @@ impl OutputService {
         });
 
         let mut checked = cursor.is_none();
+
         if let Some(expected) = &cursor
             && expected.events.next_event_seq == 0
         {

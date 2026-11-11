@@ -85,7 +85,6 @@ impl PyStubType for PathArg {
     fn type_output() -> TypeInfo {
         let mut info = TypeInfo::unqualified("str | bytes | os.PathLike[str] | os.PathLike[bytes]");
         info.import.insert("os".into());
-
         return info;
     }
 }
@@ -608,6 +607,7 @@ mod tests {
             check("__import__('os').fsencode(value['path']) == b'/tmp/session-\\xff'");
             check("value['effect'] == {'kind': 'applied', 'seq': 2**53 + 1}");
             check("value['missing'] is None");
+
             let back: Report = from_python(&value).expect("convert back");
             assert_eq!(back, report());
         });
@@ -628,6 +628,7 @@ mod tests {
                 .expect("Path");
 
             dict.set_item("path", path).expect("replace path");
+
             let back: Report = from_python(&value).expect("convert back");
             assert_eq!(back.path.as_os_str().as_bytes(), b"/tmp/session-\xff");
         });

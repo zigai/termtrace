@@ -21,6 +21,7 @@ pub const GIF_DELIVERY_CAPABILITY: &str = "gif-delivery";
 pub const WEBM_DELIVERY_CAPABILITY: &str = "webm-delivery";
 /// SSH receipt-signing capability identifier.
 pub const RECEIPT_SIGNING_CAPABILITY: &str = "receipt-signing";
+
 /// Stable capability identifiers in report order.
 pub const CAPABILITY_IDS: &[&str] = &[
     CORE_CAPABILITY,
@@ -33,12 +34,15 @@ pub const CAPABILITY_IDS: &[&str] = &[
     WEBM_DELIVERY_CAPABILITY,
     RECEIPT_SIGNING_CAPABILITY,
 ];
+
 /// Programs the native screenshot probe and capture run.
 pub const NATIVE_SCREENSHOT_TOOLS: &[&str] =
     &["ghostty", "Xvfb", "dbus-run-session", "import", "ffprobe"];
+
 /// Programs the native video probe and capture run.
 pub const NATIVE_VIDEO_TOOLS: &[&str] =
     &["ghostty", "Xvfb", "dbus-run-session", "ffmpeg", "ffprobe"];
+
 /// Programs semantic-video encoding runs.
 pub const SEMANTIC_VIDEO_TOOLS: &[&str] = &["ffmpeg", "ffprobe"];
 /// Programs presentation export runs.

@@ -129,7 +129,6 @@ fn with_actor(name: &str, check: impl FnOnce(&mut SessionActor<'_>)) {
 
     let event_log =
         EventLogWriter::create(directory.join("events.jsonl"), &header, clock).expect("event log");
-
     let journal = MutationJournal::create(&directory).expect("mutation journal");
     let live = initialize_live_terminal(geometry.into(), &options.term, &options.colors)
         .expect("live terminal");
@@ -252,7 +251,6 @@ fn preserve_policy_keeps_the_application_alive_after_a_mirror_failure() {
         ],
     );
     options.failure_policy = RecordingFailurePolicy::Preserve;
-
     assert!(record_to(&options, &mut FailingOutput, &ResizeAuthority::ChildPty).is_err());
     assert_eq!(
         fs_err::read(&survived).expect("application survived"),
@@ -263,6 +261,7 @@ fn preserve_policy_keeps_the_application_alive_after_a_mirror_failure() {
         &fs_err::read(session.join("recording-health.json")).expect("degraded health"),
     )
     .expect("health JSON");
+
     assert_eq!(health["complete_evidence"], false);
     assert_eq!(health["unrecorded_output_bytes"], 0);
 
@@ -277,6 +276,7 @@ fn preserve_policy_keeps_the_application_alive_after_a_mirror_failure() {
         .flatten()
         .copied()
         .collect();
+
     assert_eq!(output, b"triggerlater");
     assert!(read_completion(&session)
         .expect("failure completion")
@@ -315,6 +315,7 @@ fn fatal_actor_exit_writes_durable_failure_completion() {
 
     let completion = read_completion(&session).expect("failure completion");
     let failure = completion.failure.as_ref().expect("recorder failure");
+
     assert_eq!(failure.code, "recorder_actor_failed");
     assert!(completion.durability.final_sync_completed);
     assert!(!session.join(layout::FAILURE_DIAGNOSTIC).exists());
@@ -330,6 +331,7 @@ fn fatal_actor_exit_writes_durable_failure_completion() {
         .flatten()
         .copied()
         .collect();
+
     assert_eq!(
         recorded_output, b"fatal-output",
         "a mirror failure must not discard observed bytes"
@@ -376,6 +378,7 @@ fn poisoned_terminal_exit_append_preserves_incomplete_failure_without_completion
         &fs_err::read(session.join(layout::FAILURE_DIAGNOSTIC)).expect("failure diagnostic"),
     )
     .expect("failure diagnostic JSON");
+
     assert_eq!(diagnostic.lifecycle, "incomplete");
     assert_eq!(diagnostic.failure.code, "recorder_actor_failed");
     assert_eq!(
@@ -799,6 +802,7 @@ fn records_exact_output_and_exit_after_output_close() {
         .flatten()
         .copied()
         .collect::<Vec<_>>();
+
     assert_eq!(output, b"\x1b[31mhello\x1b[0m\xff");
     assert_eq!(mirrored_output, output);
     assert!(matches!(
@@ -899,7 +903,6 @@ fn attached_mirror_suppresses_answered_split_queries_and_preserves_display_seque
     let mut mirrored = Vec::new();
     let outcome =
         record_to(&options, &mut mirrored, &ResizeAuthority::ChildPty).expect("attached recording");
-
     assert!(mirrored.starts_with(b"\x1b[31mvisible\x1b[0m"));
     assert!(!mirrored.windows(4).any(|bytes| return bytes == b"\x1b[6n"));
     assert!(
@@ -1039,7 +1042,6 @@ fn graceful_control_shutdown_drains_an_inflight_request() {
 
         let mut response = Vec::new();
         stream.read_to_end(&mut response).expect("read response");
-
         return response;
     });
 

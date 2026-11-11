@@ -67,7 +67,6 @@ mod tests {
         let mut attempts = 0;
         let value = poll_until(deadline, Duration::ZERO, || {
             attempts += 1;
-
             return Ok::<_, Infallible>((attempts == 3).then_some(attempts));
         });
         assert_eq!(value, Ok(Some(3)));

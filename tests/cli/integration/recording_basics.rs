@@ -51,7 +51,6 @@ fn durability_thresholds_are_only_accepted_in_bounded_mode() {
             .assert()
             .failure()
             .stderr(predicate::str::contains("require --durability bounded"));
-
         assert!(
             !session.exists(),
             "invalid durability options created evidence"
@@ -101,6 +100,7 @@ fn output_budget_exhaustion_returns_failure_after_fast_child_exit() {
     let completion: serde_json::Value =
         serde_json::from_slice(&fs_err::read(session.join("completion.json")).expect("completion"))
             .expect("completion JSON");
+
     assert_eq!(completion["resource_limit"]["kind"], "output_bytes");
     assert_eq!(completion["resource_limit"]["limit"], 4095);
     assert!(completion["resource_limit"]["observed"]
@@ -137,6 +137,7 @@ fn semantic_record_without_ghostty_has_stable_nonwarning_stderr() {
     );
 
     let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+
     assert_eq!(log.header.colors.source, "libghostty_builtin");
 }
 

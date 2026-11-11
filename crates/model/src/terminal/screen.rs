@@ -20,7 +20,6 @@ use uuid::Uuid;
 pub fn screen_match_text(state: &SemanticState) -> (String, Vec<(usize, u16)>) {
     let mut text = String::new();
     let mut starts = Vec::with_capacity(state.grid.len());
-
     for row in &state.grid {
         let start = text.len();
         starts.push((start, row.row));
@@ -55,6 +54,7 @@ pub const DEFAULT_MAX_SCREEN_FRAME_JSON_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_SCREEN_FRAME_CELLS: u32 = CANVAS_MAX_CELLS;
 /// Maximum serialized bytes in one rich projection.
 pub const MAX_SCREEN_FRAME_JSON_BYTES: u64 = DEFAULT_MAX_SCREEN_FRAME_JSON_BYTES;
+
 /// Unsigned 64-bit field names in screen frames, observations, state points, screen
 /// predicates, stable captures, and screen waits.
 ///
@@ -72,6 +72,7 @@ pub const SDK_WIDE_UNSIGNED_FIELDS: &[&str] = &[
     "stable_for_ns",
     "state_id",
 ];
+
 /// Raw byte field names in the same observation types, serialized as standard padded Base64
 /// and carried by SDK bindings as host byte strings.
 pub const SDK_BYTE_FIELDS: &[&str] = &["base64", "semantic_state_zstd"];
@@ -599,7 +600,6 @@ mod tests {
     fn sdk_field_tables_cover_every_wide_and_byte_schema_field() {
         let mut wide = BTreeSet::new();
         let mut bytes = BTreeSet::new();
-
         for schema in [
             schemars::schema_for!(ScreenFrame),
             schemars::schema_for!(Observation),

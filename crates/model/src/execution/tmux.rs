@@ -41,6 +41,7 @@ pub struct TmuxRecordConfiguration {
     /// Opt-in completed-pane retention budget; absent means no budget-based deletion.
     pub retain_bytes: Option<u64>,
 }
+
 impl Default for TmuxRecordConfiguration {
     fn default() -> Self {
         return Self {
@@ -63,6 +64,7 @@ impl Default for TmuxRecordConfiguration {
         };
     }
 }
+
 /// Existing Ghostty pane capture policies.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -74,6 +76,7 @@ pub enum TmuxGhosttyProfile {
     /// Semantic evidence only.
     Off,
 }
+
 /// Existing uncovered-pane policies.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

@@ -227,7 +227,6 @@ impl TerminalTest {
         let LifecycleState::Open(session) = &self.state else {
             return None;
         };
-
         return Some(session);
     }
 
@@ -237,7 +236,6 @@ impl TerminalTest {
         let LifecycleState::Open(session) = &mut self.state else {
             return None;
         };
-
         return Some(session);
     }
 
@@ -279,7 +277,6 @@ impl TerminalTest {
 
         let frame = session.frame(Default::default())?;
         assert_screen_text(&frame, expected)?;
-
         return Ok(frame);
     }
 
@@ -299,7 +296,6 @@ impl TerminalTest {
 
         let frame = session.frame(Default::default())?;
         assert_cursor(&frame, expected).map_err(|error| return AssertionError::Mismatch(error))?;
-
         return Ok(frame);
     }
 
@@ -339,7 +335,6 @@ impl TerminalTest {
                 retained: true,
             };
             self.state = LifecycleState::Finalized(report.clone());
-
             return report;
         };
         let canonical_session = session.path().to_path_buf();
@@ -517,7 +512,6 @@ impl TerminalTest {
             .retained
             .then(|| return self.attempt_directory.clone());
         self.state = LifecycleState::Finalized(report.clone());
-
         return report;
     }
 }
@@ -558,6 +552,7 @@ pub fn finalize_owned_sessions(
     };
 
     let mut completed_paths = Vec::new();
+
     for session in sessions {
         let session = match session {
             OwnedSessionFinalization::Open(session) => session,
@@ -647,7 +642,6 @@ pub fn finalize_owned_sessions(
             source,
         }),
     };
-
     let foreign_session = match foreign_session {
         Ok(found) => found,
         Err(error) => {
@@ -702,7 +696,6 @@ pub fn finalize_owned_sessions(
 
     report.retained = root.exists();
     report.evidence_directory = report.retained.then(|| return root.to_path_buf());
-
     return report;
 }
 

@@ -71,7 +71,6 @@ pub fn verify_session_with_trust(
                 "session_manifest_unreadable",
                 error.to_string(),
             );
-
             return report;
         }
     };
@@ -82,7 +81,6 @@ pub fn verify_session_with_trust(
         Ok(manifest) => manifest,
         Err(error) => {
             finding(&mut report, "session_manifest_invalid", error.to_string());
-
             return report;
         }
     };
@@ -90,7 +88,6 @@ pub fn verify_session_with_trust(
 
     if let Err(error) = validate_manifest(&manifest) {
         finding(&mut report, "session_format_unsupported", error.to_string());
-
         return report;
     }
 
@@ -98,7 +95,6 @@ pub fn verify_session_with_trust(
         Ok(log) => log,
         Err(error) => {
             finding(&mut report, "event_log_invalid", error.to_string());
-
             return report;
         }
     };
@@ -115,7 +111,6 @@ pub fn verify_session_with_trust(
                 "completion_invalid_or_missing",
                 error.to_string(),
             );
-
             return report;
         }
     };
@@ -126,13 +121,11 @@ pub fn verify_session_with_trust(
             "completion_format_unsupported",
             error.to_string(),
         );
-
         return report;
     }
 
     if level == VerificationLevel::Structure {
         report.valid = true;
-
         return report;
     }
 
@@ -145,7 +138,6 @@ pub fn verify_session_with_trust(
     ) {
         let code = content_finding_code(error.kind);
         finding(&mut report, code, error.error.to_string());
-
         return report;
     }
 
@@ -157,7 +149,6 @@ pub fn verify_session_with_trust(
         Ok(count) => report.artifact_roots_verified = count,
         Err(error) => {
             finding(&mut report, "artifact_integrity_invalid", error.to_string());
-
             return report;
         }
     }
@@ -180,7 +171,6 @@ pub fn verify_session_with_trust(
                         "durability_record_invalid",
                         format!("mutation journal validation failed: {error}"),
                     );
-
                     return report;
                 }
             }

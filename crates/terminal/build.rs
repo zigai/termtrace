@@ -141,6 +141,7 @@ fn ghostty_prefix(repository_root: &Path, revision: &str) -> Result<PathBuf, Box
     }
 
     let mut searched = Vec::with_capacity(candidates.len());
+
     for candidate in candidates {
         watch_prefix(&candidate);
 

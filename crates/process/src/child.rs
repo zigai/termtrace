@@ -111,7 +111,6 @@ impl SupervisedChild {
     pub fn kill(mut self) -> io::Result<ExitStatus> {
         let _kill = self.group.kill();
         let _leader = self.child.kill();
-
         return self.child.wait();
     }
 }
@@ -153,6 +152,7 @@ mod tests {
     fn terminate_kills_members_that_ignore_sigterm() {
         let child = spawn_shell("trap '' TERM; sleep 60 & wait");
         let group = child.group();
+
         thread::sleep(Duration::from_millis(50));
 
         assert_eq!(

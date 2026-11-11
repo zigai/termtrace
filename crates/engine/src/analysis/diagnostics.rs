@@ -119,7 +119,6 @@ impl ValidatedVisualManifest {
         }
 
         self.screenshot_state_id = Some(state_id);
-
         return Ok(());
     }
 }
@@ -545,7 +544,6 @@ pub fn explain_session(
     let end_event = target_event.saturating_add(context_events);
     let mut cursor = TokenCursor::new(session, None)?;
     let mut tokens = Vec::new();
-
     while let Some(entry) = cursor.next()? {
         if let TimelineItem::VtToken { token } = entry.item
             && token.source.iter().any(|segment| {
@@ -894,7 +892,6 @@ fn detect_dirty_discrepancies(states: &[StateRecord], findings: &mut Vec<Diagnos
 
 fn detect_cursor_jumps(states: &[StateRecord], findings: &mut Vec<DiagnosticFinding>) {
     let mut previous: Option<&CursorState> = None;
-
     for state in states {
         let Some(cursor) = state.delta.cursor.as_ref() else {
             continue;
@@ -1000,6 +997,7 @@ fn detect_query_loops(log: &EventLog, findings: &mut Vec<DiagnosticFinding>) {
 
 fn findings(tokens: &[VtToken], states: &[StateRecord]) -> Vec<ExplainFinding> {
     let mut findings = Vec::new();
+
     for (description, code, fact) in [
         (
             "erase display (all)",

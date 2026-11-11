@@ -63,7 +63,6 @@ impl RawTerminalGuard {
         let Some(original) = self.original.take() else {
             return Ok(());
         };
-
         return tcsetattr(io::stdin(), SetArg::TCSANOW, &original)
             .map_err(|error| return terminal_error("restore terminal mode", error));
     }
@@ -215,6 +214,7 @@ impl ReplayTerminal {
 
         loop {
             let report = query()?;
+
             if (report.cols, report.rows) == (cols, rows) {
                 return Ok(report);
             }
@@ -259,6 +259,7 @@ pub(super) fn query() -> Result<TerminalGeometryReport> {
 
     let stdin = io::stdin();
     let deadline = Instant::now() + QUERY_TIMEOUT;
+
     let mut bytes: Vec<u8> = Vec::with_capacity(128);
     let mut buffer = [0_u8; 128];
 
@@ -365,7 +366,6 @@ fn drain_input(cancel: OwnedFd, ready: mpsc::SyncSender<()>) -> Result<()> {
         .map_err(|error| return terminal_error("start playback input drain", error))?;
 
     let mut buffer = [0_u8; 4096];
-
     loop {
         let mut descriptors = [
             PollFd::new(stdin.as_fd(), PollFlags::POLLIN),

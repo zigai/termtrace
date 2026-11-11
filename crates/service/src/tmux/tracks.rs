@@ -1,4 +1,5 @@
 //! Reusable canonical track effects; the CLI and SDK use the same adapter.
+
 use crate::{
     client::{Session, StopRequest},
     defaults,
@@ -115,7 +116,6 @@ impl Tracks for ServiceTracks {
                         "--".into(),
                     ];
                     args.extend(command.iter().cloned());
-
                     return args;
                 },
             )

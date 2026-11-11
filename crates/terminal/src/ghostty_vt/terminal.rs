@@ -23,8 +23,10 @@ const ESC: u8 = 0x1b;
 const BEL: u8 = 0x07;
 const CAN: u8 = 0x18;
 const GROUND: u32 = sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_GROUND.cast_unsigned();
+
 const OSC_START: u32 =
     sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_OSC_START.cast_unsigned();
+
 const OSC_END: u32 = sys::GhosttyTerminalBoundary_GHOSTTY_TERMINAL_BOUNDARY_OSC_END.cast_unsigned();
 
 mod checkpoint;
@@ -259,7 +261,6 @@ impl GhosttyVt {
     pub fn write_step(&mut self, bytes: &[u8]) -> OutputStep {
         let mut plain = 0;
         let mut consumed = 0;
-
         while let Some(rest) = bytes.get(consumed..)
             && !rest.is_empty()
         {
@@ -399,7 +400,6 @@ impl GhosttyVt {
         })?;
 
         self.render_holds = true;
-
         return Ok(());
     }
 
@@ -416,7 +416,6 @@ impl GhosttyVt {
     pub fn capture_effects(&mut self) -> Result<()> {
         effects::register(self.terminal)?;
         self.captures_effects = true;
-
         return Ok(());
     }
 
@@ -477,7 +476,6 @@ impl GhosttyVt {
             // CAN makes Ghostty discard the partial OSC without running it.
             self.vt_write(&[CAN]);
             self.sequence = Sequence::DiscardOsc { escape: false };
-
             return 0;
         }
 
@@ -617,7 +615,6 @@ impl GhosttyVt {
             colors.foreground,
             "set foreground color",
         )?;
-
         set_color_option(
             self.terminal,
             sys::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND,
@@ -863,6 +860,7 @@ unsafe extern "C" fn render_hold_callback(
     }
 
     let effects = unsafe { &mut *userdata.cast::<Effects>() };
+
     if !held {
         effects.holds.push(RenderHold::Ended);
 
@@ -931,12 +929,10 @@ mod tests {
             )
         })
         .expect("read Kitty storage policy");
-
         assert_eq!(kitty_storage_bytes, 0);
 
         terminal.write(b"\x1b");
         terminal.write(b"]2;bounded\x07");
-
         assert_eq!(
             terminal
                 .snapshot()
@@ -960,9 +956,10 @@ mod tests {
     fn write_steps_end_after_one_sequence_as_ghostty_parses_it() {
         let mut terminal = GhosttyVt::new(80, 24, 0).expect("create terminal");
         let input = b"ab\x1b[31mcd\x1b]2;t\x1b\\\x9b6n\xc4\x9b";
-        let mut steps = Vec::new();
 
+        let mut steps = Vec::new();
         let mut offset = 0;
+
         while offset < input.len() {
             let step = terminal.write_step(&input[offset..]);
             steps.push(step);
@@ -1032,6 +1029,7 @@ mod tests {
         terminal.capture_effects().expect("capture effects");
 
         let mut effects = Vec::new();
+
         for chunk in chunks {
             let mut offset = 0;
 
@@ -1221,7 +1219,6 @@ mod tests {
         assert!(terminal.synchronized_output().expect("mode"));
 
         terminal.write(b"\x1b[?2026h\x1b[?2026l\x1b[?2026l");
-
         assert_eq!(
             terminal.take_render_holds().expect("hold end"),
             vec![RenderHold::Ended]
@@ -1245,7 +1242,6 @@ mod tests {
 
     fn steps(terminal: &mut GhosttyVt, input: &[u8]) -> Vec<OutputStep> {
         let mut steps = Vec::new();
-
         let mut offset = 0;
         while offset < input.len() {
             let step = terminal.write_step(&input[offset..]);
@@ -1283,7 +1279,6 @@ mod tests {
     fn hold_edges_follow_sequences_across_writes_and_inline_controls() {
         let mut terminal = GhosttyVt::new(20, 4, 0).expect("create terminal");
         terminal.capture_render_holds().expect("capture holds");
-
         assert!(!terminal.write_step(b"\x1b[?20").hold_edge);
 
         let resumed = terminal.write_step(b"26\nh");
@@ -1293,7 +1288,6 @@ mod tests {
 
         // A sequence whose final byte starts the next write has no earlier byte to stop at.
         steps(&mut terminal, b"h\x1b[?2026l\x1b[?2026");
-
         assert!(!terminal.write_step(b"h").hold_edge);
         assert!(terminal.synchronized_output().expect("mode"));
 
@@ -1387,6 +1381,7 @@ mod tests {
                 terminal.capture_render_holds().expect("capture holds");
 
                 let initial = b"shown\x1b[?2026h\x1b[2J\x1b[Hhidden";
+
                 if stepped_start {
                     steps(&mut terminal, initial);
                 } else {
@@ -1441,9 +1436,7 @@ mod tests {
     fn steps_do_not_stop_for_other_modes_or_without_hold_capture() {
         let mut capturing = GhosttyVt::new(20, 4, 0).expect("create terminal");
         capturing.capture_render_holds().expect("capture holds");
-
         let other = b"\x1b[?25h\x1b[?2026l\x1b[2026h\x1b[?2026:1h\x1b[>2026h";
-
         assert!(steps(&mut capturing, other)
             .iter()
             .all(|step| return !step.hold_edge));

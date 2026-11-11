@@ -83,6 +83,7 @@ fn relative_subtitles_resolve_only_against_an_explicit_base() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let resources = temporary.path().join("resources");
     let elsewhere = temporary.path().join("elsewhere");
+
     fs_err::create_dir(&resources).expect("resource directory");
 
     fs_err::create_dir(&elsewhere).expect("other directory");
@@ -223,7 +224,6 @@ fn edit_plan_bounds_speed_caption_and_source_overlap() {
         clips: vec![clip],
         ..EditPlan::default()
     };
-
     assert!(validate_edit_plan(&edit).is_err());
     assert!(ranges_overlap(
         SourceRange {
@@ -333,7 +333,6 @@ fn failed_export_removes_its_staging_directory() {
         false,
     )
     .expect_err("invalid source video should fail export");
-
     assert!(!destination.exists());
 
     let staging = fs_err::read_dir(temporary.path())
@@ -442,7 +441,6 @@ fn full_screen_outline_change_composes_beyond_the_argument_limit() {
     fs_err::create_dir(&staging).expect("staging directory");
     pipeline::compose_pixels(&plan, &staging, true, None)
         .expect("compose a full-screen outline overlay");
-
     assert!(staging.join("composed.mkv").is_file());
 }
 
@@ -713,7 +711,6 @@ fn transform_geometry_is_ordered_bounded_and_even() {
         ],
         ..EditPlan::default()
     };
-
     assert_eq!(
         validate_transform_geometry(&edit, 80, 40, false).expect("valid transforms"),
         (64, 48)
@@ -736,7 +733,6 @@ fn transform_geometry_is_ordered_bounded_and_even() {
         ],
         ..EditPlan::default()
     };
-
     assert!(validate_transform_geometry(&invalid, 80, 40, false).is_err());
 }
 
@@ -934,12 +930,10 @@ fn preview_selection_is_bounded_deterministic_and_change_aware() {
         output_frame_count: u64::MAX,
         ..PresentationPlan::default()
     };
-
     let options = PreviewOptions {
         max_frames: 3,
         ..PreviewOptions::default()
     };
-
     assert_eq!(
         select_preview_frames(&dense, options).expect("sample huge frame range"),
         vec![0, (u64::MAX - 1) / 2, u64::MAX - 1]
@@ -954,7 +948,6 @@ fn preview_selection_is_bounded_deterministic_and_change_aware() {
         }),
         ..dense
     };
-
     assert_eq!(
         select_preview_frames(
             &encoded,
@@ -989,11 +982,9 @@ fn validate_ass_resource_accepts_valid_file_and_rejects_invalid() {
         "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Hello world\n",
     )
     .expect("write valid ASS");
-
     assert!(validate_ass_resource(&valid_ass).is_ok());
 
     let invalid_ass = temporary.path().join("invalid.ass");
     fs_err::write(&invalid_ass, "plain text without sections").expect("write invalid ASS");
-
     assert!(validate_ass_resource(&invalid_ass).is_err());
 }

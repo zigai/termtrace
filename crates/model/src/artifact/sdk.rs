@@ -18,6 +18,7 @@ pub const NATIVE_INTEGER_ANNOTATION: &str = "x-termtrace-native-integer";
 // Exact lexical bound as well as canonical decimal syntax; JSON Schema must reject overflow.
 fn decimal_pattern(max: &str) -> String {
     let mut alternatives = vec!["0".to_owned(), format!("[1-9][0-9]{{0,{}}}", max.len() - 2)];
+
     let mut prefix = String::new();
 
     for (i, digit) in max.bytes().enumerate() {
@@ -185,6 +186,7 @@ pub struct SdkCanonicalBoundary {
     /// Canonical PTY bytes through this boundary.
     pub output_bytes: DecimalU64,
 }
+
 impl From<CanonicalBoundary> for SdkCanonicalBoundary {
     fn from(b: CanonicalBoundary) -> Self {
         return Self {
@@ -218,6 +220,7 @@ pub struct SdkArtifactMember {
     /// Existing manifest relationship.
     pub relationship: String,
 }
+
 impl From<ArtifactMember> for SdkArtifactMember {
     fn from(m: ArtifactMember) -> Self {
         return Self {
@@ -266,6 +269,7 @@ struct MediaArtifactWire {
     product_kind: ArtifactProductKind,
     members: Vec<SdkArtifactMember>,
 }
+
 impl<'de> Deserialize<'de> for MediaArtifactResult {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let wire = MediaArtifactWire::deserialize(deserializer)?;
@@ -280,7 +284,6 @@ impl<'de> Deserialize<'de> for MediaArtifactResult {
         };
 
         result.validate().map_err(D::Error::custom)?;
-
         return Ok(result);
     }
 }

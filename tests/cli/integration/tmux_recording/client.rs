@@ -116,9 +116,11 @@ fn pane_fields_round_trip_through_tmux_without_changing_topology() {
                 .map(|row| return row.snapshot.pane_id.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
+
             prop_assert_eq!(actual_ids.as_bytes(), &expected_ids);
             let expected_path =
                 if value.is_empty() { None } else { Some(ByteString::from(value.as_slice())) };
+
             prop_assert_eq!(&rows[0].snapshot.recording_session, &expected_path);
             let single = client.pane_row("%0").expect("single pane");
             prop_assert_eq!(&single.snapshot.pane_id, &rows[0].snapshot.pane_id);

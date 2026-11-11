@@ -74,7 +74,6 @@ fn source_traversal_reads_complete_history_and_ignores_an_untrusted_index() {
         }
 
         count += 1;
-
         return Ok(());
     })
     .expect("all sources from authoritative history");

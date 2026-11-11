@@ -125,7 +125,6 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
     let mut count = 0;
     journal::visit(&lifecycle, &boundary, |_| {
         count += 1;
-
         return Ok(());
     })
     .expect("complete lifecycle history");
@@ -166,6 +165,7 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
 
     let page: serde_json::Value =
         serde_json::from_slice(&output.get_output().stdout).expect("event page");
+
     assert_eq!(page["events"][0]["sequence"], 2);
     assert_eq!(page["events"].as_array().expect("events").len(), 3);
     assert_eq!(page["next_sequence"], 5);
@@ -179,7 +179,6 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("must be completed before export"));
-
     assert!(!rejected.exists());
 
     {
@@ -202,6 +201,7 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
         .success();
 
     let response = compact_json_line(&output.get_output().stdout);
+
     assert_eq!(response["recording_name"], "work");
     assert_eq!(response["track_count"], 3);
     assert!(bundle.join("aggregate-recording-manifest.json").is_file());
@@ -243,7 +243,6 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
         .expect("journal-bound bundle");
 
     fs::write(bundle.join("extra"), b"extra").expect("extra file");
-
     assert!(tmux::streaming::verify(&bundle, aggregate.join("manifest.json")).is_err());
 
     fs::remove_file(bundle.join("extra")).expect("remove extra file");
@@ -252,12 +251,10 @@ fn tmux_bundle_contains_the_aggregate_manifest_and_every_canonical_track() {
         format!("{inventory}{inventory}"),
     )
     .expect("duplicate inventory");
-
     assert!(tmux::streaming::verify(&bundle, aggregate.join("manifest.json")).is_err());
 
     fs::write(bundle.join("tracks.jsonl"), inventory).expect("restore inventory");
     fs::write(bundle.join("aggregate-lifecycle.jsonl"), b"corrupt\n").expect("tamper journal");
-
     assert!(tmux::streaming::verify(&bundle, aggregate.join("manifest.json")).is_err());
 }
 
@@ -304,6 +301,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
 
     let started: serde_json::Value =
         serde_json::from_slice(&output).expect("aggregate start response");
+
     assert_eq!(started["name"], "work");
     assert!(started["composite_track"]["link"]["session"].is_string());
 
@@ -313,6 +311,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
         let value: serde_json::Value =
             serde_json::from_slice(&fs::read(&manifest).expect("read aggregate manifest"))
                 .expect("aggregate manifest JSON");
+
         if value["composite_track"]["link"]["session_id"].is_string()
             && value["pane_tracks"]
                 .as_object()
@@ -395,6 +394,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
                 return event["kind"] == "coverage_gap_resolved"
                     && event["gap"]["kind"] == "observer_start";
             });
+
         if restarted {
             break;
         }
@@ -524,6 +524,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
             .map(|entry| return &entry["gap"])
             .cloned()
             .expect("historical uncovered pane gap");
+
         if historical["resolved_unix_ns"].is_u64() {
             break (historical, refreshed);
         }
@@ -598,6 +599,7 @@ fn tmux_aggregate_manifest_links_composite_and_pane_tracks() {
     let stopped: serde_json::Value =
         serde_json::from_slice(&fs::read(&manifest).expect("read stopped aggregate manifest"))
             .expect("stopped aggregate manifest JSON");
+
     assert_eq!(stopped["lifecycle"], "completed");
 }
 
@@ -613,7 +615,6 @@ fn tmux_json(tmux_tmpdir: &Path, arguments: &[&str]) -> serde_json::Value {
         .get_output()
         .stdout
         .clone();
-
     return serde_json::from_slice(&output).expect("tmux JSON response");
 }
 
@@ -630,7 +631,6 @@ fn tmux_events(tmux_tmpdir: &Path, root: &str, name: &str) -> Vec<serde_json::Va
             "4096",
         ],
     );
-
     return page
         .get("events")
         .and_then(serde_json::Value::as_array)

@@ -54,8 +54,8 @@ pub fn create(
 
     let completion = validate_completed_session(&canonical)?;
     let session_manifest = read_manifest(&canonical)?;
-    let mut cursor = EventLogCursor::open(SessionLayout::new(&canonical).event_log())?;
 
+    let mut cursor = EventLogCursor::open(SessionLayout::new(&canonical).event_log())?;
     let mut has_input = false;
     while let Some(record) = cursor.next_record()? {
         if matches!(record.event, Event::InputIntent { .. }) {

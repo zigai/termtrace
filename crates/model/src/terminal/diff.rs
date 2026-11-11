@@ -218,9 +218,10 @@ pub fn row_moves<T: Eq + Hash>(before: &[T], after: &[T]) -> Vec<RowMove> {
 
     let link = |later: usize| return links.get(later).copied().flatten();
     let unmoved = |row: usize| return before.get(row) == after.get(row);
-    let mut moves = Vec::new();
 
+    let mut moves = Vec::new();
     let mut later = 0;
+
     while later < after.len() {
         let Some(earlier) = link(later) else {
             later += 1;

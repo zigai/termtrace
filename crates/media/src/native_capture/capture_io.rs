@@ -50,7 +50,6 @@ pub(super) fn status_error_with_logs(program: &str, status: ExitStatus, staging:
         Ok(_) => String::from_utf8_lossy(&bytes).into_owned(),
         Err(error) => format!("stderr log unavailable: {error}"),
     };
-
     return Error::ExternalCommand {
         operation: program.to_owned(),
         reason: format!("exited with {status}: {}", stderr.trim()),

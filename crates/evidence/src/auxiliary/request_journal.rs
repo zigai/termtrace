@@ -273,7 +273,6 @@ impl MutationJournal {
             .ok_or_else(|| return Error::invalid("mutation journal sequence overflow"))?;
 
         self.previous_hash.clone_from(&record.hash);
-
         return Ok(record);
     }
 }
@@ -494,7 +493,6 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
             .map_err(index_error)?;
 
         let mut host_operations = HashSet::new();
-
         while let Some(event) = cursor.next_record()? {
             boundary
                 .execute(params![event.hash, event.seq + 1])
@@ -513,6 +511,7 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
     }
 
     let _pending = cursor.finish()?;
+
     let mut journal = MutationJournalCursor::open(&path)?;
     let mut verified_count = 0;
     let mut verified_hash = String::new();
@@ -527,6 +526,7 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
             .optional()
             .map_err(index_error)?
             .flatten();
+
         if expected_hash.as_ref() != Some(&record.event_hash) {
             return Err(Error::invalid(
                 "mutation journal event hash does not match the canonical boundary",
@@ -544,8 +544,8 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
                 .map_err(index_error)?;
 
             let mut previous = None;
-
             let mut matched_count = 0;
+
             while let Some(row) = rows.next().map_err(index_error)? {
                 let bytes: Vec<u8> = row.get(0).map_err(index_error)?;
                 let id = Uuid::from_slice(&bytes).map_err(|source| {
@@ -554,6 +554,7 @@ pub fn validate_mutation_journal(session: &Path) -> Result<u64> {
                         source,
                     );
                 })?;
+
                 if previous == Some(id) {
                     continue;
                 }
@@ -682,6 +683,7 @@ fn decode_record(
     })?;
 
     let seq = u64::try_from(index).unwrap_or(u64::MAX);
+
     if record.seq != seq
         || record.prev_hash != previous_hash
         || record.response.request_id != record.request_id
@@ -932,6 +934,7 @@ mod tests {
         drop(journal);
 
         let verified = validate_mutation_journal(session).expect("validation should succeed");
+
         assert_eq!(verified, 1);
     }
 
@@ -1039,6 +1042,7 @@ mod tests {
         drop(journal);
 
         let verified = validate_mutation_journal(session).expect("validation should succeed");
+
         assert_eq!(verified, 1);
     }
 
@@ -1176,6 +1180,7 @@ mod tests {
         drop(journal);
 
         let verified = validate_mutation_journal(session).expect("validation should succeed");
+
         assert_eq!(verified, 1);
     }
 }

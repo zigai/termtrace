@@ -33,6 +33,7 @@ const GHOSTTY_QUERY_TIMEOUT: Duration = Duration::from_secs(20);
 const GHOSTTY_QUERY_POLL: Duration = Duration::from_millis(10);
 const MAX_QUERY_OUTPUT_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_REPORTED_DIAGNOSTICS: usize = 8;
+
 const FONT_FAMILY_KEYS: [&str; 4] = [
     "font-family",
     "font-family-bold",
@@ -109,6 +110,7 @@ pub fn resolve_visual_profile(
     let (base, source_config) = if let Some(config) = &native.config {
         let path = Path::new(config);
         validate_config_file(&executable, path, cancelled)?;
+
         let wrapper = format!("config-file = \"{}\"\n", escape_config_string(config));
 
         (
@@ -259,7 +261,6 @@ fn materialize(root: &Path, config: &[u8]) -> Result<PathBuf> {
 fn query_default_config() -> Result<Vec<u8>> {
     let output = run_bounded(Command::new("ghostty").arg("+show-config"), &NOT_CANCELLED)
         .map_err(|error| return profile_error(format!("run Ghostty config query: {error}")))?;
-
     return checked_config_output(output, "query default Ghostty config");
 }
 
@@ -274,7 +275,6 @@ fn query_isolated_config(config: &[u8], cancelled: &AtomicBool) -> Result<Vec<u8
         .map_err(|error| {
             return profile_error(format!("run isolated Ghostty config query: {error}"));
         })?;
-
         return checked_config_output(output, "resolve Ghostty config");
     });
 }

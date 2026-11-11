@@ -86,6 +86,7 @@ impl MutationHistory {
             command
         {
             let identifiers: Vec<_> = atoms.iter().map(sequence_operation_id).collect();
+
             if !self.journal.reserve_operations(&identifiers)? {
                 return Err(control_rejected(
                     "operation_id_collision",
@@ -125,6 +126,7 @@ impl MutationHistory {
                 },
                 ControlResult::Error { details, .. } => {
                     let mut atoms_applied = 0;
+
                     if let Some(details) = details
                         && let Some(sequence) = &details.input_sequence
                     {
@@ -161,7 +163,6 @@ impl MutationHistory {
                 response: record.response,
             },
         );
-
         return Ok(());
     }
 
@@ -253,7 +254,6 @@ mod tests {
             pace_ns: 0,
             include_atom_outcomes: false,
         };
-
         assert!(matches!(
             history.reserve_command(Uuid::now_v7(), &command),
             Err(crate::Error::ControlRejected { code, .. }) if code == "operation_id_collision"
@@ -262,7 +262,6 @@ mod tests {
         history
             .reserve_operation(first)
             .expect("rejected batch did not reserve its first identifier");
-
         assert!(matches!(
             history.reserve_operation(second),
             Err(crate::Error::ControlRejected { code, .. }) if code == "operation_id_collision"

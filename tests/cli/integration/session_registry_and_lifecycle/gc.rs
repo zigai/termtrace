@@ -214,6 +214,7 @@ fn garbage_collection_is_dry_run_by_default_and_preserves_registered_or_incomple
 
     let dry_run: serde_json::Value =
         serde_json::from_slice(&dry_run.get_output().stdout).expect("GC dry-run report");
+
     assert_eq!(dry_run["changes_applied"], false);
     assert!(dry_run.get("applied").is_none());
     assert_eq!(dry_run["candidates"].as_array().map(Vec::len), Some(1));
@@ -304,6 +305,7 @@ fn corrupt_registry_entries_do_not_poison_listing_or_unsafe_garbage_collection()
 
     let report: serde_json::Value =
         serde_json::from_slice(&output.get_output().stdout).expect("GC isolation report");
+
     assert_eq!(report["skipped_corrupt_registry_entries"], 1);
     assert_eq!(report["removed_sessions"], 0);
     assert!(
@@ -391,6 +393,7 @@ fn stale_aliases_with_exited_recorder_are_reaped_by_garbage_collection() {
 
     let report: serde_json::Value =
         serde_json::from_slice(&output.get_output().stdout).expect("GC report");
+
     assert_eq!(report["removed_stale_aliases"], 1);
     assert!(!alias_file.exists(), "stale alias file was not removed");
 }

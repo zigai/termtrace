@@ -102,6 +102,7 @@ pub(crate) fn append(
         let length = u64::try_from(bytes.len()).map_err(|source| {
             return Error::invalid_with_source("tmux lifecycle record is too large", source);
         })?;
+
         if length > MAX_RECORD_BYTES {
             return Err(Error::invalid(
                 "tmux lifecycle record exceeds its frame limit",
@@ -190,6 +191,7 @@ pub(crate) fn visit_records(
             .take(MAX_RECORD_BYTES + 1)
             .read_until(b'\n', &mut bytes)
             .map_err(|error| return Error::filesystem(path, error))?;
+
         if count == 0 {
             break;
         }
@@ -197,6 +199,7 @@ pub(crate) fn visit_records(
         let length = u64::try_from(count).map_err(|source| {
             return Error::invalid_with_source("tmux record length overflow", source);
         })?;
+
         if length > MAX_RECORD_BYTES || bytes.last() != Some(&b'\n') {
             return Err(Error::invalid(
                 "tmux lifecycle journal has an invalid frame",
@@ -205,6 +208,7 @@ pub(crate) fn visit_records(
 
         let record: Record =
             serde_json::from_slice(&bytes).map_err(|error| return Error::json(path, error))?;
+
         if sequence.checked_add(1) != Some(record.event.sequence)
             || record.previous_hash != hash
             || record.hash != record_hash(&hash, &record.event)?

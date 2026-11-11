@@ -57,6 +57,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: TmuxSubcommand) -
             }
             None => {
                 let report = status::observe(&arguments.connection.client()?).into_diagnostic()?;
+
                 if arguments.json {
                     write_json_pretty(response, &report)
                 } else {

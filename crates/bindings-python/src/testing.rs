@@ -1,4 +1,5 @@
 //! Thin adapters for shared immutable assertions and owned-session finalization.
+
 use crate::{
     errors::{query_err, to_py_err, typed, ExpectationMismatchError},
     host::{to_python, Arg, Model},

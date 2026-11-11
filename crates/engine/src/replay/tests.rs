@@ -51,7 +51,6 @@ fn output_log_with_geometry(data: &[u8], cols: u16, rows: u16) -> EventLog {
     log.header.rows = rows;
     log.header.pixel_width = cols.saturating_mul(8);
     log.header.pixel_height = rows.saturating_mul(16);
-
     return log;
 }
 
@@ -71,7 +70,6 @@ fn event_log(cols: u16, rows: u16, events: Vec<Event>) -> EventLog {
             };
         })
         .collect();
-
     return log;
 }
 
@@ -116,9 +114,10 @@ fn byte_at_a_time_hashes(log: &EventLog) -> Vec<String> {
         return semantic_state_hash(&terminal.snapshot().expect("reference snapshot"))
             .expect("reference hash");
     };
-    let mut hashes = vec![hash(&mut terminal)];
-    let mut intents = HashMap::new();
 
+    let mut hashes = vec![hash(&mut terminal)];
+
+    let mut intents = HashMap::new();
     for record in &log.events {
         match &record.event {
             Event::Output { data } => {
@@ -175,7 +174,6 @@ fn assert_every_checkpoint_resumes_canonically(log: &EventLog) {
         });
 
         canonical.push(record);
-
         return Ok(());
     })
     .expect("canonical replay");
@@ -186,7 +184,6 @@ fn assert_every_checkpoint_resumes_canonically(log: &EventLog) {
         let seeded =
             replay_with_seed_and_limits(log, None, seed, DEFAULT_REPLAY_LIMITS, |record, _, _| {
                 resumed.push(record);
-
                 return Ok(());
             })
             .expect("checkpoint replay");
@@ -221,7 +218,6 @@ fn explicit_live_prefix_excludes_later_output_and_hidden_sync_bytes() {
 
     let (_, endpoint) = inspect_latest_presented_prefix(&path, &boundary, &AtomicBool::new(false))
         .expect("frozen prefix");
-
     let expected =
         inspect_latest_presented_fast(&output_log(b"OLD")).expect("expected visible state");
     assert_eq!(endpoint.state_hash, expected.state_hash);
@@ -231,12 +227,10 @@ fn explicit_live_prefix_excludes_later_output_and_hidden_sync_bytes() {
 
     let mut wrong_bytes = boundary.clone();
     wrong_bytes.output_bytes += 1;
-
     assert!(inspect_latest_presented_prefix(&path, &wrong_bytes, &AtomicBool::new(false)).is_err());
 
     let mut wrong_hash = boundary.clone();
     wrong_hash.event_hash = "0".repeat(64);
-
     assert!(inspect_latest_presented_prefix(&path, &wrong_hash, &AtomicBool::new(false)).is_err());
     assert!(inspect_latest_presented_prefix(&path, &boundary, &AtomicBool::new(true)).is_err());
 }
@@ -248,6 +242,7 @@ fn fast_endpoint_replay_charges_only_input_output_bytes() {
     reset_test_replay_output_bytes();
 
     let inspection = inspect_latest_presented_fast(&log).expect("fast endpoint replay");
+
     assert_eq!(inspection.state.cols, 200);
     assert_eq!(inspection.state.rows, 100);
     assert_eq!(
@@ -422,12 +417,10 @@ fn validated_checkpoint_seed_skips_long_session_canonical_output_prefix() {
         },
         |record, _, _| {
             final_hash = Some(record.state_hash);
-
             return Ok(());
         },
     )
     .expect("checkpoint replay within suffix-only output budget");
-
     let canonical = replay(&log).expect("canonical replay");
     assert_eq!(
         artifacts.final_state_hash,
@@ -567,7 +560,6 @@ fn every_position_matches_byte_at_a_time_replay() {
     // A hold's presented edge is the position just before the byte that begins it.
     let mut start = 0;
     let mut edges = Vec::new();
-
     for record in &log.events {
         match &record.event {
             Event::Output { data } => {
@@ -621,7 +613,6 @@ fn indexed_seeks_rebuild_the_canonical_record_and_state() {
             record,
             state: state.clone(),
         });
-
         return Ok(());
     })
     .expect("canonical replay");
@@ -687,7 +678,6 @@ fn indexed_selectors_resolve_like_canonical_replay() {
 
     let mut first_occurrence = HashMap::new();
     let mut recurring = Vec::new();
-
     for state in &canonical.states {
         if first_occurrence
             .insert(state.state_hash.clone(), state.state_id)
@@ -739,6 +729,7 @@ fn hidden_tail_resolves_latest_presented_to_an_earlier_segment() {
     assert!(checkpoints.len() >= 2, "the hidden run must span segments");
 
     let expected = inspect(&log, StateSelector::LatestPresented).expect("canonical selection");
+
     assert_eq!(expected.record.state_id, 12);
     assert_eq!(expected.record.event_seq, Some(1));
     assert_eq!(
@@ -815,7 +806,6 @@ fn checkpoints_inside_long_wrapped_alternate_screen_output_resume_canonically() 
         let mut resumed = Vec::new();
         replay_with_seed_and_limits(&log, None, seed, DEFAULT_REPLAY_LIMITS, |record, _, _| {
             resumed.push(record);
-
             return Ok(());
         })
         .expect("checkpoint replay");
@@ -832,7 +822,6 @@ fn semantic_hash_v2_binds_wrap_and_wide_but_not_dirtiness() {
     let baseline = semantic_state_hash(&state).expect("baseline hash");
     let mut wrap_changed = state.clone();
     wrap_changed.grid[0].soft_wrapped = !wrap_changed.grid[0].soft_wrapped;
-
     assert_ne!(
         baseline,
         semantic_state_hash(&wrap_changed).expect("wrap hash")
@@ -840,7 +829,6 @@ fn semantic_hash_v2_binds_wrap_and_wide_but_not_dirtiness() {
 
     let mut wide_changed = state.clone();
     Arc::make_mut(&mut wide_changed.grid[0].cells)[0].wide_kind = WideKind::SpacerHead;
-
     assert_ne!(
         baseline,
         semantic_state_hash(&wide_changed).expect("wide hash")
@@ -850,7 +838,6 @@ fn semantic_hash_v2_binds_wrap_and_wide_but_not_dirtiness() {
     dirty_changed.dirty = DirtyState::Full;
     dirty_changed.dirty_rows = vec![0];
     dirty_changed.grid[0].dirty = !dirty_changed.grid[0].dirty;
-
     assert_eq!(
         baseline,
         semantic_state_hash(&dirty_changed).expect("dirty hash")
@@ -920,6 +907,7 @@ fn row_delta_emits_and_reconstructs_wrap_facts_without_cell_changes() {
     );
 
     let mut reconstructed = previous;
+
     for row_diff in delta.rows {
         let row = &mut reconstructed.grid[usize::from(row_diff.row)];
         row.soft_wrapped = row_diff.soft_wrapped;

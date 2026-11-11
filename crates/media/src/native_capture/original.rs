@@ -73,6 +73,7 @@ pub const CAPTURE_ENVIRONMENT: &[&str] = &[
     "DBUS_SESSION_BUS_ADDRESS",
     "GHOSTTY_SURFACE_ID",
 ];
+
 const ACQUISITION_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const TERMINAL_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const LAYOUT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -423,7 +424,6 @@ fn publish(
     result
         .validate()
         .map_err(|reason| return external_error("original capture result", reason))?;
-
     return Ok(result);
 }
 
@@ -437,7 +437,6 @@ fn classify(code: OriginalCaptureFailure, cancelled: &AtomicBool, error: Error) 
     } else {
         code
     };
-
     return Error::OriginalCapture {
         code,
         source: Box::new(error),
@@ -549,6 +548,7 @@ fn prepare_terminal(
 // Ghostty may report intermediate sizes while it applies a configure request.
 fn settle(tty: &Path, cancelled: &AtomicBool) -> Result<()> {
     let deadline = Instant::now() + LAYOUT_TIMEOUT;
+
     let mut previous = read_winsize(tty)?;
     let mut stable_since = Instant::now();
 
@@ -781,6 +781,7 @@ fn capture_staged(
         .stdin(Stdio::null()).stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr))).map_err(stage(AcquisitionFailed, cancelled))?;
 
     let mut prepared = None;
+
     if let Some(display) = display.as_ref() {
         let terminal = prepare_terminal(request, display, &tty_file, &mut ghostty, cancelled)
             .map_err(stage(AcquisitionFailed, cancelled))?;
@@ -816,8 +817,8 @@ fn capture_staged(
     })?;
 
     let manifest_path = SessionLayout::new(&options.session_directory).manifest();
-
     let mut live = false;
+
     while !finished.is_file() {
         let healthy = (|| {
             check_cancelled(cancelled, "original capture")?;
@@ -1192,6 +1193,7 @@ pub fn verify_original_capture(
     })?;
 
     let directory = canonical.join("visual-original");
+
     if result.directory_bytes.as_bytes() != directory.as_os_str().as_bytes()
         || result.manifest.path != "manifest.json"
     {

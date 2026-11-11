@@ -77,7 +77,6 @@ pub fn summarize(
 
     let mut marker_count = 0_u64;
     let mut cursor = EventLogCursor::open(SessionLayout::new(&session).event_log())?;
-
     while let Some(record) = cursor.next_record()? {
         if matches!(record.event, Event::Marker { .. }) {
             marker_count = marker_count.saturating_add(1);
@@ -86,6 +85,7 @@ pub fn summarize(
 
     cursor.validate_boundary(completion.event_count, &completion.final_event_hash)?;
     let _pending = cursor.finish()?;
+
     validated.check()?;
 
     return Ok(ReviewSummary {
@@ -165,8 +165,8 @@ pub fn export_state(
     })?;
 
     let screen = state_text(&inspection.state);
-    let destination = destination.as_ref();
 
+    let destination = destination.as_ref();
     if destination.exists() {
         return Err(review_error("review export destination already exists"));
     }
