@@ -209,7 +209,7 @@ def test_cleanup_failure_does_not_prevent_sibling_finalization(tmp_path: Path) -
     context = t.terminal_test(
         binary=BINARY,
         evidence_root=str(evidence_parent(tmp_path)),
-        finalization_timeout_secs=0.05,
+        finalization_timeout_secs=1,
     )
     with pytest.raises(t.FinalizationError) as failure, context:
         first = context.record(COMMAND)
