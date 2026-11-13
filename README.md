@@ -22,8 +22,7 @@ a video.
 curl -LsSf https://github.com/zigai/termtrace/raw/main/install.sh | bash
 ```
 
-Linux only (x86_64 or aarch64, `glibc` 2.39+). Video needs `ghostty` and `ffmpeg`;
-`termtrace doctor` tells you what's missing.
+Requires Linux with glibc 2.39 or newer. Run `termtrace doctor` to check the setup.
 
 ## Quick start
 
@@ -35,7 +34,7 @@ termtrace screen app.termtrace
 termtrace analyze timeline app.termtrace
 ```
 
-Or run it in the background and drive it. `send` returns once `Saved` is on screen:
+Or run it in the background and drive it:
 
 ```sh
 termtrace record -d app --until-screen Ready -- my-app
