@@ -5,11 +5,12 @@ every byte that went in and out of the terminal, plus every screen the program
 drew. Afterwards you can step through it, diff screens, take screenshots, or render
 a video.
 
-[![tests](https://img.shields.io/github/actions/workflow/status/zigai/termtrace/ci.yml?branch=main&label=tests&logo=githubactions&logoColor=white)](https://github.com/zigai/termtrace/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/termtrace?label=crates.io&color=blue&logo=rust)](https://crates.io/crates/termtrace)
-[![PyPI](https://img.shields.io/pypi/v/termtrace?label=pypi&color=blue&logo=pypi&logoColor=white)](https://pypi.org/project/termtrace/)
-[![npm](https://img.shields.io/npm/v/@zigai/termtrace?label=npm&color=blue&logo=npm)](https://www.npmjs.com/package/@zigai/termtrace)
-[![license](https://img.shields.io/github/license/zigai/termtrace?label=license&logo=opensourceinitiative&logoColor=white)](LICENSE)
+[![tests](https://img.shields.io/github/actions/workflow/status/zigai/termtrace/ci.yml?branch=main&label=tests&labelColor=30363d)](https://github.com/zigai/termtrace/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/termtrace?label=crates.io&color=blue&logo=rust&labelColor=30363d)](https://crates.io/crates/termtrace)
+[![PyPI](https://img.shields.io/pypi/v/termtrace?label=PyPI&color=blue&logo=pypi&logoColor=white&labelColor=30363d)](https://pypi.org/project/termtrace/)
+[![npm](https://img.shields.io/npm/v/@zigai/termtrace?label=npm&color=blue&logo=npm&labelColor=30363d)](https://www.npmjs.com/package/@zigai/termtrace)
+[![Rust](https://img.shields.io/badge/Rust-1.97.1+-blue?logo=rust&logoColor=white&labelColor=30363d)](Cargo.toml)
+[![license](https://img.shields.io/github/license/zigai/termtrace?label=license&labelColor=30363d)](LICENSE)
 
 - **Debug TUIs:** See what was on screen at any point, and what your last key changed.
 - **Drive programs from scripts:** Send keys and wait for text to appear, instead of `tmux send-keys` and `sleep`.
