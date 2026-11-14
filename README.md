@@ -31,29 +31,35 @@ Requires Linux with glibc 2.39 or newer. Run `termtrace doctor` to check the set
 
 ## Quick start
 
-Record a program, then read its last screen and the timeline of what it did:
+Start Python in a recorded background session and type into it:
 
 ```sh
-termtrace record --out app.termtrace -- my-app
-termtrace screen app.termtrace
-termtrace analyze timeline app.termtrace
+termtrace record -d demo --until-screen ">>>" -- python3
+termtrace send demo "text:print(6 * 7)" enter --until-screen 42
 ```
 
-Run a program in the background and drive it from a script:
+Read the screen:
+
+```text
+$ termtrace screen demo
+Viewport state 333ba91efeac27a06973b4ffdd16ae6c61902dde9b2122139aca0eba5b4d6d3e (160×45, live)
+Python 3.14.10 (main, Nov  4 2026, 18:21:50) [GCC 16.2.1 20260810] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+>>> print(6 * 7)
+42
+>>>
+```
+
+Stop the session, then list what happened and export a screenshot and a GIF:
 
 ```sh
-termtrace record -d app --until-screen Ready -- my-app
-termtrace send app text:hello enter --until-screen Saved
-termtrace stop app --wait
+termtrace stop demo --wait
+termtrace analyze timeline demo
+termtrace screenshot demo -o demo-screenshot
+termtrace video demo -o demo.gif
 ```
 
-Export a screenshot, a video, and a bug-report bundle:
-
-```sh
-termtrace screenshot app.termtrace -o app-screenshot
-termtrace video app.termtrace -o app.mp4
-termtrace bundle app.termtrace -o bug-report
-```
+To record your own program, replace `python3` and the text `--until-screen` waits for, and pick a new session name.
 
 ## Commands
 
@@ -114,14 +120,14 @@ go get github.com/zigai/termtrace/go
 
 The Python and npm packages bundle the `termtrace` binary. The Go module runs the installed CLI, so install it first.
 
-Record a program and drive it from Python:
+Run the same session from Python:
 
 ```python
 import termtrace
 
-with termtrace.Termtrace().record(["my-app"]) as rec:
-    rec.screen().wait_for_text("Ready", timeout_secs=5)
-    rec.actions().send_text("hello").send_key("enter").until_screen("Saved").run()
+with termtrace.Termtrace().record(["python3"]) as rec:
+    rec.screen().wait_for_text(">>>", timeout_secs=5)
+    rec.actions().send_text("print(6 * 7)").send_key("enter").until_screen("42").run()
 ```
 
 ## License
