@@ -13,6 +13,7 @@ members = [
     "crates/export",
     "crates/service",
     "crates/sdk",
+    "crates/sdk-server",
     "crates/scenario",
     "crates/schema",
     "crates/test-fixture",
@@ -72,6 +73,7 @@ termtrace-scenario = { version = "=0.1.0", path = "crates/scenario" }
 termtrace-schema = { version = "=0.1.0", path = "crates/schema" }
 termtrace-service = { version = "=0.1.0", path = "crates/service" }
 termtrace-sdk = { version = "=0.1.0", path = "crates/sdk", features = ["in-process"] }
+termtrace-sdk-server = { version = "=0.1.0", path = "crates/sdk-server" }
 termtrace-terminal = { version = "=0.1.0", path = "crates/terminal" }
 termtrace-tmux = { version = "=0.1.0", path = "crates/tmux" }
 tracing = "0.1.41"

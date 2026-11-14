@@ -19,6 +19,7 @@ mod parsers;
 mod recording;
 mod registry;
 mod scenario;
+mod sdk_server;
 mod session_helpers;
 mod tmux;
 mod tooling;

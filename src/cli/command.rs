@@ -86,6 +86,9 @@ pub(super) enum Command {
     /// Report build and runtime component versions.
     #[command(hide = true)]
     Version(VersionArgs),
+    /// Serve the SDK as JSON-RPC over stdio for clients in other languages.
+    #[command(name = "sdk-server", hide = true)]
+    SdkServer,
 
     /// Internal timed event playback used as Ghostty's child process.
     #[command(hide = true, name = helper_protocol::playback::SUBCOMMAND)]

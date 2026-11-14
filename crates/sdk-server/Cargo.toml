@@ -1,0 +1,26 @@
+[package]
+name = "termtrace-sdk-server"
+version = "0.1.0"
+edition = "2024"
+description = "JSON-RPC server that exposes the Termtrace SDK to clients in other languages"
+repository = "https://github.com/zigai/termtrace"
+license-file.workspace = true
+rust-version = "1.97.1"
+
+[dependencies]
+termtrace-model = { version = "=0.1.0", path = "../model" }
+termtrace-sdk = { version = "=0.1.0", path = "../sdk", features = ["in-process", "scenario"] }
+fs-err = "3.2.0"
+schemars = "1.1.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+
+[lints]
+workspace = true
+
+[features]
+generate = []
+
+[[bin]]
+name = "generate"
+required-features = ["generate"]

@@ -12,6 +12,7 @@ use crate::cli::{
     recording::{run_geometry_probe, run_record, run_restart},
     registry,
     scenario::run_test,
+    sdk_server::run_sdk_server,
     tmux::dispatch as dispatch_tmux,
     tooling::{run_completions, run_doctor, run_schemas, run_version},
 };
@@ -36,6 +37,7 @@ pub(super) fn dispatch(response: &mut ResponseWriter, command: Command) -> Resul
         Command::Doctor(arguments) => run_doctor(response, arguments),
         Command::Completion(arguments) => run_completions(response, arguments),
         Command::Mcp => run_mcp(),
+        Command::SdkServer => run_sdk_server(),
         Command::Schema(arguments) => run_schemas(response, arguments),
         Command::Version(arguments) => run_version(response, arguments),
         Command::Playback(arguments) => run_playback(arguments),

@@ -19,6 +19,7 @@ fn allowed_dependencies(package: &str) -> Option<&'static [&'static str]> {
             "termtrace-scenario",
             "termtrace-schema",
             "termtrace-sdk",
+            "termtrace-sdk-server",
             "termtrace-service",
             "termtrace-terminal",
             "termtrace-tmux",
@@ -61,6 +62,7 @@ fn allowed_dependencies(package: &str) -> Option<&'static [&'static str]> {
         ]),
         "termtrace-python" => Some(&["termtrace-model", "termtrace-sdk"]),
         "termtrace-schema" => Some(&["termtrace-model", "termtrace-tmux"]),
+        "termtrace-sdk-server" => Some(&["termtrace-model", "termtrace-sdk"]),
         "termtrace-sdk" => Some(&[
             "termtrace-control",
             "termtrace-media",

@@ -3512,6 +3512,7 @@ dependencies = [
  "termtrace-scenario",
  "termtrace-schema",
  "termtrace-sdk",
+ "termtrace-sdk-server",
  "termtrace-service",
  "termtrace-terminal",
  "termtrace-tmux",
@@ -3737,6 +3738,18 @@ dependencies = [
  "termtrace-scenario",
  "termtrace-service",
  "uuid",
+]
+
+[[package]]
+name = "termtrace-sdk-server"
+version = "0.1.0"
+dependencies = [
+ "fs-err",
+ "schemars",
+ "serde",
+ "serde_json",
+ "termtrace-model",
+ "termtrace-sdk",
 ]
 
 [[package]]
