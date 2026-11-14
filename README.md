@@ -1,5 +1,7 @@
 <h1 align="center">Termtrace</h1>
 
+<p align="center"><strong>A flight recorder for terminal programs.</strong></p>
+
 <p align="center">
   <a href="https://github.com/zigai/termtrace/actions/workflows/ci.yml"><img alt="tests" src="https://img.shields.io/github/actions/workflow/status/zigai/termtrace/ci.yml?branch=main&label=tests&labelColor=30363d"></a>
   <a href="https://crates.io/crates/termtrace"><img alt="crates.io" src="https://img.shields.io/crates/v/termtrace?label=crates.io&color=blue&logo=rust&labelColor=30363d"></a>
@@ -8,8 +10,6 @@
   <a href="Cargo.toml"><img alt="Rust" src="https://img.shields.io/badge/Rust-1.97.1+-blue?logo=rust&logoColor=white&labelColor=30363d"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/zigai/termtrace?label=license&labelColor=30363d"></a>
 </p>
-
-**A flight recorder for terminal programs.**
 
 Termtrace records a terminal program while it runs, keeping every key it received
 and every screen it drew. Afterwards you can step through the session, compare
