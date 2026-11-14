@@ -195,3 +195,8 @@ jobs:
           mapfile -d '' assets < <(find dist -type f -print0 | sort -z)
           test "${#assets[@]}" -gt 0
           gh release create "${GITHUB_REF_NAME}" "${assets[@]}" --verify-tag --generate-notes
+      # The Go module lives in go/, so the Go proxy reads its versions from go/v* tags.
+      - name: Tag the Go module
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f "ref=refs/tags/go/${GITHUB_REF_NAME}" -f "sha=${GITHUB_SHA}"
