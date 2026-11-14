@@ -13,7 +13,7 @@ pack_main() {
     node -e 'for (const file of require(process.argv[1]).files) console.log(file)' "$package_dir/package.json" | while read -r file; do
         install -m 0644 "$package_dir/$file" "$stage/$file"
     done
-    install -m 0644 "$package_dir/package.json" "$root/LICENSE" "$stage/"
+    install -m 0644 "$package_dir/package.json" "$package_dir/README.md" "$root/LICENSE" "$stage/"
     local version
     version=$(node -p 'require(process.argv[1]).version' "$package_dir/package.json")
     for platform in "$package_dir"/npm/*/; do
@@ -35,7 +35,7 @@ pack_platform() {
             ;;
     esac
     cargo build --locked --release -p termtrace-node --lib --target "$target"
-    install -m 0644 "$package_dir/npm/$platform/package.json" "$root/LICENSE" "$stage/"
+    install -m 0644 "$package_dir/npm/$platform/package.json" "$package_dir/npm/$platform/README.md" "$root/LICENSE" "$stage/"
     install -m 0755 "$root/target/$target/release/libtermtrace_node.so" "$stage/termtrace.$platform.node"
     install -m 0755 "$cli" "$stage/termtrace"
     npm pack --pack-destination "$out" "$stage"

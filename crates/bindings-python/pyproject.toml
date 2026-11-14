@@ -6,6 +6,7 @@ build-backend = "maturin"
 name = "termtrace"
 version = "0.1.0"
 description = "Native Python bindings for Termtrace terminal recording and semantic debugging"
+readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Ziga Ivansek" }]
