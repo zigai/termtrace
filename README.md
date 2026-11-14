@@ -110,12 +110,13 @@ Other clients: run `termtrace mcp` as a stdio server. Agent sessions show up in 
 
 ## SDKs
 
-Rust, Python, and TypeScript. The Python and npm packages include the `termtrace` CLI.
+Rust, Python, TypeScript, and Go. The Python and npm packages include the `termtrace` CLI. The Go module runs the installed CLI, so install it first.
 
 ```sh
 cargo add termtrace-sdk
 pip install termtrace
 npm install @zigai/termtrace
+go get github.com/zigai/termtrace/go
 ```
 
 ```python

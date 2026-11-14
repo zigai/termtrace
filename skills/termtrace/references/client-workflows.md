@@ -2,8 +2,8 @@
 
 Use individual CLI commands (`termtrace send`, `termtrace screen --json`, etc.) when a workflow will finish in
 two or three actions. Beyond that, use an SDK in the caller's language (Rust `termtrace_sdk`, Python
-`termtrace`, or TypeScript `@zigai/termtrace`) so repeated observations and actions do not pay process
-startup and discovery costs. All three call the same Rust services.
+`termtrace`, TypeScript `@zigai/termtrace`, or Go `github.com/zigai/termtrace/go`) so repeated observations
+and actions do not pay process startup and discovery costs. All four call the same Rust services.
 
 Use `termtrace test` when assertions should be repeatable scenarios. SDK workflows are appropriate for branching, loops,
 multiple sessions, or caller-owned retry IDs. `fixtures/conformance/sdk/matrix.json` lists each
@@ -12,7 +12,7 @@ capability's status in each language.
 ## Rust SDK for Stateful Workflows
 
 When orchestrating multi-step interactive workflows, use `termtrace_sdk`. One `Session`
-type carries every operation the CLI, MCP server, and Python/Node bindings use:
+type carries every operation the CLI, MCP server, and Python/Node/Go SDKs use:
 `Terminal::start`/`attach`, `act`, `wait_screen`, `capture_stable`, `observe`, `frame`,
 `stop`, `complete`, and `detach`. Defaults (geometry, timeouts, idle interval) live in
 `termtrace_sdk::defaults`.
@@ -157,6 +157,34 @@ await withTermtrace(async ({ record }) => {
   assert.ok(state.text.includes("Usage:"));
 });
 ```
+
+## Go SDK (`github.com/zigai/termtrace/go`)
+
+The Go module is pure Go. It runs the installed `termtrace` CLI as a hidden `sdk-server` and needs the
+same CLI version. Every call takes a `context.Context`; canceling it cancels the call.
+
+```go
+tt, err := termtrace.New(ctx, termtrace.Options{})
+defer tt.Close()
+
+rec, err := tt.Launch(ctx, []string{"bash", "--norc"}, termtrace.LaunchOptions{Rows: new(24), Cols: new(80)})
+defer rec.Stop(ctx)
+
+state, err := rec.Screen().WaitForText(ctx, "$", 5*time.Second)
+_, err = rec.Actions().IfState(state.Hash).SendText("echo from-go\n").UntilScreen("from-go", 5*time.Second).Run(ctx)
+```
+
+Failures are `*termtrace.Error`; `Facts` holds the kind, code, effect, and retry:
+
+```go
+var failure *termtrace.Error
+if errors.As(err, &failure) && failure.Facts != nil && failure.Facts.Code == "stale_observation" {
+    // observe again, then rebuild the action
+}
+```
+
+For `go test`, `termtracetest.New(t, termtracetest.Options{})` gives a client with its own evidence root.
+Recordings started with its `Launch` are finalized when the test ends, and their evidence is kept when it fails.
 
 ## Repeatable Scenarios
 
