@@ -1,9 +1,10 @@
 # Termtrace
 
-A flight recorder for terminal programs. Run something under Termtrace and you get
-every byte that went in and out of the terminal, plus every screen the program
-drew. Afterwards you can step through it, diff screens, take screenshots, or render
-a video.
+**A flight recorder for terminal programs.**
+
+Termtrace records a terminal program while it runs, keeping every key it received
+and every screen it drew. Afterwards you can step through the session, compare
+screens, take screenshots, or render a video.
 
 [![tests](https://img.shields.io/github/actions/workflow/status/zigai/termtrace/ci.yml?branch=main&label=tests&labelColor=30363d)](https://github.com/zigai/termtrace/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/termtrace?label=crates.io&color=blue&logo=rust&labelColor=30363d)](https://crates.io/crates/termtrace)
@@ -12,10 +13,11 @@ a video.
 [![Rust](https://img.shields.io/badge/Rust-1.97.1+-blue?logo=rust&logoColor=white&labelColor=30363d)](Cargo.toml)
 [![license](https://img.shields.io/github/license/zigai/termtrace?label=license&labelColor=30363d)](LICENSE)
 
-- **Debug TUIs:** See what was on screen at any point, and what your last key changed.
-- **Drive programs from scripts:** Send keys and wait for text to appear, instead of `tmux send-keys` and `sleep`.
-- **Give agents a terminal:** The MCP server lets coding agents start, type into, and read terminal programs.
-- **Share what happened:** Screenshots, MP4 or GIF video, and bug-report bundles from one recording.
+- **Debug TUIs:** See what was on screen at any moment and what each key changed.
+- **Script terminal programs:** Send keys and wait for text to appear, without `tmux send-keys` and `sleep`.
+- **Give agents a terminal:** Coding agents start, type into, and read terminal programs through the MCP server.
+- **Test in CI:** Write scenarios as JSON and get a recording of every failure.
+- **Share what happened:** Turn one recording into a screenshot, a video, or a bug-report bundle.
 
 ## Installation
 
@@ -27,7 +29,7 @@ Requires Linux with glibc 2.39 or newer. Run `termtrace doctor` to check the set
 
 ## Quick start
 
-Record a program, use it, quit, and look at what happened:
+Record a program, then read its last screen and the timeline of what it did:
 
 ```sh
 termtrace record --out app.termtrace -- my-app
@@ -35,7 +37,7 @@ termtrace screen app.termtrace
 termtrace analyze timeline app.termtrace
 ```
 
-Or run it in the background and drive it:
+Run a program in the background and drive it from a script:
 
 ```sh
 termtrace record -d app --until-screen Ready -- my-app
@@ -43,7 +45,7 @@ termtrace send app text:hello enter --until-screen Saved
 termtrace stop app --wait
 ```
 
-Make something you can attach to an issue:
+Export a screenshot, a video, and a bug-report bundle:
 
 ```sh
 termtrace screenshot app.termtrace -o app-screenshot
@@ -88,36 +90,29 @@ Options:
 
 ## MCP server
 
-Claude Code (`.mcp.json` in your project):
+Add the server to Claude Code or Codex:
 
-```json
-{
-  "mcpServers": {
-    "termtrace": { "command": "termtrace", "args": ["mcp"] }
-  }
-}
+```sh
+claude mcp add termtrace -- termtrace mcp
+codex mcp add termtrace -- termtrace mcp
 ```
 
-Codex (`~/.codex/config.toml`):
-
-```toml
-[mcp_servers.termtrace]
-command = "termtrace"
-args = ["mcp"]
-```
-
-Other clients: run `termtrace mcp` as a stdio server. Agent sessions show up in the CLI, so `termtrace screen <name>` shows what the agent sees.
+Other clients run `termtrace mcp` as a stdio server. Sessions an agent starts also appear in the CLI, so `termtrace screen <name>` shows what the agent sees.
 
 ## SDKs
 
-Rust, Python, TypeScript, and Go. The Python and npm packages include the `termtrace` CLI. The Go module runs the installed CLI, so install it first.
+Add the SDK to a Rust, Python, TypeScript, or Go project:
 
 ```sh
 cargo add termtrace-sdk
-pip install termtrace
+uv add termtrace
 npm install @zigai/termtrace
 go get github.com/zigai/termtrace/go
 ```
+
+The Python and npm packages bundle the `termtrace` binary. The Go module runs the installed CLI, so install it first.
+
+Record a program and drive it from Python:
 
 ```python
 import termtrace
