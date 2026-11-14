@@ -26,6 +26,10 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.record"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Client.Launch"
         }
       },
       "python_async": "aio.AsyncTermtrace.record",
@@ -66,6 +70,10 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.launch"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Client.Launch"
         }
       },
       "python_async": "aio.AsyncTermtrace.launch",
@@ -106,6 +114,10 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.record"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Client.Launch"
         }
       },
       "python_async": "aio.AsyncTermtrace.record",
@@ -146,6 +158,10 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.launch"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Client.Launch"
         }
       },
       "python_async": "aio.AsyncTermtrace.launch",
@@ -187,6 +203,10 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.launch"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Client.Launch"
         }
       },
       "python_async": "aio.AsyncTermtrace.launch",
@@ -227,6 +247,10 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.attach"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Client.Attach"
         }
       },
       "python_async": null,
@@ -267,6 +291,10 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.attachTarget"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Client.AttachTarget"
         }
       },
       "python_async": "aio.AsyncTermtrace.attach_target",
@@ -307,6 +335,10 @@
         "typescript": {
           "status": "verified",
           "name": "Recording.status"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Session.Status"
         }
       },
       "python_async": "aio.AsyncRecording.status",
@@ -347,6 +379,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.observe"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.Observe"
         }
       },
       "python_async": "aio.AsyncScreen.observe",
@@ -387,6 +423,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.frameAt"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.FrameAt"
         }
       },
       "python_async": "aio.AsyncScreen.frame_at",
@@ -427,6 +467,10 @@
         "typescript": {
           "status": "verified",
           "name": "ScreenFrame.source"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ScreenFrame.Source"
         }
       },
       "python_async": "aio.AsyncScreen.frame",
@@ -467,6 +511,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.observe"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.Observe"
         }
       },
       "python_async": "aio.AsyncScreen.observe",
@@ -507,6 +555,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.observe"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.Observe"
         }
       },
       "python_async": "aio.AsyncScreen.observe",
@@ -547,6 +599,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.frame"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.Frame"
         }
       },
       "python_async": "aio.AsyncScreen.frame",
@@ -587,6 +643,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.frame"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.Frame"
         }
       },
       "python_async": "aio.AsyncScreen.frame",
@@ -627,6 +687,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.frame"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.Frame"
         }
       },
       "python_async": "aio.AsyncScreen.frame",
@@ -667,6 +731,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.frame"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.Frame"
         }
       },
       "python_async": "aio.AsyncScreen.frame",
@@ -707,6 +775,10 @@
         "typescript": {
           "status": "verified",
           "name": "ScreenFrame.cursor"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ScreenFrame.Cursor"
         }
       },
       "python_async": "aio.AsyncScreen.frame",
@@ -747,6 +819,10 @@
         "typescript": {
           "status": "verified",
           "name": "ScreenFrame.modes"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ScreenFrame.Modes"
         }
       },
       "python_async": "aio.AsyncScreen.frame",
@@ -787,6 +863,10 @@
         "typescript": {
           "status": "verified",
           "name": "ScreenFrame.colors"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ScreenFrame.Colors"
         }
       },
       "python_async": "aio.AsyncScreen.frame",
@@ -827,6 +907,10 @@
         "typescript": {
           "status": "verified",
           "name": "ScreenFrame.content"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ScreenFrame.Data"
         }
       },
       "python_async": "aio.AsyncScreen.frame",
@@ -867,6 +951,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.getByText"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.GetByText"
         }
       },
       "python_async": "aio.AsyncScreen.get_by_text",
@@ -907,6 +995,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.getByRegex"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.GetByRegex"
         }
       },
       "python_async": "aio.AsyncScreen.get_by_regex",
@@ -947,6 +1039,10 @@
         "typescript": {
           "status": "verified",
           "name": "Locator.withStyle"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Locator.WithStyle"
         }
       },
       "python_async": "aio.AsyncLocator.with_style",
@@ -987,6 +1083,10 @@
         "typescript": {
           "status": "verified",
           "name": "Locator.inRegion"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Locator.InRegion"
         }
       },
       "python_async": "aio.AsyncLocator.in_region",
@@ -1027,6 +1127,10 @@
         "typescript": {
           "status": "verified",
           "name": "Locator.single"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Locator.Single"
         }
       },
       "python_async": "aio.AsyncLocator.single",
@@ -1067,6 +1171,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.waitForText"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.WaitForText"
         }
       },
       "python_async": "aio.AsyncScreen.wait_for_text",
@@ -1107,6 +1215,10 @@
         "typescript": {
           "status": "verified",
           "name": "Locator.waitStable"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Locator.Wait"
         }
       },
       "python_async": "aio.AsyncLocator.wait_stable",
@@ -1147,6 +1259,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.captureStable"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.CaptureStable"
         }
       },
       "python_async": "aio.AsyncScreen.capture_stable",
@@ -1187,6 +1303,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.waitForIdle"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.WaitForIdle"
         }
       },
       "python_async": "aio.AsyncScreen.wait_for_idle",
@@ -1227,6 +1347,10 @@
         "typescript": {
           "status": "verified",
           "name": "ActionBuilder.sendText"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ActionBuilder.SendText"
         }
       },
       "python_async": "aio.AsyncActionBuilder.run",
@@ -1267,6 +1391,10 @@
         "typescript": {
           "status": "verified",
           "name": "ActionBuilder.sendKey"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ActionBuilder.SendKey"
         }
       },
       "python_async": "aio.AsyncActionBuilder.run",
@@ -1307,6 +1435,10 @@
         "typescript": {
           "status": "verified",
           "name": "ActionBuilder.sendBytes"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ActionBuilder.SendBytes"
         }
       },
       "python_async": "aio.AsyncActionBuilder.run",
@@ -1347,6 +1479,10 @@
         "typescript": {
           "status": "verified",
           "name": "ActionBuilder.paste"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ActionBuilder.Paste"
         }
       },
       "python_async": "aio.AsyncActionBuilder.run",
@@ -1387,6 +1523,10 @@
         "typescript": {
           "status": "verified",
           "name": "Pointer.click"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Pointer.Click"
         }
       },
       "python_async": "aio.AsyncPointer.click",
@@ -1427,6 +1567,10 @@
         "typescript": {
           "status": "verified",
           "name": "Pointer.focus"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Pointer.Focus"
         }
       },
       "python_async": "aio.AsyncPointer.focus",
@@ -1467,6 +1611,10 @@
         "typescript": {
           "status": "verified",
           "name": "ActionBuilder.pace"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ActionBuilder.Pace"
         }
       },
       "python_async": "aio.AsyncActionBuilder.run",
@@ -1507,6 +1655,10 @@
         "typescript": {
           "status": "verified",
           "name": "Recording.resize"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Session.Resize"
         }
       },
       "python_async": "aio.AsyncRecording.resize",
@@ -1547,6 +1699,10 @@
         "typescript": {
           "status": "verified",
           "name": "Recording.signal"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Session.Signal"
         }
       },
       "python_async": "aio.AsyncRecording.signal",
@@ -1587,6 +1743,10 @@
         "typescript": {
           "status": "verified",
           "name": "Recording.mark"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Session.Mark"
         }
       },
       "python_async": "aio.AsyncRecording.mark",
@@ -1627,6 +1787,10 @@
         "typescript": {
           "status": "verified",
           "name": "Recording.send"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Session.Send"
         }
       },
       "python_async": "aio.AsyncRecording.send",
@@ -1667,6 +1831,10 @@
         "typescript": {
           "status": "verified",
           "name": "ActionBuilder.ifState"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ActionBuilder.IfState"
         }
       },
       "python_async": "aio.AsyncActionBuilder.run",
@@ -1707,6 +1875,10 @@
         "typescript": {
           "status": "verified",
           "name": "ActionBuilder.requestId"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ActionBuilder.WithRequestID"
         }
       },
       "python_async": "aio.AsyncActionBuilder.request_id",
@@ -1747,6 +1919,10 @@
         "typescript": {
           "status": "verified",
           "name": "ActionBuilder.run"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ActionBuilder.Run"
         }
       },
       "python_async": "aio.AsyncActionBuilder.run",
@@ -1787,6 +1963,10 @@
         "typescript": {
           "status": "verified",
           "name": "ActionResult.input"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ActionResult.Input"
         }
       },
       "python_async": "aio.AsyncActionBuilder.run",
@@ -1827,6 +2007,10 @@
         "typescript": {
           "status": "verified",
           "name": "ActionResult.postcondition"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ActionResult.Postcondition"
         }
       },
       "python_async": "aio.AsyncActionBuilder.run",
@@ -1867,6 +2051,10 @@
         "typescript": {
           "status": "verified",
           "name": "TermtraceError.effect"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Error.Facts.Effect"
         }
       },
       "python_async": null,
@@ -1907,6 +2095,10 @@
         "typescript": {
           "status": "verified",
           "name": "TermtraceError.retry"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Error.Facts.Retry"
         }
       },
       "python_async": null,
@@ -1947,6 +2139,10 @@
         "typescript": {
           "status": "verified",
           "name": "Recording.stop"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Recording.Stop"
         }
       },
       "python_async": "aio.AsyncRecording.stop",
@@ -1987,6 +2183,10 @@
         "typescript": {
           "status": "verified",
           "name": "Recording.stop"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Recording.WaitForCompletion"
         }
       },
       "python_async": "aio.AsyncRecording.stop",
@@ -2027,6 +2227,10 @@
         "typescript": {
           "status": "verified",
           "name": "Recording.detach"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Recording.Detach"
         }
       },
       "python_async": null,
@@ -2067,6 +2271,10 @@
         "typescript": {
           "status": "verified",
           "name": "Recording.forceClose"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Recording.ForceClose"
         }
       },
       "python_async": null,
@@ -2107,6 +2315,10 @@
         "typescript": {
           "status": "verified",
           "name": "Recording.stop"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Recording.Stop"
         }
       },
       "python_async": "aio.AsyncRecording.stop",
@@ -2147,6 +2359,10 @@
         "typescript": {
           "status": "verified",
           "name": "ActionBuilder.run"
+        },
+        "go": {
+          "status": "verified",
+          "name": "ActionBuilder.Run"
         }
       },
       "python_async": "aio.AsyncActionBuilder.run",
@@ -2187,6 +2403,9 @@
         "typescript": {
           "status": "verified",
           "name": "assertScreenText"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -2227,6 +2446,9 @@
         "typescript": {
           "status": "verified",
           "name": "normalizedSnapshot / maskedSnapshot / assertSnapshotFile / assertMaskedSnapshotFile"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -2267,6 +2489,9 @@
         "typescript": {
           "status": "verified",
           "name": "assertSnapshotFile({update:false})"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -2307,6 +2532,9 @@
         "typescript": {
           "status": "verified",
           "name": "withTermtrace"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -2349,6 +2577,9 @@
           "status": "not_applicable",
           "name": null,
           "reason": "pytest plugin; TypeScript uses withTermtrace (testing.node_helper)"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -2391,6 +2622,9 @@
         "typescript": {
           "status": "verified",
           "name": "withTermtrace"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -2431,6 +2665,9 @@
         "typescript": {
           "status": "verified",
           "name": "withTermtrace"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -2471,6 +2708,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.output().page"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.output().page",
@@ -2512,6 +2752,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.output().page"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.output().page",
@@ -2553,6 +2796,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.output().waitFor"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.output().wait_for",
@@ -2594,6 +2840,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.events().page"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.events().page",
@@ -2635,6 +2884,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.events().follow"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.events().follow",
@@ -2676,6 +2928,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.events().page"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.events().page",
@@ -2717,6 +2972,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.analysis().timeline"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.analysis().timeline",
@@ -2758,6 +3016,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.analysis().diff"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.analysis().diff",
@@ -2799,6 +3060,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.analysis().explain"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.analysis().explain",
@@ -2840,6 +3104,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.analysis().diagnose"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.analysis().diagnose",
@@ -2881,6 +3148,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.analysis().lastAction"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.analysis().last_action",
@@ -2922,6 +3192,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.instrumentation().event"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.instrumentation().event",
@@ -2962,6 +3235,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.instrumentation().startSpan"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.instrumentation().start_span",
@@ -3002,6 +3278,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.integrity().verify"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.integrity().verify",
@@ -3043,6 +3322,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.integrity().recover / recoverLog"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.integrity().recover / recover_log",
@@ -3084,6 +3366,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.integrity().sign / verify"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.integrity().sign / verify",
@@ -3125,6 +3410,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.integrity().sign"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.integrity().sign",
@@ -3166,6 +3454,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.integrity().bundle"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.integrity().bundle",
@@ -3207,6 +3498,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.evidence().bundle"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.evidence().bundle",
@@ -3248,6 +3542,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.evidence().bundle"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.evidence().bundle",
@@ -3289,6 +3586,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.evidence().verifyBundle"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.evidence().verify_bundle",
@@ -3330,6 +3630,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.registry().list"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.registry().list",
@@ -3371,6 +3674,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.registry().register"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.registry().register",
@@ -3412,6 +3718,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.registry().remove"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.registry().remove",
@@ -3453,6 +3762,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.registry().restart"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.registry().restart",
@@ -3494,6 +3806,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.registry().gc"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.registry().gc",
@@ -3535,6 +3850,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.tmux().status / record / recordingStatus / track / stop / events / catalog"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.tmux().status / record / recording_status / track / stop / events / catalog",
@@ -3576,6 +3894,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.tmux().bundle"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.tmux().bundle",
@@ -3617,6 +3938,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.tmux().verifyBundle"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.tmux().verify_bundle",
@@ -3658,6 +3982,10 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.system().capabilities"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Client.Capabilities"
         }
       },
       "python_async": "aio.AsyncTermtrace.system().capabilities",
@@ -3699,6 +4027,10 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.system().versions"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Client.Versions"
         }
       },
       "python_async": "aio.AsyncTermtrace.system().versions",
@@ -3740,6 +4072,10 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.system().schemas / schema"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Client.Schemas / Schema"
         }
       },
       "python_async": "aio.AsyncTermtrace.system().schemas / schema",
@@ -3781,6 +4117,10 @@
         "typescript": {
           "status": "verified",
           "name": "TermtraceError / MutationFailure"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Error"
         }
       },
       "python_async": "TermtraceError (propagated by aio namespaces)",
@@ -3822,6 +4162,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.evidence().save"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -3863,6 +4206,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.evidence().save"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -3904,6 +4250,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.evidence().save"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -3945,6 +4294,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.evidence().save"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -3986,6 +4338,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.evidence().save"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -4027,6 +4382,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.evidence().save"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -4068,6 +4426,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.evidence().save"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -4109,6 +4470,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.evidence().asciicast"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.evidence().asciicast",
@@ -4150,6 +4514,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.recordOriginal"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.record_original",
@@ -4191,6 +4558,9 @@
         "typescript": {
           "status": "verified",
           "name": "OriginalRecording.session"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncOriginalRecording.session",
@@ -4232,6 +4602,9 @@
         "typescript": {
           "status": "verified",
           "name": "Native.screenshot"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4273,6 +4646,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.videoRender({ renderer: 'native' })"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4316,6 +4692,9 @@
           "status": "not_applicable",
           "name": null,
           "reason": "internal helper that Ghostty runs as its child to replay events into the capture terminal; a Python or Node process is never that child. Native screenshots and native video renders run it"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4357,6 +4736,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.videoRender (.gif)"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4399,6 +4781,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.videoRender (.webm)"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4441,6 +4826,9 @@
         "typescript": {
           "status": "verified",
           "name": "System.capabilities"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4483,6 +4871,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.videoRender"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4525,6 +4916,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.launch({visual_profile}) / Termtrace.preflightVisualProfile"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.preflight_visual_profile",
@@ -4566,6 +4960,9 @@
         "typescript": {
           "status": "exposed_unverified",
           "name": "Termtrace.preflightVisualProfile"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4607,6 +5004,9 @@
         "typescript": {
           "status": "exposed_unverified",
           "name": "Termtrace.preflightVisualProfile"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4648,6 +5048,9 @@
         "typescript": {
           "status": "exposed_unverified",
           "name": "Termtrace.preflightVisualProfile"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4689,6 +5092,9 @@
         "typescript": {
           "status": "exposed_unverified",
           "name": "Termtrace.preflightVisualProfile"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4730,6 +5136,9 @@
         "typescript": {
           "status": "verified",
           "name": "Edit / normalizeEdit"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4771,6 +5180,9 @@
         "typescript": {
           "status": "verified",
           "name": "select"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4812,6 +5224,9 @@
         "typescript": {
           "status": "verified",
           "name": "Edit.clip"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4853,6 +5268,9 @@
         "typescript": {
           "status": "verified",
           "name": "Edit.clip({speed})"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4894,6 +5312,9 @@
         "typescript": {
           "status": "verified",
           "name": "Edit.clip({hold_ms})"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4935,6 +5356,9 @@
         "typescript": {
           "status": "verified",
           "name": "Edit.annotate / scope"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -4976,6 +5400,9 @@
         "typescript": {
           "status": "verified",
           "name": "Edit.subtitles / new Edit({resource_base})"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5017,6 +5444,9 @@
         "typescript": {
           "status": "verified",
           "name": "Edit.crop/zoom/resize/callout/cursorMask"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5058,6 +5488,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.videoPlan"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.video_plan",
@@ -5099,6 +5532,9 @@
         "typescript": {
           "status": "verified",
           "name": "sourceForOutputFrame / outputFramesForSourceFrame"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5140,6 +5576,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.videoPreview"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.video_preview",
@@ -5181,6 +5620,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.videoRender"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.video_render",
@@ -5222,6 +5664,9 @@
         "typescript": {
           "status": "verified",
           "name": "videoRender().sidecar / .artifact"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.video_render",
@@ -5263,6 +5708,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.runScenarios"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5304,6 +5752,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.runScenarios"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5345,6 +5796,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.runScenarios"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5386,6 +5840,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.runScenarios"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5427,6 +5884,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.runScenarios"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5468,6 +5928,9 @@
         "typescript": {
           "status": "verified",
           "name": "writeScenarioJunit"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5509,6 +5972,9 @@
         "typescript": {
           "status": "verified",
           "name": "scenarioCiFailed"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5550,6 +6016,10 @@
         "typescript": {
           "status": "verified",
           "name": "Pointer.scroll"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Pointer.Scroll"
         }
       },
       "python_async": "aio.AsyncPointer.scroll",
@@ -5590,6 +6060,10 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.launch"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Client.Launch"
         }
       },
       "python_async": "aio.AsyncTermtrace.launch",
@@ -5630,6 +6104,10 @@
         "typescript": {
           "status": "verified",
           "name": "Screen.frame"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Screen.Frame"
         }
       },
       "python_async": "aio.AsyncScreen.frame",
@@ -5670,6 +6148,9 @@
         "typescript": {
           "status": "verified",
           "name": "assertCursor"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5710,6 +6191,9 @@
         "typescript": {
           "status": "verified",
           "name": "assertExists"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5750,6 +6234,9 @@
         "typescript": {
           "status": "verified",
           "name": "assertNotExists"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5790,6 +6277,9 @@
         "typescript": {
           "status": "verified",
           "name": "assertCount"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5830,6 +6320,9 @@
         "typescript": {
           "status": "verified",
           "name": "assertMatchText"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5870,6 +6363,9 @@
         "typescript": {
           "status": "verified",
           "name": "assertMatchStyle"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5910,6 +6406,9 @@
         "typescript": {
           "status": "verified",
           "name": "assertNoWrappedRows"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5950,6 +6449,9 @@
         "typescript": {
           "status": "verified",
           "name": "assertNeutralRegion"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -5990,6 +6492,9 @@
         "typescript": {
           "status": "verified",
           "name": "assertNoPresentedTransient"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": null,
@@ -6030,6 +6535,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.instrumentation().endSpan"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.instrumentation().end_span",
@@ -6070,6 +6578,9 @@
         "typescript": {
           "status": "verified",
           "name": "Termtrace.registry().resolve"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncTermtrace.registry().resolve",
@@ -6111,6 +6622,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.analysis().cacheStatus"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.analysis().cache_status",
@@ -6152,6 +6666,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.analysis().cachePrune"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.analysis().cache_prune",
@@ -6193,6 +6710,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.analysis().markers"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.analysis().markers",
@@ -6234,6 +6754,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.analysis().reviewSummary"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.analysis().review_summary",
@@ -6275,6 +6798,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.analysis().reviewSearch"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.analysis().review_search",
@@ -6316,6 +6842,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.analysis().reviewExport"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.analysis().review_export",
@@ -6357,6 +6886,10 @@
         "typescript": {
           "status": "verified",
           "name": "Recording.discardCompleted"
+        },
+        "go": {
+          "status": "verified",
+          "name": "Recording.DiscardCompleted"
         }
       },
       "python_async": "aio.AsyncRecording.discard_completed",
@@ -6397,6 +6930,9 @@
         "typescript": {
           "status": "verified",
           "name": "Session.output().page"
+        },
+        "go": {
+          "status": "missing"
         }
       },
       "python_async": "aio.AsyncSession.output().page",

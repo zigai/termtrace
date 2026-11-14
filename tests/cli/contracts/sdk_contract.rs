@@ -6,7 +6,7 @@ use std::{
 };
 use termtrace_sdk::contracts::{decode_media_artifact, encode_media_artifact};
 
-const LANGUAGES: [&str; 3] = ["python", "rust", "typescript"];
+const LANGUAGES: [&str; 4] = ["go", "python", "rust", "typescript"];
 const CASE_KINDS: [&str; 3] = ["lifecycle", "negative", "positive"];
 const FOUNDATION_CASE: &str = "foundation";
 

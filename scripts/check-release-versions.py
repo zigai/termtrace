@@ -1,7 +1,8 @@
-"""Reject mixed CLI, crate, PyPI, and npm release versions."""
+"""Reject mixed CLI, crate, PyPI, npm, and Go release versions."""
 
 import json
 import os
+import re
 from pathlib import Path
 
 import tomllib
@@ -26,6 +27,14 @@ def main() -> None:
     ]:
         package = json.loads(manifest.read_text())
         versions[f"npm:{package['name']}"] = package["version"]
+    go_version = re.search(
+        r'^const Version = "([^"]+)"$',
+        (root / "go/version_gen.go").read_text(),
+        re.MULTILINE,
+    )
+    if go_version is None:
+        raise SystemExit("go/version_gen.go does not declare Version")
+    versions["go:github.com/zigai/termtrace/go"] = go_version.group(1)
     expected = versions["termtrace"]
     mismatched = {name: value for name, value in versions.items() if value != expected}
     if mismatched:

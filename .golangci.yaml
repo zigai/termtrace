@@ -1,0 +1,285 @@
+version: "2"
+
+run:
+  timeout: 3m
+
+formatters:
+  enable:
+    - goimports
+    - gofumpt
+    - golines
+  settings:
+    gofumpt:
+      extra:
+        balance-calls: true
+    golines:
+      max-len: 100
+      reformat-tags: false
+    goimports:
+      local-prefixes:
+        - github.com/zigai/termtrace
+  exclusions:
+    paths:
+
+linters:
+  enable:
+    - arangolint
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - canonicalheader
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    - cyclop
+    - decorder
+    - dogsled
+    - dupl
+    - dupword
+    - durationcheck
+    - embeddedstructfieldcheck
+    - err113
+    - errcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - exhaustruct_v5
+    - exptostd
+    - fatcontext
+    - forcetypeassert
+    - funcorder
+    - ginkgolinter
+    - gocheckcompilerdirectives
+    - gochecknoinits
+    - gochecksumtype
+    - gocognit
+    - goconst
+    - gocritic
+    - godoclint
+    - godot
+    - gomoddirectives
+    - gomodguard_v2
+    - goprintffuncname
+    - gosec
+    - gosmopolitan
+    - govet
+    - grouper
+    - iface
+    - importas
+    - inamedparam
+    - ineffassign
+    - interfacebloat
+    - intrange
+    - iotamixing
+    - lll
+    - loggercheck
+    - maintidx
+    - makezero
+    - mirror
+    - misspell
+    - mnd
+    - modernize
+    - musttag
+    - nakedret
+    - nestif
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - noctx
+    - nolintlint
+    - nonamedreturns
+    - nosprintfhostport
+    - perfsprint
+    - prealloc
+    - predeclared
+    - promlinter
+    - protogetter
+    - reassign
+    - recvcheck
+    - revive
+    - rowserrcheck
+    - sloglint
+    - spancheck
+    - sqlclosecheck
+    - staticcheck
+    - tagalign
+    - tagliatelle
+    - testableexamples
+    - testifylint
+    - thelper
+    - unconvert
+    - unparam
+    - unqueryvet
+    - unused
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+    - whitespace
+    - wrapcheck
+    - wsl_v5
+    - zerologlint
+
+  settings:
+    embeddedstructfieldcheck:
+      forbid-mutex: true
+    errcheck:
+      check-type-assertions: true
+    exhaustive:
+      check:
+        - switch
+    gochecksumtype:
+      default-signifies-exhaustive: false
+    cyclop:
+      max-complexity: 12
+    decorder:
+      disable-dec-order-check: false
+      dec-order:
+        - const
+        - var
+        - type
+        - func
+    funcorder:
+      function: true
+    gocognit:
+      min-complexity: 20
+    goconst:
+      min-occurrences: 16
+    lll:
+      line-length: 120
+      tab-width: 4
+    gocritic:
+      enabled-tags: [diagnostic]
+      settings:
+        captLocal:
+          paramsOnly: false
+        underef:
+          skipRecvDeref: false
+    godoclint:
+      enable:
+        - no-unused-link
+        - require-stdlib-doclink
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+    mnd:
+      ignored-numbers:
+        - "0o600"
+        - "0o644"
+        - "0o700"
+        - "0o750"
+        - "0600"
+        - "0644"
+        - "0700"
+        - "0750"
+    misspell:
+      locale: US
+    nakedret:
+      max-func-lines: 5
+    revive:
+      rules:
+        - name: error-naming
+        - name: if-return
+        - name: var-naming
+          arguments: [[], ["GRPC", "IOS"]]
+        - name: context-as-argument
+          arguments:
+            - allow-types-before: "*testing.T,testing.TB,*testing.B,*testing.F"
+        - name: import-shadowing
+        - name: package-naming
+          arguments:
+            - check-extra-bad-name: true
+              user-defined-bad-names: [handlers]
+        - name: package-directory-mismatch
+        - name: filename-format
+          arguments: ["^[a-z0-9][a-z0-9_]*\\.go$"]
+        - name: exported
+          arguments:
+            - disable-checks-on-constants
+            - disable-checks-on-functions
+            - disable-checks-on-methods
+            - disable-checks-on-types
+            - disable-checks-on-variables
+        - name: redundant-import-alias
+        - name: import-alias-naming
+        - name: dot-imports
+        - name: blank-imports
+        - name: error-strings
+        - name: receiver-naming
+        - name: indent-error-flow
+        - name: superfluous-else
+        - name: modifies-parameter
+        - name: enforce-repeated-arg-type-style
+          arguments: ["full"]
+        - name: unreachable-code
+          disabled: true
+        - name: redefines-builtin-id
+          disabled: true
+    rowserrcheck:
+      packages:
+        - github.com/jmoiron/sqlx
+    tagliatelle:
+      case:
+        rules:
+          json: snake
+          yaml: snake
+          toml: snake
+    staticcheck:
+      checks:
+        - all
+        - -ST1000
+        - -ST1016
+        - -QF1008
+    nolintlint:
+      allow-no-explanation: [gocognit, golines]
+      require-explanation: true
+      require-specific: true
+    thelper:
+      benchmark:
+        begin: false
+    gosec:
+      excludes:
+        - G306 # file perms
+        - G204 # subprocess launched with variable
+        - G301 # directory perms
+        - G302 # file perms
+        - G304 # file path from variable
+    exhaustruct_v5:
+      allow-empty-returns: true
+      # Types whose zero fields mean "use the default". Mark such types in
+      # this module with //exhaustruct:optional instead of listing them here.
+      ignore-patterns:
+        - "^github\\.com/spf13/cobra\\..+$"
+        - "^github\\.com/spf13/pflag\\..+$"
+        - "^github\\.com/urfave/cli(/v[0-9]+)?\\..+$"
+        - "^net/http\\.(Client|Server|Transport)$"
+        - "^net\\.(Dialer|ListenConfig)$"
+        - "^net/url\\.URL$"
+        - "^crypto/tls\\.Config$"
+        - "^log/slog\\.HandlerOptions$"
+        - "^os/exec\\.Cmd$"
+        - "^syscall\\.SysProcAttr$"
+
+  exclusions:
+    warn-unused: false
+    presets: []
+    rules:
+      - path: "main\\.go"
+        linters: [mnd]
+
+      - path: ".*_test\\.go"
+        linters:
+          [gosec, decorder, funcorder, exhaustruct_v5, cyclop, gocognit, dupl, maintidx, goconst]
+
+      # Test-helper packages (named like httptest) only build fixtures.
+      - path: "(^|/)[a-z0-9]+test/"
+        linters: [exhaustruct_v5]
+      - path: "(?:(^|/)(node_modules|third_party|forks|vendor|testdata|fixtures|__fixtures__|snapshots|__snapshots__|__image_snapshots__|golden|corpus|fuzz_corpus|baselines|generated|\\.tmp|\\.gameops|\\.stryker-tmp|\\.cache)(/|$))"
+        linters: [whitespace]
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

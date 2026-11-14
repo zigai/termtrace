@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Install a built wheel or npm tarballs into a fresh project and record one session with the
-# CLI the package bundles; PATH is cut down so no other termtrace can stand in.
+# Install a built wheel or npm tarballs into a fresh project, or build the Go module against a
+# release archive, and record one session with the CLI the package bundles or the archive holds;
+# PATH is cut down so no other termtrace can stand in.
 set -euo pipefail
 
 readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -58,8 +59,61 @@ const { Termtrace } = require("@zigai/termtrace");
 JS
 }
 
+test_go() {
+    local archive=$1 cli
+    tar --extract --gzip --file "$archive" --directory "$scratch"
+    cli=$(dirname "$(find "$scratch" -name termtrace -type f -perm -u+x | head -n 1)")
+    mkdir "$scratch/program"
+    cat >"$scratch/program/go.mod" <<'MOD'
+module example.com/packagetest
+
+go 1.27
+MOD
+    printf 'go 1.27\n\nuse (\n\t.\n\t%s\n)\n' "$root/go" >"$scratch/program/go.work"
+    cat >"$scratch/program/main.go" <<'GO'
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"time"
+
+	termtrace "github.com/zigai/termtrace/go"
+)
+
+func main() {
+	if err := run(os.Args[1]); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Println("go module records with the packaged CLI")
+}
+
+func run(evidence string) error {
+	ctx := context.Background()
+	client, err := termtrace.New(ctx, termtrace.Options{EvidenceRoot: evidence})
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	command := []string{"/bin/sh", "-c", "echo PACKAGE_OK; sleep 5"}
+	recording, err := client.Launch(ctx, command, termtrace.LaunchOptions{})
+	if err != nil {
+		return err
+	}
+	_, waitErr := recording.Screen().WaitForText(ctx, "PACKAGE_OK", 10*time.Second)
+	return errors.Join(waitErr, recording.Stop(ctx))
+}
+GO
+    (cd "$scratch/program" && go build -o "$scratch/packagetest" .)
+    PATH=$cli:$isolated_path "$scratch/packagetest" "$scratch/evidence"
+}
+
 case "${1:-}" in
     python) test_python "$(realpath "$2")" ;;
+    go) test_go "$(realpath "$2")" ;;
     node)
         main=$(realpath "$2")
         platform=$(realpath "$3")
@@ -67,7 +121,7 @@ case "${1:-}" in
         test_node "$main" "$platform"
         ;;
     *)
-        echo "usage: $0 python <wheel> | $0 node <main.tgz> <platform.tgz>" >&2
+        echo "usage: $0 python <wheel> | $0 node <main.tgz> <platform.tgz> | $0 go <archive.tar.gz>" >&2
         exit 2
         ;;
 esac

@@ -14,11 +14,13 @@ build: setup
 install: setup && (report-install home_directory() / ".local/bin/termtrace")
     TERMTRACE_BUILD_VERSION="$(git describe --tags --dirty --always)" cargo install --locked --path . --force --root "$HOME/.local"
 
-# Regenerate public schemas and the generated Python and TypeScript SDK sources
+# Regenerate public schemas and the generated Python, TypeScript, and Go SDK sources
 generate:
     cargo run --locked --quiet -- schema --out schemas
     cargo run --locked --quiet -p termtrace-python --bin generate
     cargo run --locked --quiet -p termtrace-node --bin generate
+    cargo run --locked --quiet -p termtrace-sdk-server --features generate --bin generate
+    gofmt -w go/types_gen.go go/methods_gen.go go/version_gen.go
     uv run --project crates/bindings-python --only-dev ruff check --fix --quiet crates/bindings-python/python/termtrace/types.py crates/bindings-python/python/termtrace/aio.py crates/bindings-python/python/termtrace/_termtrace.pyi
     uv run --project crates/bindings-python --only-dev ruff format crates/bindings-python/python/termtrace/types.py crates/bindings-python/python/termtrace/aio.py crates/bindings-python/python/termtrace/_termtrace.pyi
 
@@ -35,8 +37,9 @@ validate:
 test *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo nextest run --locked --workspace --lib --bins --test execution_lifecycle --test architecture "$@"
+    cargo nextest run --locked --workspace --lib --bins --test execution_lifecycle --test architecture --test server_protocol "$@"
     if (( $# == 0 )); then cargo test --locked -p termtrace-sdk --no-default-features; fi
+    if (( $# == 0 )); then (cd go && go test -race ./...); fi
     if (( $# == 0 )); then PYTHONPATH=benchmarks uv run --project benchmarks python3 -m unittest benchmarks/test_acceptance.py; fi
     if (( $# == 0 )); then bash tests/install.sh; fi
 
@@ -49,8 +52,8 @@ integration:
     cargo test --locked --test cli
     scripts/test-rust-consumer.sh
 
-# Build native Python and Node.js language bindings
-bindings-build: build-python build-node
+# Build native Python and Node.js language bindings and the Go SDK
+bindings-build: build-python build-node build-go
 
 # Build the native Python binding into its project environment
 build-python:
@@ -59,6 +62,10 @@ build-python:
 # Build the native Node.js binding
 build-node:
     bunx @napi-rs/cli build --cwd crates/bindings-node
+
+# Build the Go SDK
+build-go:
+    cd go && go build ./...
 
 # Test native Python language bindings and pytest consumer suite
 test-python:
@@ -71,13 +78,20 @@ test-node:
     node --test crates/bindings-node/test/*.test.js
     TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace npm --prefix tests/consumers/node_native test
 
-# Type-check and lint the native Python bindings
+# Test the Go SDK consumer suite against the debug CLI
+test-go:
+    cargo build --locked --bin termtrace
+    cd tests/consumers/go_native && TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace go test -count=1 ./...
+
+# Type-check and lint the native Python bindings and the Go SDK
 bindings-lint:
     uv run --project crates/bindings-python --only-dev ruff check crates/bindings-python/python/termtrace
     uv run --project crates/bindings-python --only-dev mypy crates/bindings-python/python/termtrace
+    cd go && golangci-lint run
+    cd tests/consumers/go_native && golangci-lint run
 
 # Test all native language bindings
-bindings-test: bindings-build bindings-lint test-python test-node
+bindings-test: bindings-build bindings-lint test-python test-node test-go
 
 # Run every configured linter on the whole project, stopping on failure
 lint:
@@ -96,6 +110,8 @@ format:
     @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r shfmt -f | xargs -r -d '\n' shfmt -w
     @git ls-files -co --exclude-standard -- Justfile justfile "*.just" | while IFS= read -r file; do just --justfile "$file" --fmt; done
     @just markdown fmt --exclude vendor/ghostty
+    @cd go && golangci-lint fmt
+    @cd tests/consumers/go_native && golangci-lint fmt
 
 # Run the complete native recording, replay, video, and screenshot verification test
 native-check:
@@ -126,6 +142,8 @@ fix: && format
     cargo clippy --locked -p termtrace-sdk --no-default-features --all-targets --fix --allow-dirty --allow-staged
     cargo machete --fix
     uv run --project crates/bindings-python --only-dev ruff check --fix --extend-exclude vendor/ghostty .
+    cd go && golangci-lint run --fix
+    cd tests/consumers/go_native && golangci-lint run --fix
 
 # Measure all local test suites and print coverage
 coverage:
@@ -220,6 +238,8 @@ formatcheck:
     @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r shfmt -f | xargs -r -d '\n' shfmt -d
     @git ls-files -co --exclude-standard -- Justfile justfile "*.just" | while IFS= read -r file; do just --justfile "$file" --fmt --check; done
     @just markdown check --exclude vendor/ghostty
+    @cd go && golangci-lint fmt --diff
+    @cd tests/consumers/go_native && golangci-lint fmt --diff
     @git ls-files -co --exclude-standard -z | while IFS= read -r -d '' file; do if [[ -f $file ]]; then printf '%s\0' "$file"; fi; done | xargs -0 -r editorconfig-checker -disable-indent-size -disable-indentation -disable-max-line-length -disable-charset -exclude '^fuzz/corpus/'
 
 # Run the commit checks and slow suites
@@ -235,6 +255,7 @@ lock:
     @cd "fuzz" && cargo update --workspace
     @cd "tests/consumers/rust" && cargo update --workspace
     @cd "tests/consumers/node_native" && npm install --package-lock-only --ignore-scripts
+    @cd "go" && go mod tidy
 
 # Verify dependency manifests and locks without changing files
 [no-exit-message]
@@ -246,6 +267,7 @@ lockcheck:
     cd "fuzz" && cargo metadata --locked --format-version 1 > /dev/null
     cd "tests/consumers/rust" && cargo metadata --locked --format-version 1 > /dev/null
     cd "tests/consumers/node_native" && npm ci --dry-run --ignore-scripts
+    cd "go" && go mod tidy -diff
 
 # List available recipes
 [default]
