@@ -135,7 +135,7 @@ fn render(expr: &TypeExpr) -> String {
         TypeExpr::Never => "never".to_owned(),
         TypeExpr::Named(name) => name.clone(),
         TypeExpr::Path => "string | Uint8Array".to_owned(),
-        TypeExpr::WideInteger => "bigint".to_owned(),
+        TypeExpr::WideInteger(_) => "bigint".to_owned(),
         TypeExpr::Literal(values) => values
             .iter()
             .map(ascii_json)

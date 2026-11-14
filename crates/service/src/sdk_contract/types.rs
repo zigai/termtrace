@@ -294,6 +294,13 @@ pub fn catalog() -> Result<Value, CatalogError> {
     return Ok(Value::Object(document));
 }
 
+/// A generator that already holds every catalog type as accepted on input, so a caller can add
+/// its own types and take one set of definitions with consistent names.
+#[must_use]
+pub fn input_generator() -> SchemaGenerator {
+    return collect(SchemaSettings::draft2020_12().for_deserialize()).generator;
+}
+
 fn closure<T: JsonSchema>(settings: SchemaSettings) -> (Value, Map<String, Value>) {
     let mut generator = SchemaGenerator::new(settings);
     let root = T::json_schema(&mut generator).to_value();

@@ -244,7 +244,7 @@ fn render(expr: &TypeExpr) -> String {
         TypeExpr::Never => "Never".to_owned(),
         TypeExpr::Named(name) => name.clone(),
         TypeExpr::Path | TypeExpr::String => "str".to_owned(),
-        TypeExpr::WideInteger | TypeExpr::Integer => "int".to_owned(),
+        TypeExpr::WideInteger(_) | TypeExpr::Integer => "int".to_owned(),
         TypeExpr::Literal(values) => {
             format!(
                 "Literal[{}]",

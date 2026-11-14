@@ -101,9 +101,11 @@ pub struct StyleFilter {
     pub underline_color: Option<ColorSpec>,
     /// Resolved foreground constraint, including an explicit unresolved value.
     #[serde(deserialize_with = "present")]
+    #[schemars(extend("x-termtrace-explicit-null" = true))]
     pub resolved_foreground: Option<Option<Rgb>>,
     /// Resolved background constraint, including an explicit unresolved value.
     #[serde(deserialize_with = "present")]
+    #[schemars(extend("x-termtrace-explicit-null" = true))]
     pub resolved_background: Option<Option<Rgb>>,
     /// Bold constraint.
     #[serde(deserialize_with = "present")]

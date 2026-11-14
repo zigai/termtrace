@@ -8,7 +8,29 @@ use serde_json::{Map, Value};
 use std::{collections::BTreeMap, fmt::Write as _};
 
 const FRAME_EXTENSION: &str = "x-termtrace-frame";
+const EXPLICIT_NULL_EXTENSION: &str = "x-termtrace-explicit-null";
 const WIDE_FORMATS: [&str; 6] = ["int64", "uint64", "int128", "uint128", "int", "uint"];
+
+/// An integer that may exceed the exact range of a double.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WideInteger {
+    /// Whether negative values are allowed.
+    pub signed: bool,
+    /// Bit width: 64 or 128.
+    pub bits: u16,
+    /// Whether the value is carried as decimal text instead of a JSON number.
+    pub decimal_text: bool,
+}
+
+impl WideInteger {
+    fn from_format(format: &str, decimal_text: bool) -> Self {
+        return Self {
+            signed: !format.starts_with('u'),
+            bits: if format.ends_with("128") { 128 } else { 64 },
+            decimal_text,
+        };
+    }
+}
 
 /// A schema the declaration resolver cannot express.
 #[derive(Debug, thiserror::Error)]
@@ -32,7 +54,7 @@ pub enum TypeExpr {
     /// A filesystem path.
     Path,
     /// An integer that may exceed the exact range of a double.
-    WideInteger,
+    WideInteger(WideInteger),
     /// One of these JSON values.
     Literal(Vec<Value>),
     /// Any of these types, in schema order and possibly repeated.
@@ -66,6 +88,10 @@ pub struct Field {
     pub description: Option<String>,
     /// Whether the property is always present.
     pub required: bool,
+    /// Value the reader assumes when the property is absent.
+    pub default: Option<Value>,
+    /// Whether an explicit null means something different from an absent property.
+    pub explicit_null: bool,
     /// Property type.
     pub value: TypeExpr,
 }
@@ -370,6 +396,8 @@ impl Resolver<'_> {
                 required: required
                     .iter()
                     .any(|item| return item.as_str() == Some(field)),
+                default: spec.get("default").map(Json::to_value),
+                explicit_null: spec.get(EXPLICIT_NULL_EXTENSION).is_some_and(Json::truthy),
                 value,
             });
         }
@@ -406,11 +434,17 @@ impl Resolver<'_> {
             return Ok(TypeExpr::Path);
         }
 
-        if schema
+        if let Some(format) = schema
             .get("x-termtrace-native-integer")
-            .is_some_and(Json::truthy)
+            .filter(|native| return native.truthy())
         {
-            return Ok(TypeExpr::WideInteger);
+            let format = format.as_str().unwrap_or("uint64");
+            let decimal_text = schema.get("type").and_then(Json::as_str) == Some("string");
+
+            return Ok(TypeExpr::WideInteger(WideInteger::from_format(
+                format,
+                decimal_text,
+            )));
         }
 
         if let Some(constant) = schema.get("const") {
@@ -460,9 +494,10 @@ impl Resolver<'_> {
             Some("null") => TypeExpr::Null,
             Some("boolean") => TypeExpr::Boolean,
             Some("integer")
-                if format.is_some_and(|format| return WIDE_FORMATS.contains(&format)) =>
+                if let Some(format) =
+                    format.filter(|format| return WIDE_FORMATS.contains(format)) =>
             {
-                TypeExpr::WideInteger
+                TypeExpr::WideInteger(WideInteger::from_format(format, false))
             }
             Some("integer") => TypeExpr::Integer,
             Some("number") => TypeExpr::Number,
