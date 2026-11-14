@@ -1,6 +1,7 @@
 use crate::failure::Failure;
-use serde::Deserialize;
-use serde_json::{json, Map, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
+use serde_json::Value;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
@@ -21,36 +22,52 @@ struct Envelope {
     id: Option<Value>,
     method: String,
     #[serde(default)]
-    params: Option<Value>,
+    params: Option<Box<RawValue>>,
+}
+
+#[derive(Serialize)]
+struct Response<'line> {
+    jsonrpc: &'static str,
+    id: &'line Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<&'line RawValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<&'line Failure>,
 }
 
 pub(crate) enum Incoming {
     Request {
         id: Value,
         method: String,
-        params: Value,
+        params: Box<RawValue>,
     },
     Notification {
         method: String,
-        params: Value,
+        params: Box<RawValue>,
     },
 }
 
 pub(crate) fn parse(line: &str) -> Result<Incoming, (Value, Failure)> {
-    let value: Value = serde_json::from_str(line).map_err(|error| {
-        return (
-            Value::Null,
-            Failure::protocol(PARSE_ERROR, format!("invalid JSON: {error}")),
+    // Params stay raw text, so the envelope and its id parse before any deep params are decoded,
+    // and integers past the u64 range stay exact.
+    let envelope: Envelope = serde_json::from_str(line).map_err(|error| {
+        return serde_json::from_str::<Value>(line).map_or_else(
+            |_| {
+                return (
+                    Value::Null,
+                    Failure::protocol(PARSE_ERROR, format!("invalid JSON: {error}")),
+                );
+            },
+            |value| {
+                return (
+                    value.get("id").cloned().unwrap_or(Value::Null),
+                    Failure::protocol(INVALID_REQUEST, format!("invalid request: {error}")),
+                );
+            },
         );
     })?;
 
-    let id = value.get("id").cloned().unwrap_or(Value::Null);
-    let envelope: Envelope = serde_json::from_value(value).map_err(|error| {
-        return (
-            id.clone(),
-            Failure::protocol(INVALID_REQUEST, format!("invalid request: {error}")),
-        );
-    })?;
+    let id = envelope.id.clone().unwrap_or(Value::Null);
 
     if envelope.jsonrpc != "2.0" {
         return Err((
@@ -59,9 +76,11 @@ pub(crate) fn parse(line: &str) -> Result<Incoming, (Value, Failure)> {
         ));
     }
 
-    let params = envelope
-        .params
-        .unwrap_or_else(|| return Value::Object(Map::new()));
+    let params = match envelope.params {
+        Some(params) => params,
+        None => RawValue::from_string("{}".to_owned())
+            .map_err(|error| return (id.clone(), Failure::internal(error.to_string())))?,
+    };
 
     return Ok(match envelope.id {
         Some(id @ (Value::Number(_) | Value::String(_))) => Incoming::Request {
@@ -95,10 +114,21 @@ impl Responder {
         };
     }
 
-    pub(crate) fn respond(&self, id: &Value, outcome: Result<Value, Failure>) -> io::Result<()> {
-        let message = match outcome {
-            Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-            Err(failure) => json!({"jsonrpc": "2.0", "id": id, "error": failure.to_object()}),
+    pub(crate) fn respond(
+        &self,
+        id: &Value,
+        outcome: Result<Box<RawValue>, Failure>,
+    ) -> io::Result<()> {
+        let (result, error) = match &outcome {
+            Ok(result) => (Some(&**result), None),
+            Err(failure) => (None, Some(failure)),
+        };
+
+        let message = Response {
+            jsonrpc: "2.0",
+            id,
+            result,
+            error,
         };
         let mut line = serde_json::to_vec(&message).map_err(io::Error::other)?;
         line.push(b'\n');

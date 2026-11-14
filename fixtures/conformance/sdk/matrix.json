@@ -2405,7 +2405,8 @@
           "name": "assertScreenText"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.AssertScreenText"
         }
       },
       "python_async": null,
@@ -2448,7 +2449,8 @@
           "name": "normalizedSnapshot / maskedSnapshot / assertSnapshotFile / assertMaskedSnapshotFile"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.NormalizedSnapshot / MaskedSnapshot / AssertSnapshotFile / AssertMaskedSnapshotFile"
         }
       },
       "python_async": null,
@@ -2491,7 +2493,8 @@
           "name": "assertSnapshotFile({update:false})"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.AssertSnapshotFile(SnapshotFileOptions.Update)"
         }
       },
       "python_async": null,
@@ -2534,7 +2537,8 @@
           "name": "withTermtrace"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "termtracetest.New"
         }
       },
       "python_async": null,
@@ -2579,7 +2583,9 @@
           "reason": "pytest plugin; TypeScript uses withTermtrace (testing.node_helper)"
         },
         "go": {
-          "status": "missing"
+          "status": "not_applicable",
+          "name": null,
+          "reason": "pytest plugin; Go uses termtracetest (testing.rust_helper)"
         }
       },
       "python_async": null,
@@ -2624,7 +2630,9 @@
           "name": "withTermtrace"
         },
         "go": {
-          "status": "missing"
+          "status": "not_applicable",
+          "name": null,
+          "reason": "Node helper; Go uses termtracetest"
         }
       },
       "python_async": null,
@@ -2667,7 +2675,8 @@
           "name": "withTermtrace"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "termtracetest.New / Client.FinalizeRecordings"
         }
       },
       "python_async": null,
@@ -2710,7 +2719,8 @@
           "name": "Session.output().page"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Output().Page"
         }
       },
       "python_async": "aio.AsyncSession.output().page",
@@ -2754,7 +2764,8 @@
           "name": "Session.output().page"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Output().Page"
         }
       },
       "python_async": "aio.AsyncSession.output().page",
@@ -2798,7 +2809,8 @@
           "name": "Session.output().waitFor"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Output().WaitFor"
         }
       },
       "python_async": "aio.AsyncSession.output().wait_for",
@@ -2842,7 +2854,8 @@
           "name": "Session.events().page"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Events().Page"
         }
       },
       "python_async": "aio.AsyncSession.events().page",
@@ -2886,7 +2899,8 @@
           "name": "Session.events().follow"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Events().Follow"
         }
       },
       "python_async": "aio.AsyncSession.events().follow",
@@ -2930,7 +2944,8 @@
           "name": "Session.events().page"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Events().Page"
         }
       },
       "python_async": "aio.AsyncSession.events().page",
@@ -2974,7 +2989,8 @@
           "name": "Session.analysis().timeline"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Analysis().Timeline"
         }
       },
       "python_async": "aio.AsyncSession.analysis().timeline",
@@ -3018,7 +3034,8 @@
           "name": "Session.analysis().diff"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Analysis().Diff"
         }
       },
       "python_async": "aio.AsyncSession.analysis().diff",
@@ -3062,7 +3079,8 @@
           "name": "Session.analysis().explain"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Analysis().Explain"
         }
       },
       "python_async": "aio.AsyncSession.analysis().explain",
@@ -3106,7 +3124,8 @@
           "name": "Session.analysis().diagnose"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Analysis().Diagnose"
         }
       },
       "python_async": "aio.AsyncSession.analysis().diagnose",
@@ -3150,7 +3169,8 @@
           "name": "Session.analysis().lastAction"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Analysis().LastAction"
         }
       },
       "python_async": "aio.AsyncSession.analysis().last_action",
@@ -3194,7 +3214,8 @@
           "name": "Session.instrumentation().event"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Instrumentation().Event"
         }
       },
       "python_async": "aio.AsyncSession.instrumentation().event",
@@ -3237,7 +3258,8 @@
           "name": "Session.instrumentation().startSpan"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Instrumentation().StartSpan"
         }
       },
       "python_async": "aio.AsyncSession.instrumentation().start_span",
@@ -3280,7 +3302,8 @@
           "name": "Session.integrity().verify"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Integrity().Verify"
         }
       },
       "python_async": "aio.AsyncSession.integrity().verify",
@@ -3324,7 +3347,8 @@
           "name": "Session.integrity().recover / recoverLog"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Integrity().Recover / RecoverLog"
         }
       },
       "python_async": "aio.AsyncSession.integrity().recover / recover_log",
@@ -3368,7 +3392,8 @@
           "name": "Session.integrity().sign / verify"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Integrity().Sign / Verify"
         }
       },
       "python_async": "aio.AsyncSession.integrity().sign / verify",
@@ -3412,7 +3437,8 @@
           "name": "Session.integrity().sign"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Integrity().Sign"
         }
       },
       "python_async": "aio.AsyncSession.integrity().sign",
@@ -3456,7 +3482,8 @@
           "name": "Session.integrity().bundle"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Evidence().Bundle"
         }
       },
       "python_async": "aio.AsyncSession.integrity().bundle",
@@ -3500,7 +3527,8 @@
           "name": "Session.evidence().bundle"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Evidence().Bundle"
         }
       },
       "python_async": "aio.AsyncSession.evidence().bundle",
@@ -3544,7 +3572,8 @@
           "name": "Session.evidence().bundle"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Evidence().Bundle"
         }
       },
       "python_async": "aio.AsyncSession.evidence().bundle",
@@ -3588,7 +3617,8 @@
           "name": "Session.evidence().verifyBundle"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Evidence().VerifyBundle"
         }
       },
       "python_async": "aio.AsyncSession.evidence().verify_bundle",
@@ -3632,7 +3662,8 @@
           "name": "Termtrace.registry().list"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.Registry().List"
         }
       },
       "python_async": "aio.AsyncTermtrace.registry().list",
@@ -3676,7 +3707,8 @@
           "name": "Termtrace.registry().register"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.Registry().Register"
         }
       },
       "python_async": "aio.AsyncTermtrace.registry().register",
@@ -3720,7 +3752,8 @@
           "name": "Termtrace.registry().remove"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.Registry().Remove"
         }
       },
       "python_async": "aio.AsyncTermtrace.registry().remove",
@@ -3764,7 +3797,8 @@
           "name": "Termtrace.registry().restart"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.Registry().Restart"
         }
       },
       "python_async": "aio.AsyncTermtrace.registry().restart",
@@ -3808,7 +3842,8 @@
           "name": "Termtrace.registry().gc"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.Registry().Gc"
         }
       },
       "python_async": "aio.AsyncTermtrace.registry().gc",
@@ -3852,7 +3887,8 @@
           "name": "Termtrace.tmux().status / record / recordingStatus / track / stop / events / catalog"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.Tmux().Status / Record / RecordingStatus / Track / Stop / Events / Catalog"
         }
       },
       "python_async": "aio.AsyncTermtrace.tmux().status / record / recording_status / track / stop / events / catalog",
@@ -3896,7 +3932,8 @@
           "name": "Termtrace.tmux().bundle"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.Tmux().Bundle"
         }
       },
       "python_async": "aio.AsyncTermtrace.tmux().bundle",
@@ -3940,7 +3977,8 @@
           "name": "Termtrace.tmux().verifyBundle"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.Tmux().VerifyBundle"
         }
       },
       "python_async": "aio.AsyncTermtrace.tmux().verify_bundle",
@@ -4164,7 +4202,8 @@
           "name": "Session.evidence().save"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Evidence().Save"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -4208,7 +4247,8 @@
           "name": "Session.evidence().save"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Evidence().Save"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -4252,7 +4292,8 @@
           "name": "Session.evidence().save"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Evidence().Save"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -4296,7 +4337,8 @@
           "name": "Session.evidence().save"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Evidence().Save"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -4340,7 +4382,8 @@
           "name": "Session.evidence().save"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Evidence().Save"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -4384,7 +4427,8 @@
           "name": "Session.evidence().save"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Evidence().Save"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -4428,7 +4472,8 @@
           "name": "Session.evidence().save"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Evidence().Save"
         }
       },
       "python_async": "aio.AsyncSession.evidence().save",
@@ -4472,7 +4517,8 @@
           "name": "Session.evidence().asciicast"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Evidence().Asciicast"
         }
       },
       "python_async": "aio.AsyncSession.evidence().asciicast",
@@ -4516,7 +4562,8 @@
           "name": "Termtrace.recordOriginal"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.RecordOriginal"
         }
       },
       "python_async": "aio.AsyncTermtrace.record_original",
@@ -4560,7 +4607,8 @@
           "name": "OriginalRecording.session"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "OriginalSession.Session"
         }
       },
       "python_async": "aio.AsyncOriginalRecording.session",
@@ -4604,7 +4652,8 @@
           "name": "Native.screenshot"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.NativeScreenshot"
         }
       },
       "python_async": null,
@@ -4648,7 +4697,8 @@
           "name": "Termtrace.videoRender({ renderer: 'native' })"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.VideoRender (VideoRendererNative)"
         }
       },
       "python_async": null,
@@ -4694,7 +4744,9 @@
           "reason": "internal helper that Ghostty runs as its child to replay events into the capture terminal; a Python or Node process is never that child. Native screenshots and native video renders run it"
         },
         "go": {
-          "status": "missing"
+          "status": "not_applicable",
+          "name": null,
+          "reason": "internal helper that Ghostty runs as its child to replay events into the capture terminal; a Go process is never that child. Native screenshots and native video renders run it"
         }
       },
       "python_async": null,
@@ -4738,7 +4790,8 @@
           "name": "Termtrace.videoRender (.gif)"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.VideoRender (.gif)"
         }
       },
       "python_async": null,
@@ -4783,7 +4836,8 @@
           "name": "Termtrace.videoRender (.webm)"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.VideoRender (.webm)"
         }
       },
       "python_async": null,
@@ -4828,7 +4882,8 @@
           "name": "System.capabilities"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.Capabilities"
         }
       },
       "python_async": null,
@@ -4873,7 +4928,8 @@
           "name": "Termtrace.videoRender"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.VideoRender"
         }
       },
       "python_async": null,
@@ -4918,7 +4974,8 @@
           "name": "Termtrace.launch({visual_profile}) / Termtrace.preflightVisualProfile"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.Launch(LaunchOptions.VisualProfile) / Client.PreflightVisualProfile"
         }
       },
       "python_async": "aio.AsyncTermtrace.preflight_visual_profile",
@@ -4962,7 +5019,8 @@
           "name": "Termtrace.preflightVisualProfile"
         },
         "go": {
-          "status": "missing"
+          "status": "exposed_unverified",
+          "name": "Client.PreflightVisualProfile"
         }
       },
       "python_async": null,
@@ -5006,7 +5064,8 @@
           "name": "Termtrace.preflightVisualProfile"
         },
         "go": {
-          "status": "missing"
+          "status": "exposed_unverified",
+          "name": "Client.PreflightVisualProfile"
         }
       },
       "python_async": null,
@@ -5050,7 +5109,8 @@
           "name": "Termtrace.preflightVisualProfile"
         },
         "go": {
-          "status": "missing"
+          "status": "exposed_unverified",
+          "name": "Client.PreflightVisualProfile"
         }
       },
       "python_async": null,
@@ -5094,7 +5154,8 @@
           "name": "Termtrace.preflightVisualProfile"
         },
         "go": {
-          "status": "missing"
+          "status": "exposed_unverified",
+          "name": "Client.PreflightVisualProfile"
         }
       },
       "python_async": null,
@@ -5138,7 +5199,8 @@
           "name": "Edit / normalizeEdit"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "NewEdit / Client.NormalizeEdit"
         }
       },
       "python_async": null,
@@ -5182,7 +5244,8 @@
           "name": "select"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "SelectMarker / SelectMonotonicNs / SelectEvent / SelectState / SelectNativeFrame"
         }
       },
       "python_async": null,
@@ -5226,7 +5289,8 @@
           "name": "Edit.clip"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Edit.Clip"
         }
       },
       "python_async": null,
@@ -5270,7 +5334,8 @@
           "name": "Edit.clip({speed})"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Edit.Clip(ClipOptions.Speed)"
         }
       },
       "python_async": null,
@@ -5314,7 +5379,8 @@
           "name": "Edit.clip({hold_ms})"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Edit.Clip(ClipOptions.Hold)"
         }
       },
       "python_async": null,
@@ -5358,7 +5424,8 @@
           "name": "Edit.annotate / scope"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Edit.Annotate"
         }
       },
       "python_async": null,
@@ -5402,7 +5469,8 @@
           "name": "Edit.subtitles / new Edit({resource_base})"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Edit.Subtitles / Edit.WithResourceBase"
         }
       },
       "python_async": null,
@@ -5446,7 +5514,8 @@
           "name": "Edit.crop/zoom/resize/callout/cursorMask"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Edit.Crop / Zoom / Resize / Callout / CursorMask"
         }
       },
       "python_async": null,
@@ -5490,7 +5559,8 @@
           "name": "Termtrace.videoPlan"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.VideoPlan"
         }
       },
       "python_async": "aio.AsyncTermtrace.video_plan",
@@ -5534,7 +5604,8 @@
           "name": "sourceForOutputFrame / outputFramesForSourceFrame"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.SourceForOutputFrame / OutputFramesForSourceFrame"
         }
       },
       "python_async": null,
@@ -5578,7 +5649,8 @@
           "name": "Termtrace.videoPreview"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.VideoPreview"
         }
       },
       "python_async": "aio.AsyncTermtrace.video_preview",
@@ -5622,7 +5694,8 @@
           "name": "Termtrace.videoRender"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.VideoRender"
         }
       },
       "python_async": "aio.AsyncTermtrace.video_render",
@@ -5666,7 +5739,8 @@
           "name": "videoRender().sidecar / .artifact"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.VideoRender().Sidecar / .Artifact"
         }
       },
       "python_async": "aio.AsyncTermtrace.video_render",
@@ -5710,7 +5784,8 @@
           "name": "Termtrace.runScenarios"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.RunScenarios"
         }
       },
       "python_async": null,
@@ -5754,7 +5829,8 @@
           "name": "Termtrace.runScenarios"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.RunScenarios"
         }
       },
       "python_async": null,
@@ -5798,7 +5874,8 @@
           "name": "Termtrace.runScenarios"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.RunScenarios"
         }
       },
       "python_async": null,
@@ -5842,7 +5919,8 @@
           "name": "Termtrace.runScenarios"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.RunScenarios"
         }
       },
       "python_async": null,
@@ -5886,7 +5964,8 @@
           "name": "Termtrace.runScenarios"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.RunScenarios"
         }
       },
       "python_async": null,
@@ -5930,7 +6009,8 @@
           "name": "writeScenarioJunit"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.WriteScenarioJUnit"
         }
       },
       "python_async": null,
@@ -5974,7 +6054,8 @@
           "name": "scenarioCiFailed"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.ScenarioCIFailed"
         }
       },
       "python_async": null,
@@ -6150,7 +6231,8 @@
           "name": "assertCursor"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.AssertCursor"
         }
       },
       "python_async": null,
@@ -6193,7 +6275,8 @@
           "name": "assertExists"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "QueryResult.AssertExists"
         }
       },
       "python_async": null,
@@ -6236,7 +6319,8 @@
           "name": "assertNotExists"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "QueryResult.AssertNotExists"
         }
       },
       "python_async": null,
@@ -6279,7 +6363,8 @@
           "name": "assertCount"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "QueryResult.AssertCount"
         }
       },
       "python_async": null,
@@ -6322,7 +6407,8 @@
           "name": "assertMatchText"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "ScreenMatch.AssertText"
         }
       },
       "python_async": null,
@@ -6365,7 +6451,8 @@
           "name": "assertMatchStyle"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "ScreenMatch.AssertStyle"
         }
       },
       "python_async": null,
@@ -6408,7 +6495,8 @@
           "name": "assertNoWrappedRows"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.AssertNoWrappedRows"
         }
       },
       "python_async": null,
@@ -6451,7 +6539,8 @@
           "name": "assertNeutralRegion"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.AssertNeutralRegion"
         }
       },
       "python_async": null,
@@ -6494,7 +6583,8 @@
           "name": "assertNoPresentedTransient"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.AssertNoPresentedTransient"
         }
       },
       "python_async": null,
@@ -6537,7 +6627,8 @@
           "name": "Session.instrumentation().endSpan"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Instrumentation().EndSpan"
         }
       },
       "python_async": "aio.AsyncSession.instrumentation().end_span",
@@ -6580,7 +6671,8 @@
           "name": "Termtrace.registry().resolve"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Client.Registry().Resolve"
         }
       },
       "python_async": "aio.AsyncTermtrace.registry().resolve",
@@ -6624,7 +6716,8 @@
           "name": "Session.analysis().cacheStatus"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Analysis().CacheStatus"
         }
       },
       "python_async": "aio.AsyncSession.analysis().cache_status",
@@ -6668,7 +6761,8 @@
           "name": "Session.analysis().cachePrune"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Analysis().CachePrune"
         }
       },
       "python_async": "aio.AsyncSession.analysis().cache_prune",
@@ -6712,7 +6806,8 @@
           "name": "Session.analysis().markers"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Analysis().Markers"
         }
       },
       "python_async": "aio.AsyncSession.analysis().markers",
@@ -6756,7 +6851,8 @@
           "name": "Session.analysis().reviewSummary"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Analysis().ReviewSummary"
         }
       },
       "python_async": "aio.AsyncSession.analysis().review_summary",
@@ -6800,7 +6896,8 @@
           "name": "Session.analysis().reviewSearch"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Analysis().ReviewSearch"
         }
       },
       "python_async": "aio.AsyncSession.analysis().review_search",
@@ -6844,7 +6941,8 @@
           "name": "Session.analysis().reviewExport"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Analysis().ReviewExport"
         }
       },
       "python_async": "aio.AsyncSession.analysis().review_export",
@@ -6932,7 +7030,8 @@
           "name": "Session.output().page"
         },
         "go": {
-          "status": "missing"
+          "status": "verified",
+          "name": "Session.Output().Page"
         }
       },
       "python_async": "aio.AsyncSession.output().page",

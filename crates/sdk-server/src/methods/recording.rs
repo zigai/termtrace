@@ -3,6 +3,7 @@ use crate::failure::Failure;
 use crate::server::Call;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 use termtrace_model::execution::session::SessionCompletion;
@@ -58,6 +59,18 @@ impl Recording {
 
     fn take(&self) -> Option<Session> {
         return self.lock().take();
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        return self.lifecycle.path();
+    }
+
+    /// Hand the session to test finalization; a stopped or detached recording yields its
+    /// lifecycle observer.
+    pub(crate) fn take_for_finalization(&self) -> Session {
+        return self
+            .take()
+            .unwrap_or_else(|| return self.lifecycle.lifecycle_observer());
     }
 
     fn restore(&self, session: Session) {

@@ -1,7 +1,7 @@
 use crate::protocol::{INTERNAL_ERROR, INVALID_PARAMS, TERMTRACE_ERROR};
 use schemars::JsonSchema;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Arc;
 use termtrace_model::artifact::presentation::EditFailure;
 use termtrace_model::protocol::control::ControlErrorDetails;
@@ -10,10 +10,12 @@ use termtrace_model::protocol::management::{
 };
 use termtrace_model::protocol::mutation::{MutationEffect, Retry};
 use termtrace_model::terminal::screen::ScreenFrame;
+use termtrace_sdk::assertions::{AssertionError, ExpectationMismatchError};
 use termtrace_sdk::contracts::ErrorReport;
 use termtrace_sdk::input::ActOutcome;
 use termtrace_sdk::locator::{LocatorError, LocatorFailure, QueryError};
 use termtrace_sdk::session::SendFailure;
+use termtrace_sdk::testing::TerminalAssertionError;
 use termtrace_sdk::Uuid;
 
 /// Whether a failure describes one actor request or a management workflow.
@@ -59,6 +61,8 @@ pub(crate) struct ErrorData {
     send_request_id: Option<Uuid>,
     /// Last frame a locator wait observed.
     frame: Option<ScreenFrame>,
+    /// Expected and actual facts of an expectation that did not match.
+    mismatch: Option<ExpectationMismatchError>,
 }
 
 impl ErrorData {
@@ -95,15 +99,17 @@ impl ErrorData {
             step: None,
             send_request_id: None,
             frame: None,
+            mismatch: None,
         };
     }
 }
 
 /// A JSON-RPC error.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(crate) struct Failure {
     code: i64,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     data: Option<Box<ErrorData>>,
 }
 
@@ -188,6 +194,47 @@ impl Failure {
         );
     }
 
+    /// A valid expectation that did not match; the only failure a negation accepts.
+    pub(crate) fn mismatch(error: ExpectationMismatchError) -> Self {
+        let mut data = ErrorData::new(
+            "expectation_mismatch",
+            "expectation_mismatch",
+            FailureContext::actor(MutationEffect::NotApplied),
+        );
+
+        let message = error.to_string();
+        data.mismatch = Some(error);
+
+        return Self::typed(message, data);
+    }
+
+    pub(crate) fn assertion(error: AssertionError) -> Self {
+        return match error {
+            AssertionError::Mismatch(error) => Self::mismatch(error),
+            AssertionError::Query(error) => Self::query(&error),
+            AssertionError::Snapshot(error) => Self::snapshot_validation(error.to_string()),
+        };
+    }
+
+    pub(crate) fn terminal_assertion(error: TerminalAssertionError) -> Self {
+        return match error {
+            TerminalAssertionError::Assertion(error) => Self::assertion(error),
+            TerminalAssertionError::Operation(error) => Self::sdk(&error),
+            other => Self::snapshot_validation(other.to_string()),
+        };
+    }
+
+    pub(crate) fn snapshot_validation(message: String) -> Self {
+        return Self::typed(
+            message,
+            ErrorData::new(
+                "snapshot_validation",
+                "snapshot_validation",
+                FailureContext::actor(MutationEffect::NotApplied),
+            ),
+        );
+    }
+
     pub(crate) fn query(error: &QueryError) -> Self {
         return Self::located(
             error.to_string(),
@@ -231,12 +278,5 @@ impl Failure {
         data.frame = frame.map(|frame| return (*frame).clone());
 
         return Self::typed(message, data);
-    }
-
-    pub(crate) fn to_object(&self) -> Value {
-        return self.data.as_ref().map_or_else(
-            || return json!({"code": self.code, "message": self.message}),
-            |data| return json!({"code": self.code, "message": self.message, "data": data}),
-        );
     }
 }

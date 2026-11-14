@@ -1,24 +1,31 @@
 pub(crate) mod action;
+pub(crate) mod evidence;
+pub(crate) mod instrumentation;
 pub(crate) mod locator;
+pub(crate) mod media;
+pub(crate) mod original;
 pub(crate) mod recording;
+pub(crate) mod registry;
 pub(crate) mod screen;
 pub(crate) mod session;
 pub(crate) mod system;
 pub(crate) mod termtrace;
+pub(crate) mod testing;
+pub(crate) mod tmux;
 
 use crate::failure::Failure;
 use crate::server::Call;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::value::{to_raw_value, RawValue};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 pub(crate) const INITIALIZE: &str = "initialize";
 
-type Invoke = dyn Fn(&Call<'_>, Value) -> Result<Value, Failure> + Send + Sync;
+type Invoke = dyn Fn(&Call<'_>, &RawValue) -> Result<Box<RawValue>, Failure> + Send + Sync;
 
 /// One callable method and the schemas of its params and result.
 pub(crate) struct Entry {
@@ -40,12 +47,12 @@ fn method<P, R>(
     P: DeserializeOwned + JsonSchema + 'static,
     R: Serialize + JsonSchema + 'static,
 {
-    let invoke = move |context: &Call<'_>, params: Value| {
-        let params: P = serde_json::from_value(params)
+    let invoke = move |context: &Call<'_>, params: &RawValue| {
+        let params: P = serde_json::from_str(params.get())
             .map_err(|error| return Failure::invalid_params(format!("{name}: {error}")))?;
         let result = call(context, params)?;
 
-        return serde_json::to_value(result)
+        return to_raw_value(&result)
             .map_err(|error| return Failure::internal(format!("{name}: {error}")));
     };
     let entry = Entry {
@@ -67,6 +74,13 @@ pub(crate) fn registry() -> Registry {
     locator::register(&mut registry);
     action::register(&mut registry);
     system::register(&mut registry);
+    evidence::register(&mut registry);
+    self::registry::register(&mut registry);
+    media::register(&mut registry);
+    original::register(&mut registry);
+    instrumentation::register(&mut registry);
+    tmux::register(&mut registry);
+    testing::register(&mut registry);
     return registry;
 }
 

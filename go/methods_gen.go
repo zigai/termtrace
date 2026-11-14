@@ -12,6 +12,96 @@ func (c *Client) actionRun(ctx context.Context, params runParams) (ActOutcome, e
 	return call[ActOutcome](ctx, c, "action.run", params)
 }
 
+// Remove disposable replay checkpoints.
+func (c *Client) analysisCachePrune(ctx context.Context, params sessionParams) (ReplayCachePruneReport, error) {
+	return call[ReplayCachePruneReport](ctx, c, "analysis.cache_prune", params)
+}
+
+// Inventory the replay cache.
+func (c *Client) analysisCacheStatus(ctx context.Context, params sessionParams) (ReplayCacheStatus, error) {
+	return call[ReplayCacheStatus](ctx, c, "analysis.cache_status", params)
+}
+
+// Run conservative diagnostics.
+func (c *Client) analysisDiagnose(ctx context.Context, params diagnoseParams) (DiagnoseReport, error) {
+	return call[DiagnoseReport](ctx, c, "analysis.diagnose", params)
+}
+
+// Compare two states.
+func (c *Client) analysisDiff(ctx context.Context, params diffParams) (SemanticDiff, error) {
+	return call[SemanticDiff](ctx, c, "analysis.diff", params)
+}
+
+// Explain one state from its source.
+func (c *Client) analysisExplain(ctx context.Context, params explainParams) (ExplainReport, error) {
+	return call[ExplainReport](ctx, c, "analysis.explain", params)
+}
+
+// Triage the most recent action.
+func (c *Client) analysisLastAction(ctx context.Context, params lastActionParams) (LastActionAnalysis, error) {
+	return call[LastActionAnalysis](ctx, c, "analysis.last_action", params)
+}
+
+// List markers and their nominal frames.
+func (c *Client) analysisMarkers(ctx context.Context, params markersParams) ([]MarkerRecord, error) {
+	return call[[]MarkerRecord](ctx, c, "analysis.markers", params)
+}
+
+// Export one reviewed state.
+func (c *Client) analysisReviewExport(ctx context.Context, params reviewExportParams) (ReviewExportManifest, error) {
+	return call[ReviewExportManifest](ctx, c, "analysis.review_export", params)
+}
+
+// Search presented screens.
+func (c *Client) analysisReviewSearch(ctx context.Context, params reviewSearchParams) (ReviewSearchResult, error) {
+	return call[ReviewSearchResult](ctx, c, "analysis.review_search", params)
+}
+
+// Summarize the session for review.
+func (c *Client) analysisReviewSummary(ctx context.Context, params sessionParams) (ReviewSummary, error) {
+	return call[ReviewSummary](ctx, c, "analysis.review_summary", params)
+}
+
+// Read one timeline page.
+func (c *Client) analysisTimeline(ctx context.Context, params timelineParams) (TimelinePage, error) {
+	return call[TimelinePage](ctx, c, "analysis.timeline", params)
+}
+
+// Validate an edit, resolve its subtitle paths, and hash it.
+func (c *Client) editNormalize(ctx context.Context, params normalizeParams) (NormalizedEdit, error) {
+	return call[NormalizedEdit](ctx, c, "edit.normalize", params)
+}
+
+// Wait until the event log reaches a sequence and report its position.
+func (c *Client) eventsFollow(ctx context.Context, params eventsFollowParams) (EventFollowPosition, error) {
+	return call[EventFollowPosition](ctx, c, "events.follow", params)
+}
+
+// Read one page of canonical events.
+func (c *Client) eventsPage(ctx context.Context, params eventsPageParams) (ProjectedEventPage, error) {
+	return call[ProjectedEventPage](ctx, c, "events.page", params)
+}
+
+// Export an asciicast recording.
+func (c *Client) evidenceAsciicast(ctx context.Context, params exportParams) (Path, error) {
+	return call[Path](ctx, c, "evidence.asciicast", params)
+}
+
+// Create an evidence bundle.
+func (c *Client) evidenceBundle(ctx context.Context, params bundleParams) (BundleManifest, error) {
+	return call[BundleManifest](ctx, c, "evidence.bundle", params)
+}
+
+// Save representations of one state.
+func (c *Client) evidenceSave(ctx context.Context, params saveParams) (SaveOutcome, error) {
+	return call[SaveOutcome](ctx, c, "evidence.save", params)
+}
+
+// Verify a bundle against its session and profile.
+func (c *Client) evidenceVerifyBundle(ctx context.Context, params bundleParams) (BundleManifest, error) {
+	return call[BundleManifest](ctx, c, "evidence.verify_bundle", params)
+}
+
 // Run a locator on a frame, optionally selecting one match strictly.
 func (c *Client) frameQuery(ctx context.Context, params frameQueryParams) ([]LocatorMatch, error) {
 	return call[[]LocatorMatch](ctx, c, "frame.query", params)
@@ -20,6 +110,51 @@ func (c *Client) frameQuery(ctx context.Context, params frameQueryParams) ([]Loc
 // Bind the server to a Termtrace binary and evidence root and report its version.
 func (c *Client) initialize(ctx context.Context, params initializeParams) (InitializeResult, error) {
 	return call[InitializeResult](ctx, c, "initialize", params)
+}
+
+// Release the emitter handle; open spans stay open.
+func (c *Client) instrumentationClose(ctx context.Context, params closeParams) error {
+	return callUnit(ctx, c, "instrumentation.close", params)
+}
+
+// End an application span.
+func (c *Client) instrumentationEndSpan(ctx context.Context, params endSpanParams) (ApplicationAcknowledgement, error) {
+	return call[ApplicationAcknowledgement](ctx, c, "instrumentation.end_span", params)
+}
+
+// Emit one application event.
+func (c *Client) instrumentationEvent(ctx context.Context, params eventParams) (ApplicationAcknowledgement, error) {
+	return call[ApplicationAcknowledgement](ctx, c, "instrumentation.event", params)
+}
+
+// Create an application event emitter bound to a live session.
+func (c *Client) instrumentationOpen(ctx context.Context, params openParams) (EmitterInfo, error) {
+	return call[EmitterInfo](ctx, c, "instrumentation.open", params)
+}
+
+// Start an application span; it ends only when the caller ends it.
+func (c *Client) instrumentationStartSpan(ctx context.Context, params startSpanParams) (ApplicationAcknowledgement, error) {
+	return call[ApplicationAcknowledgement](ctx, c, "instrumentation.start_span", params)
+}
+
+// Recover the valid prefix into a new session directory.
+func (c *Client) integrityRecover(ctx context.Context, params exportParams) (RecoveryReport, error) {
+	return call[RecoveryReport](ctx, c, "integrity.recover", params)
+}
+
+// Recover the valid prefix of the event log into a new log.
+func (c *Client) integrityRecoverLog(ctx context.Context, params exportParams) (RecoveryReport, error) {
+	return call[RecoveryReport](ctx, c, "integrity.recover_log", params)
+}
+
+// Sign a verification receipt.
+func (c *Client) integritySign(ctx context.Context, params signParams) (Path, error) {
+	return call[Path](ctx, c, "integrity.sign", params)
+}
+
+// Verify the session evidence.
+func (c *Client) integrityVerify(ctx context.Context, params verifyParams) (VerificationReport, error) {
+	return call[VerificationReport](ctx, c, "integrity.verify", params)
 }
 
 // Capture the latest presented frame and count the matches.
@@ -40,6 +175,66 @@ func (c *Client) locatorSelect(ctx context.Context, params selectParams) (Select
 // Poll until the match count satisfies the condition, optionally for a stable interval.
 func (c *Client) locatorWaitFor(ctx context.Context, params locatorWaitParams) (LocatorMatches, error) {
 	return call[LocatorMatches](ctx, c, "locator.wait_for", params)
+}
+
+// Replay a completed session in Ghostty and capture one state as a PNG.
+func (c *Client) nativeScreenshot(ctx context.Context, params screenshotParams) (CaptureOutcome, error) {
+	return call[CaptureOutcome](ctx, c, "native.screenshot", params)
+}
+
+// Report the native capture status.
+func (c *Client) originalCaptureStatus(ctx context.Context, params originalParams) (OriginalCaptureStatus, error) {
+	return call[OriginalCaptureStatus](ctx, c, "original.capture_status", params)
+}
+
+// Release the handle.
+func (c *Client) originalClose(ctx context.Context, params originalParams) error {
+	return callUnit(ctx, c, "original.close", params)
+}
+
+// Leave the original recording running and give up ownership.
+func (c *Client) originalDetach(ctx context.Context, params originalParams) error {
+	return callUnit(ctx, c, "original.detach", params)
+}
+
+// Stop the program and finalize the capture.
+func (c *Client) originalFinish(ctx context.Context, params finishParams) (OriginalRecording, error) {
+	return call[OriginalRecording](ctx, c, "original.finish", params)
+}
+
+// Terminate the program and the capture without finalizing.
+func (c *Client) originalForceClose(ctx context.Context, params originalParams) error {
+	return callUnit(ctx, c, "original.force_close", params)
+}
+
+// Report whether this client still owns the original recording.
+func (c *Client) originalIsActive(ctx context.Context, params originalParams) (bool, error) {
+	return call[bool](ctx, c, "original.is_active", params)
+}
+
+// Wait until the program exits and the capture is finalized.
+func (c *Client) originalWaitFinished(ctx context.Context, params waitFinishedParams) (OriginalRecording, error) {
+	return call[OriginalRecording](ctx, c, "original.wait_finished", params)
+}
+
+// Read one page of raw output bytes.
+func (c *Client) outputPage(ctx context.Context, params outputPageParams) (ByteOutputPage, error) {
+	return call[ByteOutputPage](ctx, c, "output.page", params)
+}
+
+// Wait until the raw output contains exact bytes.
+func (c *Client) outputWaitFor(ctx context.Context, params outputWaitParams) (WaitOutcome, error) {
+	return call[WaitOutcome](ctx, c, "output.wait_for", params)
+}
+
+// List the half-open output-frame spans that show a source frame.
+func (c *Client) planOutputFramesForSourceFrame(ctx context.Context, params sourceFrameParams) ([]Pair[uint64, uint64], error) {
+	return call[[]Pair[uint64, uint64]](ctx, c, "plan.output_frames_for_source_frame", params)
+}
+
+// Report the clip and source frame an output frame shows; null past the end.
+func (c *Client) planSourceForOutputFrame(ctx context.Context, params outputFrameParams) (*OutputFrameSource, error) {
+	return call[*OutputFrameSource](ctx, c, "plan.source_for_output_frame", params)
 }
 
 // Release the handle; an active recording keeps running as after `recording.detach`.
@@ -80,6 +275,56 @@ func (c *Client) recordingStop(ctx context.Context, params timedRecordingParams)
 // Wait for validated completion evidence and reap the recorder.
 func (c *Client) recordingWaitForCompletion(ctx context.Context, params timedRecordingParams) (SessionCompletion, error) {
 	return call[SessionCompletion](ctx, c, "recording.wait_for_completion", params)
+}
+
+// Plan or apply registry retention.
+func (c *Client) registryGc(ctx context.Context, params gcParams) (GarbageCollectionReport, error) {
+	return call[GarbageCollectionReport](ctx, c, "registry.gc", params)
+}
+
+// Report the lifecycle of an alias.
+func (c *Client) registryLifecycle(ctx context.Context, params aliasParams) (RegistrySessionResolution, error) {
+	return call[RegistrySessionResolution](ctx, c, "registry.lifecycle", params)
+}
+
+// List registered sessions.
+func (c *Client) registryList(ctx context.Context, params listParams) ([]RegistryListEntry, error) {
+	return call[[]RegistryListEntry](ctx, c, "registry.list", params)
+}
+
+// Register a session under an alias.
+func (c *Client) registryRegister(ctx context.Context, params registerParams) (RegistryEntry, error) {
+	return call[RegistryEntry](ctx, c, "registry.register", params)
+}
+
+// Remove an alias; the session evidence stays.
+func (c *Client) registryRemove(ctx context.Context, params aliasParams) (RegistryEntry, error) {
+	return call[RegistryEntry](ctx, c, "registry.remove", params)
+}
+
+// Resolve an alias; null when no alias record exists.
+func (c *Client) registryResolve(ctx context.Context, params aliasParams) (*RegistryEntry, error) {
+	return call[*RegistryEntry](ctx, c, "registry.resolve", params)
+}
+
+// Restart the session behind an alias.
+func (c *Client) registryRestart(ctx context.Context, params restartParams) (RestartReport, error) {
+	return call[RestartReport](ctx, c, "registry.restart", params)
+}
+
+// Report whether CI must fail for a suite report.
+func (c *Client) scenarioCiFailed(ctx context.Context, params ciParams) (bool, error) {
+	return call[bool](ctx, c, "scenario.ci_failed", params)
+}
+
+// Run scenario documents as one suite.
+func (c *Client) scenarioRun(ctx context.Context, params runScenariosParams) (ScenarioSuiteReport, error) {
+	return call[ScenarioSuiteReport](ctx, c, "scenario.run", params)
+}
+
+// Write a suite report as JUnit XML to a new file.
+func (c *Client) scenarioWriteJunit(ctx context.Context, params junitParams) error {
+	return callUnit(ctx, c, "scenario.write_junit", params)
 }
 
 // Capture one exact frame once it stays unchanged, optionally after a reaction.
@@ -142,11 +387,6 @@ func (c *Client) sessionPointer(ctx context.Context, params pointerParams) (Poin
 	return call[PointerOutcome](ctx, c, "session.pointer", params)
 }
 
-// Read a page of raw child output bytes.
-func (c *Client) sessionReadOutput(ctx context.Context, params readOutputParams) (RawOutputPage, error) {
-	return call[RawOutputPage](ctx, c, "session.read_output", params)
-}
-
 // Resize the terminal.
 func (c *Client) sessionResize(ctx context.Context, params resizeParams) (ControlAcknowledgement, error) {
 	return call[ControlAcknowledgement](ctx, c, "session.resize", params)
@@ -192,6 +432,11 @@ func (c *Client) termtraceAttach(ctx context.Context, params attachParams) (Sess
 	return call[SessionInfo](ctx, c, "termtrace.attach", params)
 }
 
+// Own an existing original recording without its capture supervisor.
+func (c *Client) termtraceAttachOriginal(ctx context.Context, params attachOriginalParams) (OriginalInfo, error) {
+	return call[OriginalInfo](ctx, c, "termtrace.attach_original", params)
+}
+
 // Attach to a session by registered name, id, or path.
 func (c *Client) termtraceAttachTarget(ctx context.Context, params attachTargetParams) (SessionInfo, error) {
 	return call[SessionInfo](ctx, c, "termtrace.attach_target", params)
@@ -200,4 +445,154 @@ func (c *Client) termtraceAttachTarget(ctx context.Context, params attachTargetP
 // Launch a command in a new recorded terminal and own its recording.
 func (c *Client) termtraceLaunch(ctx context.Context, params launchParams) (RecordingInfo, error) {
 	return call[RecordingInfo](ctx, c, "termtrace.launch", params)
+}
+
+// Launch a command as an original recording captured from its first byte.
+func (c *Client) termtraceRecordOriginal(ctx context.Context, params recordOriginalParams) (OriginalInfo, error) {
+	return call[OriginalInfo](ctx, c, "termtrace.record_original", params)
+}
+
+// Require an exact match count of a locator in a frame.
+func (c *Client) testingAssertCount(ctx context.Context, params countParams) error {
+	return callUnit(ctx, c, "testing.assert_count", params)
+}
+
+// Require the cursor of a frame.
+func (c *Client) testingAssertCursor(ctx context.Context, params cursorParams) error {
+	return callUnit(ctx, c, "testing.assert_cursor", params)
+}
+
+// Require at least one match of a locator in a frame.
+func (c *Client) testingAssertExists(ctx context.Context, params queryParams) error {
+	return callUnit(ctx, c, "testing.assert_exists", params)
+}
+
+// Compare a frame with a masked snapshot baseline file, or write it when updating.
+func (c *Client) testingAssertMaskedSnapshotFile(ctx context.Context, params maskedSnapshotFileParams) error {
+	return callUnit(ctx, c, "testing.assert_masked_snapshot_file", params)
+}
+
+// Require the appearance of one match of a locator in a frame.
+func (c *Client) testingAssertMatchStyle(ctx context.Context, params matchStyleParams) error {
+	return callUnit(ctx, c, "testing.assert_match_style", params)
+}
+
+// Require the text of one match of a locator in a frame.
+func (c *Client) testingAssertMatchText(ctx context.Context, params matchTextParams) error {
+	return callUnit(ctx, c, "testing.assert_match_text", params)
+}
+
+// Require that a region of a frame holds only default-styled blanks.
+func (c *Client) testingAssertNeutralRegion(ctx context.Context, params neutralRegionParams) error {
+	return callUnit(ctx, c, "testing.assert_neutral_region", params)
+}
+
+// Require that a frame was not presented mid-update.
+func (c *Client) testingAssertNoPresentedTransient(ctx context.Context, params frameAssertionParams) error {
+	return callUnit(ctx, c, "testing.assert_no_presented_transient", params)
+}
+
+// Require that no row of a frame soft-wraps.
+func (c *Client) testingAssertNoWrappedRows(ctx context.Context, params frameAssertionParams) error {
+	return callUnit(ctx, c, "testing.assert_no_wrapped_rows", params)
+}
+
+// Require no match of a locator in a frame.
+func (c *Client) testingAssertNotExists(ctx context.Context, params queryParams) error {
+	return callUnit(ctx, c, "testing.assert_not_exists", params)
+}
+
+// Require literal text in the presented rows of a frame.
+func (c *Client) testingAssertScreenText(ctx context.Context, params screenTextParams) error {
+	return callUnit(ctx, c, "testing.assert_screen_text", params)
+}
+
+// Compare a frame with a snapshot baseline file, or write it when updating.
+func (c *Client) testingAssertSnapshotFile(ctx context.Context, params snapshotFileParams) error {
+	return callUnit(ctx, c, "testing.assert_snapshot_file", params)
+}
+
+// Fail with the mismatch of a negated expectation that held.
+func (c *Client) testingFailNegation(ctx context.Context, params empty) error {
+	return callUnit(ctx, c, "testing.fail_negation", params)
+}
+
+// Stop, verify, and retain or discard the recordings a test owns.
+func (c *Client) testingFinalize(ctx context.Context, params finalizeParams) (FinalizationReport, error) {
+	return call[FinalizationReport](ctx, c, "testing.finalize", params)
+}
+
+// Normalize a frame into a masked cells snapshot.
+func (c *Client) testingMaskedSnapshot(ctx context.Context, params maskedSnapshotParams) (string, error) {
+	return call[string](ctx, c, "testing.masked_snapshot", params)
+}
+
+// Normalize a frame into a snapshot, without observing or retrying.
+func (c *Client) testingNormalizedSnapshot(ctx context.Context, params normalizedSnapshotParams) (string, error) {
+	return call[string](ctx, c, "testing.normalized_snapshot", params)
+}
+
+// Bundle an aggregate recording.
+func (c *Client) tmuxBundle(ctx context.Context, params tmuxBundleParams) (TmuxStreamingBundleManifest, error) {
+	return call[TmuxStreamingBundleManifest](ctx, c, "tmux.bundle", params)
+}
+
+// Read one page of tracks or coverage gaps.
+func (c *Client) tmuxCatalog(ctx context.Context, params tmuxCatalogParams) (TmuxCatalog, error) {
+	return call[TmuxCatalog](ctx, c, "tmux.catalog", params)
+}
+
+// Read one page of aggregate history.
+func (c *Client) tmuxEvents(ctx context.Context, params tmuxEventsParams) (TmuxEvents, error) {
+	return call[TmuxEvents](ctx, c, "tmux.events", params)
+}
+
+// Start an aggregate tmux recording.
+func (c *Client) tmuxRecord(ctx context.Context, params tmuxRecordParams) (TmuxRecordingStart, error) {
+	return call[TmuxRecordingStart](ctx, c, "tmux.record", params)
+}
+
+// Report the lifecycle of one aggregate recording.
+func (c *Client) tmuxRecordingStatus(ctx context.Context, params tmuxNameParams) (TmuxRecordingManifest, error) {
+	return call[TmuxRecordingManifest](ctx, c, "tmux.recording_status", params)
+}
+
+// Report tmux server and integration status.
+func (c *Client) tmuxStatus(ctx context.Context, params tmuxStatusParams) (TmuxStatusReport, error) {
+	return call[TmuxStatusReport](ctx, c, "tmux.status", params)
+}
+
+// Stop the tracks of an aggregate recording.
+func (c *Client) tmuxStop(ctx context.Context, params tmuxStopParams) (TmuxRecordingManifest, error) {
+	return call[TmuxRecordingManifest](ctx, c, "tmux.stop", params)
+}
+
+// Register a pane session as a track of an aggregate recording.
+func (c *Client) tmuxTrack(ctx context.Context, params tmuxTrackParams) error {
+	return callUnit(ctx, c, "tmux.track", params)
+}
+
+// Verify an aggregate bundle against its manifest.
+func (c *Client) tmuxVerifyBundle(ctx context.Context, params tmuxBundleParams) (TmuxStreamingBundleManifest, error) {
+	return call[TmuxStreamingBundleManifest](ctx, c, "tmux.verify_bundle", params)
+}
+
+// Resolve the presentation plan of an edit without rendering.
+func (c *Client) videoPlan(ctx context.Context, params planParams) (PresentationPlan, error) {
+	return call[PresentationPlan](ctx, c, "video.plan", params)
+}
+
+// Render a contact sheet and review video of an edit.
+func (c *Client) videoPreview(ctx context.Context, params previewParams) (VideoPreview, error) {
+	return call[VideoPreview](ctx, c, "video.preview", params)
+}
+
+// Render an edit to an MP4, GIF, or WebM file with its sidecar.
+func (c *Client) videoRender(ctx context.Context, params renderParams) (VideoRender, error) {
+	return call[VideoRender](ctx, c, "video.render", params)
+}
+
+// Validate a visual profile and report what a launch with it would use.
+func (c *Client) visualPreflight(ctx context.Context, params preflightParams) (VisualProfileReport, error) {
+	return call[VisualProfileReport](ctx, c, "visual.preflight", params)
 }

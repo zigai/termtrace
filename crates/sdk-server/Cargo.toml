@@ -13,7 +13,7 @@ termtrace-sdk = { version = "=0.1.0", path = "../sdk", features = ["in-process",
 fs-err = "3.2.0"
 schemars = "1.1.0"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
+serde_json = { version = "1.0.145", features = ["raw_value"] }
 
 [lints]
 workspace = true

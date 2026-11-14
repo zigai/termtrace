@@ -85,20 +85,6 @@ func (s *Session) Status(ctx context.Context) (SessionStatus, error) {
 	return s.client.sessionStatus(ctx, statusParams{Session: sessionRef{Path: s.path}})
 }
 
-// ReadOutput reads raw child output bytes from offset, up to limit bytes, or 65536 when limit
-// is zero.
-func (s *Session) ReadOutput(ctx context.Context, offset uint64, limit int) (RawOutputPage, error) {
-	var maxBytes *uint64
-	if limit > 0 {
-		maxBytes = new(uint64(limit))
-	}
-
-	return s.client.sessionReadOutput(
-		ctx,
-		readOutputParams{Session: s.ref(), Offset: new(offset), Limit: maxBytes},
-	)
-}
-
 // Send applies ordered input and control steps, then checks the optional postcondition.
 func (s *Session) Send(ctx context.Context, spec SendSpec) (SendResult, error) {
 	return s.client.sessionSend(ctx, sendParams{Session: s.ref(), Spec: spec})

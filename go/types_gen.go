@@ -196,6 +196,14 @@ type ActorBoundaries struct {
 	Observed CanonicalBoundary `json:"observed"`
 }
 
+// Params of calls that address one alias.
+type aliasParams struct {
+	// Session alias.
+	Alias string `json:"alias"`
+	// Registry directory; the default registry when absent.
+	Root *Path `json:"root,omitzero"` //exhaustruct:optional
+}
+
 // Stable annotation anchor vocabulary.
 type AnnotationAnchor string
 
@@ -526,6 +534,12 @@ type AtomSpecText struct {
 
 func (AtomSpecText) isAtomSpec() {}
 
+// Params of `termtrace.attach_original`.
+type attachOriginalParams struct {
+	// Session directory of the original recording.
+	Path Path `json:"path"`
+}
+
 // Params of `termtrace.attach`.
 type attachParams struct {
 	// Session directory.
@@ -558,6 +572,16 @@ type BundleManifest struct {
 	SourceFinalEventHash string `json:"source_final_event_hash"`
 	// Manifest schema version.
 	Version int `json:"version"`
+}
+
+// Params of `evidence.bundle` and `evidence.verify_bundle`.
+type bundleParams struct {
+	// Bundle directory.
+	Bundle Path `json:"bundle"`
+	// Bundle profile.
+	Profile BundleProfile `json:"profile"`
+	// Session directory.
+	Session Path `json:"session"`
 }
 
 // Fixed bundle content policy.
@@ -800,6 +824,12 @@ type ChangeVisualization struct {
 	Source ChangeSource `json:"source"`
 }
 
+// Params of `scenario.ci_failed`.
+type ciParams struct {
+	// Suite report.
+	Report ScenarioSuiteReport `json:"report"`
+}
+
 // One MIME representation of a clipboard write.
 type ClipboardRepresentation struct {
 	// Digest of the decoded representation data.
@@ -826,6 +856,12 @@ type ClockSample struct {
 	SystemMonotonicNs uint64 `json:"system_monotonic_ns"`
 	// Maximum error of the midpoint mapping, in nanoseconds.
 	UncertaintyNs uint64 `json:"uncertainty_ns"`
+}
+
+// Params of `instrumentation.close`.
+type closeParams struct {
+	// Emitter handle.
+	Emitter string `json:"emitter"`
 }
 
 // Deterministic common color-variable policy applied after caller overrides.
@@ -1079,6 +1115,16 @@ func (v ControlOutcomeMarked) MarshalJSONTo(enc *jsontext.Encoder) error {
 	}{jsontext.Value(`"marked"`), plain(v)})
 }
 
+// Params of `testing.assert_count`.
+type countParams struct {
+	// Required match count.
+	Expected uint64 `json:"expected"`
+	// Frame the locator ran on.
+	Frame ScreenFrame `json:"frame"`
+	// Locator to evaluate.
+	Locator locatorQuery `json:"locator"`
+}
+
 // One semantic cursor region masked on a mapped presentation frame.
 type CursorMaskFrame struct {
 	// Honest semantic-to-native correlation level.
@@ -1093,6 +1139,14 @@ type CursorMaskFrame struct {
 	StateHash string `json:"state_hash"`
 	// Latest presentation-eligible semantic state used for cursor geometry.
 	StateID uint64 `json:"state_id"`
+}
+
+// Params of `testing.assert_cursor`.
+type cursorParams struct {
+	// Expected cursor.
+	Expected CursorState `json:"expected"`
+	// Frame to check.
+	Frame ScreenFrame `json:"frame"`
 }
 
 // Cursor state at one semantic boundary.
@@ -1122,6 +1176,16 @@ const (
 	CursorStyleUnderline   CursorStyle = "underline"
 	CursorStyleHollowBlock CursorStyle = "hollow_block"
 )
+
+// Params of `analysis.diagnose`.
+type diagnoseParams struct {
+	// Changed-cell percent that counts as a broad change; 50 when absent.
+	BroadChangePercent *int `json:"broad_change_percent,omitzero"` //exhaustruct:optional
+	// Checks to run; every check when empty.
+	Checks []DiagnosticCheck `json:"checks,omitzero"` //exhaustruct:optional
+	// Session directory.
+	Session Path `json:"session"`
+}
 
 // Deterministic report from conservative session-wide detectors.
 type DiagnoseReport struct {
@@ -1195,6 +1259,16 @@ type DiffEndpoint struct {
 	StateHash string `json:"state_hash"`
 	// Stream position of the state.
 	StateID uint64 `json:"state_id"`
+}
+
+// Params of `analysis.diff`.
+type diffParams struct {
+	// Earlier state.
+	From StatePoint `json:"from"`
+	// Session directory.
+	Session Path `json:"session"`
+	// Later state.
+	To StatePoint `json:"to"`
 }
 
 // Global render dirtiness reported by Ghostty.
@@ -1364,6 +1438,28 @@ func (v EditSourcePlan) MarshalJSONTo(enc *jsontext.Encoder) error {
 	}{jsontext.Value(`"plan"`), plain(v)})
 }
 
+// An emitter this client owns.
+type EmitterInfo struct {
+	// Handle that addresses the emitter in `instrumentation.*` calls.
+	Emitter string `json:"emitter"`
+	// Process identity of every event and span of this emitter.
+	ProcessInstanceID string `json:"process_instance_id"`
+}
+
+type empty = struct{}
+
+// Params of `instrumentation.end_span`.
+type endSpanParams struct {
+	// Attributes recorded at the end.
+	Attributes map[string]jsontext.Value `json:"attributes,omitzero"` //exhaustruct:optional
+	// Emitter handle.
+	Emitter string `json:"emitter"`
+	// Span name.
+	Name string `json:"name"`
+	// Span to end.
+	SpanID string `json:"span_id"`
+}
+
 // Source environment used before explicit child overrides are applied.
 type EnvironmentBase string
 
@@ -1408,6 +1504,8 @@ type ErrorData struct {
 	Locator LocatorFailure `json:"locator,omitzero"` //exhaustruct:optional
 	// Proven management progress and paths.
 	Management ManagementFailure `json:"management,omitzero"` //exhaustruct:optional
+	// Expected and actual facts of an expectation that did not match.
+	Mismatch *ExpectationMismatchError `json:"mismatch,omitzero"` //exhaustruct:optional
 	// Identity of the failed mutation.
 	RequestID *string `json:"request_id,omitzero"` //exhaustruct:optional
 	// Whether the same request identity can be retried.
@@ -1954,6 +2052,16 @@ type EventPageCursor struct {
 	Source PageSource `json:"source"`
 }
 
+// Params of `instrumentation.event`.
+type eventParams struct {
+	// Event attributes.
+	Attributes map[string]jsontext.Value `json:"attributes,omitzero"` //exhaustruct:optional
+	// Emitter handle.
+	Emitter string `json:"emitter"`
+	// Event name.
+	Name string `json:"name"`
+}
+
 // Stable JSONL projection of one canonical event record.
 type EventProjection struct {
 	// Hash-and-length summaries when byte fields were elided.
@@ -2091,6 +2199,28 @@ func (v EventSignalResult) MarshalJSONTo(enc *jsontext.Encoder) error {
 	}{jsontext.Value(`"signal_result"`), plain(v)})
 }
 
+// Params of `events.follow`.
+type eventsFollowParams struct {
+	// Event sequence to reach; the start when absent.
+	NextEventSeq *uint64 `json:"next_event_seq,omitzero"` //exhaustruct:optional
+	// Session directory.
+	Session Path `json:"session"`
+}
+
+// Params of `events.page`.
+type eventsPageParams struct {
+	// Position returned by the previous page; the start when absent.
+	Cursor *EventPageCursor `json:"cursor,omitzero"` //exhaustruct:optional
+	// Event types to keep; every type when empty.
+	EventTypes []string `json:"event_types,omitzero"` //exhaustruct:optional
+	// Maximum events to return; 100 when absent.
+	Limit *int `json:"limit,omitzero"` //exhaustruct:optional
+	// Whether to leave out event payloads.
+	MetadataOnly bool `json:"metadata_only,omitzero"` //exhaustruct:optional
+	// Session directory.
+	Session Path `json:"session"`
+}
+
 // Evidence retention requested for an owned terminal test.
 type EvidencePolicy string
 
@@ -2140,6 +2270,16 @@ type ExplainOutputPage struct {
 	Tokens OutputPage `json:"tokens"`
 }
 
+// Params of `analysis.explain`.
+type explainParams struct {
+	// Events of context around the state; 8 when absent.
+	Context *uint64 `json:"context,omitzero"` //exhaustruct:optional
+	// Session directory.
+	Session Path `json:"session"`
+	// State to explain; the latest presented state when absent.
+	Target StatePoint `json:"target,omitzero"` //exhaustruct:optional
+}
+
 // Causal evidence around one canonical state point.
 type ExplainReport struct {
 	// Inclusive event-sequence context radius.
@@ -2164,6 +2304,14 @@ type ExplainReport struct {
 	Tokens []VtToken `json:"tokens"`
 }
 
+// Params of calls that write one new path from a session.
+type exportParams struct {
+	// Destination path.
+	Destination Path `json:"destination"`
+	// Session directory.
+	Session Path `json:"session"`
+}
+
 // Whether a failure describes one actor request or a management workflow.
 type FailureScope string
 
@@ -2186,6 +2334,20 @@ type FinalizationReport struct {
 	VerifiedArtifacts []string `json:"verified_artifacts"`
 }
 
+// Params of `testing.finalize`.
+type finalizeParams struct {
+	// How the test ended.
+	Outcome TestOutcome `json:"outcome"`
+	// When the evidence is kept.
+	Policy EvidencePolicy `json:"policy,omitzero"` //exhaustruct:optional
+	// Recording handles the test owns; each session directory must be inside `root`.
+	Recordings []string `json:"recordings"`
+	// Evidence root of the test.
+	Root Path `json:"root"`
+	// Bound on stopping and verifying each recording; 10 seconds when absent.
+	TimeoutMs *uint64 `json:"timeout_ms,omitzero"` //exhaustruct:optional
+}
+
 // Conservative confidence label for a derived finding.
 type FindingConfidence string
 
@@ -2194,6 +2356,16 @@ const (
 	FindingConfidenceMedium FindingConfidence = "medium"
 )
 
+// Params of `original.finish`.
+type finishParams struct {
+	// Original recording handle.
+	Original string `json:"original"`
+	// Identity of the stop request; allocated when absent.
+	RequestID *string `json:"request_id,omitzero"` //exhaustruct:optional
+	// Bound on finalization; the default stop timeout when absent.
+	TimeoutMs *uint64 `json:"timeout_ms,omitzero"` //exhaustruct:optional
+}
+
 type focusParams struct {
 	// Whether the terminal gains or loses focus.
 	Focused  bool       `json:"focused"`
@@ -2201,6 +2373,12 @@ type focusParams struct {
 	Session  sessionRef `json:"session"`
 	// Reject instead of a no-op when the application does not report focus.
 	Strict bool `json:"strict,omitzero"` //exhaustruct:optional
+}
+
+// Params of assertions on one frame.
+type frameAssertionParams struct {
+	// Frame to check.
+	Frame ScreenFrame `json:"frame"`
 }
 
 type frameAtParams struct {
@@ -2283,6 +2461,20 @@ type GarbageCollectionReport struct {
 	SkippedNonCompleted uint64 `json:"skipped_non_completed"`
 	// Owner-only Termtrace state root considered.
 	StateRoot Path `json:"state_root"`
+}
+
+// Params of `registry.gc`.
+type gcParams struct {
+	// Whether to delete; the call only plans when false.
+	Apply bool `json:"apply,omitzero"` //exhaustruct:optional
+	// Number of latest sessions always kept; 20 when absent.
+	KeepLatest *uint64 `json:"keep_latest,omitzero"` //exhaustruct:optional
+	// Byte quota for completed sessions.
+	MaxCompletedBytes *uint64 `json:"max_completed_bytes,omitzero"` //exhaustruct:optional
+	// Age in days past which completed sessions are removed; 30 when absent.
+	OlderThanDays *uint64 `json:"older_than_days,omitzero"` //exhaustruct:optional
+	// Registry directory; the default registry when absent.
+	Root *Path `json:"root,omitzero"` //exhaustruct:optional
 }
 
 // One viewport and measured grid considered by the exact-grid solver.
@@ -2598,6 +2790,14 @@ const (
 	InvalidRegionReasonOutOfBounds                InvalidRegionReason = "out_of_bounds"
 )
 
+// Params of `scenario.write_junit`.
+type junitParams struct {
+	// New XML file.
+	Path Path `json:"path"`
+	// Suite report.
+	Report ScenarioSuiteReport `json:"report"`
+}
+
 // Both task-level reports derived in one canonical replay/diagnostic pass.
 type LastActionAnalysis struct {
 	// Range-restricted diagnostics.
@@ -2652,6 +2852,14 @@ type LastActionDiagnosticsReport struct {
 	ToStateID uint64 `json:"to_state_id"`
 	// Report schema version.
 	Version int `json:"version"`
+}
+
+// Params of `analysis.last_action`.
+type lastActionParams struct {
+	// Changed-cell percent that counts as a broad change; 50 when absent.
+	BroadChangePercent *int `json:"broad_change_percent,omitzero"` //exhaustruct:optional
+	// Session directory.
+	Session Path `json:"session"`
 }
 
 // Compact semantic result of the most recent canonical input action.
@@ -2730,6 +2938,14 @@ const (
 	LifecycleKindOutputClosed LifecycleKind = "output_closed"
 	LifecycleKindStopping     LifecycleKind = "stopping"
 )
+
+// Params of `registry.list`.
+type listParams struct {
+	// Whether to include sessions that are no longer running.
+	IncludeAll bool `json:"include_all,omitzero"` //exhaustruct:optional
+	// Registry directory; the default registry when absent.
+	Root *Path `json:"root,omitzero"` //exhaustruct:optional
+}
 
 // An actor-owned position immediately after a canonical record (or the header).
 type LiveEventCursor struct {
@@ -3112,6 +3328,26 @@ type MarkerRecord struct {
 	SemanticStateID *uint64 `json:"semantic_state_id,omitzero"` //exhaustruct:optional
 }
 
+// Params of `analysis.markers`.
+type markersParams struct {
+	// Frame rate of the nominal frame numbers; 30 when absent.
+	FPS *int `json:"fps,omitzero"` //exhaustruct:optional
+	// Session directory.
+	Session Path `json:"session"`
+}
+
+// Params of `testing.assert_masked_snapshot_file`.
+type maskedSnapshotFileParams struct {
+	// Frame to compare.
+	Frame ScreenFrame `json:"frame"`
+	// Masked regions and included facts; masks are not redaction.
+	Options MaskedSnapshotOptions `json:"options"`
+	// Baseline file.
+	Path Path `json:"path"`
+	// Whether to create or replace the baseline instead of comparing.
+	Update bool `json:"update,omitzero"` //exhaustruct:optional
+}
+
 // Options for the separate version-one cells comparison format.
 //
 // Masks exclude unstable comparison cells. They do not redact canonical evidence.
@@ -3126,6 +3362,14 @@ type MaskedSnapshotOptions struct {
 	Profile SnapshotProfile `json:"profile,omitzero"` //exhaustruct:optional
 }
 
+// Params of `testing.masked_snapshot`.
+type maskedSnapshotParams struct {
+	// Frame to normalize.
+	Frame ScreenFrame `json:"frame"`
+	// Masked regions and included facts; masks are not redaction.
+	Options MaskedSnapshotOptions `json:"options"`
+}
+
 // One absolute half-open range covered by a match.
 type MatchRange struct {
 	// Exclusive absolute terminal column.
@@ -3134,6 +3378,30 @@ type MatchRange struct {
 	Row int `json:"row"`
 	// Inclusive absolute terminal column.
 	StartColumn int `json:"start_column"`
+}
+
+// Params of `testing.assert_match_style`.
+type matchStyleParams struct {
+	// Appearance every covered cell must have.
+	Expected StyleFilter `json:"expected"`
+	// Frame the locator ran on.
+	Frame ScreenFrame `json:"frame"`
+	// Zero-based index of the match among every match.
+	Index uint64 `json:"index"`
+	// Locator to evaluate.
+	Locator locatorQuery `json:"locator"`
+}
+
+// Params of `testing.assert_match_text`.
+type matchTextParams struct {
+	// Text the match must equal.
+	Expected string `json:"expected"`
+	// Frame the locator ran on.
+	Frame ScreenFrame `json:"frame"`
+	// Zero-based index of the match among every match.
+	Index uint64 `json:"index"`
+	// Locator to evaluate.
+	Locator locatorQuery `json:"locator"`
 }
 
 // Bounded cell evidence retained by a match.
@@ -3344,6 +3612,20 @@ type NativeVisualProfile struct {
 	PaddingPoints *PaddingPoints `json:"padding_points,omitzero"` //exhaustruct:optional
 }
 
+// Params of `testing.assert_neutral_region`.
+type neutralRegionParams struct {
+	// Frame to check.
+	Frame ScreenFrame `json:"frame"`
+	// Region that must hold only default-styled blanks.
+	Region ScreenRegion `json:"region"`
+}
+
+// Params of `edit.normalize`.
+type normalizeParams struct {
+	// Edit to validate.
+	Edit EditSource `json:"edit"`
+}
+
 // One annotation resolved to a half-open output-frame interval.
 type NormalizedAnnotation struct {
 	// Stable caller annotation index.
@@ -3410,6 +3692,18 @@ type NormalizedEdit struct {
 	Edit EditPlan `json:"edit"`
 	// BLAKE3 of the edit with subtitle paths replaced by their content hashes.
 	EditPlanHash string `json:"edit_plan_hash"`
+}
+
+// Params of `testing.normalized_snapshot`.
+type normalizedSnapshotParams struct {
+	// Frame to normalize.
+	Frame ScreenFrame `json:"frame"`
+	// Whether cursor facts are included.
+	IncludeCursor bool `json:"include_cursor,omitzero"` //exhaustruct:optional
+	// Whether mode facts are included.
+	IncludeModes bool `json:"include_modes,omitzero"` //exhaustruct:optional
+	// Detail of the snapshot; `text` when absent.
+	Profile *SnapshotProfile `json:"profile,omitzero"` //exhaustruct:optional
 }
 
 // Validated subtitle input with stable content identity.
@@ -3532,6 +3826,12 @@ type OmittedFindings struct {
 	Count uint64 `json:"count"`
 }
 
+// Params of `instrumentation.open`.
+type openParams struct {
+	// Live session directory, such as the value of `TERMTRACE_SESSION` in a recorded child.
+	Session Path `json:"session"`
+}
+
 // Result of a state-changing operation.
 type OperationStatus string
 
@@ -3630,6 +3930,16 @@ type OriginalCaptureStatus struct {
 	Version int `json:"version"`
 }
 
+// An original recording this client owns.
+type OriginalInfo struct {
+	// Handle that addresses the recording in `original.*` calls.
+	Original string `json:"original"`
+	// Session directory.
+	Path Path `json:"path"`
+	// Canonical session identity.
+	SessionID string `json:"session_id"`
+}
+
 // Original-capture launch configuration in host form. `grid` and `viewport` are exclusive,
 // and the canonical `rows`/`cols` options do not exist here: the captured terminal owns its grid.
 type OriginalLaunchOptions struct {
@@ -3663,6 +3973,12 @@ type OriginalLaunchOptions struct {
 	VisualProfile *VisualProfile `json:"visual_profile,omitzero"` //exhaustruct:optional
 }
 
+// Params of calls on one original recording.
+type originalParams struct {
+	// Original recording handle.
+	Original string `json:"original"`
+}
+
 // A finished original recording whose capture was published.
 type OriginalRecording struct {
 	// Whether the application exited 0 with no signal, resource limit or recorder failure.
@@ -3672,6 +3988,14 @@ type OriginalRecording struct {
 	Capture MediaArtifactResult `json:"capture"`
 	// Validated canonical completion of the captured application.
 	Completion SessionCompletion `json:"completion"`
+}
+
+// Params of `plan.source_for_output_frame`.
+type outputFrameParams struct {
+	// Output frame index.
+	OutputFrame uint64 `json:"output_frame"`
+	// Presentation plan.
+	Plan PresentationPlan `json:"plan"`
 }
 
 // Source of one presentation output frame.
@@ -3706,6 +4030,26 @@ type OutputPageCursor struct {
 	ByteOffset uint64 `json:"byte_offset"`
 	// Chain endpoint through the event containing the last returned byte.
 	Events EventPageCursor `json:"events"`
+}
+
+// Params of `output.page`.
+type outputPageParams struct {
+	// Position returned by the previous page; the start when absent.
+	Cursor *OutputPageCursor `json:"cursor,omitzero"` //exhaustruct:optional
+	// Maximum bytes to return; 65536 when absent.
+	Limit *int `json:"limit,omitzero"` //exhaustruct:optional
+	// Session directory.
+	Session Path `json:"session"`
+}
+
+// Params of `output.wait_for`.
+type outputWaitParams struct {
+	// Exact bytes to wait for.
+	Pattern Base64Bytes `json:"pattern"`
+	// Session directory.
+	Session Path `json:"session"`
+	// Bound on waiting; the default wait timeout when absent.
+	TimeoutMs *uint64 `json:"timeout_ms,omitzero"` //exhaustruct:optional
 }
 
 // Symmetric window padding in points per side.
@@ -3864,6 +4208,16 @@ func (v PixelTransformZoom) MarshalJSONTo(enc *jsontext.Encoder) error {
 		Const0 jsontext.Value `json:"transform"`
 		plain
 	}{jsontext.Value(`"zoom"`), plain(v)})
+}
+
+// Params of `video.plan`.
+type planParams struct {
+	// Edit to present.
+	Edit EditSource `json:"edit"`
+	// Renderer, frame rate, and overwrite policy.
+	Options VideoOptions `json:"options,omitzero"` //exhaustruct:optional
+	// Completed session directory.
+	Session Path `json:"session"`
 }
 
 // One high-level cell-addressed pointer operation.
@@ -4131,6 +4485,16 @@ func (v PostconditionSummaryScreen) MarshalJSONTo(enc *jsontext.Encoder) error {
 	}{jsontext.Value(`"screen"`), plain(v)})
 }
 
+// Params of `visual.preflight`.
+type preflightParams struct {
+	// Grid columns; the default when absent.
+	Cols *int `json:"cols,omitzero"` //exhaustruct:optional
+	// Visual profile to check.
+	Profile VisualProfile `json:"profile"`
+	// Grid rows; the default when absent.
+	Rows *int `json:"rows,omitzero"` //exhaustruct:optional
+}
+
 // Delivery codec and pixel-format contract.
 type PresentationDelivery struct {
 	// Stable delivery codec name.
@@ -4252,6 +4616,18 @@ type PreviewOptions struct {
 	PreviewWidth int `json:"preview_width"`
 	// Width of each storyboard tile.
 	TileWidth int `json:"tile_width"`
+}
+
+// Params of `video.preview`.
+type previewParams struct {
+	// New directory for the contact sheet and review video.
+	Directory Path `json:"directory"`
+	// Edit to present.
+	Edit EditSource `json:"edit"`
+	// Renderer, frame rate, and overwrite policy.
+	Options VideoOptions `json:"options,omitzero"` //exhaustruct:optional
+	// Completed session directory.
+	Session Path `json:"session"`
 }
 
 // Safely supported process-group signals.
@@ -4470,22 +4846,20 @@ func (v QueryErrorQueryResourceLimit) MarshalJSONTo(enc *jsontext.Encoder) error
 	}{jsontext.Value(`"query_resource_limit"`), plain(v)})
 }
 
+// Params of assertions on the matches of a locator in one frame.
+type queryParams struct {
+	// Frame the locator ran on.
+	Frame ScreenFrame `json:"frame"`
+	// Locator to evaluate.
+	Locator locatorQuery `json:"locator"`
+}
+
 // Exact positive playback speed numerator/denominator.
 type RationalSpeed struct {
 	// Source-time multiplier denominator.
 	Denominator int `json:"denominator"`
 	// Source-time multiplier numerator.
 	Numerator int `json:"numerator"`
-}
-
-// A page of raw child output bytes.
-type RawOutputPage struct {
-	// Raw bytes produced by the child process.
-	Bytes Base64Bytes `json:"bytes"`
-	// Whether more bytes follow this page.
-	HasMore bool `json:"has_more"`
-	// Byte offset of the next page.
-	NextOffset uint64 `json:"next_offset"`
 }
 
 // Reaction required before an idle interval, in host millisecond units.
@@ -4496,12 +4870,12 @@ type ReactionSpec struct {
 	TimeoutMs *uint64 `json:"timeout_ms,omitzero"` //exhaustruct:optional
 }
 
-type readOutputParams struct {
-	// Maximum bytes to return; 65536 when absent.
-	Limit *uint64 `json:"limit,omitzero"` //exhaustruct:optional
-	// Byte offset to read from; the start when absent.
-	Offset  *uint64    `json:"offset,omitzero"` //exhaustruct:optional
-	Session sessionRef `json:"session"`
+// Params of `termtrace.record_original`.
+type recordOriginalParams struct {
+	// Program and arguments.
+	Command []string `json:"command"`
+	// Grid or viewport, canvas, frame rate, environment, Ghostty settings, and limits.
+	Options OriginalLaunchOptions `json:"options,omitzero"` //exhaustruct:optional
 }
 
 // A recording this client owns.
@@ -4540,6 +4914,16 @@ type RecoveryReport struct {
 	Source Path `json:"source"`
 	// Number of integrity-checked events retained.
 	ValidEvents uint64 `json:"valid_events"`
+}
+
+// Params of `registry.register`.
+type registerParams struct {
+	// Alias to create.
+	Alias string `json:"alias"`
+	// Registry directory; the default registry when absent.
+	Root *Path `json:"root,omitzero"` //exhaustruct:optional
+	// Session directory.
+	Session Path `json:"session"`
 }
 
 // One friendly name bound to an immutable canonical session identity.
@@ -4595,6 +4979,18 @@ type RegistrySessionResolution struct {
 	// Current lifecycle classification.
 	Lifecycle SessionPhase `json:"lifecycle"`
 	// Exact registered or pending session path.
+	Session Path `json:"session"`
+}
+
+// Params of `video.render`.
+type renderParams struct {
+	// Edit to present.
+	Edit EditSource `json:"edit"`
+	// Renderer, frame rate, and overwrite policy.
+	Options VideoOptions `json:"options,omitzero"` //exhaustruct:optional
+	// Output file; its `.mp4`, `.gif`, or `.webm` extension selects the format.
+	Out Path `json:"out"`
+	// Completed session directory.
 	Session Path `json:"session"`
 }
 
@@ -4770,6 +5166,20 @@ const (
 	RestartFailurePhaseAliasRetarget        RestartFailurePhase = "alias_retarget"
 )
 
+// Params of `registry.restart`.
+type restartParams struct {
+	// Session alias.
+	Alias string `json:"alias"`
+	// Successor environment; the predecessor's when absent.
+	Environment *EnvironmentSpec `json:"environment,omitzero"` //exhaustruct:optional
+	// What the successor may change.
+	Options RestartConfiguration `json:"options,omitzero"` //exhaustruct:optional
+	// Registry directory; the default registry when absent.
+	Root *Path `json:"root,omitzero"` //exhaustruct:optional
+	// Bound on successor readiness; the default startup timeout when absent.
+	TimeoutMs *uint64 `json:"timeout_ms,omitzero"` //exhaustruct:optional
+}
+
 // Recorder restart provenance override, preserving existing internal wire names.
 type RestartProvenance string
 
@@ -4823,6 +5233,16 @@ type ReviewExportManifest struct {
 	Version int `json:"version"`
 }
 
+// Params of `analysis.review_export`.
+type reviewExportParams struct {
+	// New directory to write; an existing one is never replaced.
+	Destination Path `json:"destination"`
+	// Session directory.
+	Session Path `json:"session"`
+	// State to export.
+	StateID uint64 `json:"state_id"`
+}
+
 // One semantic viewport text match with a copyable canonical selector.
 type ReviewSearchMatch struct {
 	// Canonical event sequence associated with the state.
@@ -4835,6 +5255,14 @@ type ReviewSearchMatch struct {
 	StateHash string `json:"state_hash"`
 	// Exact semantic state identifier.
 	StateID uint64 `json:"state_id"`
+}
+
+// Params of `analysis.review_search`.
+type reviewSearchParams struct {
+	// Text to search for.
+	Query string `json:"query"`
+	// Session directory.
+	Session Path `json:"session"`
 }
 
 // Stable noninteractive reviewer text-search result.
@@ -4914,6 +5342,28 @@ type runParams struct {
 	Session sessionRef `json:"session"`
 }
 
+// Params of `scenario.run`.
+type runScenariosParams struct {
+	// Parent of each case's session; the client's evidence root when absent.
+	EvidenceRoot *Path `json:"evidence_root,omitzero"` //exhaustruct:optional
+	// Whether a flaky case fails CI.
+	FailOnFlaky bool `json:"fail_on_flaky,omitzero"` //exhaustruct:optional
+	// Parent of failure artifacts; snapshot baselines live in its sibling `snapshots`.
+	FailureRoot Path `json:"failure_root"`
+	// Maximum cases run at once; 1 when absent.
+	Jobs *int `json:"jobs,omitzero"` //exhaustruct:optional
+	// Fresh-session reruns of a failed case.
+	Reruns int `json:"reruns,omitzero"` //exhaustruct:optional
+	// Scenario documents.
+	Scenarios []Path `json:"scenarios"`
+	// Total shard count; requires `shard_index`.
+	ShardCount *int `json:"shard_count,omitzero"` //exhaustruct:optional
+	// Zero-based shard index; requires `shard_count`.
+	ShardIndex *int `json:"shard_index,omitzero"` //exhaustruct:optional
+	// Whether to replace snapshot baselines instead of comparing them.
+	UpdateSnapshots bool `json:"update_snapshots,omitzero"` //exhaustruct:optional
+}
+
 // Semantic file recipe supported by `save`.
 type SaveFormat string
 
@@ -4959,6 +5409,20 @@ type SaveOutcome struct {
 	Directory Path `json:"directory"`
 	// Published manifest.
 	Manifest SaveManifest `json:"manifest"`
+}
+
+// Params of `evidence.save`.
+type saveParams struct {
+	// Destination path.
+	Destination Path `json:"destination"`
+	// Representations to write.
+	Formats []SaveFormat `json:"formats"`
+	// Whether a hidden state may be selected.
+	IncludeHidden bool `json:"include_hidden,omitzero"` //exhaustruct:optional
+	// State to save; the latest presented state when absent.
+	Point StatePoint `json:"point,omitzero"` //exhaustruct:optional
+	// Session directory.
+	Session Path `json:"session"`
 }
 
 // One manifested saved file.
@@ -5786,6 +6250,14 @@ type ScreenSpanRow struct {
 	WrapContinuation bool `json:"wrap_continuation"`
 }
 
+// Params of `testing.assert_screen_text`.
+type screenTextParams struct {
+	// Literal text the presented rows must contain.
+	Expected string `json:"expected"`
+	// Frame to check.
+	Frame ScreenFrame `json:"frame"`
+}
+
 // Text-detail row.
 type ScreenTextRow struct {
 	// Absolute row.
@@ -5829,6 +6301,18 @@ type ScreenWaitResult struct {
 	StableForNs uint64 `json:"stable_for_ns"`
 	// Frame is the exact frame these fields describe.
 	Frame ScreenFrame `json:"frame"`
+}
+
+// Params of `native.screenshot`.
+type screenshotParams struct {
+	// New directory for the PNG, its manifest, and the replay endpoint.
+	Destination Path `json:"destination"`
+	// State to capture; the latest presented state when absent.
+	Point StatePoint `json:"point,omitzero"` //exhaustruct:optional
+	// Completed session directory.
+	Session Path `json:"session"`
+	// Bound on the replay terminal's startup; 30 seconds when absent.
+	TimeoutMs *uint64 `json:"timeout_ms,omitzero"` //exhaustruct:optional
 }
 
 // Portable member metadata. Canonical `ArtifactMember` serialization is unchanged.
@@ -6374,6 +6858,12 @@ type SessionInfo struct {
 	SessionID string `json:"session_id"`
 }
 
+// Params of calls that only read one session directory.
+type sessionParams struct {
+	// Session directory.
+	Session Path `json:"session"`
+}
+
 // Where a session is in its life, observed without changing canonical evidence.
 //
 // This is the one session-phase vocabulary. Registry listings, CLI output,
@@ -6442,11 +6932,37 @@ func (v SessionStatusLive) MarshalJSONTo(enc *jsontext.Encoder) error {
 	}{jsontext.Value(`"live"`), plain(v)})
 }
 
+// Params of `integrity.sign`.
+type signParams struct {
+	// SSH private key.
+	Key Path `json:"key"`
+	// Session directory.
+	Session Path `json:"session"`
+	// Signer identity written into the receipt.
+	Signer string `json:"signer"`
+}
+
 type signalParams struct {
 	Mutation mutation   `json:"mutation,omitzero"` //exhaustruct:optional
 	Session  sessionRef `json:"session"`
 	// Signal for the child process group.
 	Signal ProcessSignal `json:"signal"`
+}
+
+// Params of `testing.assert_snapshot_file`.
+type snapshotFileParams struct {
+	// Frame to compare.
+	Frame ScreenFrame `json:"frame"`
+	// Whether cursor facts are included.
+	IncludeCursor bool `json:"include_cursor,omitzero"` //exhaustruct:optional
+	// Whether mode facts are included.
+	IncludeModes bool `json:"include_modes,omitzero"` //exhaustruct:optional
+	// Baseline file.
+	Path Path `json:"path"`
+	// Detail of the snapshot; `text` when absent.
+	Profile *SnapshotProfile `json:"profile,omitzero"` //exhaustruct:optional
+	// Whether to create or replace the baseline instead of comparing.
+	Update bool `json:"update,omitzero"` //exhaustruct:optional
 }
 
 // Deterministic reviewed representation of an already captured exact frame.
@@ -6457,6 +6973,14 @@ const (
 	SnapshotProfileSpans SnapshotProfile = "spans"
 	SnapshotProfileCells SnapshotProfile = "cells"
 )
+
+// Params of `plan.output_frames_for_source_frame`.
+type sourceFrameParams struct {
+	// Presentation plan.
+	Plan PresentationPlan `json:"plan"`
+	// Source frame index.
+	SourceFrame uint64 `json:"source_frame"`
+}
 
 // A non-empty half-open interval on the canonical monotonic timeline.
 type SourceRange struct {
@@ -6502,6 +7026,18 @@ type StableScreenCapture struct {
 	StableForNs uint64 `json:"stable_for_ns"`
 	// Frame is the exact frame these fields describe.
 	Frame ScreenFrame `json:"frame"`
+}
+
+// Params of `instrumentation.start_span`.
+type startSpanParams struct {
+	// Span attributes.
+	Attributes map[string]jsontext.Value `json:"attributes,omitzero"` //exhaustruct:optional
+	// Emitter handle.
+	Emitter string `json:"emitter"`
+	// Span name.
+	Name string `json:"name"`
+	// Span that contains this one.
+	ParentSpanID *string `json:"parent_span_id,omitzero"` //exhaustruct:optional
 }
 
 // Delta from the previous state of the same replay.
@@ -7209,6 +7745,30 @@ type TimelinePage struct {
 	NextOffset *uint64 `json:"next_offset,omitzero"` //exhaustruct:optional
 }
 
+// Params of `analysis.timeline`.
+type timelineParams struct {
+	// Whether to include control entries.
+	Controls bool `json:"controls,omitzero"` //exhaustruct:optional
+	// Whether to include states that were never presented.
+	IncludeHidden bool `json:"include_hidden,omitzero"` //exhaustruct:optional
+	// Maximum entries to return; 100 when absent.
+	Limit *int `json:"limit,omitzero"` //exhaustruct:optional
+	// Index of the first entry.
+	Offset uint64 `json:"offset,omitzero"` //exhaustruct:optional
+	// Session-monotonic range to keep, in nanoseconds.
+	Range *SourceRange `json:"range,omitzero"` //exhaustruct:optional
+	// Session directory.
+	Session Path `json:"session"`
+}
+
+// Params of `tmux.bundle` and `tmux.verify_bundle`.
+type tmuxBundleParams struct {
+	// Bundle directory.
+	Bundle Path `json:"bundle"`
+	// Aggregate recording manifest.
+	Manifest Path `json:"manifest"`
+}
+
 // One track or coverage-gap catalog page with its manifest and summary.
 type TmuxCatalog interface {
 	isTmuxCatalog()
@@ -7233,6 +7793,26 @@ func (v TmuxCatalogGaps) MarshalJSONTo(enc *jsontext.Encoder) error {
 		Const0 jsontext.Value `json:"kind"`
 		plain
 	}{jsontext.Value(`"gaps"`), plain(v)})
+}
+
+// Params of `tmux.catalog`.
+type tmuxCatalogParams struct {
+	// Whether to list only active tracks.
+	ActiveOnly bool `json:"active_only,omitzero"` //exhaustruct:optional
+	// First sequence to return; 1 when absent.
+	FromSequence *uint64 `json:"from_sequence,omitzero"` //exhaustruct:optional
+	// Whether to list coverage gaps instead of tracks.
+	Gaps bool `json:"gaps,omitzero"` //exhaustruct:optional
+	// Maximum entries to return; 100 when absent.
+	Limit *int `json:"limit,omitzero"` //exhaustruct:optional
+	// Aggregate recording name.
+	Name string `json:"name"`
+	// State root of aggregate recordings; the default registry root when absent.
+	Root *Path `json:"root,omitzero"` //exhaustruct:optional
+	// How tmux reaches its server; the default socket when absent.
+	Socket TmuxSocket `json:"socket,omitzero"` //exhaustruct:optional
+	// tmux executable; `tmux` on `PATH` when absent.
+	Tmux *Path `json:"tmux,omitzero"` //exhaustruct:optional
 }
 
 // Counts committed with the lifecycle journal's indexed inventory.
@@ -7779,6 +8359,22 @@ type TmuxEvents struct {
 	Page EventPage `json:"page"`
 }
 
+// Params of `tmux.events`.
+type tmuxEventsParams struct {
+	// First sequence to return; 1 when absent.
+	FromSequence *uint64 `json:"from_sequence,omitzero"` //exhaustruct:optional
+	// Maximum entries to return; 100 when absent.
+	Limit *int `json:"limit,omitzero"` //exhaustruct:optional
+	// Aggregate recording name.
+	Name string `json:"name"`
+	// State root of aggregate recordings; the default registry root when absent.
+	Root *Path `json:"root,omitzero"` //exhaustruct:optional
+	// How tmux reaches its server; the default socket when absent.
+	Socket TmuxSocket `json:"socket,omitzero"` //exhaustruct:optional
+	// tmux executable; `tmux` on `PATH` when absent.
+	Tmux *Path `json:"tmux,omitzero"` //exhaustruct:optional
+}
+
 // Actual tmux progress receipts, independent of the actor mutation/retry protocol.
 type TmuxFailureFacts struct {
 	// Management entrypoint, not an actor request identifier.
@@ -7847,6 +8443,18 @@ type TmuxJournalBoundary struct {
 	Sequence uint64 `json:"sequence"`
 	// Journal record shape version.
 	Version int `json:"version"`
+}
+
+// Params of calls that address one aggregate recording by name.
+type tmuxNameParams struct {
+	// Aggregate recording name.
+	Name string `json:"name"`
+	// State root of aggregate recordings; the default registry root when absent.
+	Root *Path `json:"root,omitzero"` //exhaustruct:optional
+	// How tmux reaches its server; the default socket when absent.
+	Socket TmuxSocket `json:"socket,omitzero"` //exhaustruct:optional
+	// tmux executable; `tmux` on `PATH` when absent.
+	Tmux *Path `json:"tmux,omitzero"` //exhaustruct:optional
 }
 
 // Stable tmux object identifiers of one pane at observation time.
@@ -7953,6 +8561,18 @@ type TmuxRecordConfiguration struct {
 	Term *string `json:"term,omitzero"` //exhaustruct:optional
 	// Initial window scope targets.
 	Windows []Base64Bytes `json:"windows,omitzero"` //exhaustruct:optional
+}
+
+// Params of `tmux.record`.
+type tmuxRecordParams struct {
+	// Recording name, coverage, and capture settings.
+	Options TmuxRecordConfiguration `json:"options"`
+	// State root of aggregate recordings; the default registry root when absent.
+	Root *Path `json:"root,omitzero"` //exhaustruct:optional
+	// How tmux reaches its server; the default socket when absent.
+	Socket TmuxSocket `json:"socket,omitzero"` //exhaustruct:optional
+	// tmux executable; `tmux` on `PATH` when absent.
+	Tmux *Path `json:"tmux,omitzero"` //exhaustruct:optional
 }
 
 // Coverage policy committed by an aggregate tmux recording.
@@ -8099,6 +8719,16 @@ type TmuxSocketPath struct {
 
 func (TmuxSocketPath) isTmuxSocket() {}
 
+// Params of `tmux.status`.
+type tmuxStatusParams struct {
+	// State root of aggregate recordings; the default registry root when absent.
+	Root *Path `json:"root,omitzero"` //exhaustruct:optional
+	// How tmux reaches its server; the default socket when absent.
+	Socket TmuxSocket `json:"socket,omitzero"` //exhaustruct:optional
+	// tmux executable; `tmux` on `PATH` when absent.
+	Tmux *Path `json:"tmux,omitzero"` //exhaustruct:optional
+}
+
 // Integration and coverage status of one tmux server.
 type TmuxStatusReport struct {
 	// Configured Termtrace executable.
@@ -8131,6 +8761,22 @@ type TmuxStatusReport struct {
 	UnrecordedPanes uint64 `json:"unrecorded_panes"`
 }
 
+// Params of `tmux.stop`.
+type tmuxStopParams struct {
+	// Aggregate recording name.
+	Name string `json:"name"`
+	// State root of aggregate recordings; the default registry root when absent.
+	Root *Path `json:"root,omitzero"` //exhaustruct:optional
+	// How tmux reaches its server; the default socket when absent.
+	Socket TmuxSocket `json:"socket,omitzero"` //exhaustruct:optional
+	// Bound on waiting; the default wait timeout when absent.
+	TimeoutMs *uint64 `json:"timeout_ms,omitzero"` //exhaustruct:optional
+	// tmux executable; `tmux` on `PATH` when absent.
+	Tmux *Path `json:"tmux,omitzero"` //exhaustruct:optional
+	// Whether to wait for every track to complete; true when absent.
+	Wait *bool `json:"wait,omitzero"` //exhaustruct:optional
+}
+
 // Bounded manifest for an aggregate export with a streamed track inventory.
 type TmuxStreamingBundleManifest struct {
 	// Exact source aggregate manifest path bytes.
@@ -8161,6 +8807,16 @@ type TmuxTrackCatalogEntry struct {
 	Sequence uint64 `json:"sequence"`
 	// Immutable pane recording identity and path.
 	Track TmuxPaneTrack `json:"track"`
+}
+
+// Params of `tmux.track`.
+type tmuxTrackParams struct {
+	// Aggregate recording manifest.
+	Manifest Path `json:"manifest"`
+	// tmux pane identity, such as `%3`.
+	Pane string `json:"pane"`
+	// Session directory that records the pane.
+	Session Path `json:"session"`
 }
 
 // Rendering truth represented by an observation.
@@ -8303,6 +8959,16 @@ type VerificationReport struct {
 	Valid bool `json:"valid"`
 	// Report schema version.
 	Version int `json:"version"`
+}
+
+// Params of `integrity.verify`.
+type verifyParams struct {
+	// Allowed-signers file that decides trust.
+	AllowedSigners *Path `json:"allowed_signers,omitzero"` //exhaustruct:optional
+	// Verification depth; content when absent.
+	Level *VerificationLevel `json:"level,omitzero"` //exhaustruct:optional
+	// Session directory.
+	Session Path `json:"session"`
 }
 
 // Build and component versions of this Termtrace library.
@@ -8486,6 +9152,14 @@ const (
 	VtTokenKindUnknown    VtTokenKind = "unknown"
 	VtTokenKindIncomplete VtTokenKind = "incomplete"
 )
+
+// Params of `original.wait_finished`.
+type waitFinishedParams struct {
+	// Original recording handle.
+	Original string `json:"original"`
+	// Bound on waiting; the default stop timeout when absent.
+	TimeoutMs *uint64 `json:"timeout_ms,omitzero"` //exhaustruct:optional
+}
 
 type waitForIdleParams struct {
 	Session sessionRef `json:"session"`

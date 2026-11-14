@@ -2,6 +2,7 @@ use crate::failure::Failure;
 use crate::methods::{self, Registry};
 use crate::protocol::{self, Incoming, Responder, CANCEL, METHOD_NOT_FOUND, NOT_INITIALIZED};
 use serde::Deserialize;
+use serde_json::value::{to_raw_value, RawValue};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
@@ -11,12 +12,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread;
 use termtrace_sdk::client::Terminal;
+use termtrace_sdk::instrumentation::Instrumentation;
 use termtrace_sdk::locator::WaitCancellation;
 
 /// Server state shared by every request thread.
 pub(crate) struct Server {
     terminal: OnceLock<Terminal>,
     pub(crate) recordings: Handles<methods::recording::Recording>,
+    pub(crate) originals: Handles<methods::original::Original>,
+    pub(crate) emitters: Handles<Instrumentation>,
     cancellations: Mutex<HashMap<String, WaitCancellation>>,
 }
 
@@ -43,6 +47,8 @@ impl Server {
         let server = Arc::new(Self {
             terminal: OnceLock::new(),
             recordings: Handles::new("recording"),
+            originals: Handles::new("original"),
+            emitters: Handles::new("emitter"),
             cancellations: Mutex::new(HashMap::new()),
         });
 
@@ -58,7 +64,7 @@ impl Server {
             match protocol::parse(&line) {
                 Ok(Incoming::Request { id, method, params }) => {
                     if method == methods::INITIALIZE {
-                        responder.respond(&id, server.initialize(params))?;
+                        responder.respond(&id, server.initialize(&params))?;
                         continue;
                     }
 
@@ -76,7 +82,7 @@ impl Server {
                 }
                 Ok(Incoming::Notification { method, params }) => {
                     if method == CANCEL
-                        && let Ok(CancelParams { id }) = serde_json::from_value(params)
+                        && let Ok(CancelParams { id }) = serde_json::from_str(params.get())
                     {
                         server.cancel(&id);
                     }
@@ -86,18 +92,20 @@ impl Server {
         }
 
         server.recordings.clear();
+        server.originals.clear();
+        server.emitters.clear();
         return Ok(());
     }
 
-    fn initialize(&self, params: Value) -> Result<Value, Failure> {
-        let params: methods::termtrace::InitializeParams = serde_json::from_value(params)
+    fn initialize(&self, params: &RawValue) -> Result<Box<RawValue>, Failure> {
+        let params: methods::termtrace::InitializeParams = serde_json::from_str(params.get())
             .map_err(|error| return Failure::invalid_params(error.to_string()))?;
         let terminal = params.terminal();
 
         if self.terminal.set(terminal).is_err() {
             return Err(Failure::plain("initialize was already called".to_owned()));
         }
-        return serde_json::to_value(methods::termtrace::InitializeResult::current())
+        return to_raw_value(&methods::termtrace::InitializeResult::current())
             .map_err(|error| return Failure::internal(error.to_string()));
     }
 
@@ -113,7 +121,7 @@ impl Server {
         responder: &Responder,
         id: Value,
         method: String,
-        params: Value,
+        params: Box<RawValue>,
     ) {
         let Some(entry) = registry.get(method.as_str()).cloned() else {
             let failure = Failure::protocol(METHOD_NOT_FOUND, format!("unknown method `{method}`"));
@@ -138,7 +146,7 @@ impl Server {
             };
 
             let outcome =
-                panic::catch_unwind(AssertUnwindSafe(|| return (entry.invoke)(&call, params)))
+                panic::catch_unwind(AssertUnwindSafe(|| return (entry.invoke)(&call, &params)))
                     .unwrap_or_else(|panic| {
                         let reason = panic
                             .downcast_ref::<&str>()

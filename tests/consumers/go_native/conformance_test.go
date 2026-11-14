@@ -64,7 +64,7 @@ func TestFoundationCaseMatchesTheSharedFixture(t *testing.T) {
 	fatal(t, err)
 	_, err = recording.Actions().IfState(foundation.Guard).SendText("FORBIDDEN\n").Run(ctx)
 	stale := errorFacts(t, err)
-	page, err := recording.ReadOutput(ctx, 0, 4096)
+	page, err := recording.Output().Page(ctx, termtrace.OutputPageOptions{Limit: 4096})
 	fatal(t, err)
 	fatal(t, recording.Stop(ctx))
 

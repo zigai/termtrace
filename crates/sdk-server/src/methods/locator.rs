@@ -259,7 +259,7 @@ pub(super) fn register(registry: &mut Registry) {
     );
 }
 
-fn spec(locator: &LocatorQuery) -> Result<LocatorSpec, Failure> {
+pub(super) fn spec(locator: &LocatorQuery) -> Result<LocatorSpec, Failure> {
     return locator
         .spec()
         .map_err(|error| return Failure::query(&error));

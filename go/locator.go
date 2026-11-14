@@ -27,6 +27,10 @@ type ScreenMatch struct {
 
 	// Frame is the exact frame that produced the match.
 	Frame *ScreenFrame
+
+	client *Client
+	spec   LocatorSpec
+	index  int
 }
 
 // QueryResult is every match of one evaluation.
@@ -133,12 +137,12 @@ func (c *Client) Query(
 // Single returns the only match; none or several fail with kind "no_match" or
 // "multiple_matches".
 func (r QueryResult) Single(ctx context.Context) (ScreenMatch, error) {
-	return r.selectMatch(ctx, selectionSingle{})
+	return r.selectMatch(ctx, selectionSingle{}, 0)
 }
 
 // First returns the first match; none fails with kind "no_match".
 func (r QueryResult) First(ctx context.Context) (ScreenMatch, error) {
-	return r.selectMatch(ctx, selectionFirst{})
+	return r.selectMatch(ctx, selectionFirst{}, 0)
 }
 
 // Nth returns the match at a zero-based index.
@@ -148,10 +152,14 @@ func (r QueryResult) Nth(ctx context.Context, index int) (ScreenMatch, error) {
 		return ScreenMatch{}, err
 	}
 
-	return r.selectMatch(ctx, selectionNth{Index: position})
+	return r.selectMatch(ctx, selectionNth{Index: position}, index)
 }
 
-func (r QueryResult) selectMatch(ctx context.Context, choice selection) (ScreenMatch, error) {
+func (r QueryResult) selectMatch(
+	ctx context.Context,
+	choice selection,
+	index int,
+) (ScreenMatch, error) {
 	found, err := r.client.frameQuery(
 		ctx,
 		frameQueryParams{Frame: r.Frame, Locator: r.spec.wire(), Selection: choice},
@@ -164,7 +172,13 @@ func (r QueryResult) selectMatch(ctx context.Context, choice selection) (ScreenM
 		return ScreenMatch{}, &Error{Message: "server returned no selected match"}
 	}
 
-	return ScreenMatch{LocatorMatch: found[0], Frame: &r.Frame}, nil
+	return ScreenMatch{
+		LocatorMatch: found[0],
+		Frame:        &r.Frame,
+		client:       r.client,
+		spec:         r.spec,
+		index:        index,
+	}, nil
 }
 
 // Spec returns the unbound query.
@@ -230,12 +244,12 @@ func (l Locator) Count(ctx context.Context) (int, error) {
 // Single returns the only match; none or several fail with kind "no_match" or
 // "multiple_matches".
 func (l Locator) Single(ctx context.Context) (ScreenMatch, error) {
-	return l.selectMatch(ctx, selectionSingle{})
+	return l.selectMatch(ctx, selectionSingle{}, 0)
 }
 
 // First returns the first match; none fails with kind "no_match".
 func (l Locator) First(ctx context.Context) (ScreenMatch, error) {
-	return l.selectMatch(ctx, selectionFirst{})
+	return l.selectMatch(ctx, selectionFirst{}, 0)
 }
 
 // Nth returns the match at a zero-based index.
@@ -245,7 +259,7 @@ func (l Locator) Nth(ctx context.Context, index int) (ScreenMatch, error) {
 		return ScreenMatch{}, err
 	}
 
-	return l.selectMatch(ctx, selectionNth{Index: position})
+	return l.selectMatch(ctx, selectionNth{Index: position}, index)
 }
 
 // Wait polls until the match count satisfies the condition. Canceling ctx cancels the wait on
@@ -268,7 +282,7 @@ func (l Locator) Wait(ctx context.Context, options LocatorWaitOptions) (LocatorW
 
 	return LocatorWaitResult{
 		Frame:   found.Frame,
-		Matches: matches(&found.Frame, found.Matches),
+		Matches: matches(l.client(), l.spec, &found.Frame, found.Matches),
 	}, nil
 }
 
@@ -280,29 +294,50 @@ func (l Locator) client() *Client {
 	return l.screen.session.client
 }
 
-func (l Locator) selectMatch(ctx context.Context, choice selection) (ScreenMatch, error) {
+func (l Locator) selectMatch(
+	ctx context.Context,
+	choice selection,
+	index int,
+) (ScreenMatch, error) {
 	found, err := l.client().
 		locatorSelect(ctx, selectParams{Session: l.screen.session.ref(), Locator: l.spec.wire(), Selection: choice})
 	if err != nil {
 		return ScreenMatch{}, err
 	}
 
-	return ScreenMatch{LocatorMatch: found.Match, Frame: &found.Frame}, nil
+	return ScreenMatch{
+		LocatorMatch: found.Match,
+		Frame:        &found.Frame,
+		client:       l.client(),
+		spec:         l.spec,
+		index:        index,
+	}, nil
 }
 
 func newQueryResult(client *Client, spec LocatorSpec, found LocatorMatches) QueryResult {
 	return QueryResult{
 		Frame:   found.Frame,
-		Matches: matches(&found.Frame, found.Matches),
+		Matches: matches(client, spec, &found.Frame, found.Matches),
 		client:  client,
 		spec:    spec,
 	}
 }
 
-func matches(frame *ScreenFrame, found []LocatorMatch) []ScreenMatch {
+func matches(
+	client *Client,
+	spec LocatorSpec,
+	frame *ScreenFrame,
+	found []LocatorMatch,
+) []ScreenMatch {
 	out := make([]ScreenMatch, len(found))
 	for index, match := range found {
-		out[index] = ScreenMatch{LocatorMatch: match, Frame: frame}
+		out[index] = ScreenMatch{
+			LocatorMatch: match,
+			Frame:        frame,
+			client:       client,
+			spec:         spec,
+			index:        index,
+		}
 	}
 
 	return out

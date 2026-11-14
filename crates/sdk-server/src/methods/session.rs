@@ -12,10 +12,9 @@ use termtrace_sdk::client::Session;
 use termtrace_sdk::contracts::control::{guard, parse_request_id, CommandOutcome, ErrorReport};
 use termtrace_sdk::contracts::SendSpec;
 use termtrace_sdk::input::{ActOutcome, MutationGuard, PointerOutcome};
-use termtrace_sdk::output::{OutputCursor, OutputService};
 use termtrace_sdk::screen::{ScreenWaitResult, StableScreenCapture};
 use termtrace_sdk::session::{CommandPostcondition, SendLastStep, SendOutcome};
-use termtrace_sdk::{ByteString, ControlAcknowledgement, MarkOutcome, SessionStatus, Uuid};
+use termtrace_sdk::{ControlAcknowledgement, MarkOutcome, SessionStatus, Uuid};
 
 /// The session a call addresses.
 #[derive(Deserialize, JsonSchema)]
@@ -101,29 +100,6 @@ fn mutate<T>(
 #[serde(deny_unknown_fields)]
 struct StatusParams {
     session: SessionRef,
-}
-
-#[derive(Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct ReadOutputParams {
-    session: SessionRef,
-    /// Byte offset to read from; the start when absent.
-    #[serde(default)]
-    offset: Option<u64>,
-    /// Maximum bytes to return; 65536 when absent.
-    #[serde(default)]
-    limit: Option<usize>,
-}
-
-/// A page of raw child output bytes.
-#[derive(Serialize, JsonSchema)]
-struct RawOutputPage {
-    /// Raw bytes produced by the child process.
-    bytes: ByteString,
-    /// Byte offset of the next page.
-    next_offset: u64,
-    /// Whether more bytes follow this page.
-    has_more: bool,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -278,12 +254,6 @@ pub(super) fn register(registry: &mut Registry) {
     );
     method(
         registry,
-        "session.read_output",
-        "Read a page of raw child output bytes.",
-        read_output,
-    );
-    method(
-        registry,
         "session.send",
         "Apply ordered input and control steps, then check an optional postcondition.",
         send,
@@ -327,25 +297,6 @@ fn status(call: &Call<'_>, params: StatusParams) -> Result<SessionStatus, Failur
         .attach(call)?
         .status()
         .map_err(|error| return Failure::sdk(&error));
-}
-
-fn read_output(call: &Call<'_>, params: ReadOutputParams) -> Result<RawOutputPage, Failure> {
-    let path = params.session.path(call)?;
-    let cursor = params.offset.map(|byte_offset| {
-        return OutputCursor {
-            session_path: path.to_path_buf(),
-            byte_offset,
-            event_seq: None,
-        };
-    });
-    let page = OutputService::read_page(path, cursor, params.limit.unwrap_or(65_536))
-        .map_err(|error| return Failure::sdk(&error))?;
-
-    return Ok(RawOutputPage {
-        bytes: ByteString::new(page.bytes),
-        next_offset: page.cursor.byte_offset,
-        has_more: page.has_more,
-    });
 }
 
 fn send(call: &Call<'_>, params: SendParams) -> Result<SendResult, Failure> {
