@@ -1,17 +1,19 @@
-# Termtrace
+<h1 align="center">Termtrace</h1>
+
+<p align="center">
+  <a href="https://github.com/zigai/termtrace/actions/workflows/ci.yml"><img alt="tests" src="https://img.shields.io/github/actions/workflow/status/zigai/termtrace/ci.yml?branch=main&label=tests&labelColor=30363d"></a>
+  <a href="https://crates.io/crates/termtrace"><img alt="crates.io" src="https://img.shields.io/crates/v/termtrace?label=crates.io&color=blue&logo=rust&labelColor=30363d"></a>
+  <a href="https://pypi.org/project/termtrace/"><img alt="PyPI" src="https://img.shields.io/pypi/v/termtrace?label=PyPI&color=blue&logo=pypi&logoColor=white&labelColor=30363d"></a>
+  <a href="https://www.npmjs.com/package/@zigai/termtrace"><img alt="npm" src="https://img.shields.io/npm/v/@zigai/termtrace?label=npm&color=blue&logo=npm&labelColor=30363d"></a>
+  <a href="Cargo.toml"><img alt="Rust" src="https://img.shields.io/badge/Rust-1.97.1+-blue?logo=rust&logoColor=white&labelColor=30363d"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/zigai/termtrace?label=license&labelColor=30363d"></a>
+</p>
 
 **A flight recorder for terminal programs.**
 
 Termtrace records a terminal program while it runs, keeping every key it received
 and every screen it drew. Afterwards you can step through the session, compare
 screens, take screenshots, or render a video.
-
-[![tests](https://img.shields.io/github/actions/workflow/status/zigai/termtrace/ci.yml?branch=main&label=tests&labelColor=30363d)](https://github.com/zigai/termtrace/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/termtrace?label=crates.io&color=blue&logo=rust&labelColor=30363d)](https://crates.io/crates/termtrace)
-[![PyPI](https://img.shields.io/pypi/v/termtrace?label=PyPI&color=blue&logo=pypi&logoColor=white&labelColor=30363d)](https://pypi.org/project/termtrace/)
-[![npm](https://img.shields.io/npm/v/@zigai/termtrace?label=npm&color=blue&logo=npm&labelColor=30363d)](https://www.npmjs.com/package/@zigai/termtrace)
-[![Rust](https://img.shields.io/badge/Rust-1.97.1+-blue?logo=rust&logoColor=white&labelColor=30363d)](Cargo.toml)
-[![license](https://img.shields.io/github/license/zigai/termtrace?label=license&labelColor=30363d)](LICENSE)
 
 - **Debug TUIs:** See what was on screen at any moment and what each key changed.
 - **Script terminal programs:** Send keys and wait for text to appear, without `tmux send-keys` and `sleep`.
