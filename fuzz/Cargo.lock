@@ -725,7 +725,7 @@ dependencies = [
 
 [[package]]
 name = "termtrace-evidence"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "blake3",
  "fs-err",
@@ -758,7 +758,7 @@ dependencies = [
 
 [[package]]
 name = "termtrace-model"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "blake3",
@@ -772,14 +772,14 @@ dependencies = [
 
 [[package]]
 name = "termtrace-process"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "nix",
 ]
 
 [[package]]
 name = "termtrace-terminal"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "blake3",
  "compact_str",

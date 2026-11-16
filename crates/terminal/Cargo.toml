@@ -1,6 +1,6 @@
 [package]
 name = "termtrace-terminal"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Pinned libghostty-vt terminal semantics for Termtrace"
 repository = "https://github.com/zigai/termtrace"
@@ -13,7 +13,7 @@ compact_str = { version = "0.8.2", features = ["serde"] }
 memchr = "2.8.3"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
-termtrace-model = { version = "=0.1.1", path = "../model" }
+termtrace-model = { version = "=0.1.2", path = "../model" }
 proptest = "1.11.0"
 
 [lints]
