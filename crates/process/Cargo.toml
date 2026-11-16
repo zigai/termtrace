@@ -4,7 +4,7 @@ version = "0.1.1"
 edition = "2024"
 description = "Process-group supervision, process identity, and exclusive locks for Termtrace"
 repository = "https://github.com/zigai/termtrace"
-license-file.workspace = true
+license.workspace = true
 rust-version = "1.97.1"
 
 [dependencies]

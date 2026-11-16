@@ -4,7 +4,7 @@ version = "0.1.1"
 edition = "2024"
 description = "Typed Rust client for Termtrace, with optional in-process replay and media"
 repository = "https://github.com/zigai/termtrace"
-license-file.workspace = true
+license.workspace = true
 rust-version = "1.97.1"
 
 [features]

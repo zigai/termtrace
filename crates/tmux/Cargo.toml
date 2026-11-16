@@ -4,7 +4,7 @@ version = "0.1.1"
 edition = "2024"
 description = "Aggregate tmux recording: typed lifecycle events, a pure reducer, and its own journal and catalog"
 repository = "https://github.com/zigai/termtrace"
-license-file.workspace = true
+license.workspace = true
 rust-version = "1.97.1"
 
 [dependencies]

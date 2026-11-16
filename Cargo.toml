@@ -23,7 +23,7 @@ members = [
 exclude = ["fuzz", "tests/consumers/rust"]
 
 [workspace.package]
-license-file = "LICENSE"
+license = "MIT"
 
 [workspace.metadata.dylint]
 libraries = [
@@ -38,7 +38,7 @@ edition = "2024"
 rust-version = "1.97.1"
 description = "Native-Ghostty terminal recording and semantic debugging for humans and agents"
 repository = "https://github.com/zigai/termtrace"
-license-file.workspace = true
+license.workspace = true
 include = ["/src", "/build.rs", "/LICENSE", "/README.md"]
 
 [package.metadata.binstall]
