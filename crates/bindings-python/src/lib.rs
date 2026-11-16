@@ -56,7 +56,7 @@ pub fn parse_timeout(timeout_secs: Option<f64>, default: Duration) -> PyResult<D
 #[gen_stub_pyfunction]
 #[pyfunction]
 fn version() -> &'static str {
-    return "0.1.1";
+    return env!("CARGO_PKG_VERSION");
 }
 
 pyo3_stub_gen::define_stub_info_gatherer!(stub_info);
