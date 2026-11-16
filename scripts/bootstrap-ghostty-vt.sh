@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly zig_version=0.17.0
 readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly zig_version="$(<"$root/crates/terminal/zig-version")"
 readonly ghostty="$root/vendor/ghostty"
 readonly tools="$root/.tools"
 readonly revision="$(<"$root/crates/terminal/ghostty-revision")"
@@ -68,6 +68,7 @@ fi
 
 readonly output="${TERMTRACE_GHOSTTY_PREFIX:-$ghostty/zig-out}"
 
+# crates/terminal/build.rs builds the shared cache with the same default flags.
 "$zig" build -Demit-lib-vt=true "-Doptimize=${optimize_mode}" --prefix "$output" "${extra_args[@]}"
 
 test -f "$output/lib/libghostty-vt.a"

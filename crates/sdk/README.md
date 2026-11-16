@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Start and drive a program
 
-Session control needs the `local` feature. That feature links libghostty-vt, which `scripts/bootstrap.sh` in the Termtrace repository builds. Set `TERMTRACE_GHOSTTY_PREFIX` to the built library when you compile.
+Session control needs the `local` feature. That feature links libghostty-vt, which the first build fetches with Git and builds with Zig 0.17. Set `TERMTRACE_GHOSTTY_PREFIX` to use a library you built yourself.
 
 ```sh
 cargo add termtrace-sdk --features local

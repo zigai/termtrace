@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       # Bump the version when the Ghostty build flags or Blueprint pin change.
       - id: key
-        run: echo "key=ghostty-v2-$ImageOS-$(uname -m)-${{ hashFiles('crates/terminal/ghostty-revision', 'scripts/bootstrap.sh', 'scripts/bootstrap-ghostty-vt.sh') }}" >> "$GITHUB_OUTPUT"
+        run: echo "key=ghostty-v2-$ImageOS-$(uname -m)-${{ hashFiles('crates/terminal/ghostty-revision', 'crates/terminal/zig-version', 'scripts/bootstrap.sh', 'scripts/bootstrap-ghostty-vt.sh') }}" >> "$GITHUB_OUTPUT"
       - id: cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

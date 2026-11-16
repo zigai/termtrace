@@ -1,18 +1,21 @@
-//! Link the pinned libghostty-vt build.
+//! Link the pinned libghostty-vt build, building it with Zig when no prebuilt one is found.
 
 use std::{
     env,
     error::Error,
     fs, io,
     path::{Path, PathBuf},
-    process::Command,
+    process::{self, Command, Stdio},
 };
+
+const GHOSTTY_REPOSITORY: &str = "https://github.com/ghostty-org/ghostty.git";
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=TERMTRACE_GHOSTTY_PREFIX");
     println!("cargo:rerun-if-env-changed=XDG_CACHE_HOME");
     println!("cargo:rerun-if-env-changed=HOME");
     println!("cargo:rerun-if-changed=ghostty-revision");
+    println!("cargo:rerun-if-changed=zig-version");
 
     let Some(manifest_dir) = env::var_os("CARGO_MANIFEST_DIR") else {
         return Err(io::Error::other("CARGO_MANIFEST_DIR is not set").into());
@@ -36,7 +39,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     check_submodule_pin(&repository_root, &ghostty_revision)?;
 
-    let prefix = ghostty_prefix(&repository_root, &ghostty_revision)?;
+    let prefix = ghostty_prefix(&crate_root, &repository_root, &ghostty_revision)?;
 
     println!(
         "cargo:rustc-link-search=native={}",
@@ -110,7 +113,11 @@ fn check_submodule_pin(repository_root: &Path, revision: &str) -> Result<(), Box
 // behind by an earlier submodule pin is never linked against the current bindings.
 const REVISION_STAMP: &str = "ghostty-revision";
 
-fn ghostty_prefix(repository_root: &Path, revision: &str) -> Result<PathBuf, Box<dyn Error>> {
+fn ghostty_prefix(
+    crate_root: &Path,
+    repository_root: &Path,
+    revision: &str,
+) -> Result<PathBuf, Box<dyn Error>> {
     if let Some(prefix) = env::var_os("TERMTRACE_GHOSTTY_PREFIX") {
         let prefix = PathBuf::from(prefix);
         watch_prefix(&prefix);
@@ -134,12 +141,10 @@ fn ghostty_prefix(repository_root: &Path, revision: &str) -> Result<PathBuf, Box
         };
     }
 
+    let cache = shared_cache(revision);
+
     let mut candidates = vec![repository_root.join("vendor/ghostty/zig-out")];
-
-    if let Some(cache) = shared_cache(revision) {
-        candidates.push(cache);
-    }
-
+    candidates.extend(cache.clone());
     let mut searched = Vec::with_capacity(candidates.len());
 
     for candidate in candidates {
@@ -159,11 +164,148 @@ fn ghostty_prefix(repository_root: &Path, revision: &str) -> Result<PathBuf, Box
         }
     }
 
+    let Some(cache) = cache else {
+        return Err(format!(
+            "pinned libghostty-vt {revision} is not ready, and neither XDG_CACHE_HOME nor HOME names a cache to build it in\nsearched:\n{}",
+            searched.join("\n")
+        )
+        .into());
+    };
+    build_ghostty(crate_root, &cache, revision)?;
+    watch_prefix(&cache);
+    return Ok(cache);
+}
+
+fn build_ghostty(crate_root: &Path, cache: &Path, revision: &str) -> Result<(), Box<dyn Error>> {
+    check_zig(crate_root)?;
+
+    let Some(out_dir) = env::var_os("OUT_DIR") else {
+        return Err(io::Error::other("OUT_DIR is not set").into());
+    };
+    let source = PathBuf::from(out_dir).join("ghostty");
+
+    if source.exists() {
+        fs::remove_dir_all(&source)?;
+    }
+
+    fs::create_dir_all(&source)?;
+
+    run(Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(&source))?;
+    run(Command::new("git")
+        .args([
+            "fetch",
+            "--quiet",
+            "--depth",
+            "1",
+            GHOSTTY_REPOSITORY,
+            revision,
+        ])
+        .current_dir(&source))?;
+    run(Command::new("git")
+        .args(["checkout", "--quiet", "--detach", "FETCH_HEAD"])
+        .current_dir(&source))?;
+
+    let Some(cache_parent) = cache.parent() else {
+        return Err(format!("{} has no parent directory", cache.display()).into());
+    };
+    fs::create_dir_all(cache_parent)?;
+
+    let staging = cache_parent.join(format!("{revision}.{}", process::id()));
+    if staging.exists() {
+        fs::remove_dir_all(&staging)?;
+    }
+
+    // Must match the default build of scripts/bootstrap-ghostty-vt.sh, which shares this cache.
+    run(Command::new("zig")
+        .args([
+            "build",
+            "-Demit-lib-vt=true",
+            "-Doptimize=ReleaseFast",
+            "--prefix",
+        ])
+        .arg(&staging)
+        .current_dir(&source))?;
+
+    fs::write(staging.join(REVISION_STAMP), format!("{revision}\n"))?;
+    if matches!(prefix_build(cache, revision), PrefixBuild::Ready) {
+        fs::remove_dir_all(&staging)?;
+        return Ok(());
+    }
+
+    if cache.exists() {
+        fs::remove_dir_all(cache)?;
+    }
+
+    fs::rename(&staging, cache)?;
+
+    return Ok(());
+}
+
+// Ghostty's build accepts any patch release of its minimum Zig version from that patch on.
+fn check_zig(crate_root: &Path) -> Result<(), Box<dyn Error>> {
+    let required = fs::read_to_string(crate_root.join("zig-version"))?
+        .trim()
+        .to_owned();
+
+    let found = match Command::new("zig").arg("version").output() {
+        Ok(output) if output.status.success() => {
+            Some(String::from_utf8(output.stdout)?.trim().to_owned())
+        }
+        Ok(_) => None,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+
+    let release = |version: &str| {
+        let numbers = version
+            .split(['-', '+'])
+            .next()?
+            .split('.')
+            .map(|part| return part.parse::<u32>().ok())
+            .collect::<Option<Vec<_>>>()?;
+        return match numbers.as_slice() {
+            &[major, minor, patch] => Some((major, minor, patch)),
+            _ => None,
+        };
+    };
+    let Some((major, minor, patch)) = release(&required) else {
+        return Err(format!("zig-version holds an invalid version: {required}").into());
+    };
+    if let Some(found_release) = found.as_deref().and_then(release)
+        && found_release.0 == major
+        && found_release.1 == minor
+        && found_release.2 >= patch
+    {
+        return Ok(());
+    }
     return Err(format!(
-        "pinned libghostty-vt {revision} is not ready\nrun `scripts/bootstrap.sh` in any Termtrace checkout\nsearched:\n{}",
-        searched.join("\n")
+        "building libghostty-vt needs Zig {required} or a later {major}.{minor} patch release as `zig` on PATH, but {}; install it from https://ziglang.org/download/, or set TERMTRACE_GHOSTTY_PREFIX to a prebuilt libghostty-vt",
+        found.map_or_else(
+            || return "no working `zig` was found".to_owned(),
+            |found| return format!("found Zig {found}"),
+        ),
     )
     .into());
+}
+
+// Child output goes to stderr so that a line starting with `cargo:` is not read as a directive.
+fn run(command: &mut Command) -> Result<(), Box<dyn Error>> {
+    let status = command
+        .stdout(Stdio::from(io::stderr()))
+        .status()
+        .map_err(|error| {
+            return format!(
+                "could not run {}: {error}",
+                command.get_program().to_string_lossy()
+            );
+        })?;
+
+    if !status.success() {
+        return Err(format!("{command:?} failed with {status}").into());
+    }
+    return Ok(());
 }
 
 enum PrefixBuild {
