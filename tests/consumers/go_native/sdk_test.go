@@ -927,7 +927,11 @@ func TestPasteFocusAndScrollReachAnApplicationThatReportsThem(t *testing.T) {
 		fatal(t, err)
 	}
 
-	for _, scroll := range []struct{ column, row, lines int }{{4, 2, -2}, {9, 7, 1}} {
+	for _, scroll := range []struct {
+		column int
+		row    int
+		lines  int
+	}{{4, 2, -2}, {9, 7, 1}} {
 		outcome, err := pointer.Scroll(
 			ctx,
 			scroll.column,

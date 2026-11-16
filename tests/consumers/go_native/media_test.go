@@ -774,7 +774,10 @@ func TestSemanticPreviewAndEveryFormatRender(t *testing.T) {
 
 	completion := readJSON(t, filepath.Join(session, "completion.json"))
 
-	for _, format := range []struct{ extension, codec string }{
+	for _, format := range []struct {
+		extension string
+		codec     string
+	}{
 		{"mp4", "h264"},
 		{"gif", "gif"},
 		{"webm", "vp9"},
