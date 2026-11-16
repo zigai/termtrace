@@ -33,7 +33,7 @@ libraries = [
 [package]
 name = "termtrace"
 default-run = "termtrace"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.97.1"
 description = "Native-Ghostty terminal recording and semantic debugging for humans and agents"
@@ -62,20 +62,20 @@ signal-hook = "0.3.18"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 tempfile = "3.23.0"
-termtrace-engine = { version = "=0.1.0", path = "crates/engine" }
-termtrace-evidence = { version = "=0.1.0", path = "crates/evidence" }
-termtrace-export = { version = "=0.1.0", path = "crates/export" }
-termtrace-media = { version = "=0.1.0", path = "crates/media" }
-termtrace-model = { version = "=0.1.0", path = "crates/model" }
-termtrace-process = { version = "=0.1.0", path = "crates/process" }
-termtrace-render = { version = "=0.1.0", path = "crates/render" }
-termtrace-scenario = { version = "=0.1.0", path = "crates/scenario" }
-termtrace-schema = { version = "=0.1.0", path = "crates/schema" }
-termtrace-service = { version = "=0.1.0", path = "crates/service" }
-termtrace-sdk = { version = "=0.1.0", path = "crates/sdk", features = ["in-process"] }
-termtrace-sdk-server = { version = "=0.1.0", path = "crates/sdk-server" }
-termtrace-terminal = { version = "=0.1.0", path = "crates/terminal" }
-termtrace-tmux = { version = "=0.1.0", path = "crates/tmux" }
+termtrace-engine = { version = "=0.1.1", path = "crates/engine" }
+termtrace-evidence = { version = "=0.1.1", path = "crates/evidence" }
+termtrace-export = { version = "=0.1.1", path = "crates/export" }
+termtrace-media = { version = "=0.1.1", path = "crates/media" }
+termtrace-model = { version = "=0.1.1", path = "crates/model" }
+termtrace-process = { version = "=0.1.1", path = "crates/process" }
+termtrace-render = { version = "=0.1.1", path = "crates/render" }
+termtrace-scenario = { version = "=0.1.1", path = "crates/scenario" }
+termtrace-schema = { version = "=0.1.1", path = "crates/schema" }
+termtrace-service = { version = "=0.1.1", path = "crates/service" }
+termtrace-sdk = { version = "=0.1.1", path = "crates/sdk", features = ["in-process"] }
+termtrace-sdk-server = { version = "=0.1.1", path = "crates/sdk-server" }
+termtrace-terminal = { version = "=0.1.1", path = "crates/terminal" }
+termtrace-tmux = { version = "=0.1.1", path = "crates/tmux" }
 tracing = "0.1.41"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }

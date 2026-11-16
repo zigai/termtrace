@@ -1,6 +1,6 @@
 [package]
 name = "termtrace-evidence"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Integrity-checked canonical terminal recording storage for Termtrace"
 repository = "https://github.com/zigai/termtrace"
@@ -24,8 +24,8 @@ serde_path_to_error = "0.1.20"
 tar_archive = { package = "tar", version = "0.4.46" }
 zstd = "0.13.3"
 uuid = { version = "1.18.1", features = ["serde", "v7"] }
-termtrace-model = { version = "=0.1.0", path = "../model" }
-termtrace-process = { version = "=0.1.0", path = "../process" }
+termtrace-model = { version = "=0.1.1", path = "../model" }
+termtrace-process = { version = "=0.1.1", path = "../process" }
 tempfile = "3.23.0"
 
 [dev-dependencies]

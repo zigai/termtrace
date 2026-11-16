@@ -1,6 +1,6 @@
 [package]
 name = "termtrace-export"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Verifiable terminal evidence exports for Termtrace"
 repository = "https://github.com/zigai/termtrace"
@@ -8,11 +8,11 @@ license-file.workspace = true
 rust-version = "1.97.1"
 
 [dependencies]
-termtrace-model = { version = "=0.1.0", path = "../model" }
-termtrace-evidence = { version = "=0.1.0", path = "../evidence" }
-termtrace-engine = { version = "=0.1.0", path = "../engine" }
-termtrace-render = { version = "=0.1.0", path = "../render" }
-termtrace-tmux = { version = "=0.1.0", path = "../tmux" }
+termtrace-model = { version = "=0.1.1", path = "../model" }
+termtrace-evidence = { version = "=0.1.1", path = "../evidence" }
+termtrace-engine = { version = "=0.1.1", path = "../engine" }
+termtrace-render = { version = "=0.1.1", path = "../render" }
+termtrace-tmux = { version = "=0.1.1", path = "../tmux" }
 blake3 = "1.8.2"
 fs-err = "3.2.0"
 serde = { version = "1.0.228", features = ["derive"] }

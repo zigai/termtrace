@@ -3,4 +3,4 @@
 package termtrace
 
 // Version is the Termtrace release this module belongs to; the CLI must match it exactly.
-const Version = "0.1.0"
+const Version = "0.1.1"

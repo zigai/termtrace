@@ -219,7 +219,7 @@ pub fn decode_error_data(json: String) -> napi::Result<NativeValue> {
 /// Returns the Termtrace core version.
 #[napi]
 pub fn version() -> String {
-    return "0.1.0".to_string();
+    return "0.1.1".to_string();
 }
 
 /// Rich screen frame rendered against terminal geometry.

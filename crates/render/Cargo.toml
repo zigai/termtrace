@@ -1,6 +1,6 @@
 [package]
 name = "termtrace-render"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Deterministic semantic terminal rendering for Termtrace"
 repository = "https://github.com/zigai/termtrace"
@@ -8,8 +8,8 @@ license-file.workspace = true
 rust-version = "1.97.1"
 
 [dependencies]
-termtrace-model = { version = "=0.1.0", path = "../model" }
-termtrace-terminal = { version = "=0.1.0", path = "../terminal" }
+termtrace-model = { version = "=0.1.1", path = "../model" }
+termtrace-terminal = { version = "=0.1.1", path = "../terminal" }
 base64 = "0.22.1"
 blake3 = "1.8.2"
 resvg = { version = "0.45.1", default-features = false, features = ["text"] }

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "termtrace"
-version = "0.1.0"
+version = "0.1.1"
 description = "Native Python bindings for Termtrace terminal recording and semantic debugging"
 readme = "README.md"
 requires-python = ">=3.10"
