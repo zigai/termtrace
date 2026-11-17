@@ -112,7 +112,9 @@ jobs:
           path: |
             target/statement-spacing
             ~/.dylint_drivers
-          key: statement-spacing-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'Cargo.toml') }}
+          key: statement-spacing-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'dylint.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            statement-spacing-${{ runner.os }}-${{ runner.arch }}-
       - run: just formatcheck lockcheck audit lint bindings-lint
 
   test:
