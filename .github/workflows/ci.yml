@@ -24,7 +24,9 @@ env:
   NATIVE_PACKAGES: >-
     build-essential pkg-config ripgrep jq xz-utils tmux ncurses-term ffmpeg
     fonts-dejavu-core fonts-jetbrains-mono imagemagick xvfb xauth x11-utils dbus-daemon dbus-x11
-    libgtk-4-dev libadwaita-1-dev libx11-dev libfontconfig1-dev libfreetype-dev libgl1-mesa-dri libegl-mesa0
+    libgtk-4-1 libadwaita-1-0 libgl1-mesa-dri libegl-mesa0
+  BUILD_PACKAGES: >-
+    libgtk-4-dev libadwaita-1-dev libx11-dev libfontconfig1-dev libfreetype-dev
     gettext meson ninja-build python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
 
 jobs:
@@ -48,7 +50,7 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: ./.github/actions/apt
         with:
-          packages: ${{ env.NATIVE_PACKAGES }}
+          packages: ${{ env.NATIVE_PACKAGES }} ${{ env.BUILD_PACKAGES }}
       # Ubuntu 26.04 ships Blueprint 0.19; this Ghostty checkout needs 0.20 or newer.
       - name: Install Blueprint
         if: steps.cache.outputs.cache-hit != 'true'
