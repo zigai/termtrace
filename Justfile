@@ -50,9 +50,13 @@ test-recording:
     cargo nextest run --locked --workspace --lib --bins --test execution_lifecycle --test architecture --ignore-default-filter -E '{{ INTEGRATION_FILTER }}'
 
 # Run CLI/tmux integration on each pull request (requires bootstrap, tmux, and Ghostty on PATH)
-integration:
-    cargo test --locked --test cli
+integration: (integration-cli "all()")
     scripts/test-rust-consumer.sh
+
+# Run the CLI/tmux integration tests selected by a nextest filter expression
+[positional-arguments]
+integration-cli *args:
+    cargo nextest run --locked --test cli --ignore-default-filter -E "$@"
 
 # Build native Python and Node.js language bindings and the Go SDK
 bindings-build: build-python build-node build-go
