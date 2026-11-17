@@ -101,6 +101,12 @@ test-go:
     cargo build --locked --bin termtrace
     cd tests/consumers/go_native && TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace go test -count=1 ./...
 
+# Test one Go SDK consumer shard: `run <pattern>` or `skip <pattern>`
+[positional-arguments]
+test-go-shard *args:
+    cargo build --locked --bin termtrace
+    cd tests/consumers/go_native && TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace go test -count=1 "-$1" "$2" ./...
+
 # Type-check and lint the native Python bindings and the Go SDK
 bindings-lint:
     uv run --project crates/bindings-python --only-dev ruff check crates/bindings-python/python/termtrace
