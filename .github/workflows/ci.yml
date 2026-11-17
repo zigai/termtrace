@@ -281,6 +281,17 @@ jobs:
 
   go:
     needs: ghostty
+    name: go (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: go-a
+            mode: run
+            pattern: "^(TestOriginal|TestAScreenshot|TestTmux|TestThe)"
+          - name: go-b
+            mode: skip
+            pattern: "^(TestOriginal|TestAScreenshot|TestTmux|TestThe)"
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
@@ -293,12 +304,16 @@ jobs:
         with:
           packages: ${{ env.NATIVE_PACKAGES }}
           ghostty-key: ${{ needs.ghostty.outputs.key }}
-          rust-cache: go
+          rust-cache: go-${{ matrix.name }}
           ghostty-on-path: "true"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/go.mod
-      - run: just build-go test-go
+      - run: just build-go
+      - env:
+          SHARD_MODE: ${{ matrix.mode }}
+          SHARD_PATTERN: ${{ matrix.pattern }}
+        run: just test-go-shard "$SHARD_MODE" "$SHARD_PATTERN"
 
   native:
     needs: ghostty
