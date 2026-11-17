@@ -196,6 +196,15 @@ jobs:
 
   integration:
     needs: ghostty
+    name: integration (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: cli-a
+            filter: "test(/^(scenario_and_reviewer_workflows|live_session_control|show_workflows|artifacts_and_bundles|timeline_analysis)::/)"
+          - name: cli-b
+            filter: "not test(/^(scenario_and_reviewer_workflows|live_session_control|show_workflows|artifacts_and_bundles|timeline_analysis)::/)"
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
@@ -208,9 +217,30 @@ jobs:
         with:
           packages: ${{ env.NATIVE_PACKAGES }}
           ghostty-key: ${{ needs.ghostty.outputs.key }}
-          rust-cache: integration
+          rust-cache: integration-${{ matrix.name }}
           ghostty-on-path: "true"
-      - run: just integration
+      - env:
+          SHARD_FILTER: ${{ matrix.filter }}
+        run: just integration-cli "$SHARD_FILTER"
+
+  integration-consumer:
+    needs: ghostty
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    env:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          submodules: true
+      - uses: ./.github/actions/setup
+        with:
+          packages: ${{ env.NATIVE_PACKAGES }}
+          ghostty-key: ${{ needs.ghostty.outputs.key }}
+          rust-cache: integration-consumer
+          ghostty-on-path: "true"
+      - run: cargo build --locked --bin termtrace
+      - run: scripts/test-rust-consumer.sh
 
   python:
     needs: ghostty
