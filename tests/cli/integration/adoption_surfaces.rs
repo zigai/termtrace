@@ -140,25 +140,23 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
             OsString::from("printf FINAL_READY; sleep .2"),
         ]))
         .expect("launch final-state fixture");
-
+    final_state
+        .complete(Duration::from_secs(5))
+        .expect("final-state completion");
     let final_wait = final_state
         .wait_screen(
             ScreenPredicate::Contains {
                 text: "FINAL_READY".to_owned(),
             },
-            Duration::from_secs(5),
+            Duration::ZERO,
             Duration::from_secs(5),
         )
-        .expect("completed final state is stable");
-    assert!(final_wait.is_satisfied());
-    assert!(matches!(
-        final_wait.quality,
-        ScreenWaitQuality::ChildCompleted | ScreenWaitQuality::Completed
-    ));
-
-    final_state
-        .complete(Duration::from_secs(5))
-        .expect("final-state completion");
+        .expect("completed final state");
+    assert!(
+        final_wait.matched,
+        "completed final screen must contain FINAL_READY"
+    );
+    assert_eq!(final_wait.quality, ScreenWaitQuality::Completed);
 
     let query_session = temporary.path().join("query-heavy");
     let mut query = Command::cargo_bin("termtrace").expect("binary should build");
