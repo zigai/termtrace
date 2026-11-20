@@ -151,7 +151,7 @@ native-test:
 # Exercise original capture through the service and the Rust SDK (requires Ghostty, Xvfb, dbus-run-session, and FFmpeg)
 native-sdk-test:
     cargo build --locked --bin termtrace
-    cargo test --locked -p termtrace-service --test original_recording -- --ignored
+    cargo test --locked -p termtrace-service --test original_recording -- --ignored --test-threads=1
     TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace cargo test --locked --manifest-path tests/consumers/rust/Cargo.toml --features local --tests -- --ignored --test-threads=1
 
 # Run performance and resource benchmarks on demand (requires native capture tooling)
