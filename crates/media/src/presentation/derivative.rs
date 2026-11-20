@@ -1178,7 +1178,7 @@ mod encoder_tests {
 #[cfg(test)]
 mod failure_tests {
     use super::*;
-    use std::{sync::Arc, thread};
+    use std::{sync::Arc, thread, time::Instant};
 
     #[test]
     fn process_failure_full_disk_and_cancellation_are_not_success() {
@@ -1234,8 +1234,15 @@ mod failure_tests {
 
         let cancelled = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&cancelled);
+        let pid_file = temp.path().join("child.pid");
         let setter = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(150));
+            // Cancel only once the shell has recorded its pid, so the check below has a pid.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !fs_err::read_to_string(&pid_file).is_ok_and(|pid| return pid.ends_with('\n'))
+                && Instant::now() < deadline
+            {
+                thread::sleep(Duration::from_millis(10));
+            }
 
             flag.store(true, Ordering::Release);
         });
