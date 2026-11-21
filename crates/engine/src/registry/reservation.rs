@@ -1,24 +1,19 @@
 use super::*;
 
 impl SessionRegistry {
-    /// Register a new alias without replacing an existing binding or reservation.
+    /// Register a new alias, replacing a record whose session is no longer live.
     ///
     /// # Errors
     ///
     /// Returns an error for an invalid alias, insecure or unreadable session,
-    /// schema/identity mismatch, or existing alias reservation/binding.
+    /// schema/identity mismatch, or an alias held by a live session or a starting one.
     pub fn register(&self, alias: &str, session: &Path) -> Result<RegistryEntry> {
         let _lock = self.lock()?;
 
         validate_alias(alias)?;
-        if self.entry_path(alias).exists() {
-            return Err(registry_error(
-                "register session alias",
-                "alias is already reserved or registered",
-            ));
-        }
-
         let entry = self.entry_for(alias, session)?;
+        self.reclaim_name(alias, "register session alias")?;
+
         let encoded = self.encode_entry(&entry)?;
         write_secure(&self.entry_path(alias), &encoded)?;
 
@@ -27,11 +22,13 @@ impl SessionRegistry {
 
     /// Atomically reserve an alias for one pending detached session.
     ///
-    /// Expired reservations are reclaimed while holding the registry lock.
+    /// Expired reservations and records of finished sessions are reclaimed while holding
+    /// the registry lock.
     ///
     /// # Errors
     ///
-    /// Returns an error for invalid aliases, zero leases, or a live reservation/binding.
+    /// Returns an error for invalid aliases, zero leases, a live session, or another
+    /// command's active reservation.
     pub fn reserve(
         &self,
         alias: &str,
@@ -48,38 +45,9 @@ impl SessionRegistry {
         }
 
         let _lock = self.lock()?;
+        self.reclaim_name(alias, "reserve session alias")?;
+
         let now = system_time_unix_ns()?;
-        let path = self.entry_path(alias);
-        if path.exists() {
-            match read_registry_record_nofollow(&path)? {
-                RegistryRecord::Reservation(reservation)
-                    if is_valid(alias, &reservation)
-                        && reservation.lease_expires_unix_ns <= now =>
-                {
-                    fs::remove_file(&path).map_err(|source| {
-                        return Error::Filesystem {
-                            path: path.clone(),
-                            source,
-                        };
-                    })?;
-
-                    sync_parent_directory(&path)?;
-                }
-                RegistryRecord::Reservation(reservation) if !is_valid(alias, &reservation) => {
-                    return Err(registry_error(
-                        "reserve session alias",
-                        "existing alias reservation is incompatible",
-                    ));
-                }
-                RegistryRecord::Reservation(_) | RegistryRecord::Entry(_) => {
-                    return Err(registry_error(
-                        "reserve session alias",
-                        "alias is already reserved or registered",
-                    ));
-                }
-            }
-        }
-
         let lease_expires_unix_ns = now.saturating_add(lease.as_nanos());
         let reservation = AliasReservation {
             format: REGISTRY_RESERVATION_FORMAT.to_owned(),
@@ -91,9 +59,54 @@ impl SessionRegistry {
             pending_session: ByteString::from(pending_session.as_os_str().as_bytes()),
         };
         let encoded = self.encode_reservation(&reservation)?;
-        write_secure(&path, &encoded)?;
+        write_secure(&self.entry_path(alias), &encoded)?;
 
         return Ok(reservation);
+    }
+
+    /// Remove the alias record that stands in the way of `alias`, or fail with its reason.
+    pub(super) fn reclaim_name(&self, alias: &str, operation: &'static str) -> Result<()> {
+        let path = self.entry_path(alias);
+
+        match inspect_registry_record_nofollow(&path)? {
+            RegistryRecordState::Missing => return Ok(()),
+            RegistryRecordState::Stale => {}
+            RegistryRecordState::Current(RegistryRecord::Entry(entry)) => {
+                if inspect_entry(&entry).lifecycle == SessionPhase::Live {
+                    return Err(registry_error(
+                        operation,
+                        format!(
+                            "session name `{alias}` is in use by a live session; stop it or choose another name"
+                        ),
+                    ));
+                }
+            }
+            RegistryRecordState::Current(RegistryRecord::Reservation(reservation)) => {
+                if !is_valid(alias, &reservation) {
+                    return Err(registry_error(
+                        operation,
+                        "existing alias reservation is incompatible",
+                    ));
+                }
+
+                if reservation.lease_expires_unix_ns > system_time_unix_ns()? {
+                    return Err(registry_error(
+                        operation,
+                        format!("session name `{alias}` is being started by another command"),
+                    ));
+                }
+            }
+        }
+
+        fs::remove_file(&path).map_err(|source| {
+            return Error::Filesystem {
+                path: path.clone(),
+                source,
+            };
+        })?;
+
+        sync_parent_directory(&path)?;
+        return Ok(());
     }
 
     /// Atomically replace an owned reservation with its validated session binding.

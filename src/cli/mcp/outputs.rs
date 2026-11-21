@@ -412,10 +412,21 @@ pub(super) fn stop() -> Arc<JsonObject> {
             "boundary": boundary(&mut schemas),
         }),
     );
-    let completed = completed(&mut schemas, &[]);
+    let stopped = object(
+        &["kind", "session", "session_id", "exit_code"],
+        json!({
+            "kind": {"const": "stopped"},
+            "alias": {"type": "string"},
+            "session": schemas.typed::<PathValue>(),
+
+            "session_id": {"type": "string", "format": "uuid"},
+            "exit_code": {"type": ["integer", "null"]},
+            "signal": {"type": "string"},
+        }),
+    );
     let lifecycle = lifecycle(&mut schemas);
 
-    return schemas.finish(vec![rejected, acknowledged, completed, lifecycle]);
+    return schemas.finish(vec![rejected, acknowledged, stopped, lifecycle]);
 }
 
 pub(super) fn analyze() -> Arc<JsonObject> {
@@ -596,7 +607,7 @@ fn size() -> Value {
 
 fn lifecycle(schemas: &mut Schemas) -> Value {
     return object(
-        &["kind", "operation", "lifecycle", "session", "diagnostic"],
+        &["kind", "operation", "lifecycle", "session"],
         json!({
             "kind": {"const": "session_lifecycle"},
             "operation": {"type": "string"},
@@ -604,6 +615,10 @@ fn lifecycle(schemas: &mut Schemas) -> Value {
             "session": schemas.typed::<PathValue>(),
 
             "diagnostic": {"type": ["string", "null"]},
+            "exit_code": {"type": ["integer", "null"]},
+            "signal": {"type": "string"},
+            "screen": {"type": "string"},
+            "size": size(),
         }),
     );
 }

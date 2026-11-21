@@ -11,7 +11,11 @@ use termtrace_engine::{
     timeline::{resolve_session_prefix_source_selection, resolve_session_source_selection},
     Result as EngineResult,
 };
-use termtrace_model::terminal::{observation::StatePoint, replay::SourceRange};
+use termtrace_evidence::session::read_completion;
+use termtrace_model::{
+    execution::session::SessionPhase,
+    terminal::{observation::StatePoint, replay::SourceRange},
+};
 pub(super) use termtrace_sdk::session::LocatedSession as ResolvedSessionRef;
 use termtrace_sdk::session::{Session, SessionStatus, SessionTarget};
 
@@ -40,18 +44,63 @@ pub(super) fn write_session_lifecycle(
     operation: &'static str,
     exit_code: ExitCode,
 ) -> Result<ExitCode> {
-    write_json_line(
-        response,
-        &serde_json::json!({
-            "kind": "session_lifecycle",
-            "operation": operation,
-            "lifecycle": resolved.phase.as_str(),
-            "session": path_value(&resolved.path),
-            "diagnostic": resolved.diagnostic,
-        }),
-    )?;
+    let mut payload = serde_json::json!({
+        "kind": "session_lifecycle",
+        "operation": operation,
+        "lifecycle": resolved.phase.as_str(),
+        "session": path_value(&resolved.path),
+    });
+
+    if let Some(fields) = payload.as_object_mut() {
+        if let Some(diagnostic) = &resolved.diagnostic {
+            fields.insert("diagnostic".to_owned(), serde_json::json!(diagnostic));
+        }
+
+        if resolved.phase == SessionPhase::Completed {
+            add_completion_report(fields, &resolved.path);
+        }
+    }
+
+    write_json_line(response, &payload)?;
 
     return Ok(exit_code);
+}
+
+/// Exit status and final presented screen of a completed session.
+fn add_completion_report(fields: &mut serde_json::Map<String, serde_json::Value>, session: &Path) {
+    if let Ok(completion) = read_completion(session) {
+        fields.insert(
+            "exit_code".to_owned(),
+            serde_json::json!(completion.exit_code),
+        );
+
+        if let Some(signal) = completion.signal_name {
+            fields.insert("signal".to_owned(), serde_json::json!(signal));
+        }
+    }
+
+    let observation = attach_session(session).and_then(|attached| {
+        return attached
+            .observe(StatePoint::LatestPresented, false)
+            .into_diagnostic();
+    });
+
+    if let Ok(observation) = observation {
+        fields.insert(
+            "screen".to_owned(),
+            serde_json::json!(trimmed_screen(&observation.frame.viewport_text)),
+        );
+        fields.insert(
+            "size".to_owned(),
+            serde_json::json!([observation.frame.cols, observation.frame.rows]),
+        );
+    }
+}
+
+fn trimmed_screen(text: &str) -> &str {
+    return text.trim_end_matches(|character: char| {
+        return character == ' ' || character == '\n' || character == '\r';
+    });
 }
 
 pub(super) fn resolve_cli_range(

@@ -124,7 +124,7 @@
     "command": {
       "description": "Effective command bytes when the manifest is readable.",
       "items": {
-        "$ref": "#/$defs/Base64Bytes"
+        "$ref": "#/$defs/PathValue"
       },
       "type": [
         "array",

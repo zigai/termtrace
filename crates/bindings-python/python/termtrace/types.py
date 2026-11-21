@@ -2490,7 +2490,7 @@ class RegistryListEntry(TypedDict):
 
     alias: str
     canonical_session: PathValue
-    command: list[Base64Bytes] | None
+    command: list[PathValue] | None
     diagnostic: str | None
     geometry: SessionGeometry | None
     lifecycle: SessionPhase

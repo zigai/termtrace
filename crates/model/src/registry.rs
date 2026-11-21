@@ -95,6 +95,8 @@ pub struct RegistryListEntry {
     /// Immutable registered session ID.
     pub session_id: Uuid,
     /// Effective command bytes when the manifest is readable.
+    #[serde(with = "command_arguments")]
+    #[schemars(with = "Option<Vec<crate::value::path_bytes::PathValue>>")]
     pub command: Option<Vec<ByteString>>,
     /// Effective working directory when the manifest is readable.
     #[serde(with = "crate::value::path_bytes::option")]
@@ -110,6 +112,41 @@ pub struct RegistryListEntry {
     pub lifecycle: SessionPhase,
     /// Focused diagnostic for unhealthy entries.
     pub diagnostic: Option<String>,
+}
+
+/// Command arguments rendered as readable text when they are valid UTF-8.
+mod command_arguments {
+    use super::ByteString;
+    use crate::value::path_bytes::PathValue;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        command: &Option<Vec<ByteString>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        return command
+            .as_ref()
+            .map(|arguments| {
+                return arguments
+                    .iter()
+                    .map(PathValue::from_bytes)
+                    .collect::<Vec<_>>();
+            })
+            .serialize(serializer);
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Vec<ByteString>>, D::Error> {
+        return Option::<Vec<PathValue>>::deserialize(deserializer).map(|command| {
+            return command.map(|arguments| {
+                return arguments
+                    .into_iter()
+                    .map(PathValue::into_bytes)
+                    .collect::<Vec<_>>();
+            });
+        });
+    }
 }
 
 /// A named session path paired with the registry's evidence-derived lifecycle.

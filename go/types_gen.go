@@ -4955,7 +4955,7 @@ type RegistryListEntry struct {
 	// Exact canonical session path bytes.
 	CanonicalSession Path `json:"canonical_session"`
 	// Effective command bytes when the manifest is readable.
-	Command []Base64Bytes `json:"command,omitzero"` //exhaustruct:optional
+	Command []Path `json:"command,omitzero"` //exhaustruct:optional
 	// Focused diagnostic for unhealthy entries.
 	Diagnostic *string `json:"diagnostic,omitzero"` //exhaustruct:optional
 	// Initial grid and pixel geometry when the manifest is readable.

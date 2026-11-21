@@ -79,14 +79,22 @@ fn registry_binds_alias_to_canonical_session_identity() {
     );
 
     let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
-    duplicate
+    let duplicate = duplicate
         .env("TERMTRACE_STATE_DIR", &state)
         .args(["session", "register"])
         .arg("demo")
         .arg("--session")
         .arg(&session)
         .assert()
-        .failure();
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(
+        compact_json_line(&duplicate)["session_id"],
+        manifest.session_id.to_string(),
+        "rebinding a finished session changed its identity"
+    );
 
     let mut active_only = Command::cargo_bin("termtrace").expect("binary should build");
     active_only
@@ -204,6 +212,81 @@ fn registry_binds_alias_to_canonical_session_identity() {
             "remove changed {name}"
         );
     }
+}
+
+#[test]
+fn status_lists_finished_sessions_newest_first_and_dead_sends_report_their_exit() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+
+    for (alias, script, code) in [
+        ("first", "printf bye; exit 3", 3),
+        ("second", "printf done", 0),
+    ] {
+        let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+        record
+            .env("TERMTRACE_STATE_DIR", &state)
+            .args(["record", "-d", alias, "--"])
+            .args(["/bin/sh", "-c", script])
+            .assert()
+            .code(code);
+    }
+
+    let mut listing = Command::cargo_bin("termtrace").expect("binary should build");
+    let listing = listing
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["status", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let listing = compact_json_line(&listing);
+    let rows = listing.as_array().expect("session listing");
+    let aliases = rows
+        .iter()
+        .filter_map(|row| return row["alias"].as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(aliases, ["second", "first"]);
+    assert!(
+        rows.iter()
+            .all(|row| return row["lifecycle"] == "completed"),
+        "{listing}"
+    );
+
+    let mut table = Command::cargo_bin("termtrace").expect("binary should build");
+    table
+        .env("TERMTRACE_STATE_DIR", &state)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("completed"));
+
+    let mut dead_send = Command::cargo_bin("termtrace").expect("binary should build");
+    let dead_send = dead_send
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["send", "first", "--json", "--", "enter"])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let report = compact_json_line(&dead_send);
+
+    assert_eq!(report["kind"], "session_lifecycle");
+    assert_eq!(report["operation"], "send");
+    assert_eq!(report["lifecycle"], "completed");
+    assert_eq!(report["exit_code"], 3);
+    assert_eq!(report["screen"], "bye");
+    assert_eq!(
+        report["size"]
+            .as_array()
+            .map(|size| return size.len())
+            .unwrap_or_default(),
+        2
+    );
+    assert!(report.get("diagnostic").is_none(), "{report}");
 }
 
 #[test]

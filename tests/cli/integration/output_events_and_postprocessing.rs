@@ -688,7 +688,7 @@ fn live_postprocessing_is_explicit_and_stop_waits_for_completion() {
         .arg(&session)
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""kind": "completed""#));
+        .stdout(predicate::str::contains(r#""kind": "stopped""#));
 
     let output = child.wait_with_output().expect("wait for live recorder");
     assert!(output.status.success(), "recorder failed: {output:?}");

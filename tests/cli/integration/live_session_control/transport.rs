@@ -2,6 +2,48 @@ use super::*;
 use termtrace_model::execution::layout::SessionLayout;
 
 #[test]
+fn stop_json_reports_the_compact_session_outcome() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    let started = start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["record", "-d", "compact", "--json", "--"])
+        .args([
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; printf READY; while :; do sleep 0.1; done",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let started = compact_json_line(&started);
+    let session = started["canonical_session"].clone();
+
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    let stopped = stop
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "compact", "--json", "--wait"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stopped = compact_json_line(&stopped);
+
+    assert_eq!(stopped["kind"], "stopped");
+    assert_eq!(stopped["alias"], "compact");
+    assert_eq!(stopped["session"], session);
+    assert_eq!(stopped["exit_code"], 0);
+    assert!(stopped["session_id"].as_str().is_some(), "{stopped}");
+    assert!(stopped.get("completion").is_none(), "{stopped}");
+    assert!(stopped.get("signal").is_none(), "{stopped}");
+}
+
+#[test]
 fn live_control_drives_and_audits_a_detached_session() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("controlled");

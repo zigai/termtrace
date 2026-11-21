@@ -3,16 +3,13 @@ use directories::BaseDirs;
 
 impl SessionRegistry {
     fn named_record(&self, alias: &str) -> Result<RegistryRecord> {
-        return read_registry_record_nofollow(&self.entry_path(alias)).map_err(|error| {
-            return match error {
-                Error::Filesystem { source, .. } if source.kind() == ErrorKind::NotFound => {
-                    Error::SessionNotFound {
-                        name: alias.to_owned(),
-                    }
-                }
-                error => error,
-            };
-        });
+        return match inspect_registry_record_nofollow(&self.entry_path(alias))? {
+            RegistryRecordState::Current(record) => Ok(record),
+            RegistryRecordState::Missing => Err(Error::SessionNotFound {
+                name: alias.to_owned(),
+            }),
+            RegistryRecordState::Stale => Err(stale_name_error(alias)),
+        };
     }
 
     /// Open the default owner-only session registry.
@@ -165,21 +162,16 @@ impl SessionRegistry {
 
     /// Validate that an alias is well formed and currently unbound.
     ///
+    /// A record whose session is no longer live, stale, or an expired reservation is removed.
+    ///
     /// # Errors
     ///
-    /// Returns an error for invalid or already-published aliases.
+    /// Returns an error for invalid aliases or names held by a live session or a starting one.
     pub fn ensure_available(&self, alias: &str) -> Result<()> {
         validate_alias(alias)?;
 
         let _lock = self.lock()?;
-        let path = self.entry_path(alias);
-        if path.exists() {
-            return Err(registry_error(
-                "reserve session alias",
-                "alias is already reserved or registered",
-            ));
-        }
-        return Ok(());
+        return self.reclaim_name(alias, "reserve session alias");
     }
 
     /// Resolve and validate an alias against its canonical session manifest.
@@ -282,12 +274,13 @@ impl SessionRegistry {
         };
     }
 
-    /// List live aliases, or every alias when `include_all` is true.
+    /// List live aliases, or every alias when `include_all` is true, newest first.
     ///
     /// # Errors
     ///
     /// Returns an error when the registry directory or an entry cannot be read
-    /// securely. Broken session evidence is represented as a lifecycle row.
+    /// securely. Broken session evidence is represented as a lifecycle row, and stale records
+    /// from another registry format are skipped.
     pub fn list(&self, include_all: bool) -> Result<Vec<RegistryListEntry>> {
         let mut rows = Vec::new();
         for item in fs::read_dir(&self.directory).map_err(|source| {
@@ -308,10 +301,14 @@ impl SessionRegistry {
                 continue;
             }
 
-            let entry = match read_registry_record_nofollow(&path) {
-                Ok(RegistryRecord::Entry(entry)) => entry,
-                Ok(RegistryRecord::Reservation(_)) => continue,
-                Err(_) => continue,
+            let entry = match inspect_registry_record_nofollow(&path) {
+                Ok(RegistryRecordState::Current(RegistryRecord::Entry(entry))) => entry,
+                Ok(
+                    RegistryRecordState::Missing
+                    | RegistryRecordState::Stale
+                    | RegistryRecordState::Current(RegistryRecord::Reservation(_)),
+                )
+                | Err(_) => continue,
             };
 
             let row = inspect_entry(&entry);
@@ -321,7 +318,12 @@ impl SessionRegistry {
             }
         }
 
-        rows.sort_by(|left, right| return left.alias.cmp(&right.alias));
+        rows.sort_by(|left, right| {
+            return right
+                .registered_unix_ns
+                .cmp(&left.registered_unix_ns)
+                .then_with(|| return left.alias.cmp(&right.alias));
+        });
         return Ok(rows);
     }
 
@@ -552,7 +554,7 @@ pub(super) fn ensure_owner_directory(path: &Path) -> Result<()> {
     return SessionRegistry::validate_owner_directory(path);
 }
 
-pub(super) fn read_registry_record_nofollow(path: &Path) -> Result<RegistryRecord> {
+pub(super) fn read_registry_bytes_nofollow(path: &Path) -> Result<Vec<u8>> {
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(O_NOFOLLOW)
@@ -566,13 +568,77 @@ pub(super) fn read_registry_record_nofollow(path: &Path) -> Result<RegistryRecor
 
     validate_entry_file(path, &file)?;
 
-    return serde_json::from_reader(file).map_err(|source| {
+    let mut bytes = Vec::new();
+    BufReader::new(file)
+        .read_to_end(&mut bytes)
+        .map_err(|source| {
+            return Error::Filesystem {
+                path: path.to_path_buf(),
+                source,
+            };
+        })?;
+    return Ok(bytes);
+}
+
+pub(super) fn read_registry_record_nofollow(path: &Path) -> Result<RegistryRecord> {
+    let bytes = read_registry_bytes_nofollow(path)?;
+
+    return serde_json::from_slice(&bytes).map_err(|source| {
         return Error::InvalidJson {
             path: path.to_path_buf(),
             json_path: "$".to_owned(),
             source,
         };
     });
+}
+
+/// Read one alias record, separating absent and stale records from unreadable ones.
+pub(super) fn inspect_registry_record_nofollow(path: &Path) -> Result<RegistryRecordState> {
+    let bytes = match read_registry_bytes_nofollow(path) {
+        Ok(bytes) => bytes,
+        Err(Error::Filesystem { source, .. }) if source.kind() == ErrorKind::NotFound => {
+            return Ok(RegistryRecordState::Missing);
+        }
+        Err(error) => return Err(error),
+    };
+
+    return match serde_json::from_slice(&bytes) {
+        Ok(record) => Ok(RegistryRecordState::Current(record)),
+        Err(source) => match record_identity(&bytes) {
+            Some(identity) => match RegistryRecordKind::of(&identity.format, identity.version) {
+                Some(_) => Err(Error::InvalidJson {
+                    path: path.to_path_buf(),
+                    json_path: "$".to_owned(),
+                    source,
+                }),
+                None => Ok(RegistryRecordState::Stale),
+            },
+            None => Err(Error::InvalidJson {
+                path: path.to_path_buf(),
+                json_path: "$".to_owned(),
+                source,
+            }),
+        },
+    };
+}
+
+#[derive(serde::Deserialize)]
+struct RecordIdentity {
+    format: String,
+    version: u32,
+}
+
+fn record_identity(bytes: &[u8]) -> Option<RecordIdentity> {
+    return serde_json::from_slice(bytes).ok();
+}
+
+pub(super) fn stale_name_error(alias: &str) -> Error {
+    return registry_error(
+        "resolve session alias",
+        format!(
+            "session name `{alias}` belongs to a recording from an older termtrace version; start a new session"
+        ),
+    );
 }
 
 pub(super) fn read_entry_nofollow(path: &Path) -> Result<RegistryEntry> {

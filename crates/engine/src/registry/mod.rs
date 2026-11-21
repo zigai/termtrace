@@ -9,7 +9,7 @@ use std::{
     env,
     ffi::OsStr,
     fs::{self, DirBuilder, File, OpenOptions, Permissions},
-    io::ErrorKind,
+    io::{BufReader, ErrorKind, Read as _},
     os::unix::{
         ffi::OsStrExt as _,
         fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
@@ -48,6 +48,30 @@ enum RegistryRecord {
     Entry(RegistryEntry),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RegistryRecordKind {
+    Reservation,
+    Entry,
+}
+
+impl RegistryRecordKind {
+    fn of(format: &str, version: u32) -> Option<Self> {
+        return match (format, version) {
+            (REGISTRY_RESERVATION_FORMAT, REGISTRY_RESERVATION_VERSION) => Some(Self::Reservation),
+            (REGISTRY_ENTRY_FORMAT, REGISTRY_ENTRY_VERSION) => Some(Self::Entry),
+            _ => None,
+        };
+    }
+}
+
+/// State of one alias record on disk.
+enum RegistryRecordState {
+    Missing,
+    Current(RegistryRecord),
+    /// Written by another termtrace registry format or version.
+    Stale,
+}
+
 impl<'de> Deserialize<'de> for RegistryRecord {
     fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
     where
@@ -66,23 +90,17 @@ impl<'de> Deserialize<'de> for RegistryRecord {
 
         let identity: Identity = serde_json::from_str(raw.get()).map_err(de::Error::custom)?;
 
-        match (identity.format.as_str(), identity.version) {
-            (REGISTRY_RESERVATION_FORMAT, REGISTRY_RESERVATION_VERSION) => {
-                return serde_json::from_str(raw.get())
-                    .map(Self::Reservation)
-                    .map_err(de::Error::custom);
-            }
-            (REGISTRY_ENTRY_FORMAT, REGISTRY_ENTRY_VERSION) => {
-                return serde_json::from_str(raw.get())
-                    .map(Self::Entry)
-                    .map_err(de::Error::custom);
-            }
-            _ => {
-                return Err(de::Error::custom(
-                    "unsupported registry record format/version",
-                ))
-            }
-        }
+        return match RegistryRecordKind::of(&identity.format, identity.version) {
+            Some(RegistryRecordKind::Reservation) => serde_json::from_str(raw.get())
+                .map(Self::Reservation)
+                .map_err(de::Error::custom),
+            Some(RegistryRecordKind::Entry) => serde_json::from_str(raw.get())
+                .map(Self::Entry)
+                .map_err(de::Error::custom),
+            None => Err(de::Error::custom(
+                "unsupported registry record format/version",
+            )),
+        };
     }
 }
 
@@ -99,8 +117,8 @@ mod store;
 
 use reservation::{is_valid, system_time_unix_ns, validate_alias};
 use store::{
-    ensure_owner_directory, inspect_entry, read_registry_record_nofollow, registry_error,
-    sync_directory, sync_parent_directory,
+    ensure_owner_directory, inspect_entry, inspect_registry_record_nofollow,
+    read_registry_record_nofollow, registry_error, sync_directory, sync_parent_directory,
 };
 
 #[cfg(test)]

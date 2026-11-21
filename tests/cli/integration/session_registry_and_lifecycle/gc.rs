@@ -315,6 +315,109 @@ fn corrupt_registry_entries_do_not_poison_listing_or_unsafe_garbage_collection()
 }
 
 #[test]
+fn stale_registry_records_are_skipped_replaced_and_reaped() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let sessions = state.join("sessions");
+    let registry = state.join("registry");
+
+    fs_err::create_dir_all(&sessions).expect("managed session directory");
+    fs_err::create_dir_all(&registry).expect("managed registry directory");
+    fs_err::set_permissions(&state, Permissions::from_mode(0o700)).expect("private state root");
+    fs_err::set_permissions(&sessions, Permissions::from_mode(0o700))
+        .expect("private managed session directory");
+    fs_err::set_permissions(&registry, Permissions::from_mode(0o700))
+        .expect("private registry directory");
+
+    let stale_record = |name: &str| {
+        let path = registry.join(format!("{name}.json"));
+        fs_err::write(
+            &path,
+            br#"{"format":"termtrace-session-registry-entry","version":1}"#,
+        )
+        .expect("stale registry record");
+        fs_err::set_permissions(&path, Permissions::from_mode(0o600))
+            .expect("private stale record");
+        return path;
+    };
+
+    stale_record("stale");
+
+    let mut list = Command::cargo_bin("termtrace").expect("binary should build");
+    list.env("TERMTRACE_STATE_DIR", &state)
+        .args(["session", "list", "--all", "--json"])
+        .assert()
+        .success()
+        .stdout("[]\n");
+
+    let mut resolve = Command::cargo_bin("termtrace").expect("binary should build");
+    resolve
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["session", "resolve", "stale"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "belongs to a recording from an older termtrace version",
+        ));
+
+    let mut record = Command::cargo_bin("termtrace").expect("binary should build");
+    record
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["record", "-d", "stale", "--"])
+        .args([
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; printf REUSED; while :; do sleep 0.1; done",
+        ])
+        .assert()
+        .success();
+
+    let mut resolve = Command::cargo_bin("termtrace").expect("binary should build");
+    resolve
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["session", "resolve", "stale"])
+        .assert()
+        .success();
+
+    let abandoned = stale_record("abandoned");
+
+    let mut apply = Command::cargo_bin("termtrace").expect("binary should build");
+    let report = apply
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "session",
+            "gc",
+            "--older-than-days",
+            "0",
+            "--keep-latest",
+            "0",
+            "--apply",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report = compact_json_line(&report);
+
+    assert_eq!(report["removed_stale_aliases"], 1);
+    assert!(
+        !abandoned.exists(),
+        "garbage collection kept a stale record"
+    );
+    assert!(
+        registry.join("stale.json").is_file(),
+        "garbage collection removed the name of a live session"
+    );
+
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "stale", "--wait"])
+        .assert()
+        .success();
+}
+
+#[test]
 fn stale_aliases_with_exited_recorder_are_reaped_by_garbage_collection() {
     let temporary = TempDir::new().expect("temporary directory");
     let state = temporary.path().join("state");
