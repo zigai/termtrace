@@ -209,6 +209,8 @@ async fn tools_cover_the_session_workflow_with_valid_schemas() {
         [
             "analyze",
             "bundle",
+            "gc",
+            "restart",
             "screen",
             "screenshot",
             "send",
@@ -311,11 +313,11 @@ async fn failed_calls_return_tool_errors_and_leave_the_server_usable() {
     let deadline = call(
         &client,
         "wait",
-        json!({"session": "patient", "for": {"kind": "screen", "text": "never"}, "timeout_ms": 200}),
+        json!({"session": "patient", "until": {"kind": "screen", "text": "never"}, "timeout_ms": 200}),
     )
     .await;
     assert!(failed(&deadline));
-    assert_eq!(structured(&deadline)["quality"], "deadline");
+    assert_eq!(structured(&deadline)["outcome"], "deadline");
 
     let missing = call(&client, "status", json!({"session": "missing"})).await;
     assert!(failed(&missing));
@@ -472,7 +474,7 @@ async fn pending_sends_allow_reads_and_are_preempted_by_stop() {
         .await
         .expect("send input");
 
-    let waited = call(&client, "wait", json!({"session": "pending", "for": {"kind": "screen", "text": "hello"}, "timeout_ms": 1000})).await;
+    let waited = call(&client, "wait", json!({"session": "pending", "until": {"kind": "screen", "text": "hello"}, "timeout_ms": 1000})).await;
     let screen = call(&client, "screen", json!({"session": "pending"})).await;
     let status = call(&client, "status", json!({"session": "pending"})).await;
     let stopped = call(&client, "stop", json!({"session": "pending", "wait": true})).await;
@@ -510,7 +512,7 @@ async fn cancelling_a_send_releases_its_pending_postcondition() {
         )
         .await
         .expect("send input");
-    let waited = call(&client, "wait", json!({"session": "cancel-send", "for": {"kind": "screen", "text": "world"}, "timeout_ms": 1000})).await;
+    let waited = call(&client, "wait", json!({"session": "cancel-send", "until": {"kind": "screen", "text": "world"}, "timeout_ms": 1000})).await;
     handle.cancel(None).await.expect("cancel send");
     let screen = call(
         &client,
@@ -596,7 +598,7 @@ fn handshake_clients_are_served_until_standard_input_closes() {
         }
     }
 
-    assert_eq!(tools, Some(9));
+    assert_eq!(tools, Some(11));
 
     drop(input);
 
@@ -646,7 +648,7 @@ async fn native_screenshot_leaves_no_native_processes_behind_the_server() {
 }
 
 #[tokio::test]
-async fn reinstalled_binary_asks_for_a_server_restart() {
+async fn reinstalled_binary_serves_calls_from_the_installed_path() {
     let temporary = TempDir::new().expect("temporary directory");
     let binary = temporary.path().join("termtrace");
     fs::copy(BINARY, &binary).expect("copy binary");
@@ -658,18 +660,23 @@ async fn reinstalled_binary_asks_for_a_server_restart() {
     let started = call(
         &client,
         "start",
-        json!({"command": ["/bin/sh", "-c", "sleep 5"], "name": "replaced"}),
+        json!({
+            "command": ["/bin/sh", "-c", "printf 'replaced'; while :; do sleep 0.1; done"],
+            "name": "replaced",
+            "until": {"kind": "screen", "text": "replaced"},
+            "timeout_ms": 5000,
+        }),
     )
     .await;
-    assert!(failed(&started));
-    let ContentBlock::Text(message) = &started.content[0] else {
-        panic!("text error: {started:?}");
-    };
-    assert!(
-        message.text.contains("restart the MCP server"),
-        "{}",
-        message.text
-    );
+    assert!(!failed(&started), "{started:?}");
+
+    let stopped = call(
+        &client,
+        "stop",
+        json!({"session": "replaced", "wait": true}),
+    )
+    .await;
+    assert!(!failed(&stopped), "{stopped:?}");
 
     client.cancel().await.expect("close client");
 }
@@ -734,7 +741,7 @@ async fn long_waits_report_progress_and_stop_when_cancelled() {
 
     let request = CallToolRequestParams::new("wait").with_arguments(arguments(json!({
         "session": "cancelled",
-        "for": {"kind": "screen", "text": "never"},
+        "until": {"kind": "screen", "text": "never"},
         "timeout_ms": 60_000,
     })));
     let handle = client
@@ -897,7 +904,7 @@ async fn every_report_of_a_recorded_session_matches_its_output_schema() {
     let idle = call(
         &client,
         "wait",
-        json!({"session": "reported", "for": {"kind": "idle", "ms": 200}}),
+        json!({"session": "reported", "until": {"kind": "idle", "ms": 200}}),
     )
     .await;
     assert!(!failed(&idle), "{idle:?}");
@@ -946,6 +953,241 @@ async fn every_report_of_a_recorded_session_matches_its_output_schema() {
         let bundled = call(&client, "bundle", Value::Object(input)).await;
         assert!(!failed(&bundled), "{bundled:?}");
     }
+
+    client.cancel().await.expect("close client");
+}
+
+#[tokio::test]
+#[allow(
+    clippy::expect_used,
+    reason = "test setup failures should stop the test with context"
+)]
+async fn wait_covers_absent_screen_text_and_output_history() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let client = connect(&temporary.path().join("state")).await;
+    start_waiting_shell(&client, "conditions").await;
+
+    let absent = call(
+        &client,
+        "wait",
+        json!({
+            "session": "conditions",
+            "until": {"kind": "screen_absent", "text": "no such text"},
+            "timeout_ms": 1000,
+        }),
+    )
+    .await;
+    assert!(!failed(&absent), "{absent:?}");
+
+    let output = call(
+        &client,
+        "wait",
+        json!({
+            "session": "conditions",
+            "until": {"kind": "output", "text": "name?"},
+            "timeout_ms": 1000,
+        }),
+    )
+    .await;
+    assert!(!failed(&output), "{output:?}");
+
+    let absent_match = call(
+        &client,
+        "wait",
+        json!({
+            "session": "conditions",
+            "until": {"kind": "screen_absent", "text": "name?"},
+            "timeout_ms": 200,
+        }),
+    )
+    .await;
+    assert!(failed(&absent_match), "{absent_match:?}");
+
+    let stopped = call(
+        &client,
+        "stop",
+        json!({"session": "conditions", "wait": true}),
+    )
+    .await;
+    assert!(!failed(&stopped), "{stopped:?}");
+    client.cancel().await.expect("close client");
+}
+
+#[tokio::test]
+#[allow(
+    clippy::expect_used,
+    reason = "test setup failures should stop the test with context"
+)]
+async fn start_synchronizes_on_output_history() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let client = connect(&temporary.path().join("state")).await;
+
+    let started = call(
+        &client,
+        "start",
+        json!({
+            "command": ["/bin/sh", "-c", WAITING_SHELL],
+            "name": "byte-history",
+            "until": {"kind": "output", "text": "name?"},
+            "timeout_ms": 5000,
+        }),
+    )
+    .await;
+    assert!(!failed(&started), "{started:?}");
+    assert_eq!(structured(&started)["postcondition"]["kind"], "output");
+    assert_eq!(structured(&started)["postcondition"]["matched"], true);
+
+    let stopped = call(
+        &client,
+        "stop",
+        json!({"session": "byte-history", "wait": true}),
+    )
+    .await;
+    assert!(!failed(&stopped), "{stopped:?}");
+    client.cancel().await.expect("close client");
+}
+
+#[tokio::test]
+#[allow(
+    clippy::expect_used,
+    reason = "test setup failures should stop the test with context"
+)]
+async fn start_sets_the_terminal_type_and_keeps_controlled_variables_out() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let client = connect(&temporary.path().join("state")).await;
+
+    let rejected = call(
+        &client,
+        "start",
+        json!({
+            "command": ["/bin/sh", "-c", "sleep 5"],
+            "name": "controlled-term",
+            "env": {"TERM": "xterm"},
+        }),
+    )
+    .await;
+    assert!(failed(&rejected), "{rejected:?}");
+    assert_eq!(
+        structured(&rejected)["error"],
+        "`TERM` is set by the `term` parameter"
+    );
+
+    let rejected = call(
+        &client,
+        "start",
+        json!({
+            "command": ["/bin/sh", "-c", "sleep 5"],
+            "name": "controlled-color",
+            "env": {"COLORTERM": "truecolor"},
+        }),
+    )
+    .await;
+    assert!(failed(&rejected), "{rejected:?}");
+    assert_eq!(
+        structured(&rejected)["error"],
+        "`COLORTERM` is set by the `color_policy` parameter"
+    );
+
+    let started = call(
+        &client,
+        "start",
+        json!({
+            "command": [
+                "/bin/sh",
+                "-c",
+                "printf 'term=%s color=%s' \"$TERM\" \"${NO_COLOR-unset}\"; while :; do sleep 0.1; done",
+            ],
+            "name": "described",
+            "term": "xterm-256color",
+            "color_policy": "never",
+            "until": {"kind": "screen", "text": "term=xterm-256color color=1"},
+            "timeout_ms": 5000,
+        }),
+    )
+    .await;
+    assert!(!failed(&started), "{started:?}");
+
+    let stopped = call(
+        &client,
+        "stop",
+        json!({"session": "described", "wait": true}),
+    )
+    .await;
+    assert!(!failed(&stopped), "{stopped:?}");
+    client.cancel().await.expect("close client");
+}
+
+#[tokio::test]
+#[allow(
+    clippy::expect_used,
+    reason = "test setup failures should stop the test with context"
+)]
+async fn restart_relaunches_a_completed_session_under_its_name() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let client = connect(&temporary.path().join("state")).await;
+    start_waiting_shell(&client, "restarted").await;
+
+    let stopped = call(
+        &client,
+        "stop",
+        json!({"session": "restarted", "wait": true}),
+    )
+    .await;
+    assert!(!failed(&stopped), "{stopped:?}");
+
+    let restarted = call(&client, "restart", json!({"session": "restarted"})).await;
+    assert!(!failed(&restarted), "{restarted:?}");
+    assert_eq!(structured(&restarted)["alias"], "restarted");
+
+    let live = call(&client, "status", json!({"session": "restarted"})).await;
+    assert!(!failed(&live), "{live:?}");
+    assert_eq!(structured(&live)["lifecycle"], "live");
+
+    let stopped = call(
+        &client,
+        "stop",
+        json!({"session": "restarted", "wait": true}),
+    )
+    .await;
+    assert!(!failed(&stopped), "{stopped:?}");
+    client.cancel().await.expect("close client");
+}
+
+#[tokio::test]
+#[allow(
+    clippy::expect_used,
+    reason = "test setup failures should stop the test with context"
+)]
+async fn gc_deletes_completed_recordings_that_have_no_name() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let client = connect(&state).await;
+    let unnamed = state.join("sessions").join("unnamed");
+    fs::create_dir_all(state.join("sessions")).expect("sessions directory");
+    for directory in [&state, &state.join("sessions")] {
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700))
+            .expect("owner-only directory");
+    }
+
+    Command::cargo_bin("termtrace")
+        .expect("binary should build")
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["record", "--no-input", "--json", "--out"])
+        .arg(&unnamed)
+        .args(["--", "/bin/true"])
+        .assert()
+        .success();
+
+    let collected = call(
+        &client,
+        "gc",
+        json!({"older_than_days": 0, "keep_latest": 0}),
+    )
+    .await;
+    assert!(!failed(&collected), "{collected:?}");
+    assert_eq!(structured(&collected)["changes_applied"], true);
+    assert_eq!(structured(&collected)["removed_sessions"], 1);
+    assert!(!unnamed.exists(), "the recording was not deleted");
 
     client.cancel().await.expect("close client");
 }

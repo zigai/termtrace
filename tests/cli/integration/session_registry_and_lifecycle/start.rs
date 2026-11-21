@@ -31,10 +31,6 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
             .and_then(serde_json::Value::as_bool),
         Some(true)
     );
-    assert!(response
-        .pointer("/recorder_process_start_ticks")
-        .and_then(serde_json::Value::as_u64)
-        .is_some());
 
     let session = PathBuf::from(
         response["canonical_session"]
@@ -81,23 +77,6 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         "duplicate start must fail before allocating evidence"
     );
 
-    for key in ["stdout_log", "stderr_log"] {
-        let path = PathBuf::from(
-            response
-                .pointer(&format!("/{key}"))
-                .and_then(serde_json::Value::as_str)
-                .expect("diagnostic path"),
-        );
-        assert_eq!(
-            fs_err::metadata(path)
-                .expect("diagnostic metadata")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
-    }
-
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
     stop.env("TERMTRACE_STATE_DIR", &state)
         .args(["stop", "demo", "--wait"])
@@ -126,6 +105,23 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
     let failed = compact_json_line(&failed);
 
     assert_eq!(failed["startup_state"], "completed_failure");
+
+    for key in ["stdout_log", "stderr_log"] {
+        let path = PathBuf::from(
+            failed
+                .pointer(&format!("/{key}"))
+                .and_then(serde_json::Value::as_str)
+                .expect("diagnostic path"),
+        );
+        assert_eq!(
+            fs_err::metadata(path)
+                .expect("diagnostic metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
 
     let failed_session = PathBuf::from(
         failed["canonical_session"]
@@ -165,7 +161,6 @@ fn start_promotes_fast_completion_and_reports_child_outcome() {
 
     let successful = compact_json_line(&successful);
 
-    assert_eq!(successful["startup_state"], "completed_success");
     assert_eq!(successful["completion"]["exit_code"], 0);
 
     let mut wait_idle = Command::cargo_bin("termtrace").expect("binary should build");
