@@ -250,6 +250,7 @@ pub(super) fn send() -> Arc<JsonObject> {
             "code": {"const": "postcondition_failed"},
         }),
     );
+
     let wait_atom_failed = object(
         &[
             "v",
@@ -278,6 +279,7 @@ pub(super) fn send() -> Arc<JsonObject> {
             "screen": {"type": "string"},
         }),
     );
+
     let lifecycle = lifecycle(&mut schemas);
 
     return schemas.finish(vec![

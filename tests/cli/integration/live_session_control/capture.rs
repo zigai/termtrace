@@ -150,6 +150,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
 
     let deadline_idle: serde_json::Value =
         serde_json::from_slice(&output).expect("idle deadline JSON");
+
     assert_eq!(deadline_idle["outcome"], "deadline");
     assert!(
         deadline_idle["changing_rows"]

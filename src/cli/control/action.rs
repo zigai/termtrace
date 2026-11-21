@@ -65,7 +65,6 @@ fn parse_scroll_str(s: &str) -> Result<(u16, u16, i16)> {
             "invalid scroll lines 0; negative scrolls up and positive scrolls down"
         ));
     }
-
     return Ok((column, row, lines));
 }
 
@@ -222,7 +221,6 @@ fn send_steps(arguments: &SendArgs) -> Result<Vec<PlannedStep>> {
     }
 
     flush_input(&mut steps, &mut atoms);
-
     return Ok(steps);
 }
 
@@ -324,7 +322,6 @@ fn parse_action_atom(atom: &str) -> Result<AtomAction> {
             text: text.to_owned(),
         }));
     }
-
     return Ok(AtomAction::Input);
 }
 
@@ -383,6 +380,7 @@ pub(in crate::cli) fn run_send(
         changes,
         changing_rows,
     } = outcome;
+
     let output_wait = output_postcondition(&arguments, &resolved);
     let report_changes = arguments.screen == SendScreen::Diff;
 
@@ -484,8 +482,8 @@ struct OutputWait {
 
 fn output_postcondition(arguments: &SendArgs, resolved: &ResolvedSessionRef) -> Option<OutputWait> {
     let text = arguments.until_output.as_ref()?;
-
     let timeout = arguments.timeout.unwrap_or(defaults::WAIT_TIMEOUT);
+
     if wait_for_output(&resolved.path, text.as_bytes(), timeout).is_ok() {
         return Some(OutputWait {
             matched: true,
@@ -637,7 +635,6 @@ fn write_trailing_postcondition(
         changing_rows,
         output_wait,
     } = report;
-
     let frame = match postcondition.as_deref() {
         Some(CommandPostcondition::Idle(Ok(capture))) => Some(capture.frame.clone()),
         Some(CommandPostcondition::Screen(Ok(wait))) => Some(wait.frame.clone()),
@@ -662,7 +659,6 @@ fn write_trailing_postcondition(
             ),
             Some(CommandPostcondition::Screen(Err(_))) => (false, "screen", "error".to_owned()),
         };
-
     let matched = output_wait.map_or(postcondition_matched, |wait| return wait.matched);
     let report_changes = arguments.screen == SendScreen::Diff;
 

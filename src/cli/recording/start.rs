@@ -187,7 +187,6 @@ pub(super) fn report_start_outcome(
         let fields = output
             .as_object_mut()
             .ok_or_else(|| miette::miette!("start response is not an object"))?;
-
         fields.insert("startup_state".to_owned(), serde_json::json!(startup_state));
         fields.insert(
             "recorder_pid".to_owned(),

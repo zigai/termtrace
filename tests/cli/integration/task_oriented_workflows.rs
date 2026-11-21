@@ -909,6 +909,7 @@ fn send_wait_atom_blocks_until_the_screen_shows_the_text() {
         .clone();
 
     let sent: serde_json::Value = serde_json::from_slice(&output).expect("send JSON");
+
     assert_eq!(sent["ok"], true);
     assert!(
         sent["screen"]
@@ -953,6 +954,7 @@ fn send_wait_atom_blocks_until_the_screen_shows_the_text() {
         .clone();
 
     let failed: serde_json::Value = serde_json::from_slice(&output).expect("wait atom JSON");
+
     assert_eq!(failed["code"], "wait_atom_failed");
     assert_eq!(failed["atom"], "wait:NEVER_SHOWN");
     assert_eq!(failed["atom_index"], 1);
@@ -1017,6 +1019,7 @@ fn send_until_output_waits_for_program_output() {
         .clone();
 
     let sent: serde_json::Value = serde_json::from_slice(&output).expect("send JSON");
+
     assert_eq!(sent["postcondition"]["kind"], "output");
     assert_eq!(sent["postcondition"]["matched"], true);
     assert_eq!(sent["postcondition"]["outcome"], "matched");
@@ -1042,6 +1045,7 @@ fn send_until_output_waits_for_program_output() {
         .clone();
 
     let unmet: serde_json::Value = serde_json::from_slice(&output).expect("unmet output JSON");
+
     assert_eq!(unmet["postcondition"]["kind"], "output");
     assert_eq!(unmet["postcondition"]["matched"], false);
     assert_eq!(unmet["postcondition"]["outcome"], "deadline");

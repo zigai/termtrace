@@ -471,6 +471,7 @@ impl Session {
             request_id: Some(request_id),
             if_state: if index == 0 { request.guard.if_state.clone() } else { None },
         };
+
         if let SendStep::Wait(predicate) = step {
             return self.wait_step(index, request_id, predicate, request.wait_timeout);
         }

@@ -192,6 +192,7 @@ impl StartInput {
         push_millis(&mut arguments, "--timeout", self.timeout_ms);
 
         reject_controlled_environment(&self.env)?;
+
         let environment = environment_spec(self.env)?;
         if let Some(file) = &environment {
             push_value(

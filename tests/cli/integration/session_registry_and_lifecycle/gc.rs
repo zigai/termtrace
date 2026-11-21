@@ -322,10 +322,14 @@ fn stale_registry_records_are_skipped_replaced_and_reaped() {
     let registry = state.join("registry");
 
     fs_err::create_dir_all(&sessions).expect("managed session directory");
+
     fs_err::create_dir_all(&registry).expect("managed registry directory");
+
     fs_err::set_permissions(&state, Permissions::from_mode(0o700)).expect("private state root");
+
     fs_err::set_permissions(&sessions, Permissions::from_mode(0o700))
         .expect("private managed session directory");
+
     fs_err::set_permissions(&registry, Permissions::from_mode(0o700))
         .expect("private registry directory");
 
@@ -336,11 +340,11 @@ fn stale_registry_records_are_skipped_replaced_and_reaped() {
             br#"{"format":"termtrace-session-registry-entry","version":1}"#,
         )
         .expect("stale registry record");
+
         fs_err::set_permissions(&path, Permissions::from_mode(0o600))
             .expect("private stale record");
         return path;
     };
-
     stale_record("stale");
 
     let mut list = Command::cargo_bin("termtrace").expect("binary should build");
@@ -380,7 +384,6 @@ fn stale_registry_records_are_skipped_replaced_and_reaped() {
         .success();
 
     let abandoned = stale_record("abandoned");
-
     let mut apply = Command::cargo_bin("termtrace").expect("binary should build");
     let report = apply
         .env("TERMTRACE_STATE_DIR", &state)

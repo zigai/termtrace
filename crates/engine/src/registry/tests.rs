@@ -165,12 +165,10 @@ fn finished_session_releases_its_name_for_a_new_binding() {
     let registry = SessionRegistry::open(temporary.path().join("state")).expect("registry");
     let first = record_fixture(temporary.path().join("first"));
     let original = registry.register("demo", &first).expect("register first");
-
     let second = record_fixture(temporary.path().join("second"));
     let rebound = registry
         .register("demo", &second)
         .expect("reuse the name of a finished session");
-
     assert_ne!(rebound.session_id, original.session_id);
     assert_eq!(registry.resolve("demo").expect("resolve rebound"), rebound);
     assert!(
@@ -193,7 +191,6 @@ fn incomplete_session_releases_its_name_for_a_new_binding() {
     let rebound = registry
         .register("demo", &replacement)
         .expect("reuse the name of an incomplete session");
-
     assert_eq!(registry.resolve("demo").expect("resolve rebound"), rebound);
 }
 
@@ -208,12 +205,14 @@ fn stale_registry_records_are_skipped_replaced_and_reaped() {
             br#"{"format":"termtrace-session-registry-entry","version":1}"#,
         )
         .expect("stale record");
+
         fs_err::set_permissions(&path, Permissions::from_mode(0o600))
             .expect("private stale record");
     };
     write_stale();
 
     assert!(registry.list(true).expect("list").is_empty());
+
     let error = registry
         .resolve("demo")
         .expect_err("stale resolve")
@@ -230,6 +229,7 @@ fn stale_registry_records_are_skipped_replaced_and_reaped() {
     registry.release(&reservation).expect("release reservation");
 
     write_stale();
+
     assert_eq!(
         registry.reap_stale_aliases(true).expect("reap stale"),
         vec!["demo".to_owned()]

@@ -247,7 +247,6 @@ fn status_lists_finished_sessions_newest_first_and_dead_sends_report_their_exit(
         .iter()
         .filter_map(|row| return row["alias"].as_str())
         .collect::<Vec<_>>();
-
     assert_eq!(aliases, ["second", "first"]);
     assert!(
         rows.iter()

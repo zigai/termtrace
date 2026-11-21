@@ -434,11 +434,9 @@ fn pointer_atoms_encode_hover_scroll_and_drag() {
             else {
                 return None;
             };
-
             return Some((operation.clone(), data.as_bytes().to_vec()));
         })
         .collect();
-
     assert_eq!(
         encoded,
         vec![

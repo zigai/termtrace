@@ -13,7 +13,6 @@ impl SessionRegistry {
         validate_alias(alias)?;
         let entry = self.entry_for(alias, session)?;
         self.reclaim_name(alias, "register session alias")?;
-
         let encoded = self.encode_entry(&entry)?;
         write_secure(&self.entry_path(alias), &encoded)?;
 

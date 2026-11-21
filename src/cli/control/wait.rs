@@ -127,11 +127,9 @@ fn compact_wait_report(
         "outcome": outcome,
         "predicate": predicate,
     });
-
     let Some(object) = report.as_object_mut() else {
         return Err(miette::miette!("wait report is not a JSON object"));
     };
-
     object.insert("state".to_owned(), serde_json::json!(frame.state_hash));
     object.insert(
         "size".to_owned(),

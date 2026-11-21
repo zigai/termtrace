@@ -194,11 +194,13 @@ pub(super) fn encode_mouse(
     };
     unsafe {
         sys::ghostty_mouse_event_set_action(event.0, action);
+
         // A null button is pointer motion with no button held; the encoder's event starts
         // with no button, so only a pressed button needs to be recorded.
         if let Some(button) = button {
             sys::ghostty_mouse_event_set_button(event.0, button);
         }
+
         sys::ghostty_mouse_event_set_position(event.0, position);
     }
 

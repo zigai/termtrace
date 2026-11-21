@@ -135,7 +135,6 @@ pub(in crate::cli) fn run_screen(
                     let SessionError::StableCaptureIncomplete { result } = &error else {
                         return miette::miette!("screen did not settle: {error}");
                     };
-
                     let rows = result.changing_rows.as_deref().unwrap_or_default();
 
                     return miette::miette!("{}", changing_rows_notice(rows));

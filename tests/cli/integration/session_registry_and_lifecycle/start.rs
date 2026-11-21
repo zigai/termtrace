@@ -5,7 +5,6 @@ fn finished_session_name_starts_again_while_a_live_one_blocks_it() {
     let temporary = TempDir::new().expect("temporary directory");
     let state = temporary.path().join("state");
     let waiting_shell = "trap 'exit 0' TERM; printf READY; while :; do sleep 0.1; done";
-
     let mut start = Command::cargo_bin("termtrace").expect("binary should build");
     start
         .env("TERMTRACE_STATE_DIR", &state)

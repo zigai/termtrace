@@ -5,7 +5,6 @@ use termtrace_model::execution::layout::SessionLayout;
 fn stop_json_reports_the_compact_session_outcome() {
     let temporary = TempDir::new().expect("temporary directory");
     let state = temporary.path().join("state");
-
     let mut start = Command::cargo_bin("termtrace").expect("binary should build");
     let started = start
         .env("TERMTRACE_STATE_DIR", &state)
@@ -22,7 +21,6 @@ fn stop_json_reports_the_compact_session_outcome() {
         .clone();
     let started = compact_json_line(&started);
     let session = started["canonical_session"].clone();
-
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
     let stopped = stop
         .env("TERMTRACE_STATE_DIR", &state)

@@ -788,7 +788,6 @@ impl Session {
             let Ok(later) = self.frame(projection) else {
                 return None;
             };
-
             if later.state_hash == first.state_hash {
                 continue;
             }
