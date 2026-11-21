@@ -92,7 +92,7 @@ fn start_postcondition() -> Value {
             "outcome": {"type": "string"},
             "error": {"type": "string"},
             "state": {"type": "string"},
-            "state_hash": {"type": "string"},
+            "changing_rows": {"type": "array", "items": {"type": "integer", "minimum": 0}},
             "event_seq": {"type": "integer"},
             "output_end_offset": {"type": "integer"},
             "monotonic_ns": {"type": "integer"},

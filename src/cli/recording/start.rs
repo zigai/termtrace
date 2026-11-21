@@ -181,9 +181,11 @@ pub(super) fn report_start_outcome(
             .insert("postcondition".to_owned(), postcondition);
     }
 
-    let succeeded = synchronization_ok && startup_state != "completed_failure";
+    let postcondition_errored = output
+        .get("postcondition")
+        .is_some_and(|postcondition| return postcondition.get("error").is_some());
 
-    if !succeeded {
+    if startup_state == "completed_failure" || postcondition_errored {
         let fields = output
             .as_object_mut()
             .ok_or_else(|| miette::miette!("start response is not an object"))?;
@@ -243,6 +245,7 @@ fn start_postcondition(
             serde_json::json!({
                 "matched": true,
                 "kind": "output",
+                "outcome": "matched",
                 "event_seq": waited.event_seq,
                 "output_end_offset": waited.output_end_offset,
                 "monotonic_ns": waited.monotonic_ns,
@@ -262,17 +265,21 @@ fn start_postcondition(
             .into_diagnostic()?;
 
         let matched = capture.quality.is_settled();
+        let mut postcondition = serde_json::json!({
+            "matched": matched,
+            "kind": "idle",
+            "outcome": capture.quality,
+            "state": capture.frame.state_hash,
+            "size": [capture.frame.geometry.cols, capture.frame.geometry.rows],
+            "screen": screen_text(&capture.frame),
+        });
 
-        return Ok((
-            matched,
-            serde_json::json!({
-                "matched": matched,
-                "kind": "idle",
-                "outcome": capture.quality,
-                "state_hash": capture.frame.state_hash,
-                "screen": screen_text(&capture.frame),
-            }),
-        ));
+        if let (Some(fields), Some(rows)) = (postcondition.as_object_mut(), &capture.changing_rows)
+        {
+            fields.insert("changing_rows".to_owned(), serde_json::json!(rows));
+        }
+
+        return Ok((matched, postcondition));
     }
 
     let (kind, predicate) = match (
