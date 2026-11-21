@@ -15,6 +15,13 @@ it needs no follow-up `screen` call. Keep that output; redirecting it to
 For several MCP sessions, send without `until`, then call `wait` on each session
 in parallel. MCP clients may serialize mutating sends, but can run read-only waits together.
 
+MCP tools name the condition `until`, with `kind` one of `idle`, `screen`,
+`screen_absent`, `screen_regex`, or `output`; `wait` requires it and takes `screen`
+`text` (default) or `state` as `--report`. The CLI spells the same conditions
+`--until-*` on `record` and `send`, and `--screen`, `--screen-absent`,
+`--screen-regex`, `--output`, or `--idle` on `wait`. A name can be reused once
+its session ends; MCP `restart` relaunches a completed session under the same name.
+
 Pass `--json` to receive structured JSON objects on stdout:
 
 ```sh
@@ -47,7 +54,7 @@ canonical child output. Use `wait --output` separately only when byte history is
 the requirement.
 
 `wait --screen` and `wait --idle` also answer for a session that has completed: the
-predicate is evaluated once on the final presented screen (`quality: completed`), so a
+predicate is evaluated once on the final presented screen (`outcome: completed`), so a
 program that prints and exits still satisfies a wait for its last output. A match counts
 when it met the requested stability, or when it held on the final screen of a completed
 child; pass `--require-live-stability` to `wait --idle` to reject completed sessions.
@@ -59,8 +66,11 @@ Supported input forms include:
 - **Modifiers**: `ctrl+f`, `ctrl-c`, `alt-enter`, `shift-tab`, stacked as `ctrl+shift+x` or `super-f5`. The Python and Node `send_key`/`sendKey` accept the same grammar.
 - **Pacing**: `--pace 20ms` types `text:` atoms one character at a time.
 - **Delay**: `text:hello sleep:200ms enter` pauses before Enter; this lets Codex submit typed text instead of treating Enter as part of a paste.
+- **Synchronization**: `text:hello wait:Ready` pauses the sequence until the screen shows `Ready`.
 - **Text**: `text:any UTF-8 text`, `paste:pasted text`.
-- **Mouse**: `click:COL,ROW` (e.g. `click:10,20`).
+- **Mouse**: `click:COL,ROW` (e.g. `click:10,20`), `hover:COL,ROW`,
+  `scroll:COL,ROW,LINES` (negative lines scroll up), and
+  `drag:COL,ROW,COL,ROW`; coordinates are zero-based columns and rows.
 - **Activation**: `activate:"Button Text"` (finds visible row-contained text and activates it).
 - **PTY Resize**: `resize:COLS,ROWS` atom or `--resize COLSxROWS` flag.
 - **Signals**: `signal:SIGINT`, `signal:SIGTERM`, `signal:SIGHUP`.

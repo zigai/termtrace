@@ -13,7 +13,11 @@ and communicate strictly via exit code.
 
 ## Choose the interface first
 
-- For quick one-shot inspection and control, use the CLI:
+- When the Termtrace MCP tools are available (`claude mcp add termtrace -- termtrace mcp`),
+  use them for live control: `start`, `send`, `wait`, `screen`, `screenshot`,
+  `stop`, `restart`, and `gc`. They take the same session names as the CLI.
+- When they are not available, or for CLI-only commands such as `video`, `test`,
+  and `tmux`, use the CLI:
   - `record -d <NAME> --until-*` for background recording and initial synchronization.
   - `screen <SESSION> [--since <STATE>]` to inspect the live presented terminal viewport.
   - `send <SESSION> [INPUT]... [--until-*]` for semantic input (keys, clicks, resize, signal) plus postcondition.
@@ -22,8 +26,6 @@ and communicate strictly via exit code.
   - `analyze <SESSION>` after completion to triage the last action and view diagnostic findings.
   - `screenshot`, `video`, or `bundle` to generate self-contained artifacts.
   - Pass `--json` when structured data is required.
-- When the Termtrace MCP tools are available (`claude mcp add termtrace -- termtrace mcp`),
-  prefer them for live control. They take the same session names as the CLI.
 - For complex, stateful workflows (loops, retries, branching, multi-step agent drivers),
   use the Rust SDK (`termtrace_sdk`) rather than chaining dozens of subshell CLI calls.
   Read [client workflows](references/client-workflows.md).
@@ -43,8 +45,8 @@ and communicate strictly via exit code.
   `analyze timeline`, `analyze diff`, and `analyze explain` when explicit endpoints or forensic detail are
   needed.
 - Cryptographic validity: `analyze verify <SESSION>`.
-- Native pixels: request native screenshot/video explicitly; semantic images do
-  not become native evidence.
+- Native pixels: a native screenshot or video; a live session's screenshot is
+  native by default, and semantic images do not become native evidence.
 - Handoff or publication: use top-level `screenshot`, `video`, or `bundle`
   and read [artifact branches](references/artifacts.md). For debugging bundles,
   use `bundle --profile debug` (with optional `--screenshot`).
@@ -72,7 +74,8 @@ from an older command name.
    `--until-screen` and a `--timeout` shorter than your shell tool's timeout,
    never with `sleep`. `send` prints the resulting state and screen.
 3. Use the returned presented-state hash with `screen --since STATE` to receive
-   only a changed screen. Pass it through `--if-state` when an action is valid
+   only a changed screen. A name is free to reuse once its session has ended:
+   `start` a new session under it, or `restart` the completed one. Pass it through `--if-state` when an action is valid
    only for that exact presentation.
 4. For multi-action or interactive loops, use the Rust SDK or state-guarded send sequences.
 5. Mark meaningful workflow milestones only: `send my-app mark:checkpoint`.
