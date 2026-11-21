@@ -129,15 +129,10 @@ pub(super) fn report_start_outcome(
 
     let mut output = serde_json::json!({
         "kind": "started",
-        "startup_state": startup_state,
         "alias": entry.alias,
         "canonical_session": PathValue::from_bytes(&entry.canonical_session),
 
         "session_id": entry.session_id,
-        "recorder_pid": entry.recorder_pid,
-        "recorder_process_start_ticks": entry.recorder_process_start_ticks,
-        "stdout_log": path_value(&paths.stdout_log),
-        "stderr_log": path_value(&paths.stderr_log),
         "ready": completion.is_none(),
         "completion": completion,
     });
@@ -151,7 +146,7 @@ pub(super) fn report_start_outcome(
                 serde_json::json!({
                     "matched": false,
                     "ended": true,
-                    "quality": "completed_before_match",
+                    "outcome": "completed_before_match",
                 }),
             )
         } else {
@@ -175,6 +170,32 @@ pub(super) fn report_start_outcome(
             .as_object_mut()
             .ok_or_else(|| miette::miette!("start response is not an object"))?
             .insert("postcondition".to_owned(), postcondition);
+    }
+
+    let succeeded = synchronization_ok && startup_state != "completed_failure";
+
+    if !succeeded {
+        let fields = output
+            .as_object_mut()
+            .ok_or_else(|| miette::miette!("start response is not an object"))?;
+
+        fields.insert("startup_state".to_owned(), serde_json::json!(startup_state));
+        fields.insert(
+            "recorder_pid".to_owned(),
+            serde_json::json!(entry.recorder_pid),
+        );
+        fields.insert(
+            "recorder_process_start_ticks".to_owned(),
+            serde_json::json!(entry.recorder_process_start_ticks),
+        );
+        fields.insert(
+            "stdout_log".to_owned(),
+            serde_json::json!(path_value(&paths.stdout_log)),
+        );
+        fields.insert(
+            "stderr_log".to_owned(),
+            serde_json::json!(path_value(&paths.stderr_log)),
+        );
     }
 
     if json {
@@ -223,9 +244,8 @@ fn start_postcondition(
             serde_json::json!({
                 "matched": matched,
                 "kind": "idle",
-                "quality": capture.quality,
+                "outcome": capture.quality,
                 "state_hash": capture.frame.state_hash,
-                "frame_hash": capture.frame.frame_hash,
                 "screen": screen_text(&capture.frame),
             }),
         ));
@@ -261,8 +281,7 @@ fn start_postcondition(
             "matched": matched,
             "kind": kind,
             "state": waited.frame.state_hash,
-            "frame_hash": waited.frame.frame_hash,
-            "quality": waited.quality,
+            "outcome": waited.quality,
             "size": [waited.frame.geometry.cols, waited.frame.geometry.rows],
             "ended": matches!(
                 waited.quality,

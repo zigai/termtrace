@@ -67,11 +67,7 @@ pub(in crate::cli) fn run_restart(
             "canonical_session": PathValue::from_bytes(&successor.canonical_session),
 
             "session_id": successor.session_id,
-            "recorder_pid": successor.recorder_pid,
-            "recorder_process_start_ticks": successor.recorder_process_start_ticks,
         },
-        "stdout_log": PathBuf::from(OsString::from_vec(report.stdout_log.into_bytes())),
-        "stderr_log": PathBuf::from(OsString::from_vec(report.stderr_log.into_bytes())),
         "ready": true,
     });
 
