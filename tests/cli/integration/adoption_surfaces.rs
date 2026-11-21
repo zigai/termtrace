@@ -3,8 +3,9 @@
 use crate::support::*;
 use std::os::{
     linux::net::SocketAddrExt as _,
-    unix::net::{SocketAddr, UnixListener},
+    unix::net::{SocketAddr, UnixListener, UnixStream},
 };
+use termtrace_model::protocol::control::ControlResponse;
 
 #[test]
 fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
@@ -140,25 +141,23 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
             OsString::from("printf FINAL_READY; sleep .2"),
         ]))
         .expect("launch final-state fixture");
-
+    final_state
+        .complete(Duration::from_secs(5))
+        .expect("final-state completion");
     let final_wait = final_state
         .wait_screen(
             ScreenPredicate::Contains {
                 text: "FINAL_READY".to_owned(),
             },
-            Duration::from_secs(5),
+            Duration::ZERO,
             Duration::from_secs(5),
         )
-        .expect("completed final state is stable");
-    assert!(final_wait.is_satisfied());
-    assert!(matches!(
-        final_wait.quality,
-        ScreenWaitQuality::ChildCompleted | ScreenWaitQuality::Completed
-    ));
-
-    final_state
-        .complete(Duration::from_secs(5))
-        .expect("final-state completion");
+        .expect("completed final state");
+    assert!(
+        final_wait.matched,
+        "completed final screen must contain FINAL_READY"
+    );
+    assert_eq!(final_wait.quality, ScreenWaitQuality::Completed);
 
     let query_session = temporary.path().join("query-heavy");
     let mut query = Command::cargo_bin("termtrace").expect("binary should build");
@@ -181,6 +180,71 @@ fn framework_neutral_terminal_fixtures_cover_input_modes_and_queries() {
     assert!(log.events.iter().any(|record| {
         return matches!(record.event, Event::QueryResponse { .. });
     }));
+}
+
+#[test]
+fn screen_wait_on_a_running_child_settles_when_the_child_completes() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let terminal = ClientTerminal::new(
+        env!("CARGO_BIN_EXE_termtrace"),
+        temporary.path().join("child-completed-evidence"),
+    );
+
+    // The background holder keeps the PTY open until the recorder reaps the shell, so output
+    // cannot close before the recorder has seen the child exit.
+    let mut session = terminal
+        .start(LaunchSpec::new([
+            OsString::from("/bin/sh"),
+            OsString::from("-c"),
+            OsString::from(
+                "printf FINAL_READY; IFS= read -r line; (trap '' HUP; while kill -0 $$ 2>/dev/null; do sleep .01; done) &",
+            ),
+        ]))
+        .expect("launch child-completed fixture");
+
+    let manifest = read_manifest(session.path()).expect("child-completed manifest");
+    let address = SocketAddr::from_abstract_name(manifest.control_socket.as_bytes())
+        .expect("control socket address");
+
+    let request = ControlRequest::new(ControlCommand::WaitScreen {
+        predicate: ScreenPredicate::Contains {
+            text: "FINAL_READY".to_owned(),
+        },
+        stable_for_ns: 3_600_000_000_000,
+        timeout_ns: 3_600_000_000_000,
+        projection: ScreenProjectionRequest::default(),
+    });
+
+    // The recorder serves every connection made before its control shutdown, so the wait is
+    // sent before the child is released.
+    let mut wait = UnixStream::connect_addr(&address).expect("connect screen wait");
+    serde_json::to_writer(&mut wait, &request).expect("encode screen wait");
+    wait.write_all(b"\n").expect("terminate screen wait");
+
+    session
+        .act(ActRequest::new().text("\n"))
+        .expect("release the child");
+
+    let mut encoded = Vec::new();
+    wait.read_to_end(&mut encoded).expect("read screen wait");
+    let response: ControlResponse = serde_json::from_slice(&encoded).expect("decode screen wait");
+    assert_eq!(response.request_id, request.request_id);
+
+    let ControlResult::Ok {
+        data: ControlPayload::ScreenWait {
+            matched, quality, ..
+        },
+    } = response.result
+    else {
+        panic!("unexpected screen wait response: {:?}", response.result);
+    };
+
+    assert!(matched, "the final screen must contain FINAL_READY");
+    assert_eq!(quality, ScreenWaitQuality::ChildCompleted);
+
+    session
+        .complete(Duration::from_secs(5))
+        .expect("child-completed completion");
 }
 
 #[test]

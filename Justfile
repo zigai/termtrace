@@ -50,9 +50,13 @@ test-recording:
     cargo nextest run --locked --workspace --lib --bins --test execution_lifecycle --test architecture --ignore-default-filter -E '{{ INTEGRATION_FILTER }}'
 
 # Run CLI/tmux integration on each pull request (requires bootstrap, tmux, and Ghostty on PATH)
-integration:
-    cargo test --locked --test cli
+integration: (integration-cli "all()")
     scripts/test-rust-consumer.sh
+
+# Run the CLI/tmux integration tests selected by a nextest filter expression
+[positional-arguments]
+integration-cli *args:
+    cargo nextest run --locked --test cli --ignore-default-filter -E "$@"
 
 # Build native Python and Node.js language bindings and the Go SDK
 bindings-build: build-python build-node build-go
@@ -96,6 +100,12 @@ update:
 test-go:
     cargo build --locked --bin termtrace
     cd tests/consumers/go_native && TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace go test -count=1 ./...
+
+# Test one Go SDK consumer shard: `run <pattern>` or `skip <pattern>`
+[positional-arguments]
+test-go-shard *args:
+    cargo build --locked --bin termtrace
+    cd tests/consumers/go_native && TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace go test -count=1 "-$1" "$2" ./...
 
 # Type-check and lint the native Python bindings and the Go SDK
 bindings-lint:
@@ -141,7 +151,7 @@ native-test:
 # Exercise original capture through the service and the Rust SDK (requires Ghostty, Xvfb, dbus-run-session, and FFmpeg)
 native-sdk-test:
     cargo build --locked --bin termtrace
-    cargo test --locked -p termtrace-service --test original_recording -- --ignored
+    cargo test --locked -p termtrace-service --test original_recording -- --ignored --test-threads=1
     TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace cargo test --locked --manifest-path tests/consumers/rust/Cargo.toml --features local --tests -- --ignored --test-threads=1
 
 # Run performance and resource benchmarks on demand (requires native capture tooling)
@@ -238,6 +248,82 @@ typecheck: validate
 
 # Run the commit checks
 check: (run-checks "formatcheck" "lockcheck" "audit" "lint" "bindings-lint" "bindings-build" "test")
+
+# Check the files changed since the default branch
+prepush:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{ justfile_directory() }}"
+    base=$(git merge-base origin/main HEAD)
+    mapfile -t changed < <(git diff --name-only --no-renames --diff-filter=d "$base")
+    rust=() manifests=() python=() node=() shell=() markdown=() go=()
+    workspace=false
+    justfile=false
+    for file in "${changed[@]}"; do
+        case "$file" in
+            Cargo.toml | Cargo.lock | rust-toolchain.toml) workspace=true ;;
+            crates/*/Cargo.toml) manifests+=("$file") ;;
+            *.rs) rust+=("$file") ;;
+            *.py) python+=("$file") ;;
+            crates/bindings-node/types.d.ts | crates/bindings-node/dts-header.d.ts | crates/bindings-node/index.d.ts) ;;
+            *.js | *.ts) node+=("$file") ;;
+            *.sh) shell+=("$file") ;;
+            *.md) markdown+=("$file") ;;
+            *.go) go+=("$file") ;;
+            Justfile) justfile=true ;;
+        esac
+    done
+    if ((${#rust[@]} + ${#manifests[@]} > 0)) || [[ $workspace == true ]]; then
+        if ((${#rust[@]} > 0)); then
+            rustfmt --check --edition 2024 "${rust[@]}"
+        fi
+        if [[ $workspace == true ]]; then
+            cargo clippy --locked --workspace --all-targets --all-features
+        else
+            packages=()
+            for file in "${rust[@]}" "${manifests[@]}"; do
+                if [[ $file == crates/*/* ]]; then
+                    crate=${file#crates/}
+                    crate=${crate%%/*}
+                    packages+=("$(grep -m1 '^name = ' "crates/$crate/Cargo.toml" | cut -d'"' -f2)")
+                else
+                    packages+=(termtrace)
+                fi
+            done
+            mapfile -t packages < <(printf '%s\n' "${packages[@]}" | sort -u)
+            cargo clippy --locked --all-targets --all-features "${packages[@]/#/-p}"
+        fi
+    fi
+    if ((${#python[@]} > 0)); then
+        ruff format --check "${python[@]}"
+        ruff check "${python[@]}"
+    fi
+    if ((${#node[@]} > 0)); then
+        oxfmt --check "${node[@]}"
+    fi
+    if ((${#shell[@]} > 0)); then
+        shfmt -d "${shell[@]}"
+    fi
+    if ((${#markdown[@]} > 0)); then
+        just markdown check "${markdown[@]}"
+    fi
+    if [[ $justfile == true ]]; then
+        just --justfile Justfile --fmt --check
+    fi
+    if ((${#go[@]} > 0)); then
+        touches() {
+            local prefix=$1 file
+            for file in "${go[@]}"; do
+                if [[ $file == "$prefix"/* ]]; then return 0; fi
+            done
+            return 1
+        }
+        for module in go tests/consumers/go_native; do
+            if touches "$module"; then
+                (cd "$module" && golangci-lint fmt -d && golangci-lint run ./...)
+            fi
+        done
+    fi
 
 # Remove generated output, caches, and dependencies
 clean: (remove "node_modules" "vendor/ghostty/zig-out" "vendor/ghostty/.zig-cache" ".venv" "dist" "build" ".pytest_cache" ".pyrefly" ".ruff_cache" ".coverage" "htmlcov" ".coverage.*" "coverage.xml" "coverage" ".tools" ".zig-cache" "zig-cache" "zig-out" "fuzz/target" "fuzz/coverage" "tests/consumers/rust/target" "crates/bindings-python/.venv" "crates/bindings-python/dist" "crates/bindings-python/build" "crates/bindings-python/.pytest_cache" "crates/bindings-python/.pyrefly" "crates/bindings-python/.ruff_cache" "crates/bindings-python/.mypy_cache" "crates/bindings-python/.coverage" "crates/bindings-python/htmlcov" "crates/bindings-python/python/termtrace/*.so" "crates/bindings-node/node_modules" "crates/bindings-node/dist" "crates/bindings-node/coverage" "crates/bindings-node/*.node" "tests/consumers/python_native/.venv" "tests/consumers/python_native/.pytest_cache" "tests/consumers/node_native/node_modules" "tests/consumers/node_native/dist" "tests/consumers/node_native/coverage" "benchmarks/.venv" "benchmarks/.pytest_cache" "mutants.out" "mutants.out.old" "**/__pycache__" "crates/bindings-node/**/*.tsbuildinfo" "tests/consumers/node_native/**/*.tsbuildinfo" "target/llvm-cov-target" "benchmarks/.coverage" "benchmarks/.coverage.*" "tests/consumers/python_native/.coverage" "tests/consumers/python_native/.coverage.*")

@@ -714,6 +714,7 @@ func TestAsciicastExportWritesThePlayback(t *testing.T) {
 	)
 	_, err := recording.Screen().WaitForText(ctx, "EXPORT_GO_OK", 5*time.Second)
 	fatal(t, err)
+	fatal(t, recording.Stop(ctx))
 
 	destination := filepath.Join(dir, "playback.cast")
 

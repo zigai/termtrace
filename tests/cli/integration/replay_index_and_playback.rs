@@ -362,7 +362,8 @@ fn ranged_index_reconstructs_preroll_and_honors_half_open_boundaries() {
     assert!(!states.is_empty(), "range must include a baseline");
     assert_eq!(
         states[0].state_id,
-        state_after(&event_log, b"BEFORE").record.state_id
+        output_event_start(&event_log, b"RANGE"),
+        "range baseline is the state before the first ranged output event"
     );
     assert_eq!(states[0].event_seq, None);
     assert_eq!(states[0].monotonic_ns, range_start);
@@ -563,6 +564,38 @@ fn inspect_exits_cleanly_when_downstream_closes_the_pipe() {
         "broken pipe should be a successful early consumer exit: {output:?}"
     );
     assert!(output.stderr.is_empty(), "unexpected panic: {output:?}");
+}
+
+// The stream position where the output event containing `needle` begins.
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helper should stop when its recording fixture is invalid"
+)]
+fn output_event_start(event_log: &EventLog, needle: &[u8]) -> u64 {
+    let mut position = 0_u64;
+    for record in &event_log.events {
+        match &record.event {
+            Event::Output { data } => {
+                let bytes = data.as_bytes();
+                if bytes
+                    .windows(needle.len())
+                    .any(|part| return part == needle)
+                {
+                    return position;
+                }
+
+                position += u64::try_from(bytes.len()).expect("length");
+            }
+            Event::ResizeResult {
+                status: OperationStatus::Applied,
+                ..
+            } => position += 1,
+            _ => {}
+        }
+    }
+
+    panic!("fixture output must contain the needle");
 }
 
 // The state after the first output bytes that end with `needle`, at its stream position.

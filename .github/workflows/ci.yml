@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   TERM: xterm-256color
@@ -24,7 +24,9 @@ env:
   NATIVE_PACKAGES: >-
     build-essential pkg-config ripgrep jq xz-utils tmux ncurses-term ffmpeg
     fonts-dejavu-core fonts-jetbrains-mono imagemagick xvfb xauth x11-utils dbus-daemon dbus-x11
-    libgtk-4-dev libadwaita-1-dev libx11-dev libfontconfig1-dev libfreetype-dev libgl1-mesa-dri libegl-mesa0
+    libgtk-4-1 libadwaita-1-0 libgl1-mesa-dri libegl-mesa0
+  BUILD_PACKAGES: >-
+    libgtk-4-dev libadwaita-1-dev libx11-dev libfontconfig1-dev libfreetype-dev
     gettext meson ninja-build python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
 
 jobs:
@@ -48,7 +50,7 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: ./.github/actions/apt
         with:
-          packages: ${{ env.NATIVE_PACKAGES }}
+          packages: ${{ env.NATIVE_PACKAGES }} ${{ env.BUILD_PACKAGES }}
       # Ubuntu 26.04 ships Blueprint 0.19; this Ghostty checkout needs 0.20 or newer.
       - name: Install Blueprint
         if: steps.cache.outputs.cache-hit != 'true'
@@ -93,7 +95,26 @@ jobs:
           # A lint failure before the first compile would save a cache with no build output.
           rust-cache-on-failure: "false"
           components: clippy,rustfmt
-          tools: just@1.59.0,cargo-machete@0.9.2,cargo-audit@0.22.2,shfmt@3.14.1,editorconfig-checker@3.11.3
+          tools: just@1.59.0,cargo-machete@0.9.2
+      - run: just lint
+
+  format:
+    needs: ghostty
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          submodules: true
+      - uses: ./.github/actions/setup
+        with:
+          packages: ${{ env.BASE_PACKAGES }}
+          ghostty-key: ${{ needs.ghostty.outputs.key }}
+          rust-cache: format
+          tools: just@1.59.0,shfmt@3.14.1,editorconfig-checker@3.11.3
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.15.0
@@ -103,17 +124,59 @@ jobs:
           uv tool install ruff==0.17.3
           uv tool install rumdl==0.3.0
           npm install --global oxfmt@0.76.0
-          cargo install cargo-dylint@6.3.1 dylint-link@6.3.1 --locked
-          cargo install --git https://github.com/zigai/rust-statement-spacing.git cargo-statement-spacing --tag v0.5.0 --locked
-      # The Rust cache keeps only Cargo's own profile directories, so the Dylint output of
-      # `cargo statement-spacing` and its compiler driver need their own.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # The Rust cache keeps only Cargo's own profile directories, so the Dylint binaries,
+      # their compiler drivers, and the statement-spacing output need their own cache.
+      - id: statement-spacing
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            target/statement-spacing
+            ~/.cargo/bin/cargo-dylint
+            ~/.cargo/bin/dylint-link
+            ~/.cargo/bin/cargo-statement-spacing
             ~/.dylint_drivers
-          key: statement-spacing-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'Cargo.toml') }}
-      - run: just formatcheck lockcheck audit lint bindings-lint
+            target/statement-spacing
+          key: statement-spacing-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'dylint.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            statement-spacing-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install Dylint tools
+        if: steps.statement-spacing.outputs.cache-matched-key == ''
+        run: |
+          cargo install cargo-dylint@6.3.1 dylint-link@6.3.1 --locked
+          cargo install --git https://github.com/zigai/rust-statement-spacing.git cargo-statement-spacing --tag v0.5.0 --locked
+      - run: just formatcheck
+      - if: steps.statement-spacing.outputs.cache-matched-key == ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-dylint
+            ~/.cargo/bin/dylint-link
+            ~/.cargo/bin/cargo-statement-spacing
+            ~/.dylint_drivers
+            target/statement-spacing
+          key: ${{ steps.statement-spacing.outputs.cache-primary-key }}
+
+  checks:
+    needs: ghostty
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          submodules: true
+      - uses: ./.github/actions/setup
+        with:
+          packages: ${{ env.BASE_PACKAGES }}
+          ghostty-key: ${{ needs.ghostty.outputs.key }}
+          rust-cache: checks
+          tools: just@1.59.0,cargo-audit@0.22.2
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go/go.mod
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
+          install-only: true
+      - run: just lockcheck audit bindings-lint
 
   test:
     needs: ghostty
@@ -133,6 +196,15 @@ jobs:
 
   integration:
     needs: ghostty
+    name: integration (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: cli-a
+            filter: "test(/^(scenario_and_reviewer_workflows|live_session_control|show_workflows|artifacts_and_bundles|timeline_analysis)::/)"
+          - name: cli-b
+            filter: "not test(/^(scenario_and_reviewer_workflows|live_session_control|show_workflows|artifacts_and_bundles|timeline_analysis)::/)"
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
@@ -145,9 +217,30 @@ jobs:
         with:
           packages: ${{ env.NATIVE_PACKAGES }}
           ghostty-key: ${{ needs.ghostty.outputs.key }}
-          rust-cache: integration
+          rust-cache: integration-${{ matrix.name }}
           ghostty-on-path: "true"
-      - run: just integration
+      - env:
+          SHARD_FILTER: ${{ matrix.filter }}
+        run: just integration-cli "$SHARD_FILTER"
+
+  integration-consumer:
+    needs: ghostty
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    env:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          submodules: true
+      - uses: ./.github/actions/setup
+        with:
+          packages: ${{ env.NATIVE_PACKAGES }}
+          ghostty-key: ${{ needs.ghostty.outputs.key }}
+          rust-cache: integration-consumer
+          ghostty-on-path: "true"
+      - run: cargo build --locked --bin termtrace
+      - run: scripts/test-rust-consumer.sh
 
   python:
     needs: ghostty
@@ -188,6 +281,17 @@ jobs:
 
   go:
     needs: ghostty
+    name: go (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: go-a
+            mode: run
+            pattern: "^(TestOriginal|TestAScreenshot|TestTmux|TestThe)"
+          - name: go-b
+            mode: skip
+            pattern: "^(TestOriginal|TestAScreenshot|TestTmux|TestThe)"
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
@@ -200,12 +304,16 @@ jobs:
         with:
           packages: ${{ env.NATIVE_PACKAGES }}
           ghostty-key: ${{ needs.ghostty.outputs.key }}
-          rust-cache: go
+          rust-cache: go-${{ matrix.name }}
           ghostty-on-path: "true"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go/go.mod
-      - run: just build-go test-go
+      - run: just build-go
+      - env:
+          SHARD_MODE: ${{ matrix.mode }}
+          SHARD_PATTERN: ${{ matrix.pattern }}
+        run: just test-go-shard "$SHARD_MODE" "$SHARD_PATTERN"
 
   native:
     needs: ghostty
