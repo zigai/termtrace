@@ -61,16 +61,17 @@ pub(super) fn run_detached_record(
     let registry = RegistryService::open_default().into_diagnostic()?;
     let executable = env::current_exe().into_diagnostic()?;
     let stdin = if recording.environment_spec_stdin {
-        let mut bytes = Vec::new();
-        io::stdin()
-            .take(4 * 1024 * 1024 + 1)
-            .read_to_end(&mut bytes)
-            .into_diagnostic()?;
-
-        Some(bytes)
+        Some(record::read_environment_stdin()?)
     } else {
         None
     };
+
+    // A detached recorder must reject a controlled variable before it is spawned to report it.
+    if let Some(environment) = record::supplied_environment(&recording, stdin.as_deref())? {
+        environment
+            .validate()
+            .map_err(|error| return miette::miette!("{error}"))?;
+    }
 
     let started = registry
         .start_detached(
