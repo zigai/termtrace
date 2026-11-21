@@ -146,6 +146,8 @@ native-test:
     cargo test --locked --test cli native_capabilities:: -- --ignored
     cargo test --locked --test cli retained_native_video_exports_without_native_capture_tools -- --ignored
     cargo test --locked --test cli top_level_video_auto_captures_native_and_overwrites_output -- --ignored
+    cargo test --locked --test cli native_frame_edits_start_at_the_frame_they_name -- --ignored
+    cargo test --locked --test cli native_screenshot_leaves_no_native_processes_behind_the_server -- --ignored
     cargo test --locked --test cli original_native -- --ignored
 
 # Exercise original capture through the service and the Rust SDK (requires Ghostty, Xvfb, dbus-run-session, and FFmpeg)
