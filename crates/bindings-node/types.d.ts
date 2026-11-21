@@ -2825,7 +2825,7 @@ export interface RegistryListEntry {
   /** Exact canonical session path bytes. */
   canonical_session: PathValue
   /** Effective command bytes when the manifest is readable. */
-  command?: Array<Base64Bytes> | null
+  command?: Array<PathValue> | null
   /** Focused diagnostic for unhealthy entries. */
   diagnostic?: string | null
   /** Initial grid and pixel geometry when the manifest is readable. */

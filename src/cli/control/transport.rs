@@ -1,10 +1,12 @@
 use super::*;
+use crate::cli::output::path_value;
 use std::{ffi::OsString, fmt::Write as _, os::unix::ffi::OsStringExt as _};
 use termtrace_engine::registry::SessionRegistry;
 use termtrace_model::artifact::original::{original_capture_status_path, OriginalCaptureStatus};
 use termtrace_model::protocol::control::ClockSample;
 use termtrace_model::value::path_bytes::PathValue;
 use termtrace_sdk::session::{original_capture_status, SessionStatus};
+use uuid::Uuid;
 
 pub(in crate::cli) fn run_status(
     response: &mut ResponseWriter,
@@ -58,7 +60,17 @@ pub(in crate::cli) fn run_status(
 
     let Some(requested_session) = arguments.session else {
         let registry = SessionRegistry::open_default().into_diagnostic()?;
-        let entries = registry.list(false).into_diagnostic()?;
+        let entries = registry
+            .list(true)
+            .into_diagnostic()?
+            .into_iter()
+            .filter(|entry| {
+                return matches!(
+                    entry.lifecycle,
+                    SessionPhase::Live | SessionPhase::Completed
+                );
+            })
+            .collect::<Vec<_>>();
 
         if arguments.json {
             return write_json_pretty(response, &entries);
@@ -217,6 +229,7 @@ pub(in crate::cli) fn run_stop(
     response: &mut ResponseWriter,
     arguments: StopArgs,
 ) -> Result<ExitCode> {
+    let requested_session = arguments.session.clone();
     let resolved = resolve_session(arguments.session)?;
     if !matches!(resolved.phase, SessionPhase::Live | SessionPhase::Completed) {
         return write_session_lifecycle(response, &resolved, "stop", ExitCode::FAILURE);
@@ -263,10 +276,15 @@ pub(in crate::cli) fn run_stop(
             "stop requested",
         ),
         StopOutcome::Completed { completion } => (
-            serde_json::json!({
-                "kind": "completed",
-                "completion": completion,
-            }),
+            serde_json::to_value(&StoppedResponse {
+                kind: "stopped",
+                alias: stopped_alias(&requested_session, &resolved.path),
+                session: path_value(&resolved.path),
+                session_id: completion.session_id,
+                exit_code: completion.exit_code,
+                signal: completion.signal_name,
+            })
+            .into_diagnostic()?,
             if already_completed { "already completed" } else { "stopped" },
         ),
     };
@@ -285,4 +303,27 @@ fn original_capture(session: &Path) -> Result<Option<OriginalCaptureStatus>> {
         return Ok(None);
     }
     return original_capture_status(session).map(Some).into_diagnostic();
+}
+
+#[derive(serde::Serialize)]
+struct StoppedResponse {
+    kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alias: Option<String>,
+    session: PathValue,
+    session_id: Uuid,
+    exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signal: Option<String>,
+}
+
+/// The registry name bound to `session` when the command was given that name.
+fn stopped_alias(requested: &Path, session: &Path) -> Option<String> {
+    let name = requested.to_str()?;
+    let entry = SessionRegistry::open_default().ok()?.resolve(name).ok()?;
+
+    if entry.session_path() != session {
+        return None;
+    }
+    return Some(entry.alias);
 }
