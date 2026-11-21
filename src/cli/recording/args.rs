@@ -73,15 +73,21 @@ pub(in crate::cli) struct RecordArgs {
         num_args = 0..=1,
         require_equals = true,
         default_missing_value = "",
-        conflicts_with_all = ["until_screen", "until_screen_regex"]
+        conflicts_with_all = ["until_screen", "until_screen_absent", "until_screen_regex", "until_output"]
     )]
     pub(in crate::cli) until_idle: Option<Duration>,
     /// Wait until the first presented screen contains this text.
-    #[arg(long, conflicts_with_all = ["until_idle", "until_screen_regex"])]
+    #[arg(long, conflicts_with_all = ["until_idle", "until_screen_absent", "until_screen_regex", "until_output"])]
     pub(in crate::cli) until_screen: Option<String>,
+    /// Wait until the first presented screen no longer contains this text.
+    #[arg(long, conflicts_with_all = ["until_idle", "until_screen", "until_screen_regex", "until_output"])]
+    pub(in crate::cli) until_screen_absent: Option<String>,
     /// Wait until the first presented screen matches this bounded regular expression.
-    #[arg(long, conflicts_with_all = ["until_idle", "until_screen"], value_parser = parse_bounded_screen_regex)]
+    #[arg(long, conflicts_with_all = ["until_idle", "until_screen", "until_screen_absent", "until_output"], value_parser = parse_bounded_screen_regex)]
     pub(in crate::cli) until_screen_regex: Option<String>,
+    /// Wait until the program's output history contains this text.
+    #[arg(long, conflicts_with_all = ["until_idle", "until_screen", "until_screen_absent", "until_screen_regex"])]
+    pub(in crate::cli) until_output: Option<String>,
     /// Maximum time to wait for matching presented state; defaults to the shared wait timeout.
     #[arg(long, value_parser = parse_wait_deadline_duration)]
     pub(in crate::cli) timeout: Option<Duration>,

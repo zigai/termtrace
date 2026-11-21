@@ -37,7 +37,7 @@ use std::{
 };
 use termtrace_engine::{
     analysis::profile::{builtin_terminal_colors, terminal_colors},
-    inspection::wait_for_completion,
+    inspection::{wait_for_completion, wait_for_output},
     recording::{
         inherited_geometry, parse_environment_spec, read_environment_spec,
         record_with_resize_authority, resolve_ghostty_profile, resolve_visual_profile,

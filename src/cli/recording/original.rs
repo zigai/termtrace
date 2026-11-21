@@ -851,7 +851,9 @@ fn run_detached(response: &mut ResponseWriter, mut arguments: RecordArgs) -> Res
         &super::start::StartSynchronization {
             until_idle: arguments.until_idle,
             until_screen: arguments.until_screen.clone(),
+            until_screen_absent: arguments.until_screen_absent.clone(),
             until_screen_regex: arguments.until_screen_regex.clone(),
+            until_output: arguments.until_output.clone(),
             timeout: arguments.timeout.unwrap_or(defaults::WAIT_TIMEOUT),
         },
         arguments.json,

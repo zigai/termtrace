@@ -12,7 +12,9 @@ pub(super) fn run_detached_record(
         startup_timeout_ms,
         until_idle,
         until_screen,
+        until_screen_absent,
         until_screen_regex,
+        until_output,
         timeout,
         json,
         recording,
@@ -44,7 +46,9 @@ pub(super) fn run_detached_record(
     let synchronization = StartSynchronization {
         until_idle,
         until_screen,
+        until_screen_absent,
         until_screen_regex,
+        until_output,
         timeout: timeout.unwrap_or(defaults::WAIT_TIMEOUT),
     };
 
@@ -95,7 +99,9 @@ pub(super) fn run_detached_record(
 pub(super) struct StartSynchronization {
     pub(super) until_idle: Option<Duration>,
     pub(super) until_screen: Option<String>,
+    pub(super) until_screen_absent: Option<String>,
     pub(super) until_screen_regex: Option<String>,
+    pub(super) until_output: Option<String>,
     pub(super) timeout: Duration,
 }
 
@@ -103,7 +109,9 @@ impl StartSynchronization {
     fn requested(&self) -> bool {
         return self.until_idle.is_some()
             || self.until_screen.is_some()
-            || self.until_screen_regex.is_some();
+            || self.until_screen_absent.is_some()
+            || self.until_screen_regex.is_some()
+            || self.until_output.is_some();
     }
 }
 
@@ -224,10 +232,26 @@ fn start_postcondition(
     session: &Path,
     synchronization: &StartSynchronization,
 ) -> Result<(bool, serde_json::Value)> {
-    let session = attach_session(session)?;
+    let attached = attach_session(session)?;
+
+    if let Some(text) = &synchronization.until_output {
+        let waited =
+            wait_for_output(session, text.as_bytes(), synchronization.timeout).into_diagnostic()?;
+
+        return Ok((
+            true,
+            serde_json::json!({
+                "matched": true,
+                "kind": "output",
+                "event_seq": waited.event_seq,
+                "output_end_offset": waited.output_end_offset,
+                "monotonic_ns": waited.monotonic_ns,
+            }),
+        ));
+    }
 
     if let Some(stable_for) = synchronization.until_idle {
-        let capture = session
+        let capture = attached
             .capture_stable(StableCaptureOptions {
                 stable_for,
                 timeout: synchronization.timeout,
@@ -253,23 +277,28 @@ fn start_postcondition(
 
     let (kind, predicate) = match (
         &synchronization.until_screen,
+        &synchronization.until_screen_absent,
         &synchronization.until_screen_regex,
     ) {
-        (Some(text), _) => ("screen", ScreenPredicate::Contains { text: text.clone() }),
-        (_, Some(pattern)) => (
+        (Some(text), _, _) => ("screen", ScreenPredicate::Contains { text: text.clone() }),
+        (_, Some(text), _) => (
+            "screen_absent",
+            ScreenPredicate::Absent { text: text.clone() },
+        ),
+        (_, _, Some(pattern)) => (
             "screen_regex",
             ScreenPredicate::MatchesRegex {
                 pattern: pattern.clone(),
             },
         ),
-        (None, None) => {
+        (None, None, None) => {
             return Err(miette::miette!(
-                "start postcondition requires until-idle, until-screen, or until-screen-regex"
+                "start postcondition requires until-idle, until-screen, until-screen-absent, until-screen-regex, or until-output"
             ));
         }
     };
 
-    let waited = session
+    let waited = attached
         .wait_screen(predicate, Duration::ZERO, synchronization.timeout)
         .into_diagnostic()?;
 
