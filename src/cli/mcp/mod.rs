@@ -15,7 +15,7 @@ use rmcp::{
     transport::stdio,
     ErrorData, RoleServer, ServiceExt as _,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{
     ffi::OsString, os::unix::ffi::OsStringExt as _, path::PathBuf, process::ExitCode,
     result::Result as StdResult,
@@ -23,8 +23,8 @@ use std::{
 use termtrace_model::value::path_bytes::PathValue;
 use tokio::runtime::Builder;
 use tools::{
-    AnalyzeInput, BundleInput, Invocation, ScreenInput, ScreenshotInput, SendInput, StartInput,
-    StatusInput, StopInput, Structure, WaitInput,
+    AnalyzeInput, BundleInput, GcInput, Invocation, RestartInput, ScreenInput, ScreenshotInput,
+    SendInput, StartInput, StatusInput, StopInput, Structure, WaitInput,
 };
 
 mod execute;
@@ -34,7 +34,8 @@ mod tools;
 
 const INSTRUCTIONS: &str = "Termtrace records terminal programs and lets you drive them. \
 Call `start` to launch a program in a recorded terminal, `send` to type keys and wait for the \
-screen to react, `screen` or `wait` to read it, and `stop` when done. Completed sessions \
+screen to react, `screen` or `wait` to read it, and `stop` when done. A completed session can \
+be relaunched with `restart`, and `gc` deletes old completed recordings. Completed sessions \
 support `analyze`, `screenshot`, and `bundle`. Sessions are shared with the `termtrace` CLI \
 by name, and each one is also readable as `termtrace://sessions/{session}` resources. To drive several sessions at once, send without `until`, then call `wait` on each session in parallel. Mutating `send` calls may be serialized by the MCP client.";
 
@@ -170,6 +171,44 @@ impl Server {
     }
 
     #[tool(
+        title = "Restart session",
+        description = "Relaunch a completed session's command in a new recorded terminal session with the same name, optionally overriding geometry, working directory, or terminal type.",
+        output_schema = outputs::restart(),
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn restart(
+        &self,
+        Parameters(input): Parameters<RestartInput>,
+        context: RequestContext<RoleServer>,
+    ) -> StdResult<CallToolResult, ErrorData> {
+        return call(Ok(input.invocation()), &context).await;
+    }
+
+    #[tool(
+        title = "Delete old sessions",
+        description = "Delete completed recordings that have no session name and are older than `older_than_days`, keeping the newest `keep_latest`. Deletes the recordings and their names permanently; there is no dry run.",
+        output_schema = outputs::gc(),
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn gc(
+        &self,
+        Parameters(input): Parameters<GcInput>,
+        context: RequestContext<RoleServer>,
+    ) -> StdResult<CallToolResult, ErrorData> {
+        return call(Ok(input.invocation()), &context).await;
+    }
+
+    #[tool(
         title = "Analyze recording",
         description = "Analyze a completed session: last-action triage, timeline, state diff, explain, diagnostics, integrity verification, or output text.",
         output_schema = outputs::analyze(),
@@ -268,7 +307,7 @@ async fn call(
 ) -> StdResult<CallToolResult, ErrorData> {
     let invocation = match invocation {
         Ok(invocation) => invocation,
-        Err(message) => return Ok(CallToolResult::error(vec![ContentBlock::text(message)])),
+        Err(message) => return Ok(error_result(&message)),
     };
 
     let completed = match execute(&invocation.arguments, context).await {
@@ -276,9 +315,7 @@ async fn call(
         Err(Failure::Cancelled) => {
             return Err(ErrorData::internal_error("request cancelled", None));
         }
-        Err(Failure::Unavailable(message)) => {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(message)]));
-        }
+        Err(Failure::Unavailable(message)) => return Ok(error_result(&message)),
     };
 
     drop(invocation.environment);
@@ -287,14 +324,14 @@ async fn call(
     let Some(structured) = invocation.structure.parse(&completed.stdout) else {
         let message = if completed.stderr.is_empty() { text } else { completed.stderr };
 
-        return Ok(CallToolResult::error(vec![ContentBlock::text(message)]));
+        return Ok(error_result(&message));
     };
 
     let mut content = vec![ContentBlock::text(text)];
     if invocation.structure == Structure::Screenshot && completed.succeeded {
         match screenshot_png(&structured) {
             Ok(png) => content.push(ContentBlock::image(STANDARD.encode(png), "image/png")),
-            Err(message) => return Ok(CallToolResult::error(vec![ContentBlock::text(message)])),
+            Err(message) => return Ok(error_result(&message)),
         }
     }
 
@@ -305,6 +342,13 @@ async fn call(
     };
     result.structured_content = Some(structured);
     return Ok(result);
+}
+
+fn error_result(message: &str) -> CallToolResult {
+    let structured = json!({ "ok": false, "error": message });
+    let mut result = CallToolResult::error(vec![ContentBlock::text(structured.to_string())]);
+    result.structured_content = Some(structured);
+    return result;
 }
 
 fn screenshot_png(output: &Value) -> StdResult<Vec<u8>, String> {

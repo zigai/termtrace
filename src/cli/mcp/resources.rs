@@ -62,8 +62,8 @@ impl View {
                 "The program's output with control sequences removed; needs a completed session."
             }
             Self::Screenshot => {
-                "PNG of the last presented screen, rendered from the recorded terminal state; \
-                 needs a completed session."
+                "PNG of the last presented screen; native pixels for a live session, semantic \
+                 rendering for a completed one."
             }
         };
     }

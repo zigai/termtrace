@@ -65,20 +65,57 @@ pub(super) enum Until {
     },
     /// Wait until the screen contains this exact text.
     Screen { text: String },
+    /// Wait until the screen does not contain this exact text.
+    ScreenAbsent { text: String },
     /// Wait until the screen matches this regular expression.
     ScreenRegex { pattern: String },
+    /// Wait until the program's output history contains this exact text.
+    Output { text: String },
 }
 
 impl Until {
-    fn push(&self, arguments: &mut Vec<String>) {
+    fn push_until(&self, arguments: &mut Vec<String>) {
+        self.push(arguments, "--until-");
+    }
+
+    fn push_wait(&self, arguments: &mut Vec<String>) {
+        self.push(arguments, "--");
+    }
+
+    fn push(&self, arguments: &mut Vec<String>, prefix: &str) {
         match self {
-            Self::Idle { ms: None } => arguments.push("--until-idle".to_owned()),
-            Self::Idle { ms: Some(ms) } => arguments.push(format!("--until-idle={ms}ms")),
-            Self::Screen { text } => push_value(arguments, "--until-screen", text),
-            Self::ScreenRegex { pattern } => {
-                push_value(arguments, "--until-screen-regex", pattern);
+            Self::Idle { ms: None } => arguments.push(format!("{prefix}idle")),
+            Self::Idle { ms: Some(ms) } => arguments.push(format!("{prefix}idle={ms}ms")),
+            Self::Screen { text } => push_value(arguments, &format!("{prefix}screen"), text),
+            Self::ScreenAbsent { text } => {
+                push_value(arguments, &format!("{prefix}screen-absent"), text);
             }
+            Self::ScreenRegex { pattern } => {
+                push_value(arguments, &format!("{prefix}screen-regex"), pattern);
+            }
+            Self::Output { text } => push_value(arguments, &format!("{prefix}output"), text),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ColorPolicy {
+    /// Infer color environment settings from the server.
+    Auto,
+    /// Announce color support to the command.
+    Always,
+    /// Turn color support off for the command.
+    Never,
+}
+
+impl ColorPolicy {
+    fn as_flag(self) -> &'static str {
+        return match self {
+            Self::Auto => "auto",
+            Self::Always => "always",
+            Self::Never => "never",
+        };
     }
 }
 
@@ -99,9 +136,31 @@ pub(super) struct StartInput {
     until: Option<Until>,
     /// Maximum wait for `until` in milliseconds; defaults to 30000. Keep below the MCP client's tool timeout.
     timeout_ms: Option<u64>,
+    /// Terminal type reported to the command; defaults to `xterm-ghostty`.
+    term: Option<String>,
+    /// Color-environment policy for the command.
+    color_policy: Option<ColorPolicy>,
     /// Environment variables set for the command, on top of the server's environment.
     #[serde(default)]
     env: BTreeMap<String, String>,
+}
+
+// Keep in step with the recorder-owned names that `EnvironmentSpec::validate` rejects.
+fn reject_controlled_environment(variables: &BTreeMap<String, String>) -> Result<(), String> {
+    for name in variables.keys() {
+        let owner = match name.as_str() {
+            "TERM" => "the `term` parameter",
+            "TERMTRACE_SESSION" => "the recorder",
+            "COLORTERM" | "NO_COLOR" | "FORCE_COLOR" | "CLICOLOR" | "CLICOLOR_FORCE" => {
+                "the `color_policy` parameter"
+            }
+            _ => continue,
+        };
+
+        return Err(format!("`{name}` is set by {owner}"));
+    }
+
+    return Ok(());
 }
 
 impl StartInput {
@@ -119,13 +178,20 @@ impl StartInput {
         push_optional(&mut arguments, "--cwd", self.cwd);
         push_optional(&mut arguments, "--cols", self.cols);
         push_optional(&mut arguments, "--rows", self.rows);
+        push_optional(&mut arguments, "--term", self.term);
+        push_optional(
+            &mut arguments,
+            "--color-policy",
+            self.color_policy.map(ColorPolicy::as_flag),
+        );
 
         if let Some(until) = &self.until {
-            until.push(&mut arguments);
+            until.push_until(&mut arguments);
         }
 
         push_millis(&mut arguments, "--timeout", self.timeout_ms);
 
+        reject_controlled_environment(&self.env)?;
         let environment = environment_spec(self.env)?;
         if let Some(file) = &environment {
             push_value(
@@ -162,10 +228,15 @@ pub(super) enum SendScreen {
 pub(super) struct SendInput {
     /// Session name or path.
     session: String,
-    /// Inputs in order: key names such as `enter`, `ctrl+c`, or `up`; `text:VALUE`;
-    /// `paste:VALUE`; `sleep:200ms` to pause between atoms without splitting text;
-    /// `raw:VALUE`; `raw-file:PATH`; one printable character;
-    /// `click:COL,ROW`; `activate:TEXT`; `resize:COLSxROWS`; `signal:INT`; or `mark:LABEL`.
+    /// Inputs in order; escape sequences are never needed:
+    /// keys `enter`, `escape`, `tab`, `backspace`, `delete`, `insert`, `home`, `end`,
+    /// `pageup`, `pagedown`, `up`, `down`, `left`, `right`, `f1`..`f24`;
+    /// chords such as `ctrl+c`, `alt+X` and `ctrl+shift+tab` joining `ctrl+`, `alt+`, `shift+`
+    /// or `super+` with a named key or a letter;
+    /// `text:VALUE`, `paste:VALUE`, `sleep:200ms`, `wait:TEXT`;
+    /// `click:COL,ROW`, `hover:COL,ROW`, `scroll:COL,ROW,LINES` (negative LINES scrolls up),
+    /// `drag:COL,ROW,COL,ROW`, `activate:TEXT`, `resize:COLSxROWS`, `signal:INT`, `mark:LABEL`;
+    /// `raw:VALUE` or `raw-file:PATH` only for bytes that no form above produces.
     inputs: Vec<String>,
     /// Condition to wait for after the input.
     until: Option<Until>,
@@ -198,7 +269,7 @@ impl SendInput {
 
         let mut arguments = vec!["send".to_owned(), self.session, "--json".to_owned()];
         if let Some(until) = &self.until {
-            until.push(&mut arguments);
+            until.push_until(&mut arguments);
         }
 
         push_millis(&mut arguments, "--timeout", self.timeout_ms);
@@ -286,24 +357,13 @@ impl ScreenInput {
     }
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub(super) enum WaitFor {
-    /// The screen contains this exact text.
-    Screen { text: String },
-    /// The screen does not contain this exact text.
-    ScreenAbsent { text: String },
-    /// The screen matches this regular expression.
-    ScreenRegex { pattern: String },
-    /// The program's output history contains this exact text.
-    Output { text: String },
-    /// The screen stops changing.
-    Idle {
-        /// Quiet interval in milliseconds; defaults to 500.
-        ms: Option<u64>,
-    },
-    /// The screen state differs from this hash.
-    StateChanged { state_hash: String },
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum WaitScreen {
+    /// Trimmed screen text.
+    Text,
+    /// Only the resulting state hash.
+    State,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -312,7 +372,9 @@ pub(super) struct WaitInput {
     /// Session name or path.
     session: String,
     /// Condition to wait for.
-    r#for: WaitFor,
+    until: Until,
+    /// Screen report returned after the wait; defaults to `text`.
+    screen: Option<WaitScreen>,
     /// Maximum wait in milliseconds; defaults to 30000. Keep below the MCP client's tool timeout.
     timeout_ms: Option<u64>,
 }
@@ -320,20 +382,14 @@ pub(super) struct WaitInput {
 impl WaitInput {
     pub(super) fn invocation(self) -> Invocation {
         let mut arguments = vec!["wait".to_owned(), self.session, "--json".to_owned()];
-        match self.r#for {
-            WaitFor::Screen { text } => push_value(&mut arguments, "--screen", &text),
-            WaitFor::ScreenAbsent { text } => {
-                push_value(&mut arguments, "--screen-absent", &text);
-            }
-            WaitFor::ScreenRegex { pattern } => {
-                push_value(&mut arguments, "--screen-regex", &pattern);
-            }
-            WaitFor::Output { text } => push_value(&mut arguments, "--output", &text),
-            WaitFor::Idle { ms: None } => arguments.push("--idle".to_owned()),
-            WaitFor::Idle { ms: Some(ms) } => arguments.push(format!("--idle={ms}ms")),
-            WaitFor::StateChanged { state_hash } => {
-                push_value(&mut arguments, "--state-changed", &state_hash);
-            }
+        self.until.push_wait(&mut arguments);
+
+        if let Some(screen) = self.screen {
+            let screen = match screen {
+                WaitScreen::Text => "text",
+                WaitScreen::State => "state",
+            };
+            push_value(&mut arguments, "--report", screen);
         }
 
         push_millis(&mut arguments, "--timeout", self.timeout_ms);
@@ -380,6 +436,53 @@ impl StopInput {
         }
 
         push_optional(&mut arguments, "--timeout-ms", self.timeout_ms);
+        return Invocation::new(arguments, Structure::Object);
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RestartInput {
+    /// Name of the completed session to relaunch.
+    session: String,
+    /// Terminal columns for the successor.
+    cols: Option<u16>,
+    /// Terminal rows for the successor.
+    rows: Option<u16>,
+    /// Working directory for the successor.
+    cwd: Option<String>,
+    /// Terminal type for the successor.
+    term: Option<String>,
+    /// Maximum wait for predecessor completion and successor readiness in milliseconds.
+    timeout_ms: Option<u64>,
+}
+
+impl RestartInput {
+    pub(super) fn invocation(self) -> Invocation {
+        let mut arguments = vec!["restart".to_owned(), self.session, "--json".to_owned()];
+        push_optional(&mut arguments, "--cols", self.cols);
+        push_optional(&mut arguments, "--rows", self.rows);
+        push_optional(&mut arguments, "--cwd", self.cwd);
+        push_optional(&mut arguments, "--term", self.term);
+        push_optional(&mut arguments, "--timeout-ms", self.timeout_ms);
+        return Invocation::new(arguments, Structure::Object);
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct GcInput {
+    /// Delete completed recordings older than this many days; defaults to 30.
+    older_than_days: Option<u64>,
+    /// Keep at least this many completed recordings; defaults to 20.
+    keep_latest: Option<u64>,
+}
+
+impl GcInput {
+    pub(super) fn invocation(self) -> Invocation {
+        let mut arguments = vec!["status".to_owned(), "--gc".to_owned(), "--json".to_owned()];
+        push_optional(&mut arguments, "--older-than-days", self.older_than_days);
+        push_optional(&mut arguments, "--keep-latest", self.keep_latest);
         return Invocation::new(arguments, Structure::Object);
     }
 }
@@ -499,11 +602,11 @@ pub(super) enum Renderer {
 pub(super) struct ScreenshotInput {
     /// Session name or path.
     session: String,
-    /// New directory that receives the PNG and its manifest.
+    /// New directory that receives the PNG and its manifest; missing parent directories are created.
     out: String,
     /// State to capture; defaults to the latest presented screen.
     state_hash: Option<String>,
-    /// Image source; defaults to `semantic`.
+    /// Image source; defaults to `native` for a live session and `semantic` for a completed one.
     renderer: Option<Renderer>,
 }
 

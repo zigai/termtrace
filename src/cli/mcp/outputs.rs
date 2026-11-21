@@ -14,6 +14,7 @@ use termtrace_model::{
         },
         mutation::{MutationEffect, Retry},
     },
+    registry::GarbageCollectionReport,
     registry::RegistryListEntry,
     terminal::{
         analysis::{DiagnoseReport, ExplainReport, LastActionReport},
@@ -34,10 +35,34 @@ pub(super) fn start() -> Arc<JsonObject> {
     let started = object(
         &[
             "kind",
+            "alias",
+            "canonical_session",
+            "session_id",
+            "ready",
+            "completion",
+        ],
+        json!({
+            "kind": {"const": "started"},
+            "alias": {"type": "string"},
+            "canonical_session": schemas.typed::<PathValue>(),
+
+            "session_id": {"type": "string", "format": "uuid"},
+            "ready": {"type": "boolean"},
+            "completion": schemas.typed::<Option<SessionCompletion>>(),
+            "postcondition": start_postcondition(),
+        }),
+    );
+    let failed = object(
+        &[
+            "kind",
             "startup_state",
             "alias",
             "canonical_session",
             "session_id",
+            "recorder_pid",
+            "recorder_process_start_ticks",
+            "stdout_log",
+            "stderr_log",
             "ready",
             "completion",
         ],
@@ -54,24 +79,61 @@ pub(super) fn start() -> Arc<JsonObject> {
             "stderr_log": schemas.typed::<PathValue>(),
             "ready": {"type": "boolean"},
             "completion": schemas.typed::<Option<SessionCompletion>>(),
-            "postcondition": object(
-                &["matched"],
-                json!({
-                    "matched": {"type": "boolean"},
-                    "ended": {"type": "boolean"},
-                    "kind": {"enum": ["idle", "screen", "screen_regex"]},
-                    "quality": {"type": "string"},
-                    "error": {"type": "string"},
-                    "state": {"type": "string"},
-                    "state_hash": {"type": "string"},
-                    "frame_hash": {"type": "string"},
-                    "size": size(),
-                    "screen": {"type": "string"},
-                }),
-            ),
+            "postcondition": start_postcondition(),
         }),
     );
-    return schemas.finish(vec![started]);
+    return schemas.finish(vec![started, failed]);
+}
+
+fn start_postcondition() -> Value {
+    return object(
+        &["matched"],
+        json!({
+            "matched": {"type": "boolean"},
+            "ended": {"type": "boolean"},
+            "kind": {"enum": ["idle", "screen", "screen_absent", "screen_regex", "output"]},
+            "outcome": {"type": "string"},
+            "error": {"type": "string"},
+            "state": {"type": "string"},
+            "state_hash": {"type": "string"},
+            "event_seq": {"type": "integer"},
+            "output_end_offset": {"type": "integer"},
+            "monotonic_ns": {"type": "integer"},
+            "size": size(),
+            "screen": {"type": "string"},
+        }),
+    );
+}
+
+pub(super) fn restart() -> Arc<JsonObject> {
+    let mut schemas = Schemas::new();
+    let mut session = || {
+        return object(
+            &["canonical_session", "session_id"],
+            json!({
+                "canonical_session": schemas.typed::<PathValue>(),
+                "session_id": {"type": "string", "format": "uuid"},
+            }),
+        );
+    };
+    let predecessor = session();
+    let successor = session();
+    let restarted = object(
+        &["alias", "predecessor", "successor", "ready"],
+        json!({
+            "alias": {"type": "string"},
+            "predecessor": predecessor,
+            "successor": successor,
+            "ready": {"type": "boolean"},
+        }),
+    );
+    return schemas.finish(vec![restarted]);
+}
+
+pub(super) fn gc() -> Arc<JsonObject> {
+    let mut schemas = Schemas::new();
+    let report = schemas.typed::<GarbageCollectionReport>();
+    return schemas.finish(vec![report]);
 }
 
 pub(super) fn send() -> Arc<JsonObject> {
@@ -497,6 +559,17 @@ impl Schemas {
     fn finish(mut self, variants: Vec<Value>) -> Arc<JsonObject> {
         let mut root = JsonObject::new();
         root.insert("type".to_owned(), json!("object"));
+
+        // Every failure that carries no CLI JSON still arrives as structured content.
+        let mut variants = variants;
+        variants.push(json!({
+            "type": "object",
+            "required": ["ok", "error"],
+            "properties": {
+                "ok": {"const": false},
+                "error": {"type": "string"},
+            },
+        }));
         root.insert("anyOf".to_owned(), Value::Array(variants));
 
         let definitions = self.generator.take_definitions(true);
