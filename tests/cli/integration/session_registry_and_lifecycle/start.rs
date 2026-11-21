@@ -1,6 +1,49 @@
 use super::*;
 
 #[test]
+fn finished_session_name_starts_again_while_a_live_one_blocks_it() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let waiting_shell = "trap 'exit 0' TERM; printf READY; while :; do sleep 0.1; done";
+
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["record", "-d", "probe", "--json", "--", "/bin/sh", "-c"])
+        .arg(waiting_shell)
+        .assert()
+        .success();
+
+    let mut duplicate = Command::cargo_bin("termtrace").expect("binary should build");
+    duplicate
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["record", "-d", "probe", "--", "/bin/true"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("is in use by a live session"));
+
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "probe", "--wait"])
+        .assert()
+        .success();
+
+    let mut restart = Command::cargo_bin("termtrace").expect("binary should build");
+    restart
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args(["record", "-d", "probe", "--json", "--", "/bin/sh", "-c"])
+        .arg(waiting_shell)
+        .assert()
+        .success();
+
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "probe", "--wait"])
+        .assert()
+        .success();
+}
+
+#[test]
 fn start_publishes_alias_only_after_detached_recorder_readiness() {
     let temporary = TempDir::new().expect("temporary directory");
     let state = temporary.path().join("state");
@@ -71,7 +114,7 @@ fn start_publishes_alias_only_after_detached_recorder_readiness() {
         .args(["record", "-d", "demo", "--", "/bin/true"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("alias is already"));
+        .stderr(predicate::str::contains("is in use by a live session"));
 
     assert_eq!(
         fs_err::read_dir(state.join("sessions"))
@@ -267,7 +310,7 @@ fn concurrent_start_reservation_launches_only_one_recorder() {
 
     assert_eq!(started["alias"], "contended");
     assert!(
-        String::from_utf8_lossy(&loser.stderr).contains("reserved or registered"),
+        String::from_utf8_lossy(&loser.stderr).contains("being started by another command"),
         "unexpected loser diagnostic: {}",
         String::from_utf8_lossy(&loser.stderr)
     );

@@ -1,6 +1,6 @@
 use super::*;
 use crate::recording::{record, RecordOptions};
-use std::{ffi::OsString, os::unix::fs::symlink};
+use std::{ffi::OsString, fs::Permissions, os::unix::fs::symlink};
 use tempfile::TempDir;
 use termtrace_evidence::event_log::DurabilityPolicy;
 use termtrace_model::execution::session::RecordingFailurePolicy;
@@ -157,6 +157,84 @@ fn retarget_uses_compare_and_swap_and_preserves_previous_binding_on_failure() {
         .expect("retarget successor");
     assert_ne!(successor.session_id, original.session_id);
     assert_eq!(registry.resolve("demo").unwrap(), successor);
+}
+
+#[test]
+fn finished_session_releases_its_name_for_a_new_binding() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let registry = SessionRegistry::open(temporary.path().join("state")).expect("registry");
+    let first = record_fixture(temporary.path().join("first"));
+    let original = registry.register("demo", &first).expect("register first");
+
+    let second = record_fixture(temporary.path().join("second"));
+    let rebound = registry
+        .register("demo", &second)
+        .expect("reuse the name of a finished session");
+
+    assert_ne!(rebound.session_id, original.session_id);
+    assert_eq!(registry.resolve("demo").expect("resolve rebound"), rebound);
+    assert!(
+        first.join("completion.json").is_file(),
+        "reusing a name removed the previous recording"
+    );
+}
+
+#[test]
+fn incomplete_session_releases_its_name_for_a_new_binding() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let registry = SessionRegistry::open(temporary.path().join("state")).expect("registry");
+    let interrupted = record_fixture(temporary.path().join("interrupted"));
+    fs_err::remove_file(interrupted.join("completion.json")).expect("remove completion");
+    registry
+        .register("demo", &interrupted)
+        .expect("register interrupted");
+
+    let replacement = record_fixture(temporary.path().join("replacement"));
+    let rebound = registry
+        .register("demo", &replacement)
+        .expect("reuse the name of an incomplete session");
+
+    assert_eq!(registry.resolve("demo").expect("resolve rebound"), rebound);
+}
+
+#[test]
+fn stale_registry_records_are_skipped_replaced_and_reaped() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let registry = SessionRegistry::open(temporary.path().join("state")).expect("registry");
+    let path = registry.entry_path("demo");
+    let write_stale = || {
+        fs_err::write(
+            &path,
+            br#"{"format":"termtrace-session-registry-entry","version":1}"#,
+        )
+        .expect("stale record");
+        fs_err::set_permissions(&path, Permissions::from_mode(0o600))
+            .expect("private stale record");
+    };
+    write_stale();
+
+    assert!(registry.list(true).expect("list").is_empty());
+    let error = registry
+        .resolve("demo")
+        .expect_err("stale resolve")
+        .to_string();
+    assert!(
+        error.contains("belongs to a recording from an older termtrace version"),
+        "{error}"
+    );
+
+    let pending = registry.state_root().join("sessions/pending.termtrace");
+    let reservation = registry
+        .reserve("demo", &pending, Duration::from_secs(30))
+        .expect("replace stale record");
+    registry.release(&reservation).expect("release reservation");
+
+    write_stale();
+    assert_eq!(
+        registry.reap_stale_aliases(true).expect("reap stale"),
+        vec!["demo".to_owned()]
+    );
+    assert!(!path.exists(), "garbage collection kept the stale record");
 }
 
 fn record_fixture(output_directory: PathBuf) -> PathBuf {

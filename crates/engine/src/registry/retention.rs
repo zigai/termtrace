@@ -1,9 +1,9 @@
 use super::{
-    ensure_owner_directory, fs, inspect_entry, read_manifest, read_registry_record_nofollow,
+    ensure_owner_directory, fs, inspect_entry, inspect_registry_record_nofollow, read_manifest,
     registry_error, sync_directory, DetachedSessionPaths, Duration, Error, ErrorKind,
     GarbageCollectionCandidate, GarbageCollectionReport, HashSet, OsStr, Path, PathBuf,
-    RegistryRecord, Result, SessionPhase, SessionRegistry, SystemTime, Uuid, SESSIONS_DIRECTORY,
-    SUPERVISOR_DIRECTORY, UNIX_EPOCH,
+    RegistryRecord, RegistryRecordState, Result, SessionPhase, SessionRegistry, SystemTime, Uuid,
+    SESSIONS_DIRECTORY, SUPERVISOR_DIRECTORY, UNIX_EPOCH,
 };
 use std::cmp::Reverse;
 use termtrace_evidence::session::{read_completion, validate_completed_session};
@@ -362,9 +362,23 @@ impl SessionRegistry {
                 continue;
             }
 
-            let Ok(record) = read_registry_record_nofollow(&path) else {
-                corrupt_entries = corrupt_entries.saturating_add(1);
-                continue;
+            let record = match inspect_registry_record_nofollow(&path) {
+                Ok(RegistryRecordState::Current(record)) => record,
+                Ok(RegistryRecordState::Missing) => continue,
+                Ok(RegistryRecordState::Stale) => {
+                    if apply {
+                        remove_registry_record(&path)?;
+                    }
+
+                    stale_aliases.push(path.file_stem().map_or_else(String::new, |stem| {
+                        return stem.to_string_lossy().into_owned();
+                    }));
+                    continue;
+                }
+                Err(_) => {
+                    corrupt_entries = corrupt_entries.saturating_add(1);
+                    continue;
+                }
             };
 
             match record {
