@@ -826,7 +826,7 @@
               "type": "integer"
             },
             "operation": {
-              "description": "`click`, `multi_click`, `drag`, or `scroll`.",
+              "description": "`click`, `multi_click`, `drag`, `scroll`, or `move`.",
               "type": "string"
             },
             "pixel_height": {

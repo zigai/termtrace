@@ -3,7 +3,7 @@
 use crate::actions::{request_id_arg, PyActionResult};
 use crate::errors::{mutation_err, send_err, to_py_err};
 use crate::host::{to_python, Arg, Model};
-use crate::screen::Framed;
+use crate::screen::{Framed, PyFrame};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -391,6 +391,47 @@ fn send_result(
             last.set_item("kind", "action")?;
             last.set_item("request_id", action.request_id.to_string())?;
             last.set_item("result", PyActionResult::new(Arc::new(*action)))?;
+        }
+        SendLastStep::Wait {
+            request_id,
+            frame,
+            postcondition,
+        } => {
+            last.set_item("kind", "wait")?;
+            last.set_item("request_id", request_id.to_string())?;
+            last.set_item("frame", PyFrame::new(Arc::new(*frame)))?;
+            let checked = match postcondition.map(|postcondition| return *postcondition) {
+                None => py.None(),
+                Some(CommandPostcondition::Idle(Ok(capture))) => {
+                    let checked = PyDict::new(py);
+                    checked.set_item("kind", "idle")?;
+                    checked.set_item("capture", Framed::from(capture))?;
+
+                    checked.into_any().unbind()
+                }
+                Some(CommandPostcondition::Screen(Ok(wait))) => {
+                    let checked = PyDict::new(py);
+                    checked.set_item("kind", "screen")?;
+                    checked.set_item("wait", Framed::from(wait))?;
+
+                    checked.into_any().unbind()
+                }
+                Some(CommandPostcondition::Idle(Err(error))) => {
+                    let checked = PyDict::new(py);
+                    checked.set_item("kind", "idle")?;
+                    checked.set_item("error", Model(ErrorReport::from(&error)))?;
+
+                    checked.into_any().unbind()
+                }
+                Some(CommandPostcondition::Screen(Err(error))) => {
+                    let checked = PyDict::new(py);
+                    checked.set_item("kind", "screen")?;
+                    checked.set_item("error", Model(ErrorReport::from(&error)))?;
+
+                    checked.into_any().unbind()
+                }
+            };
+            last.set_item("postcondition", checked)?;
         }
         SendLastStep::Command {
             request_id,

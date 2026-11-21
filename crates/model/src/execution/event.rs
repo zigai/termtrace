@@ -181,7 +181,7 @@ pub enum InputDescriptor {
     },
     /// Pointer operation encoded against live mouse modes and geometry.
     Pointer {
-        /// `click`, `multi_click`, `drag`, or `scroll`.
+        /// `click`, `multi_click`, `drag`, `scroll`, or `move`.
         operation: String,
         /// Button name for clicks, otherwise wheel direction.
         button: String,

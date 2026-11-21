@@ -1534,7 +1534,7 @@ export interface InputDescriptorPointer {
   kind: "pointer"
   /** Signed requested wheel lines, or zero for clicks. */
   lines: number
-  /** `click`, `multi_click`, `drag`, or `scroll`. */
+  /** `click`, `multi_click`, `drag`, `scroll`, or `move`. */
   operation: string
   /** Total terminal surface height in pixels. */
   pixel_height: number
@@ -2410,7 +2410,7 @@ export interface PixelTransformZoom {
 }
 
 /** One high-level cell-addressed pointer operation. */
-export type PointerOperation = PointerOperationClick | PointerOperationMultiClick | PointerOperationDrag | PointerOperationScroll
+export type PointerOperation = PointerOperationClick | PointerOperationMultiClick | PointerOperationDrag | PointerOperationScroll | PointerOperationMove
 
 /** Press and release one button at a cell. */
 export interface PointerOperationClick {
@@ -2430,6 +2430,11 @@ export interface PointerOperationDrag {
   to_column: number
   /** Zero-based destination row. */
   to_row: number
+}
+
+/** Move the pointer to a cell with no button pressed. */
+export interface PointerOperationMove {
+  kind: "move"
 }
 
 /** Repeat a complete press/release click a bounded number of times. */
@@ -3926,7 +3931,7 @@ export interface SendStepSpecMark {
 export interface SendStepSpecPointer {
   /** Zero-based column. */
   column: number
-  /** Click, multi-click, drag, or scroll. */
+  /** Click, multi-click, drag, scroll, or move. */
   operation: PointerOperation
   /** Zero-based row. */
   row: number
@@ -4053,6 +4058,8 @@ export type StableCaptureQuality = "stable" | "child_completed" | "output_closed
 
 /** Atomic stable-screen outcome retaining the exact frame. The frame is not serialized; bindings attach it as a native frame object. */
 export interface StableScreenCapture {
+  /** Zero-based rows whose text differed between the last two distinct presented frames seen during an unsettled capture. */
+  changing_rows?: Array<number> | null
   /** First actor timestamp at which this exact state was observed. */
   first_observed_monotonic_ns: bigint
   /** Actor timestamp of the returned snapshot. */

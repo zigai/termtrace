@@ -124,7 +124,7 @@ pub(super) fn encode_key(
 pub(super) fn encode_mouse(
     terminal: sys::GhosttyTerminal,
     action: MouseAction,
-    button: MouseButton,
+    button: Option<MouseButton>,
     column: u16,
     row: u16,
     cols: u16,
@@ -178,13 +178,15 @@ pub(super) fn encode_mouse(
         MouseAction::Motion => sys::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_MOTION,
     };
 
-    let button = match button {
-        MouseButton::Left => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_LEFT,
-        MouseButton::Middle => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_MIDDLE,
-        MouseButton::Right => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_RIGHT,
-        MouseButton::WheelUp => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_FOUR,
-        MouseButton::WheelDown => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_FIVE,
-    };
+    let button = button.map(|button| {
+        return match button {
+            MouseButton::Left => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_LEFT,
+            MouseButton::Middle => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_MIDDLE,
+            MouseButton::Right => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_RIGHT,
+            MouseButton::WheelUp => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_FOUR,
+            MouseButton::WheelDown => sys::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_FIVE,
+        };
+    });
 
     let position = sys::GhosttyMousePosition {
         x: (f32::from(column) + 0.5) * f32::from(cell_width),
@@ -192,7 +194,11 @@ pub(super) fn encode_mouse(
     };
     unsafe {
         sys::ghostty_mouse_event_set_action(event.0, action);
-        sys::ghostty_mouse_event_set_button(event.0, button);
+        // A null button is pointer motion with no button held; the encoder's event starts
+        // with no button, so only a pressed button needs to be recorded.
+        if let Some(button) = button {
+            sys::ghostty_mouse_event_set_button(event.0, button);
+        }
         sys::ghostty_mouse_event_set_position(event.0, position);
     }
 

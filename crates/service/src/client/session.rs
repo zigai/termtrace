@@ -46,12 +46,17 @@ use termtrace_model::{
     terminal::{
         inspection::ScreenWaitOutcome,
         observation::{ActorBoundaries, CaptureQuality, Observation, StatePoint},
-        screen::{ScreenFrame, ScreenFrameSource, ScreenProjectionRequest},
+        screen::{ScreenFrame, ScreenFrameContent, ScreenFrameSource, ScreenProjectionRequest},
         state::SemanticState,
     },
 };
 use termtrace_process::{ProcessGroup, ProcessIdentity};
 use uuid::Uuid;
+
+/// Number of later presented frames sampled to name the rows that keep changing.
+const CHANGING_ROW_SAMPLES: usize = 6;
+/// Interval between those samples.
+const CHANGING_ROW_INTERVAL: Duration = Duration::from_millis(25);
 
 /// One live or completed canonical session, owning its recorder when this process launched it.
 ///
@@ -715,7 +720,7 @@ impl Session {
             return ExchangeTiming::Deadline(exchange_deadline);
         });
 
-        let capture = match self.reach_within(&request, timing)? {
+        let mut capture = match self.reach_within(&request, timing)? {
             Reached::Live(data) => {
                 let ControlPayload::StableSnapshot {
                     frame,
@@ -737,6 +742,7 @@ impl Session {
                     first_observed_monotonic_ns,
                     observed_monotonic_ns,
                     stable_for_ns,
+                    changing_rows: None,
                     semantic_state_zstd: Some(semantic_state_zstd),
                 }
             }
@@ -751,10 +757,15 @@ impl Session {
                     first_observed_monotonic_ns: observed_monotonic_ns,
                     observed_monotonic_ns,
                     stable_for_ns,
+                    changing_rows: None,
                     semantic_state_zstd: None,
                 }
             }
         };
+
+        if capture.quality == StableCaptureQuality::Deadline {
+            capture.changing_rows = self.changing_rows(options.projection, &capture.frame);
+        }
 
         if !capture.quality.is_settled() && !options.allow_incomplete {
             return Err(Error::StableCaptureIncomplete {
@@ -762,6 +773,28 @@ impl Session {
             });
         }
         return Ok(capture);
+    }
+
+    /// Zero-based rows whose text differed between `first` and the next distinct presented
+    /// frame seen after it, sampled for a bounded interval.
+    pub(super) fn changing_rows(
+        &self,
+        projection: ScreenProjectionRequest,
+        first: &ScreenFrame,
+    ) -> Option<Vec<u16>> {
+        for _ in 0..CHANGING_ROW_SAMPLES {
+            thread::sleep(CHANGING_ROW_INTERVAL);
+
+            let Ok(later) = self.frame(projection) else {
+                return None;
+            };
+
+            if later.state_hash == first.state_hash {
+                continue;
+            }
+            return Some(differing_rows(first, &later));
+        }
+        return None;
     }
 
     /// Observe the latest presented state of a live session, or any state once completed.
@@ -1210,6 +1243,32 @@ fn lifecycle_deadline(timeout: Duration) -> Result<Instant> {
     return Instant::now()
         .checked_add(timeout)
         .ok_or_else(|| return client_error("lifecycle timeout is out of range"));
+}
+
+fn differing_rows(before: &ScreenFrame, after: &ScreenFrame) -> Vec<u16> {
+    let before = frame_rows(before);
+    let after = frame_rows(after);
+
+    return (0..before.len().max(after.len()))
+        .filter(|row| return before.get(*row) != after.get(*row))
+        .filter_map(|row| return u16::try_from(row).ok())
+        .collect();
+}
+
+fn frame_rows(frame: &ScreenFrame) -> Vec<&str> {
+    let rows: Vec<&str> = match &frame.data {
+        ScreenFrameContent::Text { rows } => {
+            rows.iter().map(|row| return row.text.as_str()).collect()
+        }
+        ScreenFrameContent::Spans { rows } => {
+            rows.iter().map(|row| return row.text.as_str()).collect()
+        }
+        ScreenFrameContent::Cells { rows } => {
+            rows.iter().map(|row| return row.text.as_str()).collect()
+        }
+        ScreenFrameContent::None => Vec::new(),
+    };
+    return rows;
 }
 
 fn frame_monotonic_ns(frame: &ScreenFrame) -> u64 {

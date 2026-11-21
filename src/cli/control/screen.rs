@@ -124,19 +124,21 @@ pub(in crate::cli) fn run_screen(
                 .capture_stable(StableCaptureOptions {
                     stable_for: arguments.stable_for,
                     timeout: arguments.timeout.unwrap_or(defaults::WAIT_TIMEOUT),
-                    projection: hash_only_projection(),
+                    projection: ScreenProjectionRequest {
+                        detail: FrameDetail::Text,
+                        region: None,
+                    },
                     allow_incomplete: false,
                     reaction: None,
                 })
                 .map_err(|error| {
                     let SessionError::StableCaptureIncomplete { result } = &error else {
-                        return miette::miette!("live stability was not established: {error}");
+                        return miette::miette!("screen did not settle: {error}");
                     };
 
-                    return miette::miette!(
-                        "live stability was not established before {:?}",
-                        result.quality
-                    );
+                    let rows = result.changing_rows.as_deref().unwrap_or_default();
+
+                    return miette::miette!("{}", changing_rows_notice(rows));
                 })?;
 
             (capture.quality == StableCaptureQuality::Stable).then_some(capture.frame.state_hash)

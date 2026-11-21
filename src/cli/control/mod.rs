@@ -3,7 +3,9 @@ use crate::cli::output::ResponseWriter;
 pub(super) mod args;
 
 use crate::cli::{
-    control::args::{millis_or, ScreenArgs, ScreenEncoding, StatusArgs, StopArgs, WaitArgs},
+    control::args::{
+        millis_or, ScreenArgs, ScreenEncoding, StatusArgs, StopArgs, WaitArgs, WaitReport,
+    },
     output::{
         human_action_summary, human_screen_changes, human_screen_summary, stable_enum_label,
         write_json_line, write_json_pretty, write_stdout,
@@ -32,7 +34,7 @@ use termtrace_model::{
         ScreenPostconditionQuality, ScreenPredicate, StableCaptureQuality, StateHashComparison,
     },
     terminal::observation::{ActorBoundaries, CaptureQuality, StatePoint},
-    terminal::screen::{ScreenFrame, ScreenProjectionRequest},
+    terminal::screen::{FrameDetail, ScreenFrame, ScreenProjectionRequest},
     terminal::state::KeyChord,
 };
 use termtrace_sdk::{
@@ -52,3 +54,19 @@ pub(in crate::cli) use screen::run_screen;
 pub(in crate::cli) use transport::{run_status, run_stop};
 use wait::compact_boundaries;
 pub(in crate::cli) use wait::run_wait;
+
+pub(super) fn changing_rows_notice(rows: &[u16]) -> String {
+    if rows.is_empty() {
+        return "screen did not settle. Wait for text instead of idle.".to_owned();
+    }
+
+    let rows = rows
+        .iter()
+        .map(|row| return row.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    return format!(
+        "screen did not settle; rows {rows} kept changing. Wait for text instead of idle."
+    );
+}

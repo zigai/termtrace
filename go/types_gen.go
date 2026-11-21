@@ -2648,7 +2648,7 @@ type InputDescriptorPointer struct {
 	EndRow *int `json:"end_row,omitzero"` //exhaustruct:optional
 	// Signed requested wheel lines, or zero for clicks.
 	Lines int `json:"lines"`
-	// `click`, `multi_click`, `drag`, or `scroll`.
+	// `click`, `multi_click`, `drag`, `scroll`, or `move`.
 	Operation string `json:"operation"`
 	// Total terminal surface height in pixels.
 	PixelHeight int `json:"pixel_height"`
@@ -4263,6 +4263,21 @@ func (v PointerOperationDrag) MarshalJSONTo(enc *jsontext.Encoder) error {
 		Const0 jsontext.Value `json:"kind"`
 		plain
 	}{jsontext.Value(`"drag"`), plain(v)})
+}
+
+// Move the pointer to a cell with no button pressed.
+type PointerOperationMove struct {
+}
+
+func (PointerOperationMove) isPointerOperation() {}
+
+// MarshalJSONTo writes the constant members alongside the fields.
+func (v PointerOperationMove) MarshalJSONTo(enc *jsontext.Encoder) error {
+	type plain PointerOperationMove
+	return json.MarshalEncode(enc, struct {
+		Const0 jsontext.Value `json:"kind"`
+		plain
+	}{jsontext.Value(`"move"`), plain(v)})
 }
 
 // Repeat a complete press/release click a bounded number of times.
@@ -6620,6 +6635,29 @@ func (v SendLastCommand) MarshalJSONTo(enc *jsontext.Encoder) error {
 	}{jsontext.Value(`"command"`), plain(v)})
 }
 
+// The final step was a wait.
+type SendLastWait struct {
+	// Presented screen that satisfied the predicate.
+	Frame ScreenFrame `json:"frame"`
+	// Postcondition checked after the wait, when one was requested.
+	Postcondition CommandCheck `json:"postcondition,omitzero"` //exhaustruct:optional
+	// Identity of the wait step.
+	RequestID string `json:"request_id"`
+	// Zero-based step index.
+	Step uint64 `json:"step"`
+}
+
+func (SendLastWait) isSendLast() {}
+
+// MarshalJSONTo writes the constant members alongside the fields.
+func (v SendLastWait) MarshalJSONTo(enc *jsontext.Encoder) error {
+	type plain SendLastWait
+	return json.MarshalEncode(enc, struct {
+		Const0 jsontext.Value `json:"kind"`
+		plain
+	}{jsontext.Value(`"wait"`), plain(v)})
+}
+
 type sendParams struct {
 	Session sessionRef `json:"session"`
 	// Ordered steps, guard, and postcondition.
@@ -6741,7 +6779,7 @@ func (v SendStepSpecMark) MarshalJSONTo(enc *jsontext.Encoder) error {
 type SendStepSpecPointer struct {
 	// Zero-based column.
 	Column int `json:"column"`
-	// Click, multi-click, drag, or scroll.
+	// Click, multi-click, drag, scroll, or move.
 	Operation PointerOperation `json:"operation"`
 	// Zero-based row.
 	Row int `json:"row"`
@@ -7014,6 +7052,9 @@ const (
 //
 // The frame is not serialized; bindings attach it as a native frame object.
 type StableScreenCapture struct {
+	// Zero-based rows whose text differed between the last two distinct presented frames seen
+	// during an unsettled capture.
+	ChangingRows []int `json:"changing_rows,omitzero"` //exhaustruct:optional
 	// First actor timestamp at which this exact state was observed.
 	FirstObservedMonotonicNs uint64 `json:"first_observed_monotonic_ns"`
 	// Actor timestamp of the returned snapshot.
@@ -9979,6 +10020,10 @@ func init() {
 				var leaf PointerOperationScroll
 				err = json.Unmarshal(raw, &leaf, decodeOptions)
 				*v = leaf
+			case `"move"`:
+				var leaf PointerOperationMove
+				err = json.Unmarshal(raw, &leaf, decodeOptions)
+				*v = leaf
 			default:
 				return unknownVariant("PointerOperation", selector)
 			}
@@ -10313,6 +10358,10 @@ func init() {
 			switch selector {
 			case `"action"`:
 				var leaf SendLastAction
+				err = json.Unmarshal(raw, &leaf, decodeOptions)
+				*v = leaf
+			case `"wait"`:
+				var leaf SendLastWait
 				err = json.Unmarshal(raw, &leaf, decodeOptions)
 				*v = leaf
 			case `"command"`:

@@ -34,6 +34,6 @@ pub(super) fn parse_atom(atom: &str) -> Result<InputAtom> {
         return Ok(InputAtom::Text(atom.to_owned()));
     }
     return Err(miette::miette!(
-        "unknown input atom; run `termtrace send --help` or use text:VALUE, paste:VALUE, raw:VALUE, or raw-file:PATH"
+        "unknown input atom `{atom}`. Use a key name such as enter, ctrl+c, alt+X or ctrl+shift+tab, or one of text:, paste:, sleep:, wait:, click:, hover:, scroll:, drag:, activate:, resize:, signal:, mark:, raw:, raw-file:"
     ));
 }

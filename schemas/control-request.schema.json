@@ -1226,6 +1226,20 @@
             "lines"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Move the pointer to a cell with no button pressed.",
+          "properties": {
+            "kind": {
+              "const": "move",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
         }
       ]
     },

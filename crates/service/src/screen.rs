@@ -57,6 +57,10 @@ pub struct StableScreenCapture {
     pub observed_monotonic_ns: u64,
     /// Requested unchanged interval.
     pub stable_for_ns: u64,
+    /// Zero-based rows whose text differed between the last two distinct presented frames seen
+    /// during an unsettled capture.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changing_rows: Option<Vec<u16>>,
     /// Zstandard-compressed canonical JSON of the captured live state; `None` once completed.
     pub semantic_state_zstd: Option<ByteString>,
 }

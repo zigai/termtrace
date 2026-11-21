@@ -357,7 +357,7 @@ pub enum SendStepSpec {
         column: u16,
         /// Zero-based row.
         row: u16,
-        /// Click, multi-click, drag, or scroll.
+        /// Click, multi-click, drag, scroll, or move.
         operation: PointerOperation,
         /// Reject instead of a no-op when the application does not report the pointer.
         #[serde(default)]
@@ -493,6 +493,7 @@ impl SendSpec {
                 .map_or(Ok(ActionCondition::None), ConditionSpec::to_condition)?,
             projection: self.projection.unwrap_or_default().into(),
             report_changes: self.report_changes,
+            wait_timeout: defaults::WAIT_TIMEOUT,
         });
     }
 }

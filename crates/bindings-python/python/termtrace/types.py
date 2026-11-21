@@ -2135,7 +2135,7 @@ class PixelTransformZoom(TypedDict):
     transform: Literal["zoom"]
 
 
-PointerOperation: TypeAlias = "PointerOperationClick | PointerOperationMultiClick | PointerOperationDrag | PointerOperationScroll"
+PointerOperation: TypeAlias = "PointerOperationClick | PointerOperationMultiClick | PointerOperationDrag | PointerOperationScroll | PointerOperationMove"
 
 
 class PointerOperationClick(TypedDict):
@@ -2153,6 +2153,12 @@ class PointerOperationDrag(TypedDict):
     steps: int
     to_column: int
     to_row: int
+
+
+class PointerOperationMove(TypedDict):
+    "Move the pointer to a cell with no button pressed."
+
+    kind: Literal["move"]
 
 
 class PointerOperationMultiClick(TypedDict):
@@ -3676,6 +3682,7 @@ StableCaptureQuality: TypeAlias = "Literal['stable', 'child_completed', 'output_
 class StableScreenCapture(TypedDict):
     "Atomic stable-screen outcome retaining the exact frame.\n\nThe frame is not serialized; bindings attach it as a native frame object."
 
+    changing_rows: NotRequired[list[int] | None]
     first_observed_monotonic_ns: int
     observed_monotonic_ns: int
     quality: StableCaptureQuality
