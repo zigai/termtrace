@@ -22,11 +22,11 @@
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.10.0"
+    "@napi-rs/cli": "^3.10.12"
   },
   "license": "MIT",
   "engines": {
-    "node": ">= 18.0.0"
+    "node": ">=22.19.0"
   },
   "files": [
     "index.js",
@@ -48,5 +48,18 @@
   },
   "os": [
     "linux"
-  ]
+  ],
+  "packageManager": "npm@12.2.2",
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": ">=26.13.0",
+      "onFail": "error"
+    },
+    "packageManager": {
+      "name": "npm",
+      "version": ">=12.2.2",
+      "onFail": "error"
+    }
+  }
 }

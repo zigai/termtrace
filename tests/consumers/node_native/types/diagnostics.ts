@@ -56,10 +56,9 @@ async function surfaces(client: Termtrace): Promise<void> {
     await client.evidence(new Uint8Array([47])).verify("sig");
     // @ts-expect-error wide restart budgets require bigint
     await client.registry().restart("demo", { output_byte_budget: 10 });
+    const instrumentation = client.instrumentation(new Uint8Array([47]));
     // @ts-expect-error application attributes remain ordinary bounded JSON, not byte buffers
-    await client
-        .instrumentation(new Uint8Array([47]))
-        .event("event", { value: new Uint8Array([1]) });
+    await instrumentation.event("event", { value: new Uint8Array([1]) });
     // @ts-expect-error tmux coverage retains the underlying policy union
     await client.tmux().record({ coverage: "secret" });
 }

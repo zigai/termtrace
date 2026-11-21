@@ -80,6 +80,18 @@ test-node:
     node --test crates/bindings-node/test/*.test.js
     TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace npm --prefix tests/consumers/node_native test
 
+# Test the Node.js bindings and consumer suite on the oldest supported Node
+test-floor:
+    cargo build --locked --bin termtrace
+    npm exec --allow-scripts=node --package=node@22.19.0 -- node --test crates/bindings-node/test/*.test.js
+    cd tests/consumers/node_native && TERMTRACE_BIN={{ justfile_directory() }}/target/debug/termtrace npm exec --allow-scripts=node --package=node@22.19.0 -- node --test test/*.test.js
+
+# Update Node.js dependencies to their newest versions
+update:
+    cd crates/bindings-node && npx npm-check-updates@23.1.1 -u --reject @types/node
+    cd tests/consumers/node_native && npx npm-check-updates@23.1.1 -u --reject @types/node
+    npm --prefix tests/consumers/node_native install
+
 # Test the Go SDK consumer suite against the debug CLI
 test-go:
     cargo build --locked --bin termtrace

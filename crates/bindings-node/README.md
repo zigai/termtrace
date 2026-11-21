@@ -22,7 +22,7 @@ This package is the Node.js SDK for [Termtrace](https://github.com/zigai/termtra
 npm install @zigai/termtrace
 ```
 
-Requires Node.js 18 or newer on Linux with glibc 2.39 or newer.
+Requires Node.js 22.19 or newer on Linux with glibc 2.39 or newer.
 
 ## Examples
 
