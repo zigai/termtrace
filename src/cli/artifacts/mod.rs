@@ -500,7 +500,13 @@ pub(super) fn run_screenshot(
         fs_err::create_dir_all(parent).into_diagnostic()?;
     }
 
-    let session = resolve_session_path(arguments.session)?;
+    let resolved = resolve_session(arguments.session)?;
+    let session = resolved.path;
+    let renderer = arguments.renderer.unwrap_or(match resolved.phase {
+        SessionPhase::Live => ShowRenderer::Native,
+        _ => ShowRenderer::Semantic,
+    });
+
     let mut points = Vec::new();
     points.extend(
         arguments
@@ -537,7 +543,7 @@ pub(super) fn run_screenshot(
         points.push(StatePoint::LatestPresented);
     }
 
-    if arguments.renderer == ShowRenderer::Native {
+    if renderer == ShowRenderer::Native {
         if arguments.format != ScreenshotFormat::Png {
             return Err(miette::miette!(
                 "native screenshots are PNG; semantic SVG fallback is disabled"

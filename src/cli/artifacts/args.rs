@@ -192,7 +192,7 @@ pub(in crate::cli) struct SaveArgs {
         .args(["state", "state_hash", "event_seq", "at", "at_marker"])
 ))]
 pub(in crate::cli) struct ScreenshotArgs {
-    /// Completed session name or canonical path.
+    /// Session name or canonical path.
     pub(in crate::cli) session: PathBuf,
     /// New manifested screenshot artifact directory.
     #[arg(short = 'o', long)]
@@ -218,9 +218,10 @@ pub(in crate::cli) struct ScreenshotArgs {
     /// Semantic image representation.
     #[arg(long, value_enum, default_value_t = ScreenshotFormat::Png)]
     pub(in crate::cli) format: ScreenshotFormat,
-    /// Semantic state renderer or actual Ghostty native frame.
-    #[arg(long, value_enum, default_value_t = ShowRenderer::Semantic)]
-    pub(in crate::cli) renderer: ShowRenderer,
+    /// Semantic state renderer or actual Ghostty native frame; defaults to native for a live
+    /// session and semantic for a completed one.
+    #[arg(long, value_enum)]
+    pub(in crate::cli) renderer: Option<ShowRenderer>,
     /// Strict whole native viewport as `WIDTHxHEIGHT`; omit to solve the exact recorded grid.
     #[arg(long, value_parser = parse_capture_target)]
     pub(in crate::cli) viewport: Option<CaptureTarget>,
