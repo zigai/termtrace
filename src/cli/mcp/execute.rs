@@ -2,6 +2,7 @@ use nix::sys::signal::Signal;
 use rmcp::{model::ProgressNotificationParam, service::RequestContext, RoleServer};
 use std::{
     env, io,
+    path::{Path, PathBuf},
     process::{Output, Stdio},
     time::Duration,
 };
@@ -13,6 +14,7 @@ use tokio::{
 
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 const TERMINATION_GRACE: Duration = Duration::from_secs(5);
+const DELETED_SUFFIX: &str = " (deleted)";
 
 pub(super) struct Completed {
     pub(super) succeeded: bool,
@@ -30,14 +32,12 @@ pub(super) async fn execute(
     context: &RequestContext<RoleServer>,
 ) -> Result<Completed, Failure> {
     // Invocations spawn and attach through this executable's path, which a reinstall replaces.
-    let executable = env::current_exe().map_err(|error| return unavailable(&error))?;
+    let current = env::current_exe().map_err(|error| return unavailable(&error))?;
+    let executable = installed_path(&current);
     if !executable.exists() {
         return Err(Failure::Unavailable(format!(
             "{} was replaced or removed after this MCP server started; restart the MCP server",
-            executable
-                .display()
-                .to_string()
-                .trim_end_matches(" (deleted)")
+            executable.display()
         )));
     }
 
@@ -92,6 +92,14 @@ pub(super) async fn execute(
             }
         }
     }
+}
+
+// A replaced executable keeps running from its unlinked inode, which the kernel marks.
+fn installed_path(current: &Path) -> PathBuf {
+    return current
+        .to_str()
+        .and_then(|text| return text.strip_suffix(DELETED_SUFFIX))
+        .map_or_else(|| return current.to_path_buf(), PathBuf::from);
 }
 
 fn completed(output: Output) -> Completed {
