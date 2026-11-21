@@ -65,7 +65,7 @@ impl fmt::Display for ModelValidationError {
                 return write!(f, "invalid environment variable name `{name}`");
             }
             Self::ControlledEnvironmentVariable { name } => {
-                return write!(f, "`{name}` is controlled by --term or --color");
+                return write!(f, "`{name}` is controlled by --term or --color-policy");
             }
             Self::ReservedEnvironmentVariable { name } => {
                 return write!(f, "`{name}` is a reserved terminal or color variable");
