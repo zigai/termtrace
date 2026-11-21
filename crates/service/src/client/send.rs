@@ -12,7 +12,10 @@ use crate::{
 use std::{error::Error as StdError, fmt, result::Result as StdResult, time::Duration};
 use termtrace_engine::diff::screen_changes;
 use termtrace_model::{
-    protocol::control::{ControlCommand, ControlPayload, ScreenPredicate},
+    protocol::control::{
+        ActionPostconditionResult, ControlCommand, ControlPayload, ScreenPredicate,
+        ScreenWaitQuality, StableCaptureQuality,
+    },
     terminal::{
         diff::ScreenChanges,
         inspection::ScreenWaitOutcome,
@@ -28,6 +31,8 @@ pub enum SendStep {
     Command(ControlCommand),
     /// A run of input atoms applied as one actor-ordered action.
     Input(Vec<InputAtom>),
+    /// Pause until the presented screen satisfies this predicate.
+    Wait(ScreenPredicate),
 }
 
 /// Ordered steps sent under one caller identity, with a condition checked after the last.
@@ -50,6 +55,8 @@ pub struct SendRequest {
     pub projection: ScreenProjectionRequest,
     /// Report presented-screen changes from just before the first step to the terminating frame.
     pub report_changes: bool,
+    /// Maximum time one wait step spends waiting for its predicate.
+    pub wait_timeout: Duration,
 }
 
 /// Result of a completed [`Session::send`].
@@ -59,6 +66,8 @@ pub struct SendOutcome {
     pub last: SendLastStep,
     /// Presented-screen changes, when requested and a terminating frame exists.
     pub changes: Option<ScreenChanges>,
+    /// Zero-based rows that kept changing when the idle postcondition hit its deadline.
+    pub changing_rows: Option<Vec<u16>>,
 }
 
 /// What the last step of a [`Session::send`] produced.
@@ -66,6 +75,15 @@ pub struct SendOutcome {
 pub enum SendLastStep {
     /// The last step was input; its action outcome carries the postcondition.
     Action(Box<ActOutcome>),
+    /// The last step was a wait, which carries its matched frame.
+    Wait {
+        /// Request identity of the wait step.
+        request_id: Uuid,
+        /// Presented screen that satisfied the predicate.
+        frame: Box<ScreenFrame>,
+        /// Postcondition checked after the wait, unless none was requested.
+        postcondition: Option<Box<CommandPostcondition>>,
+    },
     /// The last step was a control command, followed by the postcondition check.
     Command {
         /// Request identity of the command.
@@ -95,6 +113,37 @@ pub struct SendFailure {
     pub request_id: Uuid,
     /// Why the step failed.
     pub error: Box<Error>,
+    /// Details of a wait step that did not match before its deadline.
+    pub wait_atom: Option<Box<WaitAtomFailure>>,
+}
+
+/// Why a wait step stopped waiting without a match.
+#[derive(Clone, Debug)]
+pub struct WaitAtomFailure {
+    /// Why the wait ended.
+    pub outcome: WaitAtomOutcome,
+    /// Presented screen at the end of the wait.
+    pub frame: ScreenFrame,
+}
+
+/// Closed reason a wait step stopped without a match.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WaitAtomOutcome {
+    /// The wait step reached its deadline.
+    Deadline,
+    /// The child completed or its output closed before a match.
+    ChildCompleted,
+}
+
+impl WaitAtomOutcome {
+    /// Stable spelling used in CLI output.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        return match self {
+            Self::Deadline => "deadline",
+            Self::ChildCompleted => "child_completed",
+        };
+    }
 }
 
 impl fmt::Display for SendFailure {
@@ -112,6 +161,7 @@ impl StdError for SendFailure {
 enum StepOutcome {
     Command(Box<ControlPayload>),
     Action(Box<ActOutcome>),
+    Wait(Box<ScreenFrame>),
 }
 
 /// Request identity of step `index`: the send's own identity for the first step, and a stable
@@ -145,6 +195,7 @@ impl Session {
                 step: 0,
                 request_id: send_request_id,
                 error: Box::new(client_error("send requires at least one step")),
+                wait_atom: None,
             });
         };
         let actor_admits_last_step =
@@ -178,6 +229,7 @@ impl Session {
                         step: 0,
                         request_id: send_request_id,
                         error: Box::new(client_error(error.to_string())),
+                        wait_atom: None,
                     };
                 })?)
             }
@@ -200,6 +252,7 @@ impl Session {
                     step: 0,
                     request_id: send_request_id,
                     error: Box::new(error),
+                    wait_atom: None,
                 };
             })?;
 
@@ -219,6 +272,7 @@ impl Session {
                         step: 0,
                         request_id: send_request_id,
                         error: Box::new(client_error("missing compiled text predicate")),
+                        wait_atom: None,
                     };
                 })?;
 
@@ -256,6 +310,7 @@ impl Session {
                             step: 0,
                             request_id,
                             error: Box::new(error),
+                            wait_atom: None,
                         };
                     })?;
 
@@ -266,6 +321,7 @@ impl Session {
                         error: Box::new(client_error(
                             "actor returned the wrong send baseline payload",
                         )),
+                        wait_atom: None,
                     });
                 };
                 let minimum = matches
@@ -333,18 +389,52 @@ impl Session {
                 postcondition: self.command_postcondition(&request),
             },
             StepOutcome::Action(outcome) => SendLastStep::Action(outcome),
+            StepOutcome::Wait(frame) => SendLastStep::Wait {
+                request_id,
+                frame,
+                postcondition: self.command_postcondition(&request),
+            },
         };
 
-        let changes = match start_frame {
+        let changes = match &start_frame {
             Some(before) if request.report_changes => self
                 .terminating_frame(&last_step, projection)
-                .map(|after| return screen_changes(&before, &after)),
+                .map(|after| return screen_changes(before, &after)),
+            _ => None,
+        };
+
+        let changing_rows = match &last_step {
+            SendLastStep::Action(outcome)
+                if matches!(
+                    outcome.postcondition,
+                    ActionPostconditionResult::Idle {
+                        quality: StableCaptureQuality::Deadline,
+                        ..
+                    }
+                ) =>
+            {
+                outcome
+                    .frame()
+                    .and_then(|frame| return self.changing_rows(projection, frame))
+            }
+            SendLastStep::Command {
+                postcondition: Some(postcondition),
+                ..
+            }
+            | SendLastStep::Wait {
+                postcondition: Some(postcondition),
+                ..
+            } => match postcondition.as_ref() {
+                CommandPostcondition::Idle(Ok(capture)) => capture.changing_rows.clone(),
+                _ => None,
+            },
             _ => None,
         };
 
         return Ok(SendOutcome {
             last: last_step,
             changes,
+            changing_rows,
         });
     }
 
@@ -355,6 +445,7 @@ impl Session {
     ) -> Option<ScreenFrame> {
         let frame = match last_step {
             SendLastStep::Action(outcome) => outcome.frame(),
+            SendLastStep::Wait { frame, .. } => Some(frame.as_ref()),
             SendLastStep::Command { postcondition, .. } => match postcondition.as_deref() {
                 Some(CommandPostcondition::Idle(Ok(capture))) => Some(&capture.frame),
                 Some(CommandPostcondition::Screen(Ok(outcome))) => Some(&outcome.frame),
@@ -380,10 +471,22 @@ impl Session {
             request_id: Some(request_id),
             if_state: if index == 0 { request.guard.if_state.clone() } else { None },
         };
+        if let SendStep::Wait(predicate) = step {
+            return self.wait_step(index, request_id, predicate, request.wait_timeout);
+        }
+
         let outcome = match step {
             SendStep::Command(command) => self
                 .control(&guard.request(command.clone()))
                 .map(|payload| return StepOutcome::Command(Box::new(payload))),
+            SendStep::Wait(_) => {
+                return Err(SendFailure {
+                    step: index,
+                    request_id,
+                    error: Box::new(client_error("wait step was not handled")),
+                    wait_atom: None,
+                });
+            }
             SendStep::Input(atoms) => self
                 .act(ActRequest {
                     atoms: atoms.clone(),
@@ -403,7 +506,50 @@ impl Session {
                 step: index,
                 request_id,
                 error: Box::new(error),
+                wait_atom: None,
             };
+        });
+    }
+
+    fn wait_step(
+        &self,
+        index: usize,
+        request_id: Uuid,
+        predicate: &ScreenPredicate,
+        timeout: Duration,
+    ) -> StdResult<StepOutcome, SendFailure> {
+        let outcome = self
+            .wait_screen(predicate.clone(), Duration::ZERO, timeout)
+            .map_err(|error| {
+                return SendFailure {
+                    step: index,
+                    request_id,
+                    error: Box::new(error),
+                    wait_atom: None,
+                };
+            })?;
+
+        if outcome.is_satisfied() {
+            return Ok(StepOutcome::Wait(Box::new(outcome.frame)));
+        }
+
+        let stopped = match outcome.quality {
+            ScreenWaitQuality::Deadline => WaitAtomOutcome::Deadline,
+            ScreenWaitQuality::Matched
+            | ScreenWaitQuality::MatchedUnsettled
+            | ScreenWaitQuality::ChildCompleted
+            | ScreenWaitQuality::OutputClosed
+            | ScreenWaitQuality::Completed => WaitAtomOutcome::ChildCompleted,
+        };
+
+        return Err(SendFailure {
+            step: index,
+            request_id,
+            error: Box::new(client_error("wait step did not match before it stopped")),
+            wait_atom: Some(Box::new(WaitAtomFailure {
+                outcome: stopped,
+                frame: outcome.frame,
+            })),
         });
     }
 

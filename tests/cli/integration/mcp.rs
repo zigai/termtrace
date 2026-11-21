@@ -315,7 +315,7 @@ async fn failed_calls_return_tool_errors_and_leave_the_server_usable() {
     )
     .await;
     assert!(failed(&deadline));
-    assert_eq!(structured(&deadline)["quality"], "deadline");
+    assert_eq!(structured(&deadline)["outcome"], "deadline");
 
     let missing = call(&client, "status", json!({"session": "missing"})).await;
     assert!(failed(&missing));

@@ -60,6 +60,28 @@ impl Pointer<'_> {
             }));
     }
 
+    /// Move the pointer to a zero-based cell with no button pressed.
+    ///
+    /// # Errors
+    /// Returns an error when the recorder cannot be reached or rejects the request; with `strict`,
+    /// a request the application does not report is rejected instead of returning a semantic no-op.
+    pub fn hover(
+        &self,
+        column: u16,
+        row: u16,
+        strict: bool,
+        guard: &MutationGuard,
+    ) -> Result<ControlPayload> {
+        return self
+            .session
+            .control(&guard.request(ControlCommand::Pointer {
+                column,
+                row,
+                operation: PointerOperation::Move,
+                strict,
+            }));
+    }
+
     /// Report focus state when the application enabled focus reporting.
     ///
     /// # Errors

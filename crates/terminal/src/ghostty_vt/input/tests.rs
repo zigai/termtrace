@@ -20,7 +20,7 @@ fn mouse_encoder_uses_live_sgr_modes_and_zero_based_cells() {
     let press = terminal
         .encode_mouse(
             MouseAction::Press,
-            MouseButton::Left,
+            Some(MouseButton::Left),
             2,
             3,
             80,
@@ -32,7 +32,7 @@ fn mouse_encoder_uses_live_sgr_modes_and_zero_based_cells() {
     let release = terminal
         .encode_mouse(
             MouseAction::Release,
-            MouseButton::Left,
+            Some(MouseButton::Left),
             2,
             3,
             80,
@@ -44,7 +44,7 @@ fn mouse_encoder_uses_live_sgr_modes_and_zero_based_cells() {
     let motion = terminal
         .encode_mouse(
             MouseAction::Motion,
-            MouseButton::Left,
+            Some(MouseButton::Left),
             3,
             3,
             80,
@@ -57,6 +57,22 @@ fn mouse_encoder_uses_live_sgr_modes_and_zero_based_cells() {
     assert_eq!(press.as_bytes(), b"\x1b[<0;3;4M");
     assert_eq!(release.as_bytes(), b"\x1b[<0;3;4m");
     assert_eq!(motion.as_bytes(), b"\x1b[<32;4;4M");
+}
+
+#[test]
+fn mouse_encoder_reports_pointer_motion_without_a_button_only_in_any_motion_mode() {
+    let mut terminal = GhosttyVt::new(80, 24, 100).expect("terminal");
+    terminal.write(b"\x1b[?1002h\x1b[?1006h");
+    let button_mode = terminal
+        .encode_mouse(MouseAction::Motion, None, 3, 3, 80, 24, 800, 480)
+        .expect("button-mode hover");
+    assert_eq!(button_mode.as_bytes(), b"");
+
+    terminal.write(b"\x1b[?1003h");
+    let any_mode = terminal
+        .encode_mouse(MouseAction::Motion, None, 3, 3, 80, 24, 800, 480)
+        .expect("any-motion hover");
+    assert_eq!(any_mode.as_bytes(), b"\x1b[<35;4;4M");
 }
 
 #[test]

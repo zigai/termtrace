@@ -253,7 +253,7 @@ pub enum MouseAction {
     Press,
     /// Button release.
     Release,
-    /// Pointer motion while a button remains logically pressed.
+    /// Pointer motion, with or without a button held.
     Motion,
 }
 

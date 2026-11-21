@@ -37,7 +37,7 @@ pub struct ClockSample {
 }
 
 /// Current control protocol version.
-pub const CONTROL_PROTOCOL_VERSION: u32 = 21;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 22;
 /// Maximum encoded request or response size.
 pub const MAX_CONTROL_MESSAGE_BYTES: u64 = 16 * 1024 * 1024;
 /// Response deadline for commands that do not wait or pace input.
@@ -118,6 +118,8 @@ pub enum PointerOperation {
         /// Negative scrolls up and positive scrolls down; zero is invalid.
         lines: i16,
     },
+    /// Move the pointer to a cell with no button pressed.
+    Move,
 }
 
 /// Exact predicate evaluated against the latest presented viewport.

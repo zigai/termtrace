@@ -374,6 +374,85 @@ fn pointer_click_uses_live_sgr_mode_geometry_and_audit_descriptor() {
 }
 
 #[test]
+fn pointer_atoms_encode_hover_scroll_and_drag() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let session = temporary.path().join("pointer-atoms-session");
+    let binary = env!("CARGO_BIN_EXE_termtrace");
+    let child = StdCommand::new(binary)
+        .args([
+            "record",
+            "--no-input",
+            "--cols",
+            "80",
+            "--rows",
+            "24",
+            "--cell-width",
+            "10",
+            "--cell-height",
+            "20",
+            "--out",
+        ])
+        .arg(&session)
+        .args([
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,tty\ntty.setraw(0)\nos.write(1,b'\\x1b[?1003h\\x1b[?1006hREADY')\nd=b''\nwhile len(d)<58: d+=os.read(0,58-len(d))\nos.write(1,b'POINTER:'+d.hex().encode())",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pointer atoms fixture");
+
+    wait_for_control(&session);
+    wait_for_output(&session, b"READY", Duration::from_secs(5)).expect("pointer mode ready");
+
+    let mut pointer = Command::cargo_bin("termtrace").expect("binary should build");
+    pointer
+        .arg("send")
+        .arg(&session)
+        .args(["hover:2,3", "scroll:2,3,-2", "drag:1,1,4,1"])
+        .assert()
+        .success();
+
+    let output = child
+        .wait_with_output()
+        .expect("pointer fixture completion");
+    assert!(output.status.success(), "fixture failed: {output:?}");
+
+    let log = EventLog::read(session.join("events.jsonl")).expect("event log");
+    let encoded: Vec<(String, Vec<u8>)> = log
+        .events
+        .iter()
+        .filter_map(|record| {
+            let Event::InputIntent {
+                input_kind: InputKind::Pointer,
+                descriptor: InputDescriptor::Pointer { operation, .. },
+                data,
+                ..
+            } = &record.event
+            else {
+                return None;
+            };
+
+            return Some((operation.clone(), data.as_bytes().to_vec()));
+        })
+        .collect();
+
+    assert_eq!(
+        encoded,
+        vec![
+            ("move".to_owned(), b"\x1b[<35;3;4M".to_vec()),
+            ("scroll".to_owned(), b"\x1b[<64;3;4M\x1b[<64;3;4M".to_vec()),
+            (
+                "drag".to_owned(),
+                b"\x1b[<0;2;2M\x1b[<32;5;2M\x1b[<0;5;2m".to_vec()
+            ),
+        ]
+    );
+}
+
+#[test]
 fn pointer_scroll_encodes_negative_wheel_ticks() {
     let temporary = TempDir::new().expect("temporary directory");
     let session = temporary.path().join("pointer-scroll-session");
@@ -869,7 +948,7 @@ fn actor_snapshot_excludes_uncommitted_synchronized_output() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""quality": "matched""#));
+        .stdout(predicate::str::contains(r#""outcome": "matched""#));
 
     let mut absent_wait = Command::cargo_bin("termtrace").expect("binary should build");
     absent_wait

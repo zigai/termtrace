@@ -53,7 +53,8 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
         let agent = wait_idle_output(&session);
         assert!(agent.status.success(), "agent idle wait failed: {agent:?}");
         let agent_value = compact_json_line(&agent.stdout);
-        assert_eq!(agent_value["kind"], "stable_snapshot");
+        assert_eq!(agent_value["outcome"], "stable");
+        assert!(agent_value["screen"].is_string());
 
         if fixture.reject_before_accept {
             let rejected = send_request_response(
@@ -98,7 +99,7 @@ fn converted_workflows_execute_with_surviving_evidence_and_compact_aggregate_out
         wait_for_path(&session.join("completion.json"));
         validate_completed_session(&session).expect("completion evidence");
 
-        let selected_hash = agent_value["state_hash"]
+        let selected_hash = agent_value["state"]
             .as_str()
             .expect("agent selected state hash")
             .to_owned();

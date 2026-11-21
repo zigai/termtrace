@@ -568,7 +568,8 @@ impl GhosttyVt {
     /// Encode one cell-addressed pointer event from current terminal mouse modes.
     ///
     /// Coordinates are zero-based cells. The encoder receives the center pixel
-    /// of the requested cell and the exact current grid/pixel geometry.
+    /// of the requested cell and the exact current grid/pixel geometry. A missing
+    /// button is pointer motion with no button held.
     ///
     /// # Errors
     ///
@@ -576,7 +577,7 @@ impl GhosttyVt {
     pub fn encode_mouse(
         &self,
         action: MouseAction,
-        button: MouseButton,
+        button: Option<MouseButton>,
         column: u16,
         row: u16,
         cols: u16,

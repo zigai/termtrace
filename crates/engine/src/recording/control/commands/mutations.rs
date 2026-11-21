@@ -236,7 +236,7 @@ impl SessionActor<'_> {
                                     .semantic
                                     .encode_mouse(
                                         action,
-                                        *button,
+                                        Some(*button),
                                         *column,
                                         *row,
                                         self.live.geometry.cols,
@@ -267,7 +267,7 @@ impl SessionActor<'_> {
                                         .semantic
                                         .encode_mouse(
                                             action,
-                                            *button,
+                                            Some(*button),
                                             *column,
                                             *row,
                                             self.live.geometry.cols,
@@ -281,6 +281,25 @@ impl SessionActor<'_> {
                         }
 
                         ("multi_click", mouse_button_name(*button), 0, None, *count)
+                    }
+                    PointerOperation::Move => {
+                        encoded.extend_from_slice(
+                            self.live
+                                .semantic
+                                .encode_mouse(
+                                    MouseAction::Motion,
+                                    None,
+                                    *column,
+                                    *row,
+                                    self.live.geometry.cols,
+                                    self.live.geometry.rows,
+                                    self.live.geometry.pixel_width,
+                                    self.live.geometry.pixel_height,
+                                )?
+                                .as_bytes(),
+                        );
+
+                        ("move", "none", 0, None, 0)
                     }
                     PointerOperation::Drag {
                         button,
@@ -305,7 +324,7 @@ impl SessionActor<'_> {
                                 .semantic
                                 .encode_mouse(
                                     MouseAction::Press,
-                                    *button,
+                                    Some(*button),
                                     *column,
                                     *row,
                                     self.live.geometry.cols,
@@ -327,7 +346,7 @@ impl SessionActor<'_> {
                                     .semantic
                                     .encode_mouse(
                                         MouseAction::Motion,
-                                        *button,
+                                        Some(*button),
                                         drag_column,
                                         drag_row,
                                         self.live.geometry.cols,
@@ -344,7 +363,7 @@ impl SessionActor<'_> {
                                 .semantic
                                 .encode_mouse(
                                     MouseAction::Release,
-                                    *button,
+                                    Some(*button),
                                     *to_column,
                                     *to_row,
                                     self.live.geometry.cols,
@@ -380,7 +399,7 @@ impl SessionActor<'_> {
                                     .semantic
                                     .encode_mouse(
                                         MouseAction::Press,
-                                        button,
+                                        Some(button),
                                         *column,
                                         *row,
                                         self.live.geometry.cols,
@@ -545,7 +564,7 @@ impl SessionActor<'_> {
                             .semantic
                             .encode_mouse(
                                 action,
-                                MouseButton::Left,
+                                Some(MouseButton::Left),
                                 target_column,
                                 region.row,
                                 self.live.geometry.cols,

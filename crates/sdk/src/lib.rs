@@ -37,7 +37,7 @@ pub mod session {
         ControlAcknowledgement, LaunchSpec, LocatedSession, MarkOutcome, OriginalFps,
         OriginalGeometry, OriginalLaunchSpec, OriginalRecording, OriginalSession, Readiness,
         SendFailure, SendLastStep, SendOutcome, SendRequest, SendStep, Session, SessionStatus,
-        SessionTarget, StopOutcome, StopRequest, Terminal,
+        SessionTarget, StopOutcome, StopRequest, Terminal, WaitAtomFailure, WaitAtomOutcome,
     };
 }
 

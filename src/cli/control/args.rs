@@ -98,6 +98,9 @@ pub(in crate::cli) struct WaitArgs {
     /// Require the presented state to equal this BLAKE3 hash.
     #[arg(long)]
     pub(in crate::cli) state_unchanged: Option<String>,
+    /// Result content reported for the wait: screen text, only the state, or the full frame.
+    #[arg(long, value_enum, default_value_t = WaitReport::Text)]
+    pub(in crate::cli) report: WaitReport,
     /// Require an unchanged matching presented state for this duration.
     #[arg(
         long,
@@ -135,6 +138,16 @@ pub(in crate::cli) enum ScreenEncoding {
     Diff,
     /// Omit screen text from the response payload.
     None,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(in crate::cli) enum WaitReport {
+    /// Trimmed screen text with the state and size.
+    Text,
+    /// Only the state hash and size.
+    State,
+    /// Complete frame with capture timestamps and hashes.
+    Frame,
 }
 
 #[derive(Debug, Args)]
@@ -195,14 +208,24 @@ pub(in crate::cli) struct ScreenArgs {
 #[command(group(
     ArgGroup::new("send_postcondition")
         .multiple(false)
-        .args(["until_idle", "until_screen", "until_screen_regex"])
+        .args([
+            "until_idle",
+            "until_screen",
+            "until_screen_absent",
+            "until_screen_regex",
+            "until_output"
+        ])
 ))]
-#[command(group(ArgGroup::new("send_screen_postcondition").args(["until_screen", "until_screen_regex"])))]
+#[command(group(
+    ArgGroup::new("send_screen_postcondition")
+        .args(["until_screen", "until_screen_absent", "until_screen_regex"])
+))]
 pub(in crate::cli) struct SendArgs {
     /// Live session name or canonical path.
     #[arg(index = 1)]
     pub(in crate::cli) session: PathBuf,
-    /// Named keys, text:VALUE, paste:VALUE, sleep:DURATION, raw:VALUE, or action atoms.
+    /// Keys, text:, paste:, sleep:, wait:, click:, hover:, scroll:, drag:, activate:, resize:,
+    /// signal:, mark:, raw:, or raw-file:.
     #[arg(index = 2, value_name = "INPUT", num_args = 0..)]
     pub(in crate::cli) atoms: Vec<String>,
     /// Read raw bytes or atoms from standard input.
@@ -226,9 +249,15 @@ pub(in crate::cli) struct SendArgs {
     /// Wait until the presented screen contains this exact text.
     #[arg(long)]
     pub(in crate::cli) until_screen: Option<String>,
+    /// Wait until the presented screen no longer contains this exact text.
+    #[arg(long)]
+    pub(in crate::cli) until_screen_absent: Option<String>,
     /// Wait until the presented screen matches this bounded regular expression.
     #[arg(long, value_parser = parse_bounded_screen_regex)]
     pub(in crate::cli) until_screen_regex: Option<String>,
+    /// Wait until the program's output history contains this exact text.
+    #[arg(long)]
+    pub(in crate::cli) until_output: Option<String>,
     /// Wait until the resulting presented screen remains unchanged for this duration, or for
     /// the default idle interval when no value is given.
     #[arg(

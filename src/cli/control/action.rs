@@ -10,7 +10,8 @@ use termtrace_model::{
     terminal::state::MouseButton,
 };
 use termtrace_sdk::session::{
-    CommandPostcondition, SendLastStep, SendOutcome, SendRequest, SendStep,
+    CommandPostcondition, SendFailure, SendLastStep, SendOutcome, SendRequest, SendStep,
+    WaitAtomFailure,
 };
 
 fn parse_click_str(s: &str) -> Result<(u16, u16)> {
@@ -21,6 +22,70 @@ fn parse_click_str(s: &str) -> Result<(u16, u16)> {
     let row = y_str.trim().parse::<u16>().into_diagnostic()?;
 
     return Ok((col, row));
+}
+
+/// Motion samples a `drag:` atom interpolates between its two cells.
+const DRAG_STEPS: u8 = 1;
+
+fn parse_scroll_str(s: &str) -> Result<(u16, u16, i16)> {
+    let mut parts = s.split(',');
+    let column = parts
+        .next()
+        .ok_or_else(|| {
+            return miette::miette!("invalid scroll format '{s}'; expected COL,ROW,LINES");
+        })?
+        .trim()
+        .parse::<u16>()
+        .into_diagnostic()?;
+    let row = parts
+        .next()
+        .ok_or_else(|| {
+            return miette::miette!("invalid scroll format '{s}'; expected COL,ROW,LINES");
+        })?
+        .trim()
+        .parse::<u16>()
+        .into_diagnostic()?;
+    let lines = parts
+        .next()
+        .ok_or_else(|| {
+            return miette::miette!("invalid scroll format '{s}'; expected COL,ROW,LINES");
+        })?
+        .trim()
+        .parse::<i16>()
+        .into_diagnostic()?;
+
+    if parts.next().is_some() {
+        return Err(miette::miette!(
+            "invalid scroll format '{s}'; expected COL,ROW,LINES"
+        ));
+    }
+
+    if lines == 0 {
+        return Err(miette::miette!(
+            "invalid scroll lines 0; negative scrolls up and positive scrolls down"
+        ));
+    }
+
+    return Ok((column, row, lines));
+}
+
+fn parse_drag_str(s: &str) -> Result<((u16, u16), (u16, u16))> {
+    let coordinates: Vec<&str> = s.split(',').collect();
+    if coordinates.len() != 4 {
+        return Err(miette::miette!(
+            "invalid drag format '{s}'; expected COL,ROW,COL,ROW"
+        ));
+    }
+
+    let mut cells = coordinates.into_iter().map(|value| {
+        return value.trim().parse::<u16>().into_diagnostic();
+    });
+    let from_column = cells.next().transpose()?.unwrap_or_default();
+    let from_row = cells.next().transpose()?.unwrap_or_default();
+    let to_column = cells.next().transpose()?.unwrap_or_default();
+    let to_row = cells.next().transpose()?.unwrap_or_default();
+
+    return Ok(((from_column, from_row), (to_column, to_row)));
 }
 
 fn parse_resize_str(s: &str) -> Result<ControlCommand> {
@@ -60,8 +125,25 @@ fn parse_signal_str(s: &str) -> Result<ProcessSignal> {
     };
 }
 
-/// Ordered `send` steps, each with the label reported for it.
-fn send_steps(arguments: &SendArgs) -> Result<Vec<(SendStep, &'static str)>> {
+struct PlannedStep {
+    step: SendStep,
+    label: &'static str,
+    wait: Option<PlannedWait>,
+}
+
+struct PlannedWait {
+    atom_index: usize,
+    atom: String,
+}
+
+enum AtomAction {
+    Command(ControlCommand, &'static str),
+    Wait(ScreenPredicate),
+    Input,
+}
+
+/// Ordered `send` steps, each with the label reported for it and the wait atom behind it.
+fn send_steps(arguments: &SendArgs) -> Result<Vec<PlannedStep>> {
     let stdin_requested = arguments.stdin || arguments.atoms.iter().any(|atom| return atom == "-");
 
     let mut stdin_bytes = Vec::new();
@@ -76,12 +158,15 @@ fn send_steps(arguments: &SendArgs) -> Result<Vec<(SendStep, &'static str)>> {
     let mut atoms = Vec::new();
 
     if let Some(resize) = &arguments.resize {
-        steps.push((SendStep::Command(parse_resize_str(resize)?), "resize"));
+        steps.push(planned(
+            SendStep::Command(parse_resize_str(resize)?),
+            "resize",
+        ));
     }
 
     if let Some(signal) = &arguments.signal {
         let signal = parse_signal_str(signal)?;
-        steps.push((
+        steps.push(planned(
             SendStep::Command(ControlCommand::Signal { signal }),
             "signal",
         ));
@@ -89,57 +174,38 @@ fn send_steps(arguments: &SendArgs) -> Result<Vec<(SendStep, &'static str)>> {
 
     if let Some(label) = &arguments.mark {
         let label = label.clone();
-        steps.push((SendStep::Command(ControlCommand::Mark { label }), "mark"));
+        steps.push(planned(
+            SendStep::Command(ControlCommand::Mark { label }),
+            "mark",
+        ));
     }
 
-    for atom in &arguments.atoms {
-        let control = if let Some(coordinates) = atom.strip_prefix("click:") {
-            let (column, row) = parse_click_str(coordinates)?;
-            let operation = PointerOperation::Click {
-                button: MouseButton::Left,
-            };
+    for (index, atom) in arguments.atoms.iter().enumerate() {
+        let action = parse_action_atom(atom)?;
 
-            Some((
-                ControlCommand::Pointer {
-                    column,
-                    row,
-                    operation,
-                    strict: false,
-                },
-                "pointer",
-            ))
-        } else if let Some(text) = atom.strip_prefix("activate:") {
-            Some((
-                ControlCommand::Activate {
-                    text: text.to_owned(),
-                    unique: false,
-                    strict: false,
-                },
-                "activate",
-            ))
-        } else if let Some(geometry) = atom.strip_prefix("resize:") {
-            Some((parse_resize_str(geometry)?, "resize"))
-        } else if let Some(signal) = atom.strip_prefix("signal:") {
-            let signal = parse_signal_str(signal)?;
-
-            Some((ControlCommand::Signal { signal }, "signal"))
-        } else if let Some(label) = atom.strip_prefix("mark:") {
-            let label = label.to_owned();
-
-            Some((ControlCommand::Mark { label }, "mark"))
-        } else {
-            None
-        };
-        match control {
-            Some((command, label)) => {
-                if !atoms.is_empty() {
-                    steps.push((SendStep::Input(take(&mut atoms)), "action"));
-                }
-
-                steps.push((SendStep::Command(command), label));
+        match action {
+            AtomAction::Command(command, label) => {
+                flush_input(&mut steps, &mut atoms);
+                steps.push(planned(SendStep::Command(command), label));
             }
-            None if atom == "-" => atoms.push(InputAtom::Bytes(stdin_bytes.clone())),
-            None => atoms.push(parse_atom(atom)?),
+            AtomAction::Wait(predicate) => {
+                flush_input(&mut steps, &mut atoms);
+                steps.push(PlannedStep {
+                    step: SendStep::Wait(predicate),
+                    label: "wait",
+                    wait: Some(PlannedWait {
+                        atom_index: index,
+                        atom: atom.clone(),
+                    }),
+                });
+            }
+            AtomAction::Input => {
+                if atom == "-" {
+                    atoms.push(InputAtom::Bytes(stdin_bytes.clone()));
+                } else {
+                    atoms.push(parse_atom(atom)?);
+                }
+            }
         }
     }
 
@@ -155,11 +221,120 @@ fn send_steps(arguments: &SendArgs) -> Result<Vec<(SendStep, &'static str)>> {
         atoms.push(InputAtom::Bytes(stdin_bytes));
     }
 
-    if !atoms.is_empty() {
-        steps.push((SendStep::Input(atoms), "action"));
-    }
+    flush_input(&mut steps, &mut atoms);
 
     return Ok(steps);
+}
+
+fn planned(step: SendStep, label: &'static str) -> PlannedStep {
+    return PlannedStep {
+        step,
+        label,
+        wait: None,
+    };
+}
+
+fn flush_input(steps: &mut Vec<PlannedStep>, atoms: &mut Vec<InputAtom>) {
+    if !atoms.is_empty() {
+        steps.push(planned(SendStep::Input(take(atoms)), "action"));
+    }
+}
+
+fn parse_action_atom(atom: &str) -> Result<AtomAction> {
+    if let Some(coordinates) = atom.strip_prefix("click:") {
+        let (column, row) = parse_click_str(coordinates)?;
+        let operation = PointerOperation::Click {
+            button: MouseButton::Left,
+        };
+
+        return Ok(AtomAction::Command(
+            pointer(column, row, operation),
+            "pointer",
+        ));
+    }
+
+    if let Some(coordinates) = atom.strip_prefix("hover:") {
+        let (column, row) = parse_click_str(coordinates)?;
+
+        return Ok(AtomAction::Command(
+            pointer(column, row, PointerOperation::Move),
+            "pointer",
+        ));
+    }
+
+    if let Some(coordinates) = atom.strip_prefix("scroll:") {
+        let (column, row, lines) = parse_scroll_str(coordinates)?;
+
+        return Ok(AtomAction::Command(
+            pointer(column, row, PointerOperation::Scroll { lines }),
+            "pointer",
+        ));
+    }
+
+    if let Some(cells) = atom.strip_prefix("drag:") {
+        let ((column, row), (to_column, to_row)) = parse_drag_str(cells)?;
+        let operation = PointerOperation::Drag {
+            button: MouseButton::Left,
+            to_column,
+            to_row,
+            steps: DRAG_STEPS,
+        };
+
+        return Ok(AtomAction::Command(
+            pointer(column, row, operation),
+            "pointer",
+        ));
+    }
+
+    if let Some(text) = atom.strip_prefix("activate:") {
+        return Ok(AtomAction::Command(
+            ControlCommand::Activate {
+                text: text.to_owned(),
+                unique: false,
+                strict: false,
+            },
+            "activate",
+        ));
+    }
+
+    if let Some(geometry) = atom.strip_prefix("resize:") {
+        return Ok(AtomAction::Command(parse_resize_str(geometry)?, "resize"));
+    }
+
+    if let Some(signal) = atom.strip_prefix("signal:") {
+        return Ok(AtomAction::Command(
+            ControlCommand::Signal {
+                signal: parse_signal_str(signal)?,
+            },
+            "signal",
+        ));
+    }
+
+    if let Some(label) = atom.strip_prefix("mark:") {
+        return Ok(AtomAction::Command(
+            ControlCommand::Mark {
+                label: label.to_owned(),
+            },
+            "mark",
+        ));
+    }
+
+    if let Some(text) = atom.strip_prefix("wait:") {
+        return Ok(AtomAction::Wait(ScreenPredicate::Contains {
+            text: text.to_owned(),
+        }));
+    }
+
+    return Ok(AtomAction::Input);
+}
+
+fn pointer(column: u16, row: u16, operation: PointerOperation) -> ControlCommand {
+    return ControlCommand::Pointer {
+        column,
+        row,
+        operation,
+        strict: false,
+    };
 }
 
 pub(in crate::cli) fn run_send(
@@ -172,16 +347,18 @@ pub(in crate::cli) fn run_send(
     }
 
     let session = attach_session(&resolved.path)?;
-    let (steps, labels): (Vec<_>, Vec<_>) = send_steps(&arguments)?.into_iter().unzip();
-    if steps.is_empty() {
+    let planned = send_steps(&arguments)?;
+    if planned.is_empty() {
         return Err(miette::miette!(
             "send requires at least one input atom or flag"
         ));
     }
 
-    let postcondition = condition(&arguments);
     let request = SendRequest {
-        steps,
+        steps: planned
+            .iter()
+            .map(|plan| return plan.step.clone())
+            .collect(),
         guard: MutationGuard {
             request_id: arguments.request_id,
             if_state: arguments.if_state.clone(),
@@ -189,53 +366,85 @@ pub(in crate::cli) fn run_send(
         intent: arguments.intent.clone(),
         pace: arguments.pace,
         verbose_atom_outcomes: arguments.verbose,
-        postcondition,
+        postcondition: condition(&arguments),
         projection: projection(&arguments),
         report_changes: arguments.screen == SendScreen::Diff,
+        wait_timeout: arguments.timeout.unwrap_or(defaults::WAIT_TIMEOUT),
     };
     let outcome = match session.send(request) {
         Ok(outcome) => outcome,
         Err(failure) => {
-            let label = labels.get(failure.step).copied().unwrap_or("send");
-
-            return write_send_failure(
-                response,
-                &arguments,
-                &session,
-                label,
-                failure.request_id,
-                &failure.error,
-            );
+            return write_send_failure(response, &arguments, &session, &planned, failure)
         }
     };
 
-    let SendOutcome { last, changes } = outcome;
+    let SendOutcome {
+        last,
+        changes,
+        changing_rows,
+    } = outcome;
+    let output_wait = output_postcondition(&arguments, &resolved);
+    let report_changes = arguments.screen == SendScreen::Diff;
+
     let outcome = match last {
         SendLastStep::Command {
             request_id,
             postcondition,
             ..
         } => {
-            let label = labels.last().copied().unwrap_or("send");
-
             return write_trailing_postcondition(
                 response,
                 &arguments,
                 &session,
-                label,
-                request_id,
-                postcondition,
-                changes.as_ref(),
+                TrailingReport {
+                    label: planned.last().map_or("send", |plan| return plan.label),
+                    request_id,
+                    postcondition,
+                    changes: changes.as_ref(),
+                    frame: None,
+                    changing_rows: changing_rows.as_deref(),
+                    output_wait: output_wait.as_ref(),
+                },
+            );
+        }
+        SendLastStep::Wait {
+            request_id,
+            frame,
+            postcondition,
+        } => {
+            return write_trailing_postcondition(
+                response,
+                &arguments,
+                &session,
+                TrailingReport {
+                    label: "wait",
+                    request_id,
+                    postcondition,
+                    changes: changes.as_ref(),
+                    frame: Some(&frame),
+                    changing_rows: changing_rows.as_deref(),
+                    output_wait: output_wait.as_ref(),
+                },
             );
         }
         SendLastStep::Action(outcome) => outcome,
     };
 
-    let report_changes = arguments.screen == SendScreen::Diff;
+    let matched =
+        outcome.is_matched() && output_wait.as_ref().is_none_or(|wait| return wait.matched);
+
     let mut output = applied_response(&outcome, arguments.verbose)?;
 
-    if arguments.screen == SendScreen::Text || !outcome.is_matched() {
+    if let Some(wait) = &output_wait {
+        apply_output_postcondition(&mut output, wait);
+    }
+
+    if arguments.screen == SendScreen::Text || !matched {
         insert_screen(&mut output, outcome.frame());
+    }
+
+    if let Some(rows) = changing_rows.as_deref() {
+        insert_changing_rows(&mut output, rows);
     }
 
     if arguments.json {
@@ -253,6 +462,10 @@ pub(in crate::cli) fn run_send(
             writeln!(summary, "State: {state}").into_diagnostic()?;
         }
 
+        if let Some(rows) = changing_rows.as_deref() {
+            writeln!(summary, "{}", changing_rows_notice(rows)).into_diagnostic()?;
+        }
+
         summary.push_str(&human_send_screen(
             arguments.screen,
             changes.as_ref(),
@@ -261,7 +474,58 @@ pub(in crate::cli) fn run_send(
         write_stdout(response, summary)?;
     }
 
-    return Ok(if outcome.is_matched() { ExitCode::SUCCESS } else { ExitCode::FAILURE });
+    return Ok(if matched { ExitCode::SUCCESS } else { ExitCode::FAILURE });
+}
+
+struct OutputWait {
+    matched: bool,
+    outcome: &'static str,
+}
+
+fn output_postcondition(arguments: &SendArgs, resolved: &ResolvedSessionRef) -> Option<OutputWait> {
+    let text = arguments.until_output.as_ref()?;
+
+    let timeout = arguments.timeout.unwrap_or(defaults::WAIT_TIMEOUT);
+    if wait_for_output(&resolved.path, text.as_bytes(), timeout).is_ok() {
+        return Some(OutputWait {
+            matched: true,
+            outcome: "matched",
+        });
+    }
+
+    let ended = resolve_session(resolved.path.clone())
+        .is_ok_and(|session| return session.phase != SessionPhase::Live);
+
+    return Some(OutputWait {
+        matched: false,
+        outcome: if ended { "child_completed" } else { "deadline" },
+    });
+}
+
+fn apply_output_postcondition(output: &mut serde_json::Value, wait: &OutputWait) {
+    if let Some(object) = output.as_object_mut() {
+        object.insert(
+            "postcondition".to_owned(),
+            serde_json::json!({
+                "kind": "output",
+                "matched": wait.matched,
+                "outcome": wait.outcome,
+            }),
+        );
+        object.insert("ok".to_owned(), serde_json::json!(wait.matched));
+
+        if wait.matched {
+            object.remove("code");
+        } else {
+            object.insert("code".to_owned(), serde_json::json!("postcondition_failed"));
+        }
+    }
+}
+
+fn insert_changing_rows(output: &mut serde_json::Value, rows: &[u16]) {
+    if let Some(object) = output.as_object_mut() {
+        object.insert("changing_rows".to_owned(), serde_json::json!(rows));
+    }
 }
 
 fn human_frame_summary(frame: &ScreenFrame) -> String {
@@ -273,7 +537,7 @@ fn human_frame_summary(frame: &ScreenFrame) -> String {
     }));
 }
 
-fn frame_text(frame: &ScreenFrame) -> String {
+pub(super) fn frame_text(frame: &ScreenFrame) -> String {
     let rows: Vec<&str> = match &frame.data {
         ScreenFrameContent::None => Vec::new(),
         ScreenFrameContent::Text { rows } => {
@@ -347,39 +611,61 @@ fn insert_changes(output: &mut serde_json::Value, changes: Option<&ScreenChanges
     return Ok(());
 }
 
-/// Report the postcondition checked after a trailing control command.
+struct TrailingReport<'data> {
+    label: &'static str,
+    request_id: uuid::Uuid,
+    postcondition: Option<Box<CommandPostcondition>>,
+    changes: Option<&'data ScreenChanges>,
+    frame: Option<&'data ScreenFrame>,
+    changing_rows: Option<&'data [u16]>,
+    output_wait: Option<&'data OutputWait>,
+}
+
+/// Report the postcondition checked after a trailing control command or wait.
 fn write_trailing_postcondition(
     response: &mut ResponseWriter,
     arguments: &SendArgs,
     session: &Session,
-    label: &'static str,
-    request_id: uuid::Uuid,
-    postcondition: Option<Box<CommandPostcondition>>,
-    changes: Option<&ScreenChanges>,
+    report: TrailingReport<'_>,
 ) -> Result<ExitCode> {
+    let TrailingReport {
+        label,
+        request_id,
+        postcondition,
+        changes,
+        frame,
+        changing_rows,
+        output_wait,
+    } = report;
+
     let frame = match postcondition.as_deref() {
         Some(CommandPostcondition::Idle(Ok(capture))) => Some(capture.frame.clone()),
         Some(CommandPostcondition::Screen(Ok(wait))) => Some(wait.frame.clone()),
-        _ => session.frame(projection(arguments)).ok(),
+        _ => frame
+            .cloned()
+            .or_else(|| return session.frame(projection(arguments)).ok()),
     };
 
-    let (matched, kind, outcome) = match postcondition.map(|postcondition| return *postcondition) {
-        None => (true, "none", "matched".to_owned()),
-        Some(CommandPostcondition::Idle(Ok(capture))) => (
-            capture.quality.is_settled(),
-            "idle",
-            capture.quality.as_str().to_owned(),
-        ),
-        Some(CommandPostcondition::Idle(Err(_))) => (false, "idle", "error".to_owned()),
-        Some(CommandPostcondition::Screen(Ok(wait))) => (
-            wait.is_satisfied(),
-            "screen",
-            stable_enum_label(&wait.quality)?,
-        ),
-        Some(CommandPostcondition::Screen(Err(_))) => (false, "screen", "error".to_owned()),
-    };
+    let (postcondition_matched, kind, outcome) =
+        match postcondition.map(|postcondition| return *postcondition) {
+            None => (true, "none", "matched".to_owned()),
+            Some(CommandPostcondition::Idle(Ok(capture))) => (
+                capture.quality.is_settled(),
+                "idle",
+                capture.quality.as_str().to_owned(),
+            ),
+            Some(CommandPostcondition::Idle(Err(_))) => (false, "idle", "error".to_owned()),
+            Some(CommandPostcondition::Screen(Ok(wait))) => (
+                wait.is_satisfied(),
+                "screen",
+                stable_enum_label(&wait.quality)?,
+            ),
+            Some(CommandPostcondition::Screen(Err(_))) => (false, "screen", "error".to_owned()),
+        };
 
+    let matched = output_wait.map_or(postcondition_matched, |wait| return wait.matched);
     let report_changes = arguments.screen == SendScreen::Diff;
+
     if arguments.json {
         let mut output = serde_json::json!({
             "v": 1,
@@ -393,6 +679,12 @@ fn write_trailing_postcondition(
             }
         });
 
+        if let Some(wait) = output_wait {
+            apply_output_postcondition(&mut output, wait);
+        } else if !matched && let Some(object) = output.as_object_mut() {
+            object.insert("code".to_owned(), serde_json::json!("postcondition_failed"));
+        }
+
         if report_changes {
             insert_changes(&mut output, changes)?;
         }
@@ -401,12 +693,16 @@ fn write_trailing_postcondition(
             insert_screen(&mut output, frame.as_ref());
         }
 
+        if let Some(rows) = changing_rows {
+            insert_changing_rows(&mut output, rows);
+        }
+
         if let Some(frame) = &frame
             && let Some(object) = output.as_object_mut()
         {
             object.insert(
                 "observation".to_owned(),
-                serde_json::json!({"state": frame.state_hash, "state_hash": frame.state_hash}),
+                serde_json::json!({"state": frame.state_hash}),
             );
         }
 
@@ -448,6 +744,10 @@ fn write_trailing_postcondition(
             && let Some(frame) = &frame
         {
             writeln!(summary, "State: {}", frame.state_hash).into_diagnostic()?;
+        }
+
+        if let Some(rows) = changing_rows {
+            writeln!(summary, "{}", changing_rows_notice(rows)).into_diagnostic()?;
         }
 
         summary.push_str(&human_send_screen(
@@ -510,15 +810,34 @@ fn write_send_failure(
     response: &mut ResponseWriter,
     arguments: &SendArgs,
     session: &Session,
-    label: &'static str,
-    request_id: uuid::Uuid,
-    error: &SessionError,
+    planned: &[PlannedStep],
+    failure: SendFailure,
 ) -> Result<ExitCode> {
+    let SendFailure {
+        step,
+        request_id,
+        error,
+        wait_atom,
+    } = failure;
+    let label = planned.get(step).map_or("send", |plan| return plan.label);
+
+    if let Some(wait_atom) = wait_atom {
+        let planned_wait = planned.get(step).and_then(|plan| return plan.wait.as_ref());
+
+        return write_wait_atom_failure(
+            response,
+            arguments,
+            request_id,
+            planned_wait,
+            wait_atom.as_ref(),
+        );
+    }
+
     let ended = session
         .completion()
         .is_ok_and(|completion| return completion.is_some());
 
-    let mut output = error_response(request_id, error, ended, arguments.verbose);
+    let mut output = error_response(request_id, &error, ended, arguments.verbose);
     let frame = session
         .frame(ScreenProjectionRequest {
             detail: FrameDetail::Text,
@@ -531,6 +850,47 @@ fn write_send_failure(
         write_json_pretty(response, &output)?;
     } else {
         write_stdout(response, format!("Send {label} failed: {error}\n"))?;
+    }
+
+    return Ok(ExitCode::FAILURE);
+}
+
+fn write_wait_atom_failure(
+    response: &mut ResponseWriter,
+    arguments: &SendArgs,
+    request_id: uuid::Uuid,
+    planned: Option<&PlannedWait>,
+    failure: &WaitAtomFailure,
+) -> Result<ExitCode> {
+    let atom_index = planned.map_or(0, |wait| return wait.atom_index);
+    let atom = planned.map_or("wait:", |wait| return wait.atom.as_str());
+    let frame = &failure.frame;
+
+    if arguments.json {
+        let output = serde_json::json!({
+            "v": 1,
+            "ok": false,
+            "type": "action",
+            "code": "wait_atom_failed",
+            "request_id": request_id,
+            "atom": atom,
+            "atom_index": atom_index,
+            "outcome": failure.outcome.as_str(),
+            "state": frame.state_hash,
+            "size": [frame.geometry.cols, frame.geometry.rows],
+            "screen": frame_text(frame),
+        });
+
+        write_json_pretty(response, &output)?;
+    } else {
+        write_stdout(
+            response,
+            format!(
+                "Send stopped at {atom} (atom {atom_index}): the screen did not contain the text; outcome {}.\n{}\n",
+                failure.outcome.as_str(),
+                frame_text(frame)
+            ),
+        )?;
     }
 
     return Ok(ExitCode::FAILURE);
@@ -560,6 +920,14 @@ pub(super) fn condition(arguments: &SendArgs) -> ActionCondition {
         };
     }
 
+    if let Some(text) = &arguments.until_screen_absent {
+        return ActionCondition::Screen {
+            predicate: ScreenPredicate::Absent { text: text.clone() },
+            timeout,
+            settle: arguments.settle.unwrap_or_default(),
+        };
+    }
+
     if let Some(pattern) = &arguments.until_screen_regex {
         return ActionCondition::Screen {
             predicate: ScreenPredicate::MatchesRegex {
@@ -579,8 +947,10 @@ pub(super) fn projection(arguments: &SendArgs) -> ScreenProjectionRequest {
 
     if arguments.screen == SendScreen::State
         && arguments.until_screen.is_none()
+        && arguments.until_screen_absent.is_none()
         && arguments.until_screen_regex.is_none()
         && arguments.until_idle.is_none()
+        && arguments.until_output.is_none()
     {
         return hash_only_projection();
     }
@@ -594,8 +964,6 @@ pub(super) fn projection(arguments: &SendArgs) -> ScreenProjectionRequest {
 pub(super) struct ActionObservation<'data> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) state: Option<&'data str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) state_hash: Option<&'data str>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub(super) frame: Option<&'data ScreenFrame>,
 }
@@ -711,7 +1079,6 @@ pub(super) fn applied_response(
         postcondition,
         observation: ActionObservation {
             state: state_hash,
-            state_hash,
             frame: outcome.frame().filter(|_| return include_details),
         },
         ended,
@@ -983,7 +1350,9 @@ mod action_response_tests {
             signal: None,
             mark: None,
             until_screen: Some("ready".to_owned()),
+            until_screen_absent: None,
             until_screen_regex: None,
+            until_output: None,
             until_idle: None,
             reaction_timeout: None,
             timeout: None,

@@ -47,7 +47,7 @@ canonical child output. Use `wait --output` separately only when byte history is
 the requirement.
 
 `wait --screen` and `wait --idle` also answer for a session that has completed: the
-predicate is evaluated once on the final presented screen (`quality: completed`), so a
+predicate is evaluated once on the final presented screen (`outcome: completed`), so a
 program that prints and exits still satisfies a wait for its last output. A match counts
 when it met the requested stability, or when it held on the final screen of a completed
 child; pass `--require-live-stability` to `wait --idle` to reject completed sessions.

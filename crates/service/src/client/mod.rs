@@ -51,7 +51,7 @@ pub use original::{
 };
 pub use send::{
     send_step_request_id, CommandPostcondition, SendFailure, SendLastStep, SendOutcome,
-    SendRequest, SendStep,
+    SendRequest, SendStep, WaitAtomFailure, WaitAtomOutcome,
 };
 pub use session::{Session, SessionStatus, StopOutcome, StopRequest};
 pub use target::{LocatedSession, SessionTarget};

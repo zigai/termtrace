@@ -9,18 +9,15 @@ use termtrace_model::{
         session::{SessionCompletion, SessionPhase, VerificationReport},
     },
     protocol::{
-        control::{
-            ClockSample, ControlErrorDetails, InputSequenceAtomOutcome, StableCaptureQuality,
-        },
+        control::{ClockSample, ControlErrorDetails, InputSequenceAtomOutcome},
         mutation::{MutationEffect, Retry},
     },
     registry::RegistryListEntry,
     terminal::{
         analysis::{DiagnoseReport, ExplainReport, LastActionReport},
         diff::{RowMove, ScreenChanges, SemanticDiff},
-        inspection::{ScreenWaitOutcome, WaitOutcome},
         observation::{ActorBoundaries, CaptureQuality, Observation},
-        screen::{ScreenFrame, ScreenGeometry},
+        screen::ScreenFrame,
         timeline::TimelineEntry,
     },
     value::{pagination::OutputPage, path_bytes::PathValue},
@@ -79,7 +76,7 @@ pub(super) fn send() -> Arc<JsonObject> {
     let postcondition = object(
         &["kind", "matched", "outcome"],
         json!({
-            "kind": {"enum": ["none", "idle", "screen"]},
+            "kind": {"enum": ["none", "output", "idle", "screen"]},
             "matched": {"type": "boolean"},
             "outcome": {"type": "string"},
             "matched_row": {"type": "integer", "minimum": 0},
@@ -117,13 +114,13 @@ pub(super) fn send() -> Arc<JsonObject> {
                 &[],
                 json!({
                     "state": {"type": "string"},
-                    "state_hash": {"type": "string"},
                 }),
             ),
             "ended": {"type": "boolean"},
             "boundaries": schemas.typed::<ActorBoundaries>(),
             "code": {"const": "postcondition_failed"},
             "changes": schemas.typed::<ScreenChanges>(),
+            "changing_rows": rows(),
             "screen": {"type": "string"},
             "size": size(),
         }),
@@ -175,17 +172,59 @@ pub(super) fn send() -> Arc<JsonObject> {
         json!({
             "v": {"const": 1},
             "ok": {"type": "boolean"},
-            "type": {"enum": ["pointer", "activate", "resize", "signal", "mark"]},
+            "type": {"enum": ["pointer", "activate", "resize", "signal", "mark", "wait"]},
             "request_id": {"type": "string", "format": "uuid"},
             "postcondition": postcondition,
+            "observation": object(
+                &[],
+                json!({
+                    "state": {"type": "string"},
+                }),
+            ),
             "changes": schemas.typed::<ScreenChanges>(),
+            "changing_rows": rows(),
             "screen": {"type": "string"},
             "size": size(),
+            "code": {"const": "postcondition_failed"},
+        }),
+    );
+    let wait_atom_failed = object(
+        &[
+            "v",
+            "ok",
+            "type",
+            "code",
+            "request_id",
+            "atom",
+            "atom_index",
+            "outcome",
+            "state",
+            "size",
+            "screen",
+        ],
+        json!({
+            "v": {"const": 1},
+            "ok": {"const": false},
+            "type": {"const": "action"},
+            "code": {"const": "wait_atom_failed"},
+            "request_id": {"type": "string", "format": "uuid"},
+            "atom": {"type": "string"},
+            "atom_index": {"type": "integer", "minimum": 0},
+            "outcome": {"enum": ["deadline", "child_completed"]},
+            "state": {"type": "string"},
+            "size": size(),
+            "screen": {"type": "string"},
         }),
     );
     let lifecycle = lifecycle(&mut schemas);
 
-    return schemas.finish(vec![applied, rejected, command, lifecycle]);
+    return schemas.finish(vec![
+        applied,
+        rejected,
+        command,
+        wait_atom_failed,
+        lifecycle,
+    ]);
 }
 
 pub(super) fn screen() -> Arc<JsonObject> {
@@ -254,37 +293,31 @@ pub(super) fn screen() -> Arc<JsonObject> {
 
 pub(super) fn wait() -> Arc<JsonObject> {
     let mut schemas = Schemas::new();
-    let output = schemas.typed::<WaitOutcome>();
-    let screen = schemas.typed::<ScreenWaitOutcome>();
-    let idle = object(
-        &[
-            "kind",
-            "quality",
-            "state",
-            "state_hash",
-            "frame_hash",
-            "geometry",
-            "first_observed_monotonic_ns",
-            "observed_monotonic_ns",
-            "stable_for_ns",
-            "frame",
-        ],
+    let report = object(
+        &["matched", "outcome", "predicate", "state", "size"],
         json!({
-            "kind": {"const": "stable_snapshot"},
-            "quality": schemas.typed::<StableCaptureQuality>(),
+            "matched": {"type": "boolean"},
+            "outcome": {"type": "string"},
+            "predicate": {"type": "object"},
             "state": {"type": "string"},
-            "state_hash": {"type": "string"},
+            "size": size(),
+            "screen": {"type": "string"},
+            "changing_rows": rows(),
             "frame_hash": {"type": "string"},
-            "geometry": schemas.typed::<ScreenGeometry>(),
-            "first_observed_monotonic_ns": {"type": "integer"},
+            "frame": schemas.typed::<ScreenFrame>(),
+            "first_match_monotonic_ns": {"type": ["integer", "null"]},
             "observed_monotonic_ns": {"type": "integer"},
             "stable_for_ns": {"type": "integer"},
-            "frame": schemas.typed::<ScreenFrame>(),
+            "first_observed_monotonic_ns": {"type": "integer"},
+            "event_seq": {"type": "integer"},
+            "output_end_offset": {"type": "integer"},
+            "monotonic_ns": {"type": "integer"},
+            "semantic_state_zstd": {"type": "string"},
         }),
     );
     let lifecycle = lifecycle(&mut schemas);
 
-    return schemas.finish(vec![output, screen, idle, lifecycle]);
+    return schemas.finish(vec![report, lifecycle]);
 }
 
 pub(super) fn status() -> Arc<JsonObject> {
@@ -510,6 +543,13 @@ impl Schemas {
 
 fn object(required: &[&str], properties: Value) -> Value {
     return json!({"type": "object", "required": required, "properties": properties});
+}
+
+fn rows() -> Value {
+    return json!({
+        "type": "array",
+        "items": {"type": "integer", "minimum": 0},
+    });
 }
 
 fn size() -> Value {

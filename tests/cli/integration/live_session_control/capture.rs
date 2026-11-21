@@ -63,18 +63,30 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
     let compact: serde_json::Value =
         serde_json::from_slice(&compact_output).expect("compact idle response");
     assert_eq!(
-        compact.pointer("/kind").and_then(serde_json::Value::as_str),
-        Some("stable_snapshot")
+        compact
+            .pointer("/outcome")
+            .and_then(serde_json::Value::as_str),
+        Some("stable")
     );
     assert_eq!(
         compact
-            .pointer("/state_hash")
+            .pointer("/state")
             .and_then(serde_json::Value::as_str),
         Some(state_hash.as_str())
     );
-    assert!(compact.pointer("/frame").is_some() || compact.pointer("/screen").is_some());
+    assert!(compact.pointer("/screen").is_some());
     assert!(compact.pointer("/boundary").is_none());
     assert!(compact.pointer("/semantic_state_zstd").is_none());
+
+    let mut frame_idle = Command::cargo_bin("termtrace").expect("binary should build");
+    frame_idle
+        .args(["wait", "--json"])
+        .arg(&stable_session)
+        .args(["--idle=10ms", "--timeout", "2s", "--report", "frame"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""frame_hash""#))
+        .stdout(predicate::str::contains(r#""stable_for_ns""#));
 
     let mut full_idle = Command::cargo_bin("termtrace").expect("binary should build");
     full_idle
@@ -124,6 +136,28 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
             ..
         }
     ));
+
+    let mut idle = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = idle
+        .args(["wait", "--json"])
+        .arg(&changing_session)
+        .args(["--idle=100ms", "--timeout", "500ms", "--allow-incomplete"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let deadline_idle: serde_json::Value =
+        serde_json::from_slice(&output).expect("idle deadline JSON");
+    assert_eq!(deadline_idle["outcome"], "deadline");
+    assert!(
+        deadline_idle["changing_rows"]
+            .as_array()
+            .is_some_and(|rows| return !rows.is_empty()),
+        "{deadline_idle}"
+    );
+
     send_request(
         &changing_session,
         &ControlRequest::new(ControlCommand::Stop),
@@ -237,7 +271,7 @@ fn stable_capture_returns_the_exact_actor_state_and_typed_deadline() {
         .args(["--idle=1s", "--timeout", "3s", "--allow-incomplete"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""quality": "output_closed""#));
+        .stdout(predicate::str::contains(r#""outcome": "output_closed""#));
 
     let _closed_status = closed_child.wait().expect("closed recorder exit");
 }

@@ -2,7 +2,7 @@
 
 use crate::actions::{mutation_err, request_id_arg, send_err, JsActionResult};
 use crate::host::{self, Arg, Model};
-use crate::{blocking_failure, to_napi_err, with_frame, JsCaptured};
+use crate::{blocking_failure, to_napi_err, with_frame, JsCaptured, JsFrame};
 use napi::bindgen_prelude::{Object, ToNapiValue};
 use napi::{sys, Env};
 use napi_derive::napi;
@@ -31,6 +31,8 @@ pub enum SendResult {
     /// Model fields plus the exact frame they describe.
     Stable(Box<JsCaptured<StableScreenCapture>>),
     Wait(JsCaptured<ScreenWaitResult>),
+    /// One rich screen frame.
+    Frame(JsFrame),
     /// A native action result.
     Action(JsActionResult),
     /// An object of named entries.
@@ -50,6 +52,7 @@ impl ToNapiValue for SendResult {
                 Self::Changes(v) => Model::to_napi_value(env, Model(v)),
                 Self::Stable(v) => JsCaptured::to_napi_value(env, *v),
                 Self::Wait(v) => JsCaptured::to_napi_value(env, v),
+                Self::Frame(v) => JsFrame::to_napi_value(env, v),
                 Self::Action(result) => JsActionResult::to_napi_value(env, result),
                 Self::Object(entries) => {
                     let mut object = Object::new(&Env::from(env))?;
@@ -569,6 +572,48 @@ fn send_result(
             ),
             ("result", SendResult::Action(JsActionResult::new(*action))),
         ]),
+        SendLastStep::Wait {
+            request_id,
+            frame,
+            postcondition,
+        } => {
+            let postcondition = match postcondition.map(|postcondition| return *postcondition) {
+                None => SendResult::Null,
+                Some(CommandPostcondition::Idle(Ok(capture))) => checked(
+                    "idle",
+                    (
+                        "capture",
+                        SendResult::Stable(Box::new(with_frame(capture.clone(), capture.frame))),
+                    ),
+                ),
+                Some(CommandPostcondition::Screen(Ok(wait))) => checked(
+                    "screen",
+                    (
+                        "wait",
+                        SendResult::Wait(with_frame(ScreenWaitResult::from(&wait), wait.frame)),
+                    ),
+                ),
+                Some(CommandPostcondition::Idle(Err(error))) => checked(
+                    "idle",
+                    ("error", SendResult::Error(ErrorReport::from(&error))),
+                ),
+                Some(CommandPostcondition::Screen(Err(error))) => checked(
+                    "screen",
+                    ("error", SendResult::Error(ErrorReport::from(&error))),
+                ),
+            };
+
+            SendResult::Object(vec![
+                ("kind", SendResult::Text("wait".to_owned())),
+                step,
+                ("request_id", SendResult::Text(request_id.to_string())),
+                (
+                    "frame",
+                    SendResult::Frame(JsFrame::new(std::sync::Arc::new(*frame))),
+                ),
+                ("postcondition", postcondition),
+            ])
+        }
         SendLastStep::Command {
             request_id,
             payload,

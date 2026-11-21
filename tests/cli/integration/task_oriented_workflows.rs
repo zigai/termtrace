@@ -68,7 +68,7 @@ fn start_act_and_screen_form_one_state_safe_workflow() {
     assert_eq!(action["postcondition"]["matched"], true);
     assert_eq!(action["postcondition"]["outcome"], "matched_unsettled");
     assert_eq!(
-        action["observation"]["state_hash"].as_str().map(str::len),
+        action["observation"]["state"].as_str().map(str::len),
         Some(64)
     );
     assert!(action["screen"].is_string());
@@ -301,7 +301,7 @@ fn child_completed_wait_returns_the_output_drained_frame() {
         );
     });
 
-    assert_eq!(waited["quality"], "child_completed");
+    assert_eq!(waited["outcome"], "child_completed");
     assert!(
         String::from_utf8_lossy(output).contains("TAIL_SENTINEL"),
         "terminating wait frame omitted queued PTY output: {waited}"
@@ -319,7 +319,7 @@ fn child_completed_wait_returns_the_output_drained_frame() {
 
     let completed: serde_json::Value =
         serde_json::from_slice(&output).expect("completed screen response");
-    assert_eq!(waited["frame"]["state_hash"], completed["state"]);
+    assert_eq!(waited["state"], completed["state"]);
     assert!(
         String::from_utf8_lossy(&output).contains("TAIL_SENTINEL"),
         "completed frame omitted sentinel: {completed}"
@@ -453,7 +453,7 @@ fn act_excludes_concurrent_mutations_until_its_postcondition_finishes() {
     assert!(action["screen"]
         .as_str()
         .is_some_and(|text| return text.contains("FIRST:41")));
-    assert!(action["observation"]["state_hash"].as_str().is_some());
+    assert!(action["observation"]["state"].as_str().is_some());
     assert!(action["screen"].is_string());
 
     let mut after = Command::cargo_bin("termtrace").expect("binary should build");
@@ -862,4 +862,194 @@ fn last_action_uses_the_full_journaled_multi_atom_action_boundary() {
         .as_u64()
         .zip(report["action"]["result_event_seq"].as_u64())
         .is_some_and(|(intent, result)| return intent < result));
+}
+
+#[test]
+fn send_wait_atom_blocks_until_the_screen_shows_the_text() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "record",
+            "-d",
+            "--json",
+            "--until-screen",
+            "READY",
+            "--timeout",
+            "5s",
+            "waiting",
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; printf READY; sleep 0.7; printf 'LATE\\n'; while :; do sleep 0.1; done",
+        ])
+        .assert()
+        .success();
+
+    let mut send = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = send
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "send",
+            "--json",
+            "waiting",
+            "--timeout",
+            "5s",
+            "--",
+            "text:first",
+            "wait:LATE",
+            "text:second",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let sent: serde_json::Value = serde_json::from_slice(&output).expect("send JSON");
+    assert_eq!(sent["ok"], true);
+    assert!(
+        sent["screen"]
+            .as_str()
+            .is_some_and(|text| return text.contains("LATE")),
+        "{sent}"
+    );
+
+    let mut reached = Command::cargo_bin("termtrace").expect("binary should build");
+    reached
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "wait",
+            "--json",
+            "waiting",
+            "--screen",
+            "second",
+            "--timeout",
+            "5s",
+        ])
+        .assert()
+        .success();
+
+    let mut timeout = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = timeout
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "send",
+            "--json",
+            "waiting",
+            "--timeout",
+            "700ms",
+            "--",
+            "text:skipped",
+            "wait:NEVER_SHOWN",
+            "text:unreached",
+        ])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+
+    let failed: serde_json::Value = serde_json::from_slice(&output).expect("wait atom JSON");
+    assert_eq!(failed["code"], "wait_atom_failed");
+    assert_eq!(failed["atom"], "wait:NEVER_SHOWN");
+    assert_eq!(failed["atom_index"], 1);
+    assert_eq!(failed["outcome"], "deadline");
+    assert_eq!(failed["state"].as_str().map(str::len), Some(64));
+    assert_eq!(failed["size"].as_array().map(Vec::len), Some(2));
+    assert!(failed["screen"].is_string());
+    assert!(!failed["screen"]
+        .as_str()
+        .is_some_and(|text| return text.contains("unreached")));
+
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "waiting", "--wait"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn send_until_output_waits_for_program_output() {
+    let temporary = TempDir::new().expect("temporary directory");
+    let state = temporary.path().join("state");
+    let mut start = Command::cargo_bin("termtrace").expect("binary should build");
+    start
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "record",
+            "-d",
+            "--json",
+            "--until-screen",
+            "READY",
+            "--timeout",
+            "5s",
+            "output",
+            "--",
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM; stty -icanon; printf READY; read line; printf 'REPLY:%s\\n' \"$line\"; while :; do sleep 0.1; done",
+        ])
+        .assert()
+        .success();
+
+    let mut send = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = send
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "send",
+            "--json",
+            "output",
+            "--until-output",
+            "REPLY:hello",
+            "--timeout",
+            "5s",
+            "--",
+            "text:hello",
+            "enter",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let sent: serde_json::Value = serde_json::from_slice(&output).expect("send JSON");
+    assert_eq!(sent["postcondition"]["kind"], "output");
+    assert_eq!(sent["postcondition"]["matched"], true);
+    assert_eq!(sent["postcondition"]["outcome"], "matched");
+
+    let mut missing = Command::cargo_bin("termtrace").expect("binary should build");
+    let output = missing
+        .env("TERMTRACE_STATE_DIR", &state)
+        .args([
+            "send",
+            "--json",
+            "output",
+            "--until-output",
+            "NEVER_PRINTED",
+            "--timeout",
+            "300ms",
+            "--",
+            "text:later",
+        ])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+
+    let unmet: serde_json::Value = serde_json::from_slice(&output).expect("unmet output JSON");
+    assert_eq!(unmet["postcondition"]["kind"], "output");
+    assert_eq!(unmet["postcondition"]["matched"], false);
+    assert_eq!(unmet["postcondition"]["outcome"], "deadline");
+    assert_eq!(unmet["code"], "postcondition_failed");
+
+    let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
+    stop.env("TERMTRACE_STATE_DIR", &state)
+        .args(["stop", "output", "--wait"])
+        .assert()
+        .success();
 }

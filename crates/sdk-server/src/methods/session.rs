@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use termtrace_model::protocol::control::{PointerOperation, ProcessSignal};
 use termtrace_model::terminal::diff::ScreenChanges;
+use termtrace_model::terminal::screen::ScreenFrame;
 use termtrace_model::value::ExactPath;
 use termtrace_sdk::client::Session;
 use termtrace_sdk::contracts::control::{guard, parse_request_id, CommandOutcome, ErrorReport};
@@ -133,6 +134,17 @@ enum SendLast {
         request_id: Uuid,
         /// Complete action result.
         result: Box<ActOutcome>,
+    },
+    /// The final step was a wait.
+    Wait {
+        /// Zero-based step index.
+        step: usize,
+        /// Identity of the wait step.
+        request_id: Uuid,
+        /// Presented screen that satisfied the predicate.
+        frame: ScreenFrame,
+        /// Postcondition checked after the wait, when one was requested.
+        postcondition: Option<Box<CommandCheck>>,
     },
     /// The final step was a control command.
     Command {
@@ -367,6 +379,42 @@ fn send_result(
                 postcondition,
             }
         }
+        SendLastStep::Wait {
+            request_id,
+            frame,
+            postcondition,
+        } => {
+            let postcondition = postcondition.map(|postcondition| {
+                return Box::new(match *postcondition {
+                    CommandPostcondition::Idle(Ok(capture)) => CommandCheck::Idle {
+                        capture: Some(Box::new(Captured::new(capture.clone(), capture.frame))),
+                        error: None,
+                    },
+                    CommandPostcondition::Idle(Err(error)) => CommandCheck::Idle {
+                        capture: None,
+                        error: Some(ErrorReport::from(&error)),
+                    },
+                    CommandPostcondition::Screen(Ok(wait)) => CommandCheck::Screen {
+                        wait: Some(Box::new(Captured::new(
+                            ScreenWaitResult::from(&wait),
+                            wait.frame,
+                        ))),
+                        error: None,
+                    },
+                    CommandPostcondition::Screen(Err(error)) => CommandCheck::Screen {
+                        wait: None,
+                        error: Some(ErrorReport::from(&error)),
+                    },
+                });
+            });
+
+            SendLast::Wait {
+                step,
+                request_id,
+                frame: *frame,
+                postcondition,
+            }
+        }
     };
 
     return Ok(SendResult {
@@ -414,6 +462,9 @@ fn pointer(call: &Call<'_>, params: PointerParams) -> Result<PointerOutcome, Fai
                 .and_then(|payload| return PointerOutcome::from_payload(request_id, payload)),
             PointerOperation::Scroll { lines } => pointer
                 .scroll(column, row, lines, strict, guard)
+                .and_then(|payload| return PointerOutcome::from_payload(request_id, payload)),
+            PointerOperation::Move => pointer
+                .hover(column, row, strict, guard)
                 .and_then(|payload| return PointerOutcome::from_payload(request_id, payload)),
             PointerOperation::MultiClick { button, count } => {
                 pointer.multi_click(column, row, button, count, strict, guard)
