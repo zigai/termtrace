@@ -593,9 +593,10 @@ fn synchronization_commands_reject_incomplete_stability() {
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains(
-            "live stability was not established before Deadline",
-        ));
+        .stderr(
+            predicate::str::is_match("screen did not settle; rows .* kept changing")
+                .expect("valid pattern"),
+        );
 
     let mut stop = Command::cargo_bin("termtrace").expect("binary should build");
     stop.env("TERMTRACE_STATE_DIR", &state)
