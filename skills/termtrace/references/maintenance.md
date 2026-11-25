@@ -1,8 +1,11 @@
 # Skill maintenance
 
+After the MCP tools change, update the skill so every tool name, parameter, and
+`until` kind it mentions matches `src/cli/mcp/tools.rs`.
+
 After the CLI graph changes:
 
-- Update every skill example that invokes a changed path.
+- Update every CLI example in [the CLI reference](cli.md) that invokes a changed path.
 - Keep discovery shallow: root help and the direct leaf help for the workflow.
   Do not copy generated command listings into the skill.
 - Verify affected root and direct leaf help against the built binary. Do not
