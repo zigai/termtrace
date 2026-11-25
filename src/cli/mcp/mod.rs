@@ -37,7 +37,14 @@ Call `start` to launch a program in a recorded terminal, `send` to type keys and
 screen to react, `screen` or `wait` to read it, and `stop` when done. A completed session can \
 be relaunched with `restart`, and `gc` deletes old completed recordings. Completed sessions \
 support `analyze`, `screenshot`, and `bundle`. Sessions are shared with the `termtrace` CLI \
-by name, and each one is also readable as `termtrace://sessions/{session}` resources. To drive several sessions at once, send without `until`, then call `wait` on each session in parallel. Mutating `send` calls may be serialized by the MCP client.";
+by name, and each one is also readable as `termtrace://sessions/{session}` resources. \
+Use these tools instead of the `termtrace` CLI for everything they cover. \
+`start` and `send` results include the new screen, so they need no follow-up `screen` call. \
+Wait for the text you expect with `until` of kind `screen` instead of sleeping, and keep \
+`timeout_ms` below the client's tool timeout. When `send` fails, follow its `retry` field and \
+never resend input that already applied. To drive several sessions at once, send without \
+`until`, then call `wait` on each session in parallel. Mutating `send` calls may be serialized \
+by the MCP client.";
 
 pub(in crate::cli) fn run_mcp() -> Result<ExitCode> {
     let runtime = Builder::new_current_thread()
