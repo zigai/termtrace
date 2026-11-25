@@ -277,7 +277,7 @@ linters:
       # Test-helper packages (named like httptest) only build fixtures.
       - path: "(^|/)[a-z0-9]+test/"
         linters: [exhaustruct_v5]
-      - path: "(?:(^|/)(node_modules|third_party|forks|vendor|testdata|fixtures|__fixtures__|snapshots|__snapshots__|__image_snapshots__|golden|corpus|fuzz_corpus|baselines|generated|\\.tmp|\\.gameops|\\.stryker-tmp|\\.cache)(/|$))"
+      - path: "(?:(^|/)(node_modules|third_party|forks|vendor|testdata|fixtures|__fixtures__|snapshots|__snapshots__|__image_snapshots__|golden|corpus|fuzz_corpus|baselines|generated|\\.tmp|\\.stryker-tmp|\\.cache)(/|$))"
         linters: [whitespace]
 
 issues:
